@@ -1,0 +1,31 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: local-minidrama:latest
+    container_name: local-minidrama
+    restart: unless-stopped
+    ports:
+      # 仅映射 5679；如需改端口，修改左侧（宿主机端口）即可
+      - "${HOST_PORT:-5679}:5679"
+    volumes:
+      # 数据持久化：SQLite 库 + 所有上传/生成素材
+      # 部署前请确保 ./volumes/data 存在（部署脚本会自动创建）
+      - ./volumes/data:/app/backend-node/data
+    environment:
+      - NODE_ENV=production
+      - PORT=5679
+      # 如需覆盖前端 dist 路径（默认后端会读 ../frontweb/dist）
+      # - WEB_DIST_PATH=/app/frontweb/dist
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5679/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

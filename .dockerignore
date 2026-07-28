@@ -1,0 +1,48 @@
+# 依赖与构建产物（镜像内重新构建）
+**/node_modules
+frontweb/dist
+backend-node/dist
+
+# 运行时数据（通过卷挂载，绝不进镜像）
+backend-node/data
+volumes
+**/*.db
+**/*.db-shm
+**/*.db-wal
+
+# Git / CI
+.git
+.github
+.gitignore
+.gitattributes
+
+# 桌面打包 / 文档 / 截图（与服务器部署无关）
+desktop/dist
+desktop/backend-app-secure
+backend-node/deploy-pack
+build
+build_edu
+frontweb-edu
+项目截图
+example_drama
+各大平台中转站配置
+docs
+
+# 本地编辑器 / 临时
+.idea
+.vscode
+.trae
+.cursor
+.opencode
+.superpowers
+.DS_Store
+
+# 密钥 / 环境配置
+.env
+.env.*
+backend-node/configs/ai-configs-*.json
+
+# 部署文档本身无需进镜像
+deploy
+*.md
+部署规范.txt
