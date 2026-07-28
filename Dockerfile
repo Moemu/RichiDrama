@@ -5,6 +5,9 @@
 
 FROM node:18-bookworm-slim AS builder
 
+# 使用国内 Debian 镜像源加速 apt（基于 bookworm）
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
+
 # 编译原生模块所需工具链
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -30,6 +33,9 @@ RUN cd backend-node && npm ci --omit=dev --no-audit --no-fund
 
 # ============================================================
 FROM node:18-bookworm-slim AS runtime
+
+# 使用国内 Debian 镜像源加速 apt
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
 
 # sharp 运行时基础库 + ffmpeg（视频合并/后期处理依赖）+ tini（信号转发）
 RUN apt-get update \
