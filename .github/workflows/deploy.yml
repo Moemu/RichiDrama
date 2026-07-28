@@ -1,0 +1,39 @@
+# LocalMiniDrama 自动部署
+# 合并/推送到 main 后，自动 SSH 登录服务器执行 deploy.sh
+#
+# 需要配置的 Repository Secrets（Settings → Secrets and variables → Actions）:
+#   SERVER_HOST  - 服务器 IP，例如 101.96.224.33
+#   SERVER_KEY   - SSH 私钥（用于登录 root），与服务器 ~/.ssh/authorized_keys 中的公钥配对
+#   SERVER_PORT  - SSH 端口（可选，默认 22）
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+  # 允许手动触发，便于调试
+  workflow_dispatch:
+
+# 同一时间只允许一个部署任务，避免并发构建冲突
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          # 远程命令执行超时（构建含原生模块编译，给足时间）
+          command_timeout: 25m
+          # 建立连接超时
+          proxy_timeout: 60s
+          script: |
+            cd /data/apps/LocalMiniDrama
+            ./deploy.sh
