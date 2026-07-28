@@ -31,6 +31,9 @@ COPY backend-node/package.json backend-node/package-lock.json* ./backend-node/
 COPY backend-node/.npmrc ./backend-node/.npmrc
 RUN cd backend-node && npm ci --omit=dev --no-audit --no-fund
 
+# 拷贝后端源码（src/configs/migrations/tools 等）—— 上面只为装依赖，这里补齐业务代码
+COPY backend-node ./backend-node
+
 # ============================================================
 FROM node:18-bookworm-slim AS runtime
 
