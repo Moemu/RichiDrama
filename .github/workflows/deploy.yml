@@ -36,4 +36,7 @@ jobs:
           proxy_timeout: 60s
           script: |
             cd /data/apps/LocalMiniDrama
-            ./deploy.sh
+            # 先拉取最新代码（deploy.sh 本身可能就是新加的），再执行部署脚本
+            git fetch --all --prune
+            git reset --hard origin/main
+            bash deploy.sh
