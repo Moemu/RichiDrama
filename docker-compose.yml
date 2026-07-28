@@ -7,8 +7,8 @@ services:
     container_name: local-minidrama
     restart: unless-stopped
     ports:
-      # 宿主机端口 10588（复用原 toonflow 端口，已在防火墙放行）→ 容器内 5679
-      # 如需改端口，修改左侧（宿主机端口）即可
+      # 宿主机端口 10588（内网调试/备用）→ 容器内 5679
+      # 对外访问走 80 端口的 lens-rhyme-nginx，用域名 drama.richbest.cn
       - "10588:5679"
     volumes:
       # 数据持久化：SQLite 库 + 所有上传/生成素材
@@ -17,16 +17,25 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5679
-      # 如需覆盖前端 dist 路径（默认后端会读 ../frontweb/dist）
-      # - WEB_DIST_PATH=/app/frontweb/dist
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5679/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      default: {}
+      # 加入 lens-rhyme 网络，使其 nginx 能通过容器名反代到本应用
+      lens-rhyme:
+        aliases:
+          - minidrama-app
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+networks:
+  lens-rhyme:
+    external: true
+    name: lens-rhyme_default
