@@ -7,8 +7,9 @@ services:
     container_name: local-minidrama
     restart: unless-stopped
     ports:
-      # 仅映射 5679；如需改端口，修改左侧（宿主机端口）即可
-      - "${HOST_PORT:-5679}:5679"
+      # 宿主机端口 10588（复用原 toonflow 端口，已在防火墙放行）→ 容器内 5679
+      # 如需改端口，修改左侧（宿主机端口）即可
+      - "10588:5679"
     volumes:
       # 数据持久化：SQLite 库 + 所有上传/生成素材
       # 部署前请确保 ./volumes/data 存在（部署脚本会自动创建）

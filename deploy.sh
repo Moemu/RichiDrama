@@ -54,10 +54,12 @@ log "[4/4] 启动容器..."
 docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans
 
 # ---------- 健康检查 ----------
+# 宿主机端口（与 docker-compose.yml 中映射的左侧端口一致）
+HOST_PORT="10588"
 log "等待容器启动..."
 sleep 5
 for i in 1 2 3 4 5 6 7 8 9 10; do
-  if curl -sf --max-time 5 http://127.0.0.1:5679/health >/dev/null 2>&1; then
+  if curl -sf --max-time 5 http://127.0.0.1:${HOST_PORT}/health >/dev/null 2>&1; then
     log "✅ 健康检查通过"
     docker compose -f "${COMPOSE_FILE}" ps
     log "===== 部署成功 ====="

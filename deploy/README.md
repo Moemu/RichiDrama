@@ -6,7 +6,7 @@
 
 ```
 单容器（node:18 + 前端 dist + 后端）
-   ├── 监听端口 5679
+   ├── 宿主机端口 10588 → 容器内 5679（复用原 toonflow 端口，已放行）
    └── 数据卷挂载到宿主机 ./volumes/data （SQLite + 素材）
 ```
 
@@ -16,7 +16,7 @@
 - `/`          前端 SPA（来自 `frontweb/dist`）
 - `/health`    健康检查
 
-访问地址：`http://<服务器IP>:5679/`
+访问地址：`http://<服务器IP>:10588/`
 
 ---
 
@@ -100,10 +100,10 @@ docker compose up -d --build
 ```bash
 docker compose ps
 docker compose logs -f app
-curl http://127.0.0.1:5679/health
+curl http://127.0.0.1:10588/health
 ```
 
-浏览器访问 `http://<服务器IP>:5679/`。
+浏览器访问 `http://<服务器IP>:10588/`。
 
 ---
 
@@ -148,13 +148,16 @@ sudo rm -rf volumes/data
 
 ## 四、端口修改
 
-如需改用其他宿主机端口（例如 8080），在项目根目录创建 `.env`：
+当前宿主机端口为 **10588**（复用原 toonflow 端口，已在防火墙放行）。
+如需改用其他宿主机端口，编辑 `docker-compose.yml` 中的端口映射左侧：
 
-```env
-HOST_PORT=8080
+```yaml
+ports:
+  - "10588:5679"   # 改左侧，如 "8080:5679"
 ```
 
 然后 `docker compose up -d`。容器内仍监听 5679，仅外部映射变化。
+改端口后需同步在防火墙放行新端口：`firewall-cmd --add-port=<新端口>/tcp --permanent && firewall-cmd --reload`。
 
 ---
 
