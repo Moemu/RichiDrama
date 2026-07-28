@@ -3,15 +3,13 @@
     <el-alert type="info" :closable="false" class="sd2-intro" show-icon>
       <template #title>
         <span>
-          对接 BytePlus ModelArk / 火山方舟<strong>私有资产库</strong>（Seedance 2.0 等使用的 <code>Asset://</code> 素材）。
-          配置完成后请点击下方<strong>「保存到 AI 配置」</strong>，创作页「SD2认证」将优先使用「即梦2角色认证」；若未配置则使用此处保存的官方资产库配置。
-          官方流程：<a href="https://docs.byteplus.com/en/docs/ModelArk/2318270" target="_blank" rel="noopener">CreateAssetGroup</a>
-          → CreateAsset → List / Get / Update / Delete。
-          带 <code>?Action=</code> 的接口为<strong>控制面 OpenAPI</strong>，须使用控制台
-          <a href="https://console.volcengine.com/iam/keymanage" target="_blank" rel="noopener">访问密钥（AK/SK）</a>签名，不能用推理用的 ARK API Key 当 Bearer，否则会报 Invalid Authorization（见
-          <a href="https://docs.byteplus.com/en/docs/ModelArk/1298459" target="_blank" rel="noopener">认证说明</a>）。
-          若已能调通接口但返回 <strong>403</strong> 且含 <code>not authorized</code> / <code>ark:CreateAssetGroup</code>，说明 AK 对应 IAM 用户<strong>缺策略</strong>：在控制台为该用户绑定含 ModelArk 私有资产/资产组管理的权限（参见
-          <a href="https://docs.byteplus.com/en/docs/ModelArk/1263493" target="_blank" rel="noopener">IAM 访问控制</a>），勿仅用「能推理」的极简权限。
+          对接火山方舟<strong>私有资产库</strong>（Seedance 2.0 等使用的 <code>asset://</code> 素材）。
+          只需填写 <strong>Base URL + AK/SK + 项目名</strong>（资产组 Id 可留空，保存时自动创建）。
+          <br /><strong>注意：</strong>AK/SK 必须是控制台
+          <a href="https://console.volcengine.com/iam/keymanage" target="_blank" rel="noopener">IAM 访问密钥</a>（Access Key ID 形如 <code>AKLT...</code>），
+          <strong>不是</strong>推理用的 ARK API Key（<code>ark-...</code>），否则会报 <code>401 the API key or AK/SK ... invalid</code>。
+          若返回 <strong>403</strong> 且含 <code>not authorized</code> / <code>ark:CreateAssetGroup</code>，说明该 IAM 用户<strong>缺策略</strong>：在控制台为其绑定含 ModelArk 资产/资产组管理的权限（参见
+          <a href="https://docs.byteplus.com/en/docs/ModelArk/1263493" target="_blank" rel="noopener">IAM 访问控制</a>）。
         </span>
       </template>
     </el-alert>
@@ -20,44 +18,18 @@
       <el-form-item label="Base URL">
         <el-input
           v-model="baseUrl"
-          placeholder="须含 /api/v3，如 https://ark.ap-southeast-1.byteplusapi.com/api/v3（仅域名时后端会尝试自动补全）"
+          placeholder="留空使用官方默认 https://ark.cn-beijing.volcengineapi.com/api/v3"
           clearable
         />
-        <p class="field-hint">OpenAPI 与推理共用前缀一般为 <code>/api/v3</code>；若只填域名可能导致路由不对、工程名不生效。</p>
+        <p class="field-hint">火山官方地址一般为 <code>https://ark.cn-beijing.volcengineapi.com/api/v3</code>；通常无需修改。</p>
       </el-form-item>
-      <el-form-item label="鉴权方式">
-        <el-radio-group v-model="authMode">
-          <el-radio-button value="volc_sign">AK/SK 签名（官方 OpenAPI）</el-radio-button>
-          <el-radio-button value="bearer">Bearer 推理 Key</el-radio-button>
-        </el-radio-group>
-        <p class="field-hint">选「官方 OpenAPI」路径时，请用本项并填写 AK/SK；选「Bearer」仅适合 <code>/asset/…</code> 等中转。</p>
+      <el-form-item label="Access Key ID">
+        <el-input v-model="accessKeyId" placeholder="控制台 IAM 访问密钥 Access Key ID（AKLT 开头）" clearable />
       </el-form-item>
-      <el-form-item v-if="authMode === 'bearer'" label="API Key">
-        <el-input v-model="apiKey" type="password" show-password placeholder="推理用 ARK / 中转 API Key" clearable />
+      <el-form-item label="Secret Key">
+        <el-input v-model="secretAccessKey" type="password" show-password placeholder="Secret Access Key（不是推理 API Key）" clearable />
       </el-form-item>
-      <template v-else>
-        <el-form-item label="Access Key ID">
-          <el-input v-model="accessKeyId" placeholder="控制台 IAM Access Key ID" clearable />
-        </el-form-item>
-        <el-form-item label="Secret Key">
-          <el-input v-model="secretAccessKey" type="password" show-password placeholder="Secret Access Key" clearable />
-        </el-form-item>
-        <el-form-item label="Region">
-          <el-input v-model="signRegion" placeholder="可空：国内 ark 多为 cn-beijing；BytePlus 国际多为 ap-southeast-1" clearable />
-        </el-form-item>
-      </template>
-      <el-form-item label="路径模式">
-        <el-select v-model="pathMode" style="width: 100%">
-          <el-option label="官方 OpenAPI：POST {Base}?Action=…&Version=…（火山/BytePlus 默认）" value="open_api_query" />
-          <el-option label="路径：POST {Base}/asset/{Action}（部分中转）" value="asset_subpath" />
-          <el-option label="扁平：POST {Base}/{Action}" value="flat" />
-        </el-select>
-        <p class="field-hint">官方接口必须在 Query 里带 <code>Action</code>；若用 AnyFast 等自建路径再选中转模式。</p>
-      </el-form-item>
-      <el-form-item label="API Version">
-        <el-input v-model="apiVersion" placeholder="默认 2024-01-01（仅官方 OpenAPI 模式使用）" clearable />
-      </el-form-item>
-      <el-form-item v-if="pathMode === 'open_api_query'" label="工程 / 项目名">
+      <el-form-item label="工程 / 项目名">
         <el-input
           v-model="projectName"
           placeholder="与控制台「项目」标识完全一致（区分大小写、下划线等）"
@@ -65,36 +37,16 @@
         />
         <p class="field-hint">
           会写入 <strong>Query</strong> 与 <strong>JSON Body</strong> 的 <code>ProjectName</code>（与 Action 一并签名）。
-          若仍报 403 且文案里是 <code>project/*</code>，多为 IAM 未授权该动作；请确认策略里资源是否包含你的工程（或 <code>project/*</code>），错误提示不一定替换为具体工程名。
+          若报 403 且文案含 <code>project/*</code>，多为 IAM 未授权该动作。
         </p>
-      </el-form-item>
-      <el-form-item label="model（可选）">
-        <el-input v-model="billingModel" placeholder="部分中转要求计费模型，如 volc-asset；官方直连可留空" clearable />
-      </el-form-item>
-      <el-form-item label="从配置填入">
-        <el-select
-          v-model="fillConfigId"
-          filterable
-          clearable
-          placeholder="选择已保存的视频类配置（火山等）"
-          style="width: 100%"
-          @change="onFillFromSaved"
-        >
-          <el-option
-            v-for="c in videoLikeConfigs"
-            :key="c.id"
-            :label="`${c.name} · ${c.base_url || ''}`"
-            :value="c.id"
-          />
-        </el-select>
       </el-form-item>
       <el-form-item label="默认资产组 Id">
         <el-input
           v-model="assetGroupIdForCert"
-          placeholder="创作页 SD2 认证写入此组；可左侧点选资产组自动填入"
+          placeholder="留空则保存时自动创建一个资产组（AIGC 类型）并回填"
           clearable
         />
-        <p class="field-hint">保存到 AI 配置时必填。与下方「资产」列表使用的组 Id 一致。</p>
+        <p class="field-hint">留空时，点「保存到 AI 配置」会自动调用 CreateAssetGroup 建组并填入；已填则以你填的为准。也可左侧资产组列表点选一行自动填入。</p>
       </el-form-item>
       <el-form-item label=" ">
         <div class="sd2-save-row">
@@ -266,18 +218,10 @@ const props = defineProps({
 const emit = defineEmits(['saved'])
 
 const baseUrl = ref('')
-const apiKey = ref('')
-const pathMode = ref('open_api_query')
-const apiVersion = ref('2024-01-01')
 /** OpenAPI 可选查询参数 ProjectName（与控制台项目对应，便于 IAM 精确到 project/某工程 而非 project/*） */
 const projectName = ref('')
-const authMode = ref('volc_sign')
 const accessKeyId = ref('')
 const secretAccessKey = ref('')
-const signRegion = ref('')
-/** 仅合并到 List / Create 类请求，避免影响 Get/Update/Delete */
-const billingModel = ref('')
-const fillConfigId = ref(null)
 const savedConfigId = ref(null)
 const savingConfig = ref(false)
 /** 创作页 SD2 认证默认写入的资产组 */
@@ -314,22 +258,6 @@ const editAssetFullJson = ref('')
 const dlgDetail = ref(false)
 const detailJson = ref('')
 
-const videoLikeConfigs = computed(() => {
-  const rows = props.configs || []
-  return rows.filter((c) => {
-    if (c.service_type !== 'video') return false
-    const u = (c.base_url || '').toLowerCase()
-    const p = (c.api_protocol || '').toLowerCase()
-    return (
-      p.includes('volc') ||
-      u.includes('volces.com') ||
-      u.includes('byteplus') ||
-      u.includes('byteplustech') ||
-      u.includes('/ark')
-    )
-  })
-})
-
 const savedModelArkConfigs = computed(() => {
   return (props.configs || []).filter((c) => c.service_type === 'model_ark_asset')
 })
@@ -349,17 +277,11 @@ function loadFromSavedRow(row) {
   if (!row) return
   savedConfigId.value = row.id
   baseUrl.value = (row.base_url || '').replace(/\/$/, '')
-  apiKey.value = row.api_key || ''
   const s = parseSettingsJson(row.settings)
-  authMode.value = s.auth_mode || 'volc_sign'
-  pathMode.value = s.path_mode || 'open_api_query'
-  apiVersion.value = s.api_version || '2024-01-01'
   projectName.value = s.project_name || ''
-  billingModel.value = s.billing_model || ''
   assetGroupIdForCert.value = s.asset_group_id || ''
   accessKeyId.value = s.access_key_id || ''
   secretAccessKey.value = s.secret_access_key || ''
-  signRegion.value = s.sign_region || ''
   if (assetGroupIdForCert.value) assetGroupIdInput.value = assetGroupIdForCert.value
 }
 
@@ -386,35 +308,65 @@ onMounted(() => {
   applyDefaultSavedConfig()
 })
 
+/**
+ * 保证「默认资产组 Id」有值：已填则原样返回；留空则调用 CreateAssetGroup
+ * 自动创建一个 AIGC 资产组，回填到字段并刷新左侧列表。
+ * 失败（接口报错或没返回 Id）时抛出错误，由调用方决定如何提示。
+ */
+async function ensureAssetGroupId() {
+  const existing = assetGroupIdForCert.value.trim()
+  if (existing) return existing
+
+  // 组名优先用 ProjectName，保持与控制台项目一致；为空则用固定默认名
+  const name = projectName.value.trim() || 'sd2-default'
+  const payload = { Name: name, GroupType: 'AIGC' }
+  const resp = await call('CreateAssetGroup', payload)
+  setLastJson(resp)
+
+  // CreateAssetGroup 返回单个对象（非列表），与后端 pickId 取值口径一致
+  const result = (resp && (resp.Result || resp.result)) || resp
+  const groupId = String(
+    result?.Id || result?.id || result?.GroupId || result?.group_id || ''
+  ).trim()
+  if (!groupId) {
+    throw new Error('CreateAssetGroup 未返回组 Id（请查看下方调试响应）')
+  }
+
+  assetGroupIdForCert.value = groupId
+  assetGroupIdInput.value = groupId
+  // 刷新左侧资产组列表，让用户直观看到新建的组
+  refreshGroups().catch(() => {})
+  return groupId
+}
+
 async function saveToAiConfig() {
   const w = connWarn()
   if (!connReady() || w) {
     ElMessage.warning(w || '请先完成连接信息')
     return
   }
+  // 资产组 Id 留空时自动创建并回填，用户无需手填
   if (!assetGroupIdForCert.value.trim()) {
-    ElMessage.warning('请填写默认资产组 Id（创作页 SD2 认证需要）')
-    return
+    ElMessage.info('未填写资产组 Id，正在自动创建...')
+    try {
+      await ensureAssetGroupId()
+    } catch (e) {
+      ElMessage.error('自动创建资产组失败：' + (e?.message || e))
+      return
+    }
   }
   const settings = {
-    auth_mode: authMode.value,
-    path_mode: pathMode.value,
-    api_version: apiVersion.value.trim() || '2024-01-01',
     project_name: projectName.value.trim(),
-    billing_model: billingModel.value.trim(),
     asset_group_id: assetGroupIdForCert.value.trim(),
-  }
-  if (authMode.value === 'volc_sign') {
-    settings.access_key_id = accessKeyId.value.trim()
-    settings.secret_access_key = secretAccessKey.value.trim()
-    if (signRegion.value.trim()) settings.sign_region = signRegion.value.trim()
+    access_key_id: accessKeyId.value.trim(),
+    secret_access_key: secretAccessKey.value.trim(),
   }
   const payload = {
     service_type: 'model_ark_asset',
     name: 'SD2 资产库',
     provider: 'model_ark',
     base_url: baseUrl.value.trim(),
-    api_key: authMode.value === 'bearer' ? apiKey.value : '',
+    api_key: '',
     model: ['-'],
     default_model: '-',
     priority: 10,
@@ -473,15 +425,6 @@ function extractRows(resp) {
 const groupRows = computed(() => extractRows(lastListGroupsPayload.value))
 const assetRows = computed(() => extractRows(lastListAssetsPayload.value))
 
-function onFillFromSaved(id) {
-  if (id == null || id === '') return
-  const c = (props.configs || []).find((x) => x.id === id)
-  if (!c) return
-  baseUrl.value = (c.base_url || '').replace(/\/$/, '')
-  apiKey.value = c.api_key || ''
-  ElMessage.success('已填入所选配置的 Base URL 与 API Key')
-}
-
 function onGroupRowChange(row) {
   if (row && row.Id) {
     assetGroupIdInput.value = row.Id
@@ -489,57 +432,31 @@ function onGroupRowChange(row) {
   }
 }
 
-function mergeBillingModel(payload, withModel) {
-  const p = { ...(payload || {}) }
-  if (withModel && billingModel.value.trim() && !String(p.model || '').trim()) {
-    p.model = billingModel.value.trim()
-  }
-  return p
-}
-
 function connReady() {
-  if (!baseUrl.value.trim()) return false
-  if (authMode.value === 'volc_sign') {
-    return !!(accessKeyId.value.trim() && secretAccessKey.value.trim())
-  }
-  return !!apiKey.value.trim()
+  return !!(baseUrl.value.trim() && accessKeyId.value.trim() && secretAccessKey.value.trim())
 }
 
 function connWarn() {
   if (!baseUrl.value.trim()) return '请先填写 Base URL'
-  if (authMode.value === 'volc_sign') {
-    if (!accessKeyId.value.trim() || !secretAccessKey.value.trim()) {
-      return '官方 OpenAPI 请填写 Access Key ID 与 Secret Access Key（控制台 IAM，非推理 API Key）'
-    }
-  } else if (!apiKey.value.trim()) {
-    return '请先填写 API Key'
-  }
-  if (authMode.value === 'volc_sign' && pathMode.value !== 'open_api_query') {
-    return 'AK/SK 签名请配合「官方 OpenAPI」路径模式'
+  if (!accessKeyId.value.trim() || !secretAccessKey.value.trim()) {
+    return '请填写 Access Key ID 与 Secret Access Key（控制台 IAM 访问密钥，非推理 API Key）'
   }
   return ''
 }
 
-async function call(action, payload, opts = {}) {
-  const { withBillingModel = false } = opts
+/** 统一调用 ModelArk 资产管理 OpenAPI 代理；固定使用 AK/SK 签名 + 官方 Query 路径模式 */
+async function call(action, payload) {
   const body = {
     base_url: baseUrl.value.trim(),
     action,
-    path_mode: pathMode.value,
-    api_version: apiVersion.value.trim() || undefined,
-    auth_mode: authMode.value,
-    payload: mergeBillingModel(payload, withBillingModel),
+    path_mode: 'open_api_query',
+    api_version: '2024-01-01',
+    auth_mode: 'volc_sign',
+    payload: payload || {},
   }
-  if (pathMode.value === 'open_api_query' && projectName.value.trim()) {
-    body.project_name = projectName.value.trim()
-  }
-  if (authMode.value === 'bearer') {
-    body.api_key = apiKey.value
-  } else {
-    body.access_key_id = accessKeyId.value.trim()
-    body.secret_access_key = secretAccessKey.value.trim()
-    if (signRegion.value.trim()) body.sign_region = signRegion.value.trim()
-  }
+  if (projectName.value.trim()) body.project_name = projectName.value.trim()
+  body.access_key_id = accessKeyId.value.trim()
+  body.secret_access_key = secretAccessKey.value.trim()
   return aiAPI.modelArkAsset(body)
 }
 
@@ -559,7 +476,7 @@ async function refreshGroups() {
         GroupType: 'AIGC',
       },
     }
-    const data = await call('ListAssetGroups', body, { withBillingModel: true })
+    const data = await call('ListAssetGroups', body)
     lastListGroupsPayload.value = data
     setLastJson(data)
   } catch (e) {
@@ -590,7 +507,7 @@ async function refreshAssets() {
         GroupIds: [gid],
       },
     }
-    const data = await call('ListAssets', body, { withBillingModel: true })
+    const data = await call('ListAssets', body)
     lastListAssetsPayload.value = data
     setLastJson(data)
   } catch (e) {
@@ -623,7 +540,7 @@ async function submitCreateGroup() {
       }
     }
     const payload = { Name: formGroupName.value.trim(), ...extra }
-    const data = await call('CreateAssetGroup', payload, { withBillingModel: true })
+    const data = await call('CreateAssetGroup', payload)
     setLastJson(data)
     ElMessage.success('已创建')
     dlgGroupCreate.value = false
@@ -719,7 +636,7 @@ async function submitCreateAsset() {
     }
     if (formAssetUrl.value.trim()) payload.URL = formAssetUrl.value.trim()
     if (formAssetModel.value.trim()) payload.model = formAssetModel.value.trim()
-    const data = await call('CreateAsset', payload, { withBillingModel: true })
+    const data = await call('CreateAsset', payload)
     setLastJson(data)
     ElMessage.success('已创建')
     dlgAssetCreate.value = false

@@ -65,6 +65,23 @@ function inferSignRegion(host, explicit) {
 }
 
 /**
+ * 素材管理 / 控制面 OpenAPI（?Action=…&Version=…）的通用 host，按 region 推断。
+ *
+ * 关键：控制面接口必须打到 open.volcengineapi.com（国内）/ open.byteplusapi.com（国际），
+ * 而不是用户填的推理域名 ark.*.volcengineapi.com。推理域名只认 Bearer API Key，
+ * 用 AK/SK 给推理域名签名会被拒，返回 401 “the API key or AK/SK … invalid”。
+ * 该规则与火山官方 SDK（@volcengine/openapi base/utils.js 默认 host）、
+ * 以及 lens-rhyme 的 volcenginesdkcore.UniversalApi（按 region 自动选 host）完全一致。
+ */
+function resolveControlPlaneHost(region) {
+  const r = String(region || '').toLowerCase();
+  if (r.includes('ap-southeast') || r.includes('ap-singapore') || r.includes('byteplus')) {
+    return 'open.byteplusapi.com';
+  }
+  return 'open.volcengineapi.com';
+}
+
+/**
  * 转发 ModelArk / 方舟「私有资产库」请求。
  *
  * - open_api_query：POST {base}?Action=…&Version=…，JSON body。
@@ -126,7 +143,14 @@ async function fetchSignedOpenApi({
   projectName,
 }) {
   const ver = (apiVersion || '2024-01-01').toString().trim() || '2024-01-01';
-  const { protocol, host, pathname } = parseSignedOpenApiUrl(base);
+  // 解析 base 仅为推断 region（取用户填的 host 做 region 判定）；
+  // 实际签名 host / 请求 host 一律用控制面 open.volcengineapi.com / open.byteplusapi.com，
+  // 不再用推理域名 ark.* —— 否则 AK/SK 签名会被推理服务拒，返回 401。
+  const parsed = parseSignedOpenApiUrl(base);
+  const region = inferSignRegion(parsed.host, signRegion);
+  const host = resolveControlPlaneHost(region);
+  const protocol = 'https:';
+  const pathname = '/';
   const bodyStr = JSON.stringify(bodyObj && typeof bodyObj === 'object' ? bodyObj : {});
 
   const params = { Action: action, Version: ver };
@@ -134,7 +158,7 @@ async function fetchSignedOpenApi({
   if (pn) params.ProjectName = pn;
 
   const request = {
-    region: inferSignRegion(host, signRegion),
+    region,
     method: 'POST',
     pathname,
     params,

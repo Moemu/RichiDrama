@@ -37,40 +37,31 @@ function buildModelArkContext(db, log) {
     return { ready: false, diag: { db_model_ark_row_found: false } };
   }
   const settings = parseSettingsJson(row.settings);
-  const authMode = (settings.auth_mode || 'volc_sign').toString();
   const baseUrl = (row.base_url || '').toString().trim();
   const assetGroupId = (settings.asset_group_id || '').toString().trim();
 
+  // 素材管理 OpenAPI 固定使用 AK/SK 签名（volc_sign）+ 官方 Query 路径模式；
+  // 即便老配置里存了 auth_mode/path_mode/api_version，也强制覆盖为安全默认，
+  // 避免 bearer / 中转路径模式导致控制面接口 401。
   const callOpts = {
     base_url: baseUrl,
-    path_mode: settings.path_mode || 'open_api_query',
-    api_version: settings.api_version || '2024-01-01',
-    auth_mode: authMode,
+    path_mode: 'open_api_query',
+    api_version: '2024-01-01',
+    auth_mode: 'volc_sign',
     project_name: settings.project_name || undefined,
+    access_key_id: (settings.access_key_id || '').toString().trim(),
+    secret_access_key: (settings.secret_access_key || '').toString().trim(),
   };
+  if (settings.sign_region) callOpts.sign_region = settings.sign_region;
 
-  if (authMode === 'bearer') {
-    callOpts.api_key = (row.api_key || '').toString().trim();
-    if (!baseUrl || !callOpts.api_key) {
-      return {
-        ready: false,
-        row,
-        settings,
-        diag: { db_model_ark_row_found: true, missing: 'base_url 或 api_key' },
-      };
-    }
-  } else {
-    callOpts.access_key_id = (settings.access_key_id || '').toString().trim();
-    callOpts.secret_access_key = (settings.secret_access_key || '').toString().trim();
-    if (settings.sign_region) callOpts.sign_region = settings.sign_region;
-    if (!baseUrl || !callOpts.access_key_id || !callOpts.secret_access_key) {
-      return {
-        ready: false,
-        row,
-        settings,
-        diag: { db_model_ark_row_found: true, missing: 'base_url 或 AK/SK' },
-      };
-    }
+  if (!baseUrl || !callOpts.access_key_id || !callOpts.secret_access_key) {
+    return {
+      ready: false,
+      row,
+      settings,
+      callOpts,
+      diag: { db_model_ark_row_found: true, missing: 'base_url 或 AK/SK' },
+    };
   }
 
   if (!assetGroupId) {
@@ -87,7 +78,7 @@ function buildModelArkContext(db, log) {
     db_model_ark_row_found: true,
     db_config_id: row.id,
     db_config_name: row.name,
-    auth_mode: authMode,
+    auth_mode: 'volc_sign',
     asset_group_id: assetGroupId,
   };
   if (log && typeof log.info === 'function') {
