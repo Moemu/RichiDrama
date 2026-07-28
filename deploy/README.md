@@ -36,14 +36,50 @@ docker compose version
 git --version
 ```
 
-### 2. 拉取代码
+### 2. 配置 GitHub SSH 访问（重要）
+
+> 国内服务器访问 `github.com` 的 HTTPS(443) 常被墙，但 **SSH(22) 稳定**。
+> 因此服务器用 SSH 方式拉代码。
+
+在服务器生成密钥并把**公钥**添加为仓库的 Deploy Key（仓库 Settings → Deploy keys）：
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/github_deploy_key -N '' -C 'server-github-pull'
+cat ~/.ssh/github_deploy_key.pub   # 复制到 GitHub Deploy Keys
+```
+
+配置 SSH 使用该密钥：
+
+```bash
+cat > ~/.ssh/config <<'EOF'
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/github_deploy_key
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+EOF
+chmod 600 ~/.ssh/config ~/.ssh/github_deploy_key
+```
+
+验证：
+
+```bash
+ssh -T git@github.com
+# 期望: Hi Yangheyu123/LocalMiniDrama! You've successfully authenticated...
+```
+
+### 3. 拉取代码
 
 ```bash
 mkdir -p /data/apps
 cd /data/apps
-git clone https://github.com/Yangheyu123/LocalMiniDrama.git
+git clone git@github.com:Yangheyu123/LocalMiniDrama.git
 cd LocalMiniDrama
 ```
+
+> 如已有 HTTPS 克隆，改为 SSH：
+> `git remote set-url origin git@github.com:Yangheyu123/LocalMiniDrama.git`
 
 ### 3. 准备数据目录
 

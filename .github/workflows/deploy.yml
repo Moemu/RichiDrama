@@ -35,7 +35,14 @@ jobs:
           # 建立连接超时
           proxy_timeout: 60s
           script: |
+            set -e
             cd /data/apps/LocalMiniDrama
+            # 服务器从国内访问 github.com (HTTPS 443) 常被墙，
+            # 已将 remote 改为 SSH（git@github.com，走 22 端口，稳定）。
+            # 确保使用 SSH remote（防止有人误改回 HTTPS）
+            if git remote get-url origin | grep -q '^https://'; then
+              git remote set-url origin git@github.com:Yangheyu123/LocalMiniDrama.git
+            fi
             # 先拉取最新代码（deploy.sh 本身可能就是新加的），再执行部署脚本
             git fetch --all --prune
             git reset --hard origin/main
