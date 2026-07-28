@@ -5,18 +5,25 @@
 ## 架构
 
 ```
-单容器（node:18 + 前端 dist + 后端）
-   ├── 宿主机端口 10588 → 容器内 5679（复用原 toonflow 端口，已放行）
-   └── 数据卷挂载到宿主机 ./volumes/data （SQLite + 素材）
+公网(80端口) → lens-rhyme-nginx → server_name drama.richbest.cn
+                                        ↓ (lens-rhyme 网络)
+                                  minidrama-app:5679 (本应用容器)
+                                        ↓
+                                  数据卷 ./volumes/data (SQLite + 素材)
 ```
 
-后端（Express）在容器内启动后，会同时托管：
+本应用容器加入 `lens-rhyme_default` 网络（alias `minidrama-app`），
+由 `lens-rhyme-nginx` 按域名 `drama.richbest.cn` 反代。
+- 容器内监听 5679；宿主机 10588 仅作内网调试备用。
+- `deploy/nginx-drama-richbest.conf` 为 nginx 反代配置，每次部署自动同步（见下）。
+
+后端（Express）在容器内托管：
 - `/api/v1/*`  后端接口
 - `/static/*`  生成的图片/视频素材
 - `/`          前端 SPA（来自 `frontweb/dist`）
 - `/health`    健康检查
 
-访问地址：`http://<服务器IP>:10588/`
+**访问地址：`http://drama.richbest.cn/`**
 
 ---
 
@@ -100,10 +107,10 @@ docker compose up -d --build
 ```bash
 docker compose ps
 docker compose logs -f app
-curl http://127.0.0.1:10588/health
+curl -H "Host: drama.richbest.cn" http://127.0.0.1/health
 ```
 
-浏览器访问 `http://<服务器IP>:10588/`。
+浏览器访问 `http://drama.richbest.cn/`（需域名已解析到服务器 IP）。
 
 ---
 
