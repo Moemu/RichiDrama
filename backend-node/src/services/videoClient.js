@@ -48,7 +48,17 @@ function resolveVideoProtocol(config, modelHint) {
   if (!explicit && protocol === 'openai') {
     if (/api\.x\.ai(\/|$)/.test(baseLower)) protocol = 'xai';
     else if (/grok-imagine|grok.*video/.test(modelLower)) protocol = 'xai';
-    else if (p === 'agnes' || /agnes-video|apihub\.agnes-ai\.com/i.test(baseLower)) protocol = 'agnes';
+    else if (provider === 'agnes' || /agnes-video|apihub\.agnes-ai\.com/i.test(baseLower)) protocol = 'agnes';
+  }
+  // Seedance 2.x 家族天然支持「全能/多图参考」，未显式指定协议时自动走 volcengine_omni，
+  // 否则会落到普通 volcengine 协议（仅认单张首帧 image_url），导致多张参考图被丢弃、退化为 t2v。
+  // 显式指定了其它协议则尊重用户选择（如已选 volcengine_omni/kling_omni 等）。
+  // 注意：调用方常不传 model（preferredModel 为空），需结合 config 内配置的模型名判断。
+  if (!explicit && protocol === 'volcengine') {
+    const cfgModel = getModelFromConfig(config, modelHint);
+    if (isSeedance2FamilyModel(cfgModel) || isSeedance2FamilyModel(modelHint)) {
+      protocol = 'volcengine_omni';
+    }
   }
   return protocol;
 }
@@ -298,7 +308,9 @@ function resolveImageInputForOmniLocalBase64(rawUrl, files_base_url, storage_loc
   if (/localhost|127\.0\.0\.1/i.test(raw) && storage_local_path) {
     const baseUrl = (files_base_url || '').replace(/\/$/, '');
     const afterStatic = raw.split('/static/')[1] || (baseUrl ? raw.replace(baseUrl + '/', '').replace(baseUrl, '') : null);
-    const relPath = afterStatic ? afterStatic.replace(/^\//, '') : null;
+    let relPath = afterStatic ? afterStatic.replace(/^\//, '') : null;
+    // URL 中文可能百分号编码，需 decode 才能与磁盘路径匹配
+    if (relPath) { try { relPath = decodeURIComponent(relPath); } catch (_) {} }
     if (relPath) {
       const filePath = path.join(storage_local_path, relPath);
       try {
@@ -2851,7 +2863,9 @@ async function resolveJimengApiImageBuffer(rawUrl, files_base_url, storage_local
   if (/localhost|127\.0\.0\.1/i.test(raw) && storage_local_path) {
     const baseUrl = (files_base_url || '').replace(/\/$/, '');
     const afterStatic = raw.split('/static/')[1] || (baseUrl ? raw.replace(baseUrl + '/', '').replace(baseUrl, '') : null);
-    const relPath = afterStatic ? afterStatic.replace(/^\//, '') : null;
+    let relPath = afterStatic ? afterStatic.replace(/^\//, '') : null;
+    // URL 中文可能百分号编码，需 decode 才能与磁盘路径匹配
+    if (relPath) { try { relPath = decodeURIComponent(relPath); } catch (_) {} }
     if (relPath) {
       const filePath = path.join(storage_local_path, relPath);
       try {
@@ -3410,7 +3424,11 @@ function resolveVolcClassicImage(rawUrl, files_base_url, storage_local_path, log
       rel = u.replace(/^\//, '').split('?')[0];
     }
     if (rel) {
-      const filePath = path.join(storage_local_path, rel);
+      // URL 中的中文/特殊字符可能是百分号编码（如 %E5%B8%88），而磁盘路径是解码后的原文，
+      // 不 decode 会导致 fs.existsSync 匹配失败、回退成 localhost URL（火山无法下载）。
+      let relDecoded = rel;
+      try { relDecoded = decodeURIComponent(rel); } catch (_) {}
+      const filePath = path.join(storage_local_path, relDecoded);
       try {
         if (fs.existsSync(filePath)) {
           const buf = fs.readFileSync(filePath);
@@ -3459,7 +3477,8 @@ async function callVideoApi(db, log, opts) {
   const model = getModelFromConfig(config, preferredModel);
   const provider = (config.provider || '').toLowerCase();
   const protocol = resolveVideoProtocol(config, preferredModel);
-  if (db && opts.drama_id && VIDEO_PROTOCOLS_SUPPORT_SD2_ASSET_SCHEME.has(protocol)) {
+  if (db && opts.drama_id && VIDEO_PROTOCOLS_SUPPORT_SD2_ASSET_SCHEME.has(protocol)
+      && process.env.SD2_DISABLE_ASSET_INJECT !== '1') {
     opts = applySeedance2CertifiedAssetUrlsToVideoOpts(db, log, opts);
   }
 

@@ -1,4 +1,4 @@
-const { loadConfig } = require('./config/index.js');
+const { loadConfig, getEnvOverrideLog } = require('./config/index.js');
 
 const preConfig = loadConfig();
 const tlsFlag = preConfig.server?.insecure_tls ?? preConfig.server?.INSECURE_TLS;
@@ -10,6 +10,15 @@ const insecureTlsOn =
 if (insecureTlsOn) {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   console.warn('[config] server.insecure_tls 已启用：全局跳过 TLS 证书校验，仅用于测试');
+}
+// 打印环境变量覆盖清单（CFG_*），方便本地调试确认覆盖是否生效
+const envOverrides = getEnvOverrideLog();
+if (envOverrides.length) {
+  console.warn('[config] 环境变量覆盖 config（CFG_*）：');
+  for (const line of envOverrides) console.warn('  ' + line);
+}
+if (process.env.SD2_DISABLE_ASSET_INJECT === '1') {
+  console.warn('[config] SD2_DISABLE_ASSET_INJECT=1：已禁用 Seedance 2.0 asset 注入（本地调试用）');
 }
 
 const { createApp } = require('./app.js');

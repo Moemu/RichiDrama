@@ -6219,6 +6219,9 @@ function canUseUniversalOmniVideoApi(cfg) {
   if (proto === 'agnes' || provider === 'agnes' || /agnes-video/.test(model)) {
     return true
   }
+  // 即使接口规范未选 volcengine_omni，只要模型名属于 Seedance 2.x 家族也走多图参考
+  // （与后端 videoClient.isSeedance2FamilyModel 对齐，避免误判降级）
+  if (isSeedance2VideoModel(model)) return true
   return false
 }
 

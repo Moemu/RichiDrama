@@ -227,7 +227,10 @@ async function uploadLocalImageToProxy(storagePath, localPathOrUrl, log, tag) {
       // localhost URL → 提取 /static/ 后的相对路径
       const afterStatic = localPathOrUrl.split('/static/')[1];
       if (afterStatic && storagePath) {
-        filePath = path.join(storagePath, afterStatic.replace(/^\//, ''));
+        // URL 中文可能百分号编码，需 decode 才能与磁盘路径匹配
+        let rel = afterStatic.replace(/^\//, '');
+        try { rel = decodeURIComponent(rel); } catch (_) {}
+        filePath = path.join(storagePath, rel);
       }
     } else if (localPathOrUrl && storagePath) {
       filePath = path.isAbsolute(localPathOrUrl)
