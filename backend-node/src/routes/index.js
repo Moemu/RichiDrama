@@ -31,6 +31,7 @@ function setupRouter(cfg, db, log) {
   const prop = propRoutes(db, log, cfg);
   const stub = stubRoutes(db, cfg, log);
   const sceneModelMap = sceneModelMapRoutes(db, log);
+  const omniVideo = require('./omniVideo')(db, log);
   
   const uploadService = require('../services/uploadService');
   const charLibrary = characterLibraryRoutes(db, cfg, log);
@@ -44,7 +45,7 @@ function setupRouter(cfg, db, log) {
   const images = imageRoutes(db, cfg, log);
   const videos = videoRoutes(db, log);
   const videoMerges = videoMergeRoutes(db, log);
-  const assets = assetRoutes(db, log);
+  const assets = assetRoutes(db, log, cfg);
   const audio = audioRoutes(db, log, cfg);
   const promptOverrides = promptOverridesRoutes.routes(db, log);
 
@@ -208,6 +209,21 @@ function setupRouter(cfg, db, log) {
 
   // ---------- upload ----------
   r.post('/upload/image', uploadModule.multerSingle, uploadHandlers.uploadImage);
+  r.post('/media/upload', uploadHandlers.multerMediaSingle, uploadHandlers.uploadMedia);
+  r.get('/video-model-capabilities', omniVideo.capabilities);
+  r.get('/omni-video-sequences', omniVideo.listSequences);
+  r.post('/omni-video-sequences', omniVideo.createSequence);
+  r.get('/omni-video-sequences/default', omniVideo.defaultSequence);
+  r.get('/omni-video-sequences/:id', omniVideo.getSequence);
+  r.put('/omni-video-sequences/:id', omniVideo.updateSequence);
+  r.post('/omni-video-sequences/:id/shots', omniVideo.addShot);
+  r.put('/omni-video-sequences/:id/shots/reorder', omniVideo.reorderShots);
+  r.put('/omni-video-sequences/:id/shots/:shotId', omniVideo.updateShot);
+  r.delete('/omni-video-sequences/:id/shots/:shotId', omniVideo.deleteShot);
+  r.get('/omni-video-jobs', omniVideo.list);
+  r.post('/omni-video-jobs', omniVideo.create);
+  r.post('/omni-video-jobs/:id/retry', omniVideo.retry);
+  r.get('/omni-video-jobs/:id', omniVideo.get);
 
   // ---------- episodes ----------
   // 注意：drama.generateStoryboard 已处理所有逻辑（包括参数解析），这里统一使用 drama 模块的实现
@@ -267,6 +283,8 @@ function setupRouter(cfg, db, log) {
   r.post('/assets', assets.create);
   r.post('/assets/import/image/:image_gen_id', assets.importImage);
   r.post('/assets/import/video/:video_gen_id', assets.importVideo);
+  r.post('/assets/:id/sd2-certify', assets.sd2Certify);
+  r.post('/assets/:id/sd2-certify/refresh', assets.sd2CertifyRefresh);
   r.get('/assets/:id', assets.get);
   r.put('/assets/:id', assets.update);
   r.delete('/assets/:id', assets.delete);

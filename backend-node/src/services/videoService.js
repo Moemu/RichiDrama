@@ -221,7 +221,24 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
     const projectSubdir = storageLayout.getProjectStorageSubdir(db, row.drama_id);
     localPath = await downloadVideoToLocal(storagePath, videoUrl, videoGenId, log, projectSubdir);
     maybeNormalizeVideoAfterDownload(storagePath, localPath, rowForAspect, videoGenId, log);
-  } catch (_) {}
+    // 全能工作台选择“成片后混音”时，生成完成后创建新成片，不覆盖原供应商结果。
+    const postMix = db.prepare(`SELECT a.snapshot_json, j.request_snapshot_json FROM omni_video_jobs j
+      JOIN omni_video_job_assets a ON a.omni_job_id = j.id
+      WHERE j.video_generation_id = ? AND j.audio_strategy = 'post_mix' AND a.media_type = 'audio'
+      ORDER BY a.ordinal LIMIT 1`).get(Number(videoGenId));
+    if (postMix?.snapshot_json && localPath) {
+      const audio = JSON.parse(postMix.snapshot_json);
+      if (audio.local_path) {
+        const processor = require('./omniMediaProcessService');
+        const requestSnapshot = JSON.parse(postMix.request_snapshot_json || '{}');
+        localPath = processor.mixAudio(localPath, audio.local_path, log, requestSnapshot.post_process || {});
+        const baseUrl = cfg.storage?.base_url ? String(cfg.storage.base_url).replace(/\/$/, '') : '';
+        videoUrl = baseUrl ? `${baseUrl}/${localPath}` : `/static/${localPath}`;
+      }
+    }
+  } catch (error) {
+    log.warn('全能视频本地归档/后期处理失败，保留原始生成结果', { video_gen_id: videoGenId, error: error.message });
+  }
   try {
     db.prepare(
       'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, completed_at = ?, updated_at = ? WHERE id = ?'
@@ -331,7 +348,7 @@ async function resumePollForVideoGeneration(db, log, videoGenId) {
   }
 }
 
-/** 启动时恢复 processing 视频任务；无 provider_task_id 的视为中断 */
+/** 启动时恢复 processing 视频任务；无 provider_task_id 的保留为可显式重试。 */
 function resumeProcessingVideoGenerations(db, log) {
   const stuck = db
     .prepare(
@@ -340,12 +357,12 @@ function resumeProcessingVideoGenerations(db, log) {
          AND (provider_task_id IS NULL OR TRIM(provider_task_id) = '')`
     )
     .all();
-  const stuckMsg = '服务重启后无法恢复轮询（缺少厂商任务 ID），请重新生成';
+  const stuckMsg = '服务重启前未持久化厂商任务 ID；原请求快照已保留，请在全能创作中显式重试';
   for (const s of stuck) {
     const now = new Date().toISOString();
-    setVideoGenFailed(db, s.id, stuckMsg, now);
+    db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run('retryable', stuckMsg, now, s.id);
     if (s.task_id) taskService.updateTaskError(db, s.task_id, stuckMsg);
-    log.warn('Marked interrupted video generation as failed', { videoGenId: s.id });
+    log.warn('Marked interrupted video generation as retryable', { videoGenId: s.id });
   }
 
   const resumable = db
@@ -402,6 +419,19 @@ async function processVideoGeneration(db, log, videoGenId) {
         if (!Array.isArray(reference_urls)) reference_urls = null;
       } catch (_) {}
     }
+    // 全能工作台的音频引用与图片一样从任务快照恢复，避免依赖角色专用音色字段。
+    let voiceReferenceUrl = null;
+    try {
+      const omni = db.prepare('SELECT id FROM omni_video_jobs WHERE video_generation_id = ?').get(Number(videoGenId));
+      if (omni) {
+        const audio = db.prepare(`SELECT snapshot_json FROM omni_video_job_assets
+          WHERE omni_job_id = ? AND media_type = 'audio' AND send_to_model = 1 ORDER BY ordinal LIMIT 1`).get(omni.id);
+        if (audio?.snapshot_json) {
+          const snapshot = JSON.parse(audio.snapshot_json);
+          voiceReferenceUrl = snapshot.local_path || snapshot.url || null;
+        }
+      }
+    } catch (_) {}
     // 优先使用分镜自身的镜头时长（storyboard.duration），其次用 video_generations.duration
     let effectiveDuration = row.duration || null;
     if (row.storyboard_id) {
@@ -455,6 +485,7 @@ async function processVideoGeneration(db, log, videoGenId) {
       first_frame_url: hasOmniRefs ? undefined : row.first_frame_url,
       last_frame_url: hasOmniRefs ? undefined : row.last_frame_url,
       reference_urls,
+      voice_reference_url: voiceReferenceUrl,
       files_base_url: filesBaseUrl,
       storage_local_path: storageLocalPath,
       video_gen_id: videoGenId,

@@ -45,13 +45,13 @@
           <div v-else-if="!busy" class="preview-empty">无视频</div>
           <div v-if="busy" class="preview-loading"><span class="spinner" />生视频中…</div>
         </div>
-        <el-button size="small" type="primary" :loading="busy" @click.stop="runStep('video')">重新生视频</el-button>
+        <div class="panel-actions"><el-button size="small" type="primary" :loading="busy" @click.stop="runStep('video')">重新生视频</el-button><el-button v-if="url" size="small" plain @click.stop="sendToOmni">在全能视频中使用</el-button></div>
       </template>
 
       <template v-else-if="kind === 'audio'">
         <div class="audio-label">{{ audioType === 'narration' ? '旁白音频' : '对白音频' }}</div>
         <audio v-if="url" :src="url" controls class="preview-aud" />
-        <el-button size="small" type="warning" :loading="busy" @click.stop="runStep('audio')">重新配音</el-button>
+        <div class="panel-actions"><el-button size="small" type="warning" :loading="busy" @click.stop="runStep('audio')">重新配音</el-button><el-button v-if="url" size="small" plain @click.stop="sendToOmni">在全能视频中使用</el-button></div>
       </template>
     </div>
   </div>
@@ -64,6 +64,7 @@ import { useCanvasContext } from '@/composables/useCanvasContext'
 import { CANVAS_NODE_STATUS_LABELS } from '@/composables/useCanvasNodeStatus'
 import { runImageStep, runVideoStep, runAudioStep } from '@/composables/useCanvasWorkflowRunner'
 import { findStoryboardInDrama, getDramaGenerationOptions } from '@/utils/canvasWorkflow'
+import { useRouter } from 'vue-router'
 
 const props = defineProps({
   nodeId: { type: String, default: '' },
@@ -76,6 +77,7 @@ const props = defineProps({
 
 const ctx = useCanvasContext()
 const busy = ref(false)
+const router = useRouter()
 
 const sbNodeId = computed(() => (props.storyboard?.id ? `sb:${props.storyboard.id}` : ''))
 
@@ -96,6 +98,9 @@ function focusStoryboard() {
 
 function closePanel() {
   ctx?.clearFocusedNode?.()
+}
+function sendToOmni() {
+  router.push({ path: '/free-create', query: { media_url: props.url, media_type: props.kind === 'audio' ? 'audio' : 'video', name: props.kind === 'audio' ? '画布音频' : '画布视频' } })
 }
 
 async function runStep(step) {

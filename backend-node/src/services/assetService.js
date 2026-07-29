@@ -9,6 +9,10 @@ function list(db, query) {
     sql += ' AND type = ?';
     params.push(query.type);
   }
+  if (query.keyword) {
+    sql += ' AND name LIKE ?';
+    params.push(`%${String(query.keyword).trim()}%`);
+  }
   const countRow = db.prepare('SELECT COUNT(*) as total ' + sql).get(...params);
   const total = countRow.total || 0;
   const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -27,7 +31,19 @@ function rowToItem(r) {
     category: r.category,
     url: r.url,
     local_path: r.local_path,
+    file_size: r.file_size,
+    mime_type: r.mime_type,
+    width: r.width,
+    height: r.height,
     duration: r.duration,
+    source_type: r.source_type || 'upload',
+    parent_asset_id: r.parent_asset_id,
+    thumbnail_local_path: r.thumbnail_local_path,
+    metadata: safeParse(r.metadata_json),
+    tags: safeParse(r.tags_json),
+    processing_status: r.processing_status || 'ready',
+    error_msg: r.error_msg,
+    seedance2_asset: safeParse(r.seedance2_asset),
     image_gen_id: r.image_gen_id,
     video_gen_id: r.video_gen_id,
     created_at: r.created_at,
@@ -43,8 +59,8 @@ function getById(db, id) {
 function create(db, log, req) {
   const now = new Date().toISOString();
   const info = db.prepare(
-    `INSERT INTO assets (drama_id, name, type, category, url, local_path, file_size, mime_type, width, height, duration, image_gen_id, video_gen_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO assets (drama_id, name, type, category, url, local_path, file_size, mime_type, width, height, duration, image_gen_id, video_gen_id, source_type, parent_asset_id, thumbnail_local_path, metadata_json, tags_json, checksum, processing_status, error_msg, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     req.drama_id ?? null,
     req.name || '未命名',
@@ -59,6 +75,9 @@ function create(db, log, req) {
     req.duration ?? null,
     req.image_gen_id ?? null,
     req.video_gen_id ?? null,
+    req.source_type || 'upload', req.parent_asset_id ?? null, req.thumbnail_local_path ?? null,
+    stringifyJson(req.metadata), stringifyJson(req.tags), req.checksum ?? null,
+    req.processing_status || 'ready', req.error_msg ?? null,
     now,
     now
   );
@@ -66,17 +85,21 @@ function create(db, log, req) {
 }
 
 function update(db, log, id, req) {
-  const row = db.prepare('SELECT id FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id));
+  const row = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!row) return null;
   const updates = [];
   const params = [];
-  ['name', 'description', 'type', 'category', 'url', 'local_path', 'thumbnail_url', 'file_size', 'mime_type', 'width', 'height', 'duration', 'is_favorite'].forEach((key) => {
+  ['name', 'description', 'type', 'category', 'url', 'local_path', 'thumbnail_url', 'thumbnail_local_path', 'file_size', 'mime_type', 'width', 'height', 'duration', 'is_favorite', 'source_type', 'parent_asset_id', 'checksum', 'processing_status', 'error_msg'].forEach((key) => {
     if (req[key] !== undefined) {
       updates.push(key + ' = ?');
       params.push(req[key]);
     }
   });
+  [['metadata', 'metadata_json'], ['tags', 'tags_json']].forEach(([input, column]) => {
+    if (req[input] !== undefined) { updates.push(column + ' = ?'); params.push(stringifyJson(req[input])); }
+  });
   if (updates.length === 0) return getById(db, id);
+  require('./assetSd2Service').markStale(db, row, req);
   params.push(new Date().toISOString(), id);
   db.prepare('UPDATE assets SET ' + updates.join(', ') + ', updated_at = ? WHERE id = ?').run(...params);
   return getById(db, id);
@@ -123,3 +146,6 @@ module.exports = {
   importFromImage,
   importFromVideo,
 };
+
+function safeParse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
+function stringifyJson(value) { return value == null ? null : (typeof value === 'string' ? value : JSON.stringify(value)); }

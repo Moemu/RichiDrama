@@ -37,7 +37,7 @@ const router = createRouter({
       path: '/free-create',
       name: 'free-create',
       component: () => import('@/views/FreeCreate.vue'),
-      meta: { title: '自由创作' }
+      meta: { title: '全能视频' }
     },
     {
       path: '/media-library',
