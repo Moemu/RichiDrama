@@ -21,6 +21,14 @@ request.interceptors.response.use(
   },
   (error) => {
     // 提取后端实际错误信息（优先 API 返回的 message，而非 axios 通用 "status code 500"）
+    const status = error.response?.status
+    // 413 通常由 nginx 反代层返回（HTML 响应体，非 JSON），需单独给出可读提示
+    if (status === 413) {
+      const msg413 = '上传文件过大（413），请压缩图片到 16MB 以内后重试'
+      ElMessage.error(msg413)
+      error.message = msg413
+      return Promise.reject(error)
+    }
     const backendMsg = error.response?.data?.error?.message
     const msg = backendMsg || error.message || '网络错误'
     ElMessage.error(msg)

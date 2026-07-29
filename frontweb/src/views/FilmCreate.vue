@@ -1708,6 +1708,7 @@
             <div v-else-if="editCharacterForm.id && (editCharacterForm.image_url || editCharacterForm.local_path) && !editCharacterForm.appearance" class="ref-actions">
               <el-button size="small" :loading="extractingCharAppearance" @click="doExtractCharFromImage">从主图提取描述</el-button>
             </div>
+            <div class="ref-upload-tip">支持 jpg/png/gif/webp，单张不超过 {{ MAX_IMAGE_SIZE_MB }}MB</div>
           </div>
         </el-form-item>
         <el-form-item label="名称" required>
@@ -1854,6 +1855,7 @@
             <div v-else-if="editPropForm.id && (editPropForm.image_url || editPropForm.local_path) && !editPropForm.description" class="ref-actions">
               <el-button size="small" :loading="extractingPropDesc" @click="doExtractPropFromImage">从主图提取描述</el-button>
             </div>
+            <div class="ref-upload-tip">支持 jpg/png/gif/webp，单张不超过 {{ MAX_IMAGE_SIZE_MB }}MB</div>
           </div>
         </el-form-item>
         <el-form-item label="名称" required>
@@ -1913,6 +1915,7 @@
             <div v-else-if="editSceneForm.id && (editSceneForm.image_url || editSceneForm.local_path) && !editSceneForm.prompt" class="ref-actions">
               <el-button size="small" :loading="extractingSceneDesc" @click="doExtractSceneFromImage">从主图提取描述</el-button>
             </div>
+            <div class="ref-upload-tip">支持 jpg/png/gif/webp，单张不超过 {{ MAX_IMAGE_SIZE_MB }}MB</div>
           </div>
         </el-form-item>
         <el-form-item label="地点" required>
@@ -2642,6 +2645,7 @@ import {
   stylePromptMetadataForSave,
   backfillDramaStylePromptMetadataIfNeeded,
 } from '@/constants/styleOptions'
+import { MAX_IMAGE_SIZE_MB, checkImageFile } from '@/constants/uploadLimits'
 import { useNavigation } from '@/composables/filmCreate/useNavigation'
 import { runGenerateStoryFromPremise } from '@/composables/useStoryGeneration'
 import { useCharacters } from '@/composables/filmCreate/useCharacters'
@@ -3371,12 +3375,30 @@ function readFileAsRefImage(file) {
 }
 
 /**
+ * 校验参考图文件（类型 + 大小），不通过则弹提示并返回 null。
+ * 在读取/上传前调用，避免选完图、填完表单点保存才报错。
+ */
+function validateRefImageFile(file) {
+  if (!file) return null
+  const result = checkImageFile(file)
+  if (!result.ok) {
+    ElMessage.warning(result.message)
+    return null
+  }
+  return file
+}
+
+/**
  * 处理角色/道具/场景参考图文件选择（<input type="file"> change 事件）
  * type: 'character' | 'prop' | 'scene'
  */
 async function onRefImageFileChange(type, event) {
   const file = event.target?.files?.[0]
   if (!file) return
+  if (!validateRefImageFile(file)) {
+    event.target.value = ''
+    return
+  }
   const result = await readFileAsRefImage(file)
   if (type === 'character') addCharRefImage.value = result
   else if (type === 'prop') addPropRefImage.value = result
@@ -3391,6 +3413,7 @@ async function onRefImageFileChange(type, event) {
 async function onRefImageDrop(type, event) {
   const file = getFirstImageFile(event.dataTransfer)
   if (!file) return
+  if (!validateRefImageFile(file)) return
   const result = await readFileAsRefImage(file)
   if (type === 'character') addCharRefImage.value = result
   else if (type === 'prop') addPropRefImage.value = result
@@ -3404,6 +3427,10 @@ async function onRefImageDrop(type, event) {
 async function onRefImageFileChange2(type, event) {
   const file = event.target?.files?.[0]
   if (!file) return
+  if (!validateRefImageFile(file)) {
+    event.target.value = ''
+    return
+  }
   const result = await readFileAsRefImage(file)
   if (type === 'addProp') addPropAddRefImage.value = result
   event.target.value = ''
@@ -3416,6 +3443,7 @@ async function onRefImageFileChange2(type, event) {
 async function onRefImageDrop2(type, event) {
   const file = getFirstImageFile(event.dataTransfer)
   if (!file) return
+  if (!validateRefImageFile(file)) return
   const result = await readFileAsRefImage(file)
   if (type === 'addProp') addPropAddRefImage.value = result
 }
@@ -9117,6 +9145,12 @@ html.light .section-title { color: #1e1b4b; }
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.ref-upload-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #909399);
+  line-height: 1.4;
 }
 
 /* 资源管理大面板 + 可折叠标题 */

@@ -5,8 +5,13 @@ const uploadService = require('../services/uploadService');
 const storageLayout = require('../services/storageLayout');
 
 const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-const maxSize = 16 * 1024 * 1024; // 16MB，单张图片上限
-const MAX_SIZE_MB = 16;
+// 单张图片上限。修改时请同步：
+//   - 前端 frontweb/src/constants/uploadLimits.js (MAX_IMAGE_SIZE_MB)
+//   - nginx deploy/nginx-drama-richbest.conf (client_max_body_size，需 ≥ 此值 + multipart 开销)
+const MAX_IMAGE_SIZE_MB = 16;
+const maxSize = MAX_IMAGE_SIZE_MB * 1024 * 1024;
+// 兼容旧导出名（routes/index.js 等可能引用 MAX_IMAGE_SIZE_MB）
+const MAX_SIZE_MB = MAX_IMAGE_SIZE_MB;
 
 const memoryStorage = multer.memoryStorage();
 const upload = multer({
@@ -100,5 +105,7 @@ module.exports = {
   upload,
   multerSingle: upload.single('file'),
   multerAudioSingle: audioUpload.single('file'),
-  MAX_IMAGE_SIZE_MB: MAX_SIZE_MB,
+  MAX_IMAGE_SIZE_MB,
+  // 兼容旧导出名
+  MAX_SIZE_MB,
 };
