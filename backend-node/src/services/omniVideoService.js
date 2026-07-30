@@ -1,6 +1,7 @@
 const taskService = require('./taskService');
 const videoService = require('./videoService');
 const capabilityService = require('./videoModelCapabilities');
+const SHOT_ASSET_LIMITS = { total: 12, image: 9, video: 3, audio: 3 };
 
 const IMAGE_USAGES = new Set(['primary', 'identity', 'environment', 'style', 'prop', 'first_frame', 'last_frame', 'reference']);
 
@@ -10,6 +11,7 @@ function create(db, log, body) {
   const input = Array.isArray(body.assets) ? body.assets : [];
   if (input.length > 12) throw new Error('一次创作最多使用 12 个素材');
   const assets = input.map((entry, ordinal) => resolveAsset(db, entry, ordinal));
+  validateShotAssetLimits(assets);
   const capability = capabilityService.resolve(db, body.model, assets);
   if (!capability.model) throw new Error('请先在 AI 配置中启用视频模型');
   const routed = routeAssets(expandVideoReferences(db, log, assets, capability.supports), capability.supports, body.audio_strategy);
@@ -69,6 +71,18 @@ function routeAssets(assets, supports, audioStrategy) {
   });
 }
 
+function validateShotAssetLimits(assets) {
+  const counts = assets.reduce((result, asset) => {
+    if (Object.prototype.hasOwnProperty.call(SHOT_ASSET_LIMITS, asset.type)) result[asset.type] += 1;
+    return result;
+  }, { image: 0, video: 0, audio: 0 });
+  for (const type of ['image', 'video', 'audio']) {
+    if (counts[type] > SHOT_ASSET_LIMITS[type]) {
+      throw new Error(`${type} asset count exceeds the per-shot limit of ${SHOT_ASSET_LIMITS[type]}`);
+    }
+  }
+}
+
 function expandVideoReferences(db, log, assets, supports) {
   if (supports.video_reference) return assets;
   const output = [];
@@ -86,6 +100,8 @@ function expandVideoReferences(db, log, assets, supports) {
 function isSeedanceCapability(capability) { return /seedance|doubao-seedance/i.test(String(capability?.model || '')) && /volc|volces/i.test(String(capability?.provider || '')); }
 function enforceSd2IdentityAssets(assets, capability) {
   if (!isSeedanceCapability(capability)) return;
+  const undeclared = assets.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && asset.send_to_model && !asset.requires_sd2_identity);
+  if (undeclared.length) throw new Error(`人物一致性素材请先勾选“含真人／需要身份一致性”：${undeclared.map((asset) => asset.alias).join('、')}`);
   const invalid = assets.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && asset.send_to_model && !(asset.seedance2_asset && String(asset.seedance2_asset.status || '').toLowerCase() === 'active' && String(asset.seedance2_asset.asset_url || '').startsWith('asset://')));
   if (invalid.length) throw new Error(`人物一致性素材必须先完成 SD2 认证：${invalid.map((asset) => asset.alias).join('、')}`);
 }
@@ -121,4 +137,4 @@ function retry(db, log, id) {
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry };
+module.exports = { create, get, list, retry, validateShotAssetLimits, SHOT_ASSET_LIMITS };

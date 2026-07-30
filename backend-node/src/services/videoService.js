@@ -350,6 +350,7 @@ async function resumePollForVideoGeneration(db, log, videoGenId) {
 
 /** 启动时恢复 processing 视频任务；无 provider_task_id 的保留为可显式重试。 */
 function resumeProcessingVideoGenerations(db, log) {
+  const hasOmniJobs = !!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'omni_video_jobs'").get();
   const stuck = db
     .prepare(
       `SELECT id, task_id FROM video_generations
@@ -360,9 +361,17 @@ function resumeProcessingVideoGenerations(db, log) {
   const stuckMsg = '服务重启前未持久化厂商任务 ID；原请求快照已保留，请在全能创作中显式重试';
   for (const s of stuck) {
     const now = new Date().toISOString();
-    db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run('retryable', stuckMsg, now, s.id);
-    if (s.task_id) taskService.updateTaskError(db, s.task_id, stuckMsg);
-    log.warn('Marked interrupted video generation as retryable', { videoGenId: s.id });
+    const omniJob = hasOmniJobs
+      ? db.prepare('SELECT request_snapshot_json FROM omni_video_jobs WHERE video_generation_id = ? ORDER BY id DESC LIMIT 1').get(s.id)
+      : null;
+    let snapshot = null;
+    try { snapshot = omniJob?.request_snapshot_json ? JSON.parse(omniJob.request_snapshot_json) : null; } catch (_) {}
+    const isEmptyOmniJob = !!omniJob && (!snapshot?.prompt || !Array.isArray(snapshot.assets) || snapshot.assets.length === 0);
+    const message = isEmptyOmniJob ? '历史空任务未实际提交模型，已标记为无效，可从任务历史中清理' : stuckMsg;
+    const status = isEmptyOmniJob ? 'invalid' : 'retryable';
+    db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run(status, message, now, s.id);
+    if (s.task_id) taskService.updateTaskError(db, s.task_id, message);
+    log.warn(isEmptyOmniJob ? 'Marked empty omni video task invalid' : 'Marked interrupted video generation as retryable', { videoGenId: s.id });
   }
 
   const resumable = db

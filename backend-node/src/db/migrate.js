@@ -410,6 +410,7 @@ function ensureAllColumns(database) {
     { name: 'processing_status', type: 'TEXT DEFAULT \'ready\'' },
     { name: 'error_msg', type: 'TEXT' },
     { name: 'seedance2_asset', type: 'TEXT' },
+    { name: 'requires_sd2_identity', type: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'created_at',   type: 'TEXT' },
     { name: 'updated_at',   type: 'TEXT' },
     { name: 'deleted_at',   type: 'TEXT' },

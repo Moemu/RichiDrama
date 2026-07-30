@@ -44,6 +44,7 @@ function rowToItem(r) {
     processing_status: r.processing_status || 'ready',
     error_msg: r.error_msg,
     seedance2_asset: safeParse(r.seedance2_asset),
+    requires_sd2_identity: !!r.requires_sd2_identity,
     image_gen_id: r.image_gen_id,
     video_gen_id: r.video_gen_id,
     created_at: r.created_at,
@@ -89,10 +90,12 @@ function update(db, log, id, req) {
   if (!row) return null;
   const updates = [];
   const params = [];
-  ['name', 'description', 'type', 'category', 'url', 'local_path', 'thumbnail_url', 'thumbnail_local_path', 'file_size', 'mime_type', 'width', 'height', 'duration', 'is_favorite', 'source_type', 'parent_asset_id', 'checksum', 'processing_status', 'error_msg'].forEach((key) => {
+  ['name', 'description', 'type', 'category', 'url', 'local_path', 'thumbnail_url', 'thumbnail_local_path', 'file_size', 'mime_type', 'width', 'height', 'duration', 'is_favorite', 'source_type', 'parent_asset_id', 'checksum', 'processing_status', 'error_msg', 'requires_sd2_identity'].forEach((key) => {
     if (req[key] !== undefined) {
       updates.push(key + ' = ?');
-      params.push(req[key]);
+      // better-sqlite3 does not accept booleans as bound values. Keep the API
+      // boolean-shaped while storing the SQLite INTEGER flag explicitly.
+      params.push(key === 'requires_sd2_identity' ? (req[key] ? 1 : 0) : req[key]);
     }
   });
   [['metadata', 'metadata_json'], ['tags', 'tags_json']].forEach(([input, column]) => {

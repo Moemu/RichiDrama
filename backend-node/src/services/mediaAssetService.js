@@ -14,6 +14,22 @@ const EXTENSIONS = {
   audio: ['.mp3', '.wav', '.m4a', '.ogg', '.webm'],
 };
 
+function readableUploadName(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const fixed = Buffer.from(raw, 'latin1').toString('utf8');
+    return fixed.includes('\ufffd') ? raw : fixed;
+  } catch (_) { return raw; }
+}
+
+function limits() {
+  return {
+    files: { image: { max_mb: LIMITS.image, extensions: EXTENSIONS.image }, video: { max_mb: LIMITS.video, extensions: EXTENSIONS.video }, audio: { max_mb: LIMITS.audio, extensions: EXTENSIONS.audio } },
+    shot: { total: 12, image: 9, video: 3, audio: 3 },
+  };
+}
+
 function detectType(file) {
   const mime = String(file.mimetype || '').toLowerCase();
   const ext = path.extname(file.originalname || '').toLowerCase();
@@ -52,13 +68,14 @@ async function upload(db, cfg, log, file, body = {}) {
   const result = uploadService.uploadFile(storagePath, cfg?.storage?.base_url || '', log, file.buffer, file.originalname, file.mimetype, `${type}s`, projectSubdir);
   const checksum = crypto.createHash('sha256').update(file.buffer).digest('hex');
   const inspection = await inspectMedia(path.join(storagePath, result.local_path.replace(/\//g, path.sep)), type, storagePath, result.local_path, log);
+  const displayName = String(body.name || readableUploadName(file.originalname) || 'untitled-media').slice(0, 255);
   return assetService.create(db, log, {
     drama_id: dramaId,
-    name: String(body.name || file.originalname || '未命名素材').slice(0, 255),
+    name: displayName,
     type, category: body.category || null, url: result.url, local_path: result.local_path,
     file_size: file.size, mime_type: file.mimetype || null, source_type: 'upload', checksum,
     width: inspection.width, height: inspection.height, duration: inspection.duration, thumbnail_local_path: inspection.thumbnail_local_path,
-    metadata: { original_name: file.originalname, uploaded_mime_type: file.mimetype || '', ...inspection.metadata },
+    metadata: { original_name: displayName, uploaded_mime_type: file.mimetype || '', ...inspection.metadata },
     processing_status: 'ready',
   });
 }
@@ -89,4 +106,4 @@ async function inspectMedia(filePath, type, storageRoot, localPath, log) {
   return result;
 }
 
-module.exports = { upload, detectType, LIMITS, hasExpectedSignature, inspectMedia };
+module.exports = { upload, detectType, LIMITS, EXTENSIONS, limits, readableUploadName, hasExpectedSignature, inspectMedia };
