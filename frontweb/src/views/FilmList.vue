@@ -23,6 +23,9 @@
           <el-button class="btn-library" title="全能视频" @click="createOmniProject">
             <el-icon><MagicStick /></el-icon>全能视频
           </el-button>
+          <el-button class="btn-library" title="AI 工具箱" @click="$router.push('/ai-tools')">
+            <el-icon><MagicStick /></el-icon>AI 工具箱
+          </el-button>
           <el-button class="btn-library" title="媒体素材库" @click="$router.push('/media-library')">
             <el-icon><Files /></el-icon>素材库
           </el-button>
@@ -88,6 +91,7 @@
             class="project-card omni-project-card"
             @click="openOmniProject(project.id)"
           >
+            <div class="project-card-actions" @click.stop><el-button size="small" type="danger" plain @click="deleteOmniProject(project)">删除</el-button></div>
             <div class="project-card-body">
               <h3 class="project-title">{{ project.name || '未命名全能项目' }}</h3>
               <p class="project-desc">全能创作工作台 · 可按镜头顺序继续编辑与生成</p>
@@ -782,6 +786,15 @@ async function createOmniProject() {
 
 function openOmniProject(id) {
   router.push({ path: '/free-create', query: { sequence_id: id } })
+}
+
+async function deleteOmniProject(project) {
+  try {
+    await ElMessageBox.confirm(`删除“${project.name || '未命名全能项目'}”？已生成成片和素材会保留，进行中的供应商任务不会被取消。`, '删除全能项目', { type: 'warning' })
+    await omniVideoAPI.deleteSequence(project.id)
+    ElMessage.success('全能项目已删除，可在后续恢复列表中找回')
+    loadList()
+  } catch (_) {}
 }
 
 function onExport(d) {

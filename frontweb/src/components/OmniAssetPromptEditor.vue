@@ -33,14 +33,14 @@ const props = defineProps({
   /** 已选素材 id 集合，用于在 @ 选择器里标记"已选" */
   chosenIds: { type: Set, default: () => new Set() },
 })
-const emit = defineEmits(['update:modelValue', 'pick'])
+const emit = defineEmits(['update:modelValue', 'pick', 'references'])
 const inputRef = ref(null)
 const text = ref(props.modelValue)
 const showPicker = ref(false)
 const dragging = ref(false)
 let dragCounter = 0
 
-watch(() => props.modelValue, (value) => { if (value !== text.value) text.value = value })
+watch(() => props.modelValue, (value) => { if (value !== text.value) text.value = value; syncReferences(value || '') })
 
 // @ 选择器：显示全部素材，已选的标记 _chosen
 const pickerAssets = computed(() =>
@@ -54,7 +54,16 @@ const referenced = computed(() =>
 
 function onInput(value) {
   emit('update:modelValue', value)
+  syncReferences(value)
   showPicker.value = /@[^\s@]*$/.test(value)
+}
+
+function syncReferences(value) {
+  const refs = (props.assets || []).filter((asset) => {
+    const name = asset.alias || asset.name
+    return name && String(value || '').includes(`@${name}`)
+  }).map((asset) => ({ asset_id: asset.id, alias: asset.alias || asset.name }))
+  emit('references', { text: value || '', refs })
 }
 
 /** 插入素材 @引用；若未选中则通知父组件加入创作 */
@@ -72,6 +81,7 @@ function insertAsset(asset, opts = {}) {
     text.value = text.value.replace(/@[^\s@]*$/, token)
   }
   emit('update:modelValue', text.value)
+  syncReferences(text.value)
   showPicker.value = false
 }
 

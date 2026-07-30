@@ -31,7 +31,7 @@ function setupRouter(cfg, db, log) {
   const prop = propRoutes(db, log, cfg);
   const stub = stubRoutes(db, cfg, log);
   const sceneModelMap = sceneModelMapRoutes(db, log);
-  const omniVideo = require('./omniVideo')(db, log);
+  const omniVideo = require('./omniVideo')(db, log, cfg);
   
   const uploadService = require('../services/uploadService');
   const charLibrary = characterLibraryRoutes(db, cfg, log);
@@ -210,12 +210,16 @@ function setupRouter(cfg, db, log) {
   // ---------- upload ----------
   r.post('/upload/image', uploadModule.multerSingle, uploadHandlers.uploadImage);
   r.post('/media/upload', uploadHandlers.multerMediaSingle, uploadHandlers.uploadMedia);
+  r.get('/upload-limits', (req, res) => response.success(res, require('../services/mediaAssetService').limits()));
   r.get('/video-model-capabilities', omniVideo.capabilities);
   r.get('/omni-video-sequences', omniVideo.listSequences);
+  r.get('/omni-video-sequences/deleted', omniVideo.listDeletedSequences);
   r.post('/omni-video-sequences', omniVideo.createSequence);
   r.get('/omni-video-sequences/default', omniVideo.defaultSequence);
   r.get('/omni-video-sequences/:id', omniVideo.getSequence);
   r.put('/omni-video-sequences/:id', omniVideo.updateSequence);
+  r.delete('/omni-video-sequences/:id', omniVideo.deleteSequence);
+  r.post('/omni-video-sequences/:id/restore', omniVideo.restoreSequence);
   r.post('/omni-video-sequences/:id/shots', omniVideo.addShot);
   r.put('/omni-video-sequences/:id/shots/reorder', omniVideo.reorderShots);
   r.put('/omni-video-sequences/:id/shots/:shotId', omniVideo.updateShot);
@@ -223,6 +227,7 @@ function setupRouter(cfg, db, log) {
   r.get('/omni-video-jobs', omniVideo.list);
   r.post('/omni-video-jobs', omniVideo.create);
   r.post('/omni-video-jobs/:id/retry', omniVideo.retry);
+  r.post('/omni-video-jobs/:id/extract-frame', omniVideo.extractFrame);
   r.get('/omni-video-jobs/:id', omniVideo.get);
 
   // ---------- episodes ----------

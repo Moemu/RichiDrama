@@ -16,7 +16,7 @@ function ensureDefault(db) {
 }
 
 function shotRow(row) {
-  return { ...row, assets: parse(row.assets_json, []), settings: parse(row.settings_json, {}),
+  return { ...row, assets: parse(row.assets_json, []), prompt_document: parse(row.prompt_document_json, null), settings: parse(row.settings_json, {}),
     status: row.generation_status || (row.omni_job_id ? 'processing' : 'draft'),
     video_url: row.generation_local_path ? `/static/${row.generation_local_path}` : row.generation_video_url || null };
 }
@@ -35,14 +35,15 @@ function get(db, id) {
   return sequence ? { ...sequence, shots: listShots(db, sequence.id) } : null;
 }
 
-function list(db) {
+function list(db, options = {}) {
+  const deleted = options.deleted ? 'IS NOT NULL' : 'IS NULL';
   return db.prepare(`SELECT q.*, COUNT(s.id) shot_count,
       SUM(CASE WHEN v.status = 'completed' THEN 1 ELSE 0 END) completed_count
     FROM omni_video_sequences q
     LEFT JOIN omni_video_sequence_shots s ON s.sequence_id = q.id AND s.deleted_at IS NULL
     LEFT JOIN omni_video_jobs j ON j.id = s.omni_job_id
     LEFT JOIN video_generations v ON v.id = j.video_generation_id
-    WHERE q.deleted_at IS NULL
+    WHERE q.deleted_at ${deleted}
     GROUP BY q.id
     ORDER BY q.updated_at DESC, q.id DESC`).all().map((row) => ({
       ...row,
@@ -89,9 +90,9 @@ function updateShot(db, sequenceId, shotId, body) {
   if (!shot) throw new Error('镜头不存在');
   const settings = body.settings !== undefined ? { ...parse(shot.settings_json, {}), ...body.settings } : parse(shot.settings_json, {});
   if (settings.duration != null) settings.duration = Math.min(15, Math.max(1, Number(settings.duration) || 5));
-  db.prepare(`UPDATE omni_video_sequence_shots SET title = ?, prompt = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?`).run(
-    body.title ?? shot.title, body.prompt ?? shot.prompt, body.assets !== undefined ? JSON.stringify(body.assets) : shot.assets_json,
-    JSON.stringify(settings), now(), shot.id);
+  db.prepare(`UPDATE omni_video_sequence_shots SET title = ?, prompt = ?, prompt_document_json = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?`).run(
+    body.title ?? shot.title, body.prompt ?? shot.prompt, body.prompt_document !== undefined ? JSON.stringify(body.prompt_document) : shot.prompt_document_json,
+    body.assets !== undefined ? JSON.stringify(body.assets) : shot.assets_json, JSON.stringify(settings), now(), shot.id);
   return listShots(db, sequenceId).find((s) => s.id === shot.id);
 }
 
@@ -118,4 +119,26 @@ function normalizeOrder(db, sequenceId) {
   const tx = db.transaction(() => ids.forEach((row, index) => stmt.run((index + 1) * 10, row.id))); tx();
 }
 
-module.exports = { ensureDefault, list, get, createSequence, updateSequence, createShot, updateShot, deleteShot, reorder, listShots };
+function deleteSequence(db, id) {
+  const sequence = db.prepare('SELECT * FROM omni_video_sequences WHERE id = ? AND deleted_at IS NULL').get(Number(id));
+  if (!sequence) throw new Error('全能创作项目不存在');
+  const stamp = now();
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE omni_video_sequences SET deleted_at = ?, updated_at = ? WHERE id = ?').run(stamp, stamp, sequence.id);
+    db.prepare('UPDATE omni_video_sequence_shots SET deleted_at = ?, updated_at = ? WHERE sequence_id = ? AND deleted_at IS NULL').run(stamp, stamp, sequence.id);
+  }); tx();
+  return true;
+}
+
+function restoreSequence(db, id) {
+  const sequence = db.prepare('SELECT * FROM omni_video_sequences WHERE id = ? AND deleted_at IS NOT NULL').get(Number(id));
+  if (!sequence) throw new Error('已删除项目不存在');
+  const stamp = now();
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE omni_video_sequences SET deleted_at = NULL, updated_at = ? WHERE id = ?').run(stamp, sequence.id);
+    db.prepare('UPDATE omni_video_sequence_shots SET deleted_at = NULL, updated_at = ? WHERE sequence_id = ?').run(stamp, sequence.id);
+  }); tx();
+  return get(db, sequence.id);
+}
+
+module.exports = { ensureDefault, list, get, createSequence, updateSequence, createShot, updateShot, deleteShot, deleteSequence, restoreSequence, reorder, listShots };

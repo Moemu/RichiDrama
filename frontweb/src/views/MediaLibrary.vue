@@ -17,6 +17,8 @@
       </div>
     </div>
 
+    <div class="upload-limits">上传限制：图片 ≤30MB（JPG/PNG/GIF/WebP） · 视频 ≤50MB（MP4/WebM/MOV/M4V） · 音频 ≤15MB（MP3/WAV/M4A/OGG/WebM）</div>
+
     <!-- 筛选栏 -->
     <div class="filter-bar">
       <el-radio-group v-model="mediaType" class="type-filter" @change="loadMedia">
@@ -79,7 +81,7 @@
           </div>
         </div>
         <div class="media-info">
-          <span class="media-name" :title="item.name">{{ item.name || '未命名' }}</span>
+          <span class="media-name" :title="item.name" @dblclick.stop="renameItem(item)">{{ item.name || '未命名' }}</span>
           <span class="media-meta">{{ formatSize(item.size) }}</span>
         </div>
       </div>
@@ -262,6 +264,15 @@ async function deleteItem(item) {
   }
 }
 
+async function renameItem(item) {
+  try {
+    const { value } = await ElMessageBox.prompt('输入素材名称', '重命名素材', { inputValue: item.name || '' })
+    const updated = await omniVideoAPI.updateAsset(item.id, { name: String(value || '').trim() || item.name })
+    Object.assign(item, updated)
+    ElMessage.success('素材名称已更新')
+  } catch (_) {}
+}
+
 async function batchDelete() {
   const count = selectedIds.size
   await ElMessageBox.confirm(`确定删除选中的 ${count} 个素材？`, '批量删除', { type: 'warning' })
@@ -314,6 +325,7 @@ onMounted(loadMedia)
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
+.upload-limits { margin: -8px 0 14px; color: #6b7280; font-size: 12px; }
 
 .search-input {
   width: 240px;

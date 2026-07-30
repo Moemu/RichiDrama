@@ -44,6 +44,12 @@ const router = createRouter({
       name: 'media-library',
       component: () => import('@/views/MediaLibrary.vue'),
       meta: { title: '媒体素材库' }
+    },
+    {
+      path: '/ai-tools',
+      name: 'ai-tools',
+      component: () => import('@/views/AITools.vue'),
+      meta: { title: 'AI 工具箱' }
     }
   ]
 })
