@@ -679,6 +679,69 @@ input_reference = (图片文件，可选)</pre>
             <el-input v-model="form.group_id" placeholder="MiniMax GroupId，如 1234567890" />
             <p class="field-tip">仅 MiniMax T2A 需要此字段。</p>
           </el-form-item>
+          <!-- 豆包语音（火山引擎 TTS）专属字段：AppID / Cluster / 音色类型 -->
+          <template v-if="isDoubaoTtsProvider">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-tip">App ID
+                  <el-tooltip placement="top" popper-class="cfg-tip-popper">
+                    <template #content>
+                      <div class="cfg-tip-content">
+                        火山引擎语音技术应用的 App ID。<br>
+                        登录 <b>console.volcengine.com</b> → 语音技术 → 应用管理 → 查看 App ID。
+                      </div>
+                    </template>
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
+              <el-input v-model="form.doubao_appid" placeholder="火山引擎语音 App ID，如 1234567890" />
+              <p class="field-tip">豆包语音必填。</p>
+            </el-form-item>
+            <el-form-item>
+              <template #label>
+                <span class="form-label-tip">Cluster
+                  <el-tooltip placement="top" popper-class="cfg-tip-popper">
+                    <template #content>
+                      <div class="cfg-tip-content">
+                        火山引擎语音业务的核心集群 ID（Cluster）。<br>
+                        常见值如 <code>volcano_tts</code>、<code>volcano_mega</code>，<br>
+                        在应用详情页的「接入信息」里查看。
+                      </div>
+                    </template>
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
+              <el-input v-model="form.doubao_cluster" placeholder="集群 ID，如 volcano_tts" />
+              <p class="field-tip">豆包语音必填。</p>
+            </el-form-item>
+            <el-form-item>
+              <template #label>
+                <span class="form-label-tip">音色类型
+                  <el-tooltip placement="top" popper-class="cfg-tip-popper">
+                    <template #content>
+                      <div class="cfg-tip-content">
+                        火山引擎 TTS 的音色 ID（voice_type）。<br>
+                        <b>通用音色：</b>BV001（通用女声）、BV002（通用男声）、<br>
+                        BV405（灿婷）、BV406（擎苍）等。<br>
+                        详见语音技术控制台「音色管理」。
+                      </div>
+                    </template>
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
+              <el-select v-model="form.doubao_voice_type" filterable allow-create default-first-option placeholder="选择或输入音色类型" style="width: 100%">
+                <el-option label="BV001（通用女声）" value="BV001" />
+                <el-option label="BV002（通用男声）" value="BV002" />
+                <el-option label="BV405（灿婷）" value="BV405" />
+                <el-option label="BV406（擎苍）" value="BV406" />
+                <el-option label="BV704（灿灿）" value="BV704" />
+              </el-select>
+              <p class="field-tip">不填默认 BV001。</p>
+            </el-form-item>
+          </template>
         </template>
 
         <!-- 端点配置：视频必填（自定义厂商）；图片/分镜在使用代理或特殊厂商时填写 -->
@@ -1199,10 +1262,21 @@ const form = ref({
   // TTS 专属字段
   voice_id: '',
   group_id: '',
+  // 豆包语音（火山引擎 TTS）专属字段，存 settings
+  doubao_appid: '',
+  doubao_cluster: '',
+  doubao_voice_type: '',
 })
 const presetModelPick = ref('')
 
 const formModelList = computed(() => parseModelText(form.value.modelText))
+
+// 判断当前 TTS 配置是否为豆包语音（火山引擎 TTS），决定是否显示 AppID/Cluster/音色字段
+const isDoubaoTtsProvider = computed(() => {
+  if (form.value.service_type !== 'tts') return false
+  const p = String(form.value.provider || '').toLowerCase()
+  return p === 'doubao' || p === '豆包语音' || p.includes('doubao') || p.includes('豆包') || p === 'volcengine_tts'
+})
 
 // 保证「生成时默认使用」下拉有可选且选中值在列表内，否则会不显示或修改无效
 watch(
@@ -1751,6 +1825,9 @@ function resetForm() {
     is_default: true,  // 新增时默认勾选「设为默认」，便于理解当前会使用哪条配置
     voice_id: '',
     group_id: '',
+    doubao_appid: '',
+    doubao_cluster: '',
+    doubao_voice_type: '',
     kling_access_key: '',
     kling_secret_key: '',
     kling_secret_key_base64: false,
@@ -1772,6 +1849,9 @@ function openEdit(row) {
   // TTS / 可灵 Omni 等从 settings 解析
   let voice_id = row.voice_id || ''
   let group_id = row.group_id || ''
+  let doubao_appid = ''
+  let doubao_cluster = ''
+  let doubao_voice_type = ''
   let kling_access_key = ''
   let kling_secret_key = ''
   let kling_secret_key_base64 = false
@@ -1783,6 +1863,9 @@ function openEdit(row) {
       if (row.service_type === 'tts') {
         voice_id = s.voice_id || voice_id
         group_id = s.group_id || group_id
+        doubao_appid = s.appid || ''
+        doubao_cluster = s.cluster || ''
+        doubao_voice_type = s.voice_type || ''
       }
       if (row.service_type === 'video' && row.api_protocol === 'kling_omni') {
         kling_access_key = s.kling_access_key || ''
@@ -1809,6 +1892,9 @@ function openEdit(row) {
     is_default: !!row.is_default,
     voice_id,
     group_id,
+    doubao_appid,
+    doubao_cluster,
+    doubao_voice_type,
     kling_access_key,
     kling_secret_key,
     kling_secret_key_base64,
@@ -1834,6 +1920,12 @@ async function submit() {
       const s = {}
       if (form.value.voice_id) s.voice_id = form.value.voice_id
       if (form.value.group_id) s.group_id = form.value.group_id
+      // 豆包语音（火山引擎 TTS）专属参数
+      if (isDoubaoTtsProvider.value) {
+        if (form.value.doubao_appid) s.appid = form.value.doubao_appid.trim()
+        if (form.value.doubao_cluster) s.cluster = form.value.doubao_cluster.trim()
+        if (form.value.doubao_voice_type) s.voice_type = form.value.doubao_voice_type.trim()
+      }
       settings = Object.keys(s).length ? JSON.stringify(s) : null
     } else if (form.value.service_type === 'video' && form.value.api_protocol === 'kling_omni') {
       let baseS = {}

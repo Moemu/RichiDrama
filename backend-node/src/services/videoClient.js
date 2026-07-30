@@ -619,24 +619,7 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
   if (opts.voice_reference_url) {
     let voiceUrl = String(opts.voice_reference_url).trim();
     if (voiceUrl) {
-      // 复用图片的本地文件转 base64 逻辑
-      if (/localhost|127\.0\.0\.1/i.test(voiceUrl) && storage_local_path && (files_base_url || '').match(/localhost|127\.0\.0\.1/i)) {
-        const baseUrl = (files_base_url || '').replace(/\/$/, '');
-        const afterStatic = voiceUrl.split('/static/')[1] || (baseUrl ? voiceUrl.replace(baseUrl + '/', '').replace(baseUrl, '') : null);
-        const relPath = afterStatic ? afterStatic.replace(/^\//, '') : null;
-        if (relPath) {
-          const filePath = path.join(storage_local_path, relPath);
-          try {
-            if (fs.existsSync(filePath)) {
-              const buf = fs.readFileSync(filePath);
-              const ext = path.extname(filePath).toLowerCase();
-              const mime =
-                { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg' }[ext] || 'audio/mpeg';
-              voiceUrl = 'data:' + mime + ';base64,' + buf.toString('base64');
-            }
-          } catch (_) {}
-        }
-      }
+      voiceUrl = resolveLocalAudioToBase64(voiceUrl, files_base_url, storage_local_path, log, video_gen_id);
       body.content.push({
         type: 'audio_url',
         audio_url: { url: voiceUrl },
@@ -3446,6 +3429,54 @@ function resolveVolcClassicImage(rawUrl, files_base_url, storage_local_path, log
     }
   }
   // 兜底返回原始值（中转或公网会处理）
+  return u;
+}
+
+/**
+ * 将音色参考音频解析为可直接发往火山的形态：
+ *   - data:/asset:// 直传
+ *   - 公网 https URL（非 localhost）直传
+ *   - 含 localhost 的 URL：从 /static/ 或 files_base_url 中提取相对路径，读本地文件转 base64
+ *   - 纯相对路径（omni 工作台 voice_reference_url 来自 asset.local_path）：直接拼 storage_local_path 读文件转 base64
+ * 与 resolveVolcClassicImage 对齐，避免相对路径音频漏网导致火山报 invalid url。
+ */
+function resolveLocalAudioToBase64(rawUrl, filesBaseUrl, storageLocalPath, log, videoGenId) {
+  let u = String(rawUrl || '').trim();
+  if (!u) return u;
+  if (u.startsWith('data:') || u.startsWith('asset://')) return u;
+  // 公网 https URL（非 localhost）直传
+  if (/^https?:\/\//i.test(u) && !/localhost|127\.0\.0\.1/i.test(u)) return u;
+
+  const marker = '/static/';
+  let rel = null;
+  const idx = u.toLowerCase().indexOf(marker);
+  if (idx >= 0) {
+    rel = u.slice(idx + marker.length).replace(/^\//, '').split('?')[0];
+  } else if (/^https?:\/\//i.test(u)) {
+    // 含 localhost 的绝对 URL：剥离 base_url
+    const fb = String(filesBaseUrl || '').replace(/\/$/, '');
+    rel = fb ? u.replace(fb + '/', '').replace(fb, '').replace(/^\//, '').split('?')[0] : null;
+  } else {
+    // 纯相对路径（如 audio/xxx.wav）
+    rel = u.replace(/^\//, '').split('?')[0];
+  }
+  if (rel && storageLocalPath) {
+    let relDecoded = rel;
+    try { relDecoded = decodeURIComponent(rel); } catch (_) {}
+    const filePath = path.join(storageLocalPath, relDecoded);
+    try {
+      if (fs.existsSync(filePath)) {
+        const buf = fs.readFileSync(filePath);
+        const ext = path.extname(filePath).toLowerCase();
+        const mime = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg' }[ext] || 'audio/mpeg';
+        if (log && log.info) {
+          log.info('[VolcOmni] 本地音频参考已转为 base64 提交', { video_gen_id: videoGenId, rel: rel.slice(0, 80) });
+        }
+        return 'data:' + mime + ';base64,' + buf.toString('base64');
+      }
+    } catch (_) {}
+  }
+  // 兜底返回原值（交由中转/公网处理）
   return u;
 }
 
