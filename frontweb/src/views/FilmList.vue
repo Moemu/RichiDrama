@@ -20,12 +20,13 @@
         </div>
         <!-- 右侧操作区 -->
         <div class="header-actions">
-          <el-button class="btn-library" title="全能视频" @click="createOmniProject">
-            <el-icon><MagicStick /></el-icon>全能视频
+          <!-- 暂时隐藏，功能待完善 -->
+          <!-- <el-button class="btn-library" title="自由创作" @click="$router.push('/free-create')">
+            <el-icon><MagicStick /></el-icon>自由创作
           </el-button>
           <el-button class="btn-library" title="媒体素材库" @click="$router.push('/media-library')">
             <el-icon><Files /></el-icon>素材库
-          </el-button>
+          </el-button> -->
           <el-button v-if="!vendorLockEnabled" class="btn-wechat" title="扫码联系作者" @click="showWechat = true">
             <el-icon><ChatDotSquare /></el-icon>微信我
           </el-button>
@@ -80,23 +81,6 @@
                   </el-button>
                 </div>
               </div>
-            </div>
-          </div>
-          <div
-            v-for="project in omniProjects"
-            :key="`omni-${project.id}`"
-            class="project-card omni-project-card"
-            @click="openOmniProject(project.id)"
-          >
-            <div class="project-card-body">
-              <h3 class="project-title">{{ project.name || '未命名全能项目' }}</h3>
-              <p class="project-desc">全能创作工作台 · 可按镜头顺序继续编辑与生成</p>
-              <div class="project-badges">
-                <span class="badge badge-omni">全能视频</span>
-                <span class="badge badge-storyboards">{{ project.shot_count || 0 }} 个镜头</span>
-                <span v-if="project.completed_count" class="badge badge-status badge-status--published">{{ project.completed_count }} 个成片</span>
-              </div>
-              <p class="project-meta">{{ formatDate(project.updated_at) }}</p>
             </div>
           </div>
           <div
@@ -383,7 +367,6 @@ import { uploadAPI } from '@/api/upload'
 import { aiAPI } from '@/api/ai'
 import { imagesAPI } from '@/api/images'
 import { taskAPI } from '@/api/task'
-import { omniVideoAPI } from '@/api/omniVideo'
 
 const router = useRouter()
 const { isDark, toggle: toggleTheme } = useTheme()
@@ -446,7 +429,6 @@ async function doGenerateLibImg(form, prompt, api, reloadFn) {
 
 const loading = ref(false)
 const dramas = ref([])
-const omniProjects = ref([])
 const total = ref(0)
 
 const showAiConfigDialog = ref(false)
@@ -644,14 +626,18 @@ const editSaving = ref(false)
 
 function loadList() {
   loading.value = true
-  Promise.all([dramaAPI.list({ page: 1, page_size: 50 }), omniVideoAPI.listSequences()])
-    .then(([dramaResult, omniResult]) => {
-      dramas.value = dramaResult?.items ?? []
-      total.value = dramaResult?.pagination?.total ?? 0
-      omniProjects.value = omniResult ?? []
+  dramaAPI
+    .list({ page: 1, page_size: 50 })
+    .then((res) => {
+      dramas.value = res?.items ?? []
+      total.value = res?.pagination?.total ?? 0
     })
-    .catch(() => { dramas.value = []; omniProjects.value = [] })
-    .finally(() => { loading.value = false })
+    .catch(() => {
+      dramas.value = []
+    })
+    .finally(() => {
+      loading.value = false
+    })
 }
 
 function formatDate(val) {
@@ -769,19 +755,6 @@ async function submitEdit() {
 
 function openProject(id) {
   router.push('/drama/' + id)
-}
-
-async function createOmniProject() {
-  try {
-    const project = await omniVideoAPI.createSequence()
-    router.push({ path: '/free-create', query: { sequence_id: project.id } })
-  } catch (e) {
-    ElMessage.error(e.message || '创建全能创作项目失败')
-  }
-}
-
-function openOmniProject(id) {
-  router.push({ path: '/free-create', query: { sequence_id: id } })
 }
 
 function onExport(d) {
@@ -1072,15 +1045,6 @@ html.light .btn-import {
   background: rgba(28, 28, 36, 0.9);
   transform: translateY(-3px);
   box-shadow: 0 12px 40px rgba(99, 102, 241, 0.15), 0 0 0 1px rgba(99, 102, 241, 0.1), 0 2px 8px rgba(0, 0, 0, 0.4);
-}
-.omni-project-card {
-  border-color: rgba(108, 140, 255, 0.45);
-  background: linear-gradient(135deg, rgba(69, 92, 171, 0.16), rgba(24, 24, 30, 0.86));
-}
-.badge-omni {
-  color: #a9bbff;
-  background: rgba(108, 140, 255, 0.16);
-  border: 1px solid rgba(108, 140, 255, 0.3);
 }
 
 /* 操作卡片 */

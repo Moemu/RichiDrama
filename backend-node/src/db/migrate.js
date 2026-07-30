@@ -401,36 +401,10 @@ function ensureAllColumns(database) {
     { name: 'duration',     type: 'REAL' },
     { name: 'image_gen_id', type: 'INTEGER' },
     { name: 'video_gen_id', type: 'INTEGER' },
-    { name: 'source_type', type: 'TEXT DEFAULT \'upload\'' },
-    { name: 'parent_asset_id', type: 'INTEGER' },
-    { name: 'thumbnail_local_path', type: 'TEXT' },
-    { name: 'metadata_json', type: 'TEXT' },
-    { name: 'tags_json', type: 'TEXT' },
-    { name: 'checksum', type: 'TEXT' },
-    { name: 'processing_status', type: 'TEXT DEFAULT \'ready\'' },
-    { name: 'error_msg', type: 'TEXT' },
-    { name: 'seedance2_asset', type: 'TEXT' },
     { name: 'created_at',   type: 'TEXT' },
     { name: 'updated_at',   type: 'TEXT' },
     { name: 'deleted_at',   type: 'TEXT' },
   ]);
-
-  // --- omni_video_jobs ---
-  try {
-    database.exec(`CREATE TABLE IF NOT EXISTS omni_video_jobs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, video_generation_id INTEGER NOT NULL,
-      mode TEXT NOT NULL DEFAULT 'omni', prompt TEXT NOT NULL DEFAULT '', negative_prompt TEXT,
-      model_requested TEXT, model_resolved TEXT, capability_snapshot_json TEXT,
-      request_snapshot_json TEXT, preprocess_snapshot_json TEXT, input_summary_json TEXT,
-      audio_strategy TEXT DEFAULT 'reference_only', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-    )`);
-    database.exec(`CREATE TABLE IF NOT EXISTS omni_video_job_assets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, omni_job_id INTEGER NOT NULL, asset_id INTEGER,
-      ordinal INTEGER NOT NULL DEFAULT 0, alias TEXT, media_type TEXT, role TEXT, usage TEXT,
-      send_to_model INTEGER NOT NULL DEFAULT 0, derived_asset_id INTEGER, provider_asset_ref TEXT,
-      snapshot_json TEXT, created_at TEXT NOT NULL
-    )`);
-  } catch (_) {}
 
   // --- character_libraries ---
   ensureColumns(database, 'character_libraries', [

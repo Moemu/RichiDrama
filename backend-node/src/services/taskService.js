@@ -96,12 +96,9 @@ function cancelTask(db, log, taskId, reason) {
  * 进程内 setImmediate 任务在重启后会丢失；启动时将遗留的 pending/processing 标为失败，避免前端无限轮询。
  */
 function failOrphanedAsyncTasksOnStartup(db, log) {
-  const hasVideoGenerations = !!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'video_generations'").get();
   const rows = db.prepare(
     `SELECT id, type, status, resource_id FROM async_tasks
-     WHERE status IN ('pending', 'processing') AND deleted_at IS NULL${hasVideoGenerations
-       ? " AND id NOT IN (SELECT task_id FROM video_generations WHERE status = 'processing' AND task_id IS NOT NULL)"
-       : ''}`
+     WHERE status IN ('pending', 'processing') AND deleted_at IS NULL`
   ).all();
   if (!rows.length) return 0;
   log.warn('Failing orphaned async tasks after startup', { count: rows.length });

@@ -49,13 +49,11 @@ const audioUpload = multer({
     cb(null, true);
   },
 });
-const mediaUpload = multer({ storage: memoryStorage, limits: { fileSize: 50 * 1024 * 1024 } });
 
 function routes(cfg, log, db) {
   const singleUpload = upload.single('file');
   return {
     multerSingle: singleUpload,
-    multerMediaSingle: mediaUpload.single('file'),
     uploadImage: (req, res) => {
       if (!req.file || !req.file.buffer) {
         return response.badRequest(res, '请选择文件');
@@ -99,17 +97,6 @@ function routes(cfg, log, db) {
         response.internalError(res, err.message || '上传失败');
       }
     },
-    uploadMedia: async (req, res) => {
-      if (!req.file || !req.file.buffer) return response.badRequest(res, '请选择文件');
-      try {
-        const mediaAssetService = require('../services/mediaAssetService');
-        const asset = await mediaAssetService.upload(db, cfg, log, req.file, req.body || {});
-        response.created(res, { asset });
-      } catch (err) {
-        log.error('upload media', { error: err.message });
-        response.badRequest(res, err.message || '上传失败');
-      }
-    },
   };
 }
 
@@ -118,7 +105,6 @@ module.exports = {
   upload,
   multerSingle: upload.single('file'),
   multerAudioSingle: audioUpload.single('file'),
-  multerMediaSingle: mediaUpload.single('file'),
   MAX_IMAGE_SIZE_MB,
   // 兼容旧导出名
   MAX_SIZE_MB,

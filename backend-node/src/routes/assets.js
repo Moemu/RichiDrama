@@ -1,7 +1,7 @@
 const response = require('../response');
 const assetService = require('../services/assetService');
 
-function routes(db, log, cfg) {
+function routes(db, log) {
   return {
     list: (req, res) => {
       try {
@@ -71,14 +71,6 @@ function routes(db, log, cfg) {
         log.error('assets import video', { error: err.message });
         response.internalError(res, err.message);
       }
-    },
-    sd2Certify: async (req, res) => {
-      try { const out = await require('../services/assetSd2Service').certify(db, log, cfg, req.params.id); if (!out.ok) return response.badRequest(res, out.error); response.success(res, out); }
-      catch (err) { log.error('assets sd2-certify', { error: err.message }); response.internalError(res, err.message); }
-    },
-    sd2CertifyRefresh: async (req, res) => {
-      try { const out = await require('../services/assetSd2Service').refresh(db, log, cfg, req.params.id); if (!out.ok) return response.badRequest(res, out.error); response.success(res, out); }
-      catch (err) { log.error('assets sd2-certify-refresh', { error: err.message }); response.internalError(res, err.message); }
     },
   };
 }

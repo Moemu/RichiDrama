@@ -369,8 +369,6 @@ function useImageProxyForVideo() {
 async function resolveVolcOmniImageAsync(rawUrl, files_base_url, storage_local_path, log, video_gen_id, index) {
   const raw = (rawUrl || '').trim();
   if (!raw) return null;
-  // ModelArk certified references are provider-native and must not become base64.
-  if (raw.startsWith('asset://')) return raw;
   if (raw.startsWith('data:')) return raw;
 
   const isPublicHttp = /^https?:\/\//i.test(raw) && !/localhost|127\.0\.0\.1/i.test(raw);

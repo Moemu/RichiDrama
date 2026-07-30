@@ -1,123 +1,586 @@
 <template>
-  <main class="omni-page">
-    <header class="topbar">
-      <div class="topbar-left">
-        <el-button text @click="$router.back()"><el-icon><ArrowLeft /></el-icon>返回</el-button>
-        <span class="divider"></span><span>剧集：</span><el-input v-if="sequence" v-model="sequence.name" size="small" class="sequence-name" @change="saveCurrentShot" />
+  <div class="free-create-page">
+    <div class="page-header">
+      <div class="header-left">
+        <el-button text @click="$router.back()">
+          <el-icon><ArrowLeft /></el-icon>
+          返回
+        </el-button>
+        <h2 class="page-title">自由创作</h2>
       </div>
-      <div class="topbar-actions"><el-button text @click="$router.push('/media-library')">素材库</el-button><el-button type="primary" plain size="small" @click="saveCurrentShot">保存整集</el-button></div>
-    </header>
+      <p class="page-desc">不绑定剧集，直接输入文字生成图片或视频</p>
+    </div>
 
-    <section class="workbench">
-      <aside class="panel shot-panel">
-        <div class="shot-heading"><b>镜头列表</b><small>{{ shots.length }} 个镜头</small></div>
-        <div class="shot-actions"><el-button size="small" type="primary" plain @click="addShot(false)">+ 尾部添加</el-button><el-button size="small" @click="addShot(true)">当前镜头后添加</el-button></div>
-        <div class="shot-list">
-          <article v-for="(shot, index) in shots" :key="shot.id" class="shot-card" :class="{ active: shot.id === activeShotId, dragging: draggedShotId === shot.id }" draggable="true" @dragstart="draggedShotId = shot.id" @dragover.prevent @drop="dropShot(shot.id)" @click="selectShot(shot)">
-            <div class="shot-title"><span class="drag-handle">⠿</span><span class="shot-number">{{ index + 1 }}</span><b>{{ shot.title || '未命名镜头' }}</b><el-button text size="small" @click.stop="renameShot(shot)"><el-icon><Edit /></el-icon></el-button><el-button text size="small" @click.stop="removeShot(shot)"><el-icon><Delete /></el-icon></el-button></div>
-            <div class="shot-preview"><video v-if="shot.video_url" :src="shot.video_url" muted preload="metadata" /><img v-else-if="shotCover(shot)" :src="shotCover(shot)" /><div v-else class="shot-empty"><el-icon><VideoCamera /></el-icon></div><span>{{ shot.settings?.duration || 5 }}s</span></div>
-            <div class="shot-state" :class="shot.status"><i></i>{{ shotState(shot) }}</div>
-          </article>
-        </div>
-      </aside>
+    <div class="create-layout">
+      <!-- 左侧：输入面板 -->
+      <div class="input-panel">
+        <el-tabs v-model="mode" class="mode-tabs">
+          <el-tab-pane label="🎨 生成图片" name="image" />
+          <el-tab-pane label="🎬 生成视频" name="video" />
+        </el-tabs>
 
-      <section class="center-stage">
-        <div class="player-tools"><el-button text size="small" @click="selectRelative(-1)">上一镜</el-button><el-button text size="small" @click="selectRelative(1)">下一镜</el-button><span></span><el-tag :type="stageTagType" effect="dark">{{ stageLabel }}</el-tag></div>
-        <div class="video-stage" :class="{ rendering: activeJob?.status === 'processing' }">
-          <video v-if="activeJob?.videoUrl" :src="activeJob.videoUrl" controls autoplay class="main-video" />
-          <template v-else-if="activeJob?.status === 'processing'"><div class="render-ring ring-one"></div><div class="render-ring ring-two"></div><div class="render-play">▶</div><b>{{ stagePhase || '正在生成当前镜头' }}</b></template>
-          <template v-else-if="activeJob && ['failed','retryable'].includes(activeJob.status)"><el-icon class="stage-warning"><WarningFilled /></el-icon><b>当前镜头生成失败</b><small>{{ activeJob.error_msg }}</small><el-button type="primary" @click="retry(activeJob)">重新生成</el-button></template>
-          <template v-else><div class="selected-mosaic"><img v-for="asset in chosenImageAssets.slice(0, 5)" :key="asset.id" :src="assetUrl(asset)" /></div><div class="empty-play">▶</div><b>{{ chosenAssets.length ? '当前镜头已编排，等待生成' : '为当前镜头添加素材' }}</b></template>
-        </div>
-        <div class="time-ruler"><span>0秒</span><div><i :style="{ width: `${Math.min(100, duration / 15 * 100)}%` }"></i></div><span>{{ duration }}秒 / 15秒</span></div>
-        <div class="shot-tabs"><span class="active">本分镜脚本</span><span>本分镜素材 {{ chosenAssets.length }}</span><span>镜头 {{ activeShotIndex + 1 }} / {{ shots.length }}</span></div>
-        <div class="shot-script"><el-input v-model="prompt" type="textarea" :rows="4" resize="none" placeholder="输入当前镜头的脚本、对白、动作与镜头要求……" /></div>
-      </section>
-
-      <aside class="panel creation-panel">
-        <div class="panel-title"><b>视频生成方式</b><el-tag size="small" type="info">全能参考生视频</el-tag></div>
-        <div class="parameters"><label>模型<el-select v-model="model" size="small"><el-option label="自动匹配" value="auto" /><el-option v-for="item in capabilities" :key="item.model" :label="item.model" :value="item.model" /></el-select></label><label>宽高比<el-select v-model="aspectRatio" size="small"><el-option label="16:9" value="16:9"/><el-option label="9:16" value="9:16"/><el-option label="1:1" value="1:1"/></el-select></label><label>时长<el-select v-model="duration" size="small"><el-option v-for="n in [4,5,8,10,15]" :key="n" :label="`${n} 秒`" :value="n"/></el-select></label><label>音频<el-select v-model="audioStrategy" size="small"><el-option label="音频参考" value="reference_only"/><el-option label="成片混音" value="post_mix"/></el-select></label></div>
-
-        <div class="materials-title"><b>当前镜头素材</b><div><el-button text size="small" @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
-        <input ref="fileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="uploadFiles" />
-        <div class="dropzone" @click="pickFiles" @dragover.prevent @drop.prevent="dropFiles"><el-icon><Upload /></el-icon>拖入图片、视频或音频</div>
-        <div class="material-pool">
-          <article v-for="asset in assets" :key="asset.id" class="material-card" :class="{ selected: selected.has(asset.id) }" draggable="true" @dragstart="onAssetDragStart($event, asset)" @click="toggle(asset)"><img v-if="asset.type === 'image'" :src="assetUrl(asset)"/><video v-else-if="asset.type === 'video'" :src="assetUrl(asset)" muted/><span v-else>🎵</span><small>{{ asset.alias || asset.name }}</small><el-icon v-if="selected.has(asset.id)"><CircleCheckFilled /></el-icon></article>
+        <div class="form-section">
+          <div class="form-label">提示词 <span class="required">*</span></div>
+          <el-input
+            v-model="prompt"
+            type="textarea"
+            :rows="5"
+            placeholder="描述你想要生成的画面内容..."
+            class="prompt-input"
+          />
         </div>
 
-        <label class="prompt-label">提示词 <em>可拖入上方素材或输入 @ 引用</em></label>
-        <OmniAssetPromptEditor v-model="prompt" :assets="assets" :chosen-ids="selected" @pick="onPickFromEditor" />
-        <div class="selected-assets">
-          <article v-for="(asset, index) in chosenAssets" :key="asset.id" draggable="true" @dragstart="draggedAssetId = asset.id" @dragover.prevent @drop="dropSelectedAsset(asset.id)"><span class="drag-handle">⠿</span><b>@{{ asset.alias || asset.name }}</b><el-select v-model="asset.usage" size="small" @change="onUsageChange(asset)"><el-option v-for="usage in usages(asset.type)" :key="usage.value" :label="usage.label" :value="usage.value"/></el-select><el-button text size="small" @click="remove(asset.id)">移除</el-button></article>
+        <div v-if="mode === 'video'" class="form-section">
+          <div class="form-label">参考图（可选）</div>
+          <div class="ref-image-zone" @click="triggerRefImageUpload" @dragover.prevent @drop.prevent="onRefImageDrop">
+            <template v-if="refImageDataUrl">
+              <img :src="refImageDataUrl" class="ref-preview" />
+              <div class="ref-actions">
+                <el-button size="small" type="danger" plain @click.stop="clearRefImage">移除</el-button>
+              </div>
+            </template>
+            <template v-else>
+              <el-icon class="upload-icon"><Picture /></el-icon>
+              <div class="upload-tip">点击或拖拽上传参考图</div>
+            </template>
+          </div>
+          <input ref="refImageInput" type="file" accept="image/*" style="display:none" @change="onRefImageChange" />
         </div>
-        <div v-if="audioStrategy === 'post_mix'" class="audio-options"><el-checkbox v-model="keepOriginalAudio">保留原声</el-checkbox><el-slider v-model="audioVolume" :min="0" :max="2" :step="0.1"/><el-input-number v-model="audioFadeSeconds" :min="0" :max="10" size="small"/></div>
-        <el-button class="generate-button" type="primary" size="large" :loading="creating" :disabled="!prompt.trim()" @click="create">{{ creating ? '准备并生成中…' : '生成当前镜头' }}</el-button>
-      </aside>
-    </section>
-  </main>
+
+        <div class="form-section form-row">
+          <div class="form-item">
+            <div class="form-label">风格</div>
+            <el-input v-model="style" placeholder="例如: cinematic, anime..." />
+          </div>
+          <div v-if="mode === 'image'" class="form-item">
+            <div class="form-label">比例</div>
+            <el-select v-model="aspectRatio">
+              <el-option label="16:9" value="16:9" />
+              <el-option label="9:16" value="9:16" />
+              <el-option label="1:1" value="1:1" />
+              <el-option label="4:3" value="4:3" />
+            </el-select>
+          </div>
+          <div v-if="mode === 'video'" class="form-item">
+            <div class="form-label">时长</div>
+            <el-select v-model="duration">
+              <el-option label="3秒" :value="3" />
+              <el-option label="5秒" :value="5" />
+              <el-option label="8秒" :value="8" />
+              <el-option label="10秒" :value="10" />
+            </el-select>
+          </div>
+        </div>
+
+        <el-button
+          type="primary"
+          size="large"
+          :loading="generating"
+          :disabled="!prompt.trim()"
+          class="generate-btn"
+          @click="generate"
+        >
+          {{ generating ? '生成中...' : (mode === 'image' ? '生成图片' : '生成视频') }}
+        </el-button>
+      </div>
+
+      <!-- 右侧：结果展示 -->
+      <div class="result-panel">
+        <div class="result-header">
+          <span class="result-title">生成结果</span>
+          <el-button v-if="results.length > 0" size="small" plain @click="clearResults">清空</el-button>
+        </div>
+
+        <div v-if="results.length === 0 && !generating" class="empty-result">
+          <el-icon class="empty-icon"><MagicStick /></el-icon>
+          <p>生成的内容将显示在这里</p>
+        </div>
+
+        <div v-if="generating" class="generating-tip">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          <span>正在生成，请稍候...</span>
+        </div>
+
+        <div class="result-grid">
+          <div v-for="(item, idx) in results" :key="idx" class="result-item">
+            <div class="result-media">
+              <video
+                v-if="item.type === 'video' && item.url"
+                :src="item.url"
+                controls
+                class="result-video"
+                loop
+              />
+              <img
+                v-else-if="item.type === 'image' && item.url"
+                :src="item.url"
+                class="result-image"
+                @click="previewUrl = item.url"
+              />
+              <div v-else-if="item.status === 'pending' || item.status === 'processing'" class="media-loading">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span>{{ item.status === 'processing' ? '生成中...' : '排队中...' }}</span>
+              </div>
+              <div v-else-if="item.status === 'failed'" class="media-error">
+                <el-icon><CircleClose /></el-icon>
+                <span>{{ item.error || '生成失败' }}</span>
+              </div>
+            </div>
+            <div class="result-meta">
+              <span class="result-prompt">{{ item.prompt }}</span>
+              <div class="result-actions">
+                <el-button v-if="item.url" size="small" plain @click="downloadItem(item)">下载</el-button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 图片预览 -->
+    <div v-if="previewUrl" class="image-preview-overlay" @click="previewUrl = null">
+      <img :src="previewUrl" class="preview-img" @click.stop />
+    </div>
+  </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, CircleCheckFilled, Delete, Edit, Upload, VideoCamera, WarningFilled } from '@element-plus/icons-vue'
-import { omniVideoAPI } from '@/api/omniVideo'
-import OmniAssetPromptEditor from '@/components/OmniAssetPromptEditor.vue'
+import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { ArrowLeft, Picture, MagicStick, Loading, CircleClose } from '@element-plus/icons-vue'
+import { imagesAPI } from '@/api/images'
+import { videosAPI } from '@/api/videos'
+import { uploadAPI } from '@/api/upload'
+import { generationSettingsAPI } from '@/api/prompts'
 
-const assets = ref([]), capabilities = ref([]), jobs = ref([]), sequence = ref(null), shots = ref([]), activeShotId = ref(null)
-const selected = ref(new Set()), selectedOrder = ref([]), prompt = ref(''), model = ref('auto'), aspectRatio = ref('16:9'), duration = ref(5), audioStrategy = ref('reference_only')
-const keepOriginalAudio = ref(false), audioVolume = ref(1), audioFadeSeconds = ref(0), creating = ref(false), certifyingId = ref(null), stagePhase = ref(''), fileInput = ref(null)
-const draggedShotId = ref(null), draggedAssetId = ref(null), loadingShot = ref(false)
-let saveTimer = null
+const mode = ref('image')
+const prompt = ref('')
+const style = ref('')
+const aspectRatio = ref('16:9')
+const duration = ref(5)
+const generating = ref(false)
+const results = ref([])
+const previewUrl = ref(null)
+const refImageDataUrl = ref(null)
+const refImageLocalPath = ref(null)
+const refImageInput = ref(null)
+/** 与后端视频异步超时一致（分钟 → 毫秒） */
+const videoPollMaxMs = ref(30 * 60 * 1000)
 
-const currentShot = computed(() => shots.value.find((shot) => shot.id === activeShotId.value) || null)
-const activeShotIndex = computed(() => Math.max(0, shots.value.findIndex((shot) => shot.id === activeShotId.value)))
-const chosenAssets = computed(() => selectedOrder.value.map((id) => assets.value.find((asset) => asset.id === id)).filter(Boolean))
-const chosenImageAssets = computed(() => chosenAssets.value.filter((asset) => asset.type === 'image'))
-const activeJob = computed(() => jobs.value.find((job) => job.id === currentShot.value?.omni_job_id) || null)
-const stageLabel = computed(() => ({ completed: '成片完成', processing: '生成中', failed: '生成失败', retryable: '可重试' })[activeJob.value?.status] || '镜头草稿')
-const stageTagType = computed(() => ({ completed: 'success', failed: 'danger', retryable: 'warning' })[activeJob.value?.status] || 'info')
+onMounted(async () => {
+  try {
+    const res = await generationSettingsAPI.get()
+    const m = Math.max(1, Number(res?.video_generation_timeout_minutes) || 30)
+    videoPollMaxMs.value = m * 60 * 1000
+  } catch (_) {}
+})
 
-function assetUrl(asset) { return asset?.local_path ? `/static/${asset.local_path}` : asset?.url || '' }
-function typeName(type) { return ({ image: '图片', video: '视频', audio: '音频' })[type] || '素材' }
-function usages(type) { return type === 'image' ? [{label:'主视觉',value:'primary'},{label:'人物一致性',value:'identity'},{label:'场景/风格',value:'environment'},{label:'普通参考',value:'reference'},{label:'首帧',value:'first_frame'},{label:'尾帧',value:'last_frame'}] : type === 'video' ? [{label:'动作/镜头参考',value:'motion'},{label:'关键帧提取',value:'keyframes'},{label:'仅后期',value:'post_process'}] : [{label:'音色/氛围参考',value:'ambience'},{label:'成片混音',value:'post_mix'}] }
-function shotState(shot) { return ({ completed:'已完成',processing:'生成中',failed:'失败',retryable:'可重试',draft:'草稿' })[shot.status] || '草稿' }
-function shotCover(shot) { const first = (shot.assets || []).find((item) => item.type === 'image'); const asset = first && assets.value.find((item) => item.id === Number(first.asset_id)); return assetUrl(asset) }
-function sd2Status(asset) { return String(asset?.seedance2_asset?.status || 'none').toLowerCase() }
-function normalizeJob(data) { const generation = data.generation || {}; return { ...data, status: generation.status || data.status || 'processing', error_msg: generation.error_msg || data.error_msg, videoUrl: generation.local_path ? `/static/${generation.local_path}` : generation.video_url || data.video_url } }
+function triggerRefImageUpload() {
+  refImageInput.value?.click()
+}
 
-function loadShot(shot) { loadingShot.value = true; activeShotId.value = shot.id; prompt.value = shot.prompt || ''; const settings = shot.settings || {}; model.value = settings.model || 'auto'; aspectRatio.value = settings.aspect_ratio || '16:9'; duration.value = Math.min(15, Number(settings.duration) || 5); audioStrategy.value = settings.audio_strategy || 'reference_only'; keepOriginalAudio.value = !!settings.keep_original_audio; audioVolume.value = settings.audio_volume ?? 1; audioFadeSeconds.value = settings.audio_fade_seconds ?? 0; const ids = (shot.assets || []).map((item) => Number(item.asset_id)).filter((id) => assets.value.some((asset) => asset.id === id)); selected.value = new Set(ids); selectedOrder.value = ids; (shot.assets || []).forEach((saved) => { const asset = assets.value.find((item) => item.id === Number(saved.asset_id)); if (asset) { asset.usage = saved.usage || asset.usage; asset.alias = saved.alias || asset.alias } }); queueMicrotask(() => { loadingShot.value = false }) }
-async function selectShot(shot) { if (shot.id === activeShotId.value) return; await saveCurrentShot(false); loadShot(shot) }
-async function saveCurrentShot(showMessage = true) { if (!sequence.value || !currentShot.value || loadingShot.value) return; clearTimeout(saveTimer); const [updated, savedSequence] = await Promise.all([omniVideoAPI.updateShot(sequence.value.id, currentShot.value.id, { title: currentShot.value.title, prompt: prompt.value, assets: chosenAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: asset.alias || asset.name, type: asset.type, usage: asset.usage, ordinal: index + 1 })), settings: { model: model.value, aspect_ratio: aspectRatio.value, duration: Math.min(15, Number(duration.value) || 5), audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value } }), omniVideoAPI.updateSequence(sequence.value.id, { name: sequence.value.name })]); Object.assign(currentShot.value, updated); sequence.value.name = savedSequence.name; if (showMessage) ElMessage.success('整集与当前镜头已保存') }
-function scheduleSave() { if (loadingShot.value || !currentShot.value) return; clearTimeout(saveTimer); saveTimer = setTimeout(() => saveCurrentShot(false).catch(() => {}), 650) }
-async function addShot(afterCurrent) { await saveCurrentShot(false); const shot = await omniVideoAPI.addShot(sequence.value.id, afterCurrent ? { after_shot_id: activeShotId.value } : {}); const refreshed = await omniVideoAPI.getSequence(sequence.value.id); sequence.value = refreshed; shots.value = refreshed.shots; loadShot(shots.value.find((item) => item.id === shot.id) || shots.value.at(-1)) }
-async function renameShot(shot) { try { const { value } = await ElMessageBox.prompt('输入镜头名称', '重命名镜头', { inputValue: shot.title || '' }); shot.title = value || '未命名镜头'; if (shot.id === activeShotId.value) await saveCurrentShot(false); else Object.assign(shot, await omniVideoAPI.updateShot(sequence.value.id, shot.id, { title: shot.title })) } catch (_) {} }
-async function removeShot(shot) { try { await ElMessageBox.confirm(`删除“${shot.title || '未命名镜头'}”？`, '删除镜头', { type: 'warning' }); await omniVideoAPI.deleteShot(sequence.value.id, shot.id); shots.value = shots.value.filter((item) => item.id !== shot.id); if (shot.id === activeShotId.value) loadShot(shots.value[Math.min(activeShotIndex.value, shots.value.length - 1)]) } catch (_) {} }
-async function dropShot(targetId) { if (!draggedShotId.value || draggedShotId.value === targetId) return; const list = [...shots.value]; const from = list.findIndex((shot) => shot.id === draggedShotId.value), to = list.findIndex((shot) => shot.id === targetId); const [moved] = list.splice(from, 1); list.splice(to, 0, moved); shots.value = list; draggedShotId.value = null; shots.value = await omniVideoAPI.reorderShots(sequence.value.id, list.map((shot) => shot.id)) }
-function selectRelative(offset) { const target = shots.value[activeShotIndex.value + offset]; if (target) selectShot(target) }
+function clearRefImage() {
+  refImageDataUrl.value = null
+  refImageLocalPath.value = null
+}
 
-function toggle(asset) { const next = new Set(selected.value); if (next.has(asset.id)) { next.delete(asset.id); selectedOrder.value = selectedOrder.value.filter((id) => id !== asset.id) } else { next.add(asset.id); selectedOrder.value = [...selectedOrder.value, asset.id]; asset.usage ||= asset.type === 'image' ? 'reference' : asset.type === 'video' ? 'motion' : 'ambience' } selected.value = next; scheduleSave() }
-function remove(id) { const next = new Set(selected.value); next.delete(id); selected.value = next; selectedOrder.value = selectedOrder.value.filter((item) => item !== id); scheduleSave() }
-function dropSelectedAsset(targetId) { if (!draggedAssetId.value || draggedAssetId.value === targetId) return; const order = [...selectedOrder.value], from = order.indexOf(draggedAssetId.value), to = order.indexOf(targetId); const [moved] = order.splice(from, 1); order.splice(to, 0, moved); selectedOrder.value = order; draggedAssetId.value = null; scheduleSave() }
-function onAssetDragStart(event, asset) { event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('asset', JSON.stringify({ id: asset.id, name: asset.name, alias: asset.alias, type: asset.type })); event.dataTransfer.setData('text/plain', asset.alias || asset.name) }
-function onPickFromEditor(asset) { if (asset && !selected.value.has(asset.id)) toggle(asset) }
-function onUsageChange(asset) { if (asset.type === 'image' && asset.usage === 'identity' && sd2Status(asset) !== 'active') certify(asset); scheduleSave() }
-function pickFiles() { fileInput.value?.click() }
-function dropFiles(event) { upload(event.dataTransfer.files) }
-function uploadFiles(event) { upload(event.target.files); event.target.value = '' }
-async function upload(files) { for (const file of Array.from(files || [])) { try { const out = await omniVideoAPI.upload(file); if (out.asset) { const item = { ...out.asset, alias: out.asset.name, usage: out.asset.type === 'image' ? 'reference' : out.asset.type === 'video' ? 'motion' : 'ambience' }; assets.value.unshift(item); toggle(item); if (item.type === 'image') certify(item, true).catch(() => {}) } } catch (error) { ElMessage.error(`${file.name}：${error.message || '上传失败'}`) } } }
-async function certify(asset) { if (!asset || asset.type !== 'image' || sd2Status(asset) === 'active' || certifyingId.value === asset.id) return; certifyingId.value = asset.id; try { const out = sd2Status(asset) === 'processing' ? await omniVideoAPI.refreshAssetCertification(asset.id) : await omniVideoAPI.certifyAsset(asset.id); asset.seedance2_asset = out.seedance2_asset } finally { certifyingId.value = null } }
+async function onRefImageChange(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  processRefImageFile(file)
+  e.target.value = ''
+}
 
-async function create() { creating.value = true; stagePhase.value = '保存镜头'; try { await saveCurrentShot(false); const identity = chosenAssets.value.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && sd2Status(asset) !== 'active'); if (identity.length) { stagePhase.value = '自动认证人物素材'; for (const asset of identity) await certify(asset) } stagePhase.value = '提交生成任务'; const res = await omniVideoAPI.create({ sequence_id: sequence.value.id, shot_id: currentShot.value.id, prompt: prompt.value, model: model.value, aspect_ratio: aspectRatio.value, duration: Math.min(15, Number(duration.value) || 5), audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: chosenAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: asset.alias || asset.name, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const job = { id: res.omni_job_id, prompt: prompt.value, status: 'processing', video_generation_id: res.video_generation_id }; jobs.value.unshift(job); currentShot.value.omni_job_id = job.id; currentShot.value.status = 'processing'; stagePhase.value = '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
-async function poll(id) { for (let n = 0; n < 450; n++) { await new Promise((resolve) => setTimeout(resolve, 4000)); try { const data = await omniVideoAPI.get(id), job = normalizeJob(data), index = jobs.value.findIndex((item) => item.id === id); if (index >= 0) jobs.value[index] = job; if (currentShot.value?.omni_job_id === id) { currentShot.value.status = job.status; currentShot.value.video_url = job.videoUrl; currentShot.value.generation_error = job.error_msg } if (['completed','failed','retryable'].includes(job.status)) return } catch (_) { return } } }
-async function retry(job) { const res = await omniVideoAPI.retry(job.id); const next = { id: res.omni_job_id, prompt: job.prompt, status: 'processing', video_generation_id: res.video_generation_id }; jobs.value.unshift(next); currentShot.value.omni_job_id = next.id; currentShot.value.status = 'processing'; poll(next.id) }
+function onRefImageDrop(e) {
+  const file = e.dataTransfer?.files?.[0]
+  if (file && file.type.startsWith('image/')) processRefImageFile(file)
+}
 
-watch([prompt, model, aspectRatio, duration, audioStrategy, keepOriginalAudio, audioVolume, audioFadeSeconds], scheduleSave)
-watch(chosenAssets, scheduleSave, { deep: true })
-onBeforeUnmount(() => { clearTimeout(saveTimer); saveCurrentShot(false).catch(() => {}) })
-onMounted(async () => { try { const [media, caps, history, seq] = await Promise.all([omniVideoAPI.assets({ page_size: 100 }), omniVideoAPI.capabilities(), omniVideoAPI.list(), omniVideoAPI.defaultSequence()]); assets.value = (media.items || []).map((item) => ({ ...item, alias: item.name, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' })); capabilities.value = caps || []; jobs.value = (history || []).map(normalizeJob); sequence.value = seq; shots.value = seq.shots || []; if (shots.value[0]) loadShot(shots.value[0]) } catch (error) { ElMessage.error(error.message || '全能创作工作台加载失败') } })
+async function processRefImageFile(file) {
+  const reader = new FileReader()
+  reader.onload = async (ev) => {
+    refImageDataUrl.value = ev.target.result
+    try {
+      const res = await uploadAPI.uploadImage(file)
+      refImageLocalPath.value = res?.local_path || null
+    } catch (_) {}
+  }
+  reader.readAsDataURL(file)
+}
+
+function clearResults() {
+  results.value = []
+}
+
+function downloadItem(item) {
+  if (!item.url) return
+  const a = document.createElement('a')
+  a.href = item.url
+  a.download = `free_create_${Date.now()}.${item.type === 'video' ? 'mp4' : 'jpg'}`
+  a.click()
+}
+
+async function generate() {
+  if (!prompt.value.trim()) return
+  generating.value = true
+  const newItem = {
+    type: mode.value,
+    prompt: prompt.value,
+    style: style.value,
+    status: 'processing',
+    url: null,
+    error: null,
+  }
+  results.value.unshift(newItem)
+  try {
+    if (mode.value === 'image') {
+      const res = await imagesAPI.create({
+        prompt: prompt.value,
+        style: style.value || undefined,
+        aspect_ratio: aspectRatio.value,
+      })
+      if (res?.task_id) {
+        await pollImageTask(res.task_id, newItem)
+      } else if (res?.image_url || res?.local_path) {
+        newItem.url = res.image_url || ('/static/' + res.local_path)
+        newItem.status = 'completed'
+      }
+    } else {
+      const body = {
+        prompt: prompt.value,
+        style: style.value || undefined,
+        aspect_ratio: aspectRatio.value,
+        duration: duration.value,
+      }
+      if (refImageLocalPath.value) {
+        body.first_frame_url = refImageLocalPath.value
+        body.image_url = '/static/' + refImageLocalPath.value
+      }
+      const res = await videosAPI.create(body)
+      if (res?.task_id) {
+        await pollVideoTask(res.task_id, newItem)
+      } else {
+        newItem.status = 'failed'
+        newItem.error = '提交失败'
+      }
+    }
+  } catch (e) {
+    newItem.status = 'failed'
+    newItem.error = e.message || '生成失败'
+    ElMessage.error(newItem.error)
+  } finally {
+    generating.value = false
+  }
+}
+
+async function pollImageTask(taskId, item, maxMs = 180000) {
+  const start = Date.now()
+  while (Date.now() - start < maxMs) {
+    await new Promise((r) => setTimeout(r, 3000))
+    try {
+      const res = await imagesAPI.getTask ? imagesAPI.getTask(taskId) : null
+      if (!res) break
+      if (res.status === 'completed' && res.result) {
+        const r = res.result
+        item.url = r.image_url ? r.image_url : (r.local_path ? '/static/' + r.local_path : null)
+        item.status = 'completed'
+        return
+      }
+      if (res.status === 'failed') {
+        item.status = 'failed'
+        item.error = res.error || '生成失败'
+        return
+      }
+    } catch (_) {}
+  }
+  item.status = 'failed'
+  item.error = '超时'
+}
+
+async function pollVideoTask(taskId, item) {
+  const maxMs = videoPollMaxMs.value
+  const start = Date.now()
+  const { taskAPI } = await import('@/api/task')
+  while (Date.now() - start < maxMs) {
+    await new Promise((r) => setTimeout(r, 4000))
+    try {
+      const res = await taskAPI.get(taskId)
+      if (res?.status === 'completed' && res?.result) {
+        const r = res.result
+        const vgId = r.video_generation_id
+        if (vgId) {
+          const vRes = await videosAPI.get(vgId)
+          item.url = vRes?.local_path ? '/static/' + vRes.local_path : vRes?.video_url
+        }
+        item.status = 'completed'
+        return
+      }
+      if (res?.status === 'failed') {
+        item.status = 'failed'
+        item.error = res.error || '生成失败'
+        return
+      }
+    } catch (_) {}
+  }
+  item.status = 'failed'
+  item.error = '超时'
+}
 </script>
 
 <style scoped>
-.omni-page{height:100vh;overflow:hidden;background:#171d2d;color:#e7ebf5}.topbar{height:54px;box-sizing:border-box;padding:0 14px;display:flex;align-items:center;justify-content:space-between;background:#20273a;border-bottom:1px solid #323a50}.topbar-left,.topbar-actions{display:flex;align-items:center;gap:8px}.divider{height:26px;width:1px;background:#4a5266}.sequence-name{width:180px}.workbench{height:calc(100vh - 54px);display:grid;grid-template-columns:320px minmax(560px,1fr) 355px}.panel{min-width:0;background:#20273a;border-right:1px solid #333b50;padding:12px;box-sizing:border-box}.shot-panel{display:flex;flex-direction:column}.shot-heading{display:flex;justify-content:space-between;align-items:end}.shot-heading b{font-size:18px}.shot-heading small{color:#8993aa}.shot-actions{display:flex;gap:6px;margin:12px 0}.shot-actions .el-button{flex:1;margin:0}.shot-list{overflow:auto;display:grid;gap:9px;padding-right:3px}.shot-card{border:1px solid #30394e;border-radius:9px;padding:7px;background:#252d42;cursor:pointer}.shot-card.active{border-color:#6c8cff;box-shadow:0 0 0 1px #6c8cff}.shot-card.dragging{opacity:.5}.shot-title{height:28px;display:flex;align-items:center;gap:6px}.shot-title b{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.drag-handle{cursor:grab;color:#7c879e}.shot-number{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#f2f4fa;color:#273148;font-weight:700}.shot-preview{position:relative;height:128px;border-radius:7px;overflow:hidden;background:#090d16}.shot-preview img,.shot-preview video{width:100%;height:100%;object-fit:cover}.shot-preview>span{position:absolute;right:7px;bottom:5px;font-size:12px}.shot-empty{height:100%;display:grid;place-items:center;font-size:34px;color:#55617a}.shot-state{margin-top:5px;font-size:11px;color:#919bb0}.shot-state i{display:inline-block;width:6px;height:6px;margin-right:5px;border-radius:50%;background:#7f899d}.shot-state.processing i{background:#e7a83b}.shot-state.completed i{background:#3dbb83}.shot-state.failed i,.shot-state.retryable i{background:#ee6d78}.center-stage{min-width:0;display:flex;flex-direction:column;background:#111621}.player-tools{height:44px;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid #2f374a}.player-tools>span{flex:1}.video-stage{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#05070c;overflow:hidden}.main-video{width:100%;height:100%;object-fit:contain}.selected-mosaic{position:absolute;inset:8%;display:flex;justify-content:center;align-items:center;gap:8px;opacity:.44}.selected-mosaic img{width:17%;max-height:55%;object-fit:cover;border-radius:8px}.empty-play,.render-play{z-index:2;display:grid;place-items:center;width:76px;height:76px;border-radius:50%;background:#747b8bcc;font-size:27px}.video-stage b,.video-stage small,.video-stage .el-button{z-index:2}.stage-warning{z-index:2;font-size:48px;color:#ec6974}.render-ring{position:absolute;border:1px solid #6685f266;border-radius:50%}.ring-one{width:230px;height:230px;animation:spin 8s linear infinite}.ring-two{width:360px;height:360px;animation:spin 14s linear infinite reverse}.time-ruler{height:46px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px;padding:0 16px;font-size:12px;color:#adb6c9;background:#171d2b}.time-ruler div{height:5px;background:#3a4256;border-radius:5px;overflow:hidden}.time-ruler i{display:block;height:100%;background:#6d8bff}.shot-tabs{height:42px;display:flex;align-items:center;gap:26px;padding:0 18px;background:#20273a;border-bottom:1px solid #343c50;font-size:13px;color:#96a0b5}.shot-tabs .active{color:#fff}.shot-script{padding:10px 16px 14px;background:#20273a}.creation-panel{border-left:1px solid #333b50;border-right:0;overflow:auto}.panel-title,.materials-title{display:flex;justify-content:space-between;align-items:center}.parameters{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.parameters label{font-size:11px;color:#9ca7bc}.parameters .el-select{display:block;margin-top:5px}.materials-title{margin:13px 0 7px}.dropzone{height:46px;border:1px dashed #61708d;border-radius:7px;display:flex;align-items:center;justify-content:center;gap:7px;color:#9da8bd;cursor:pointer}.material-pool{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;max-height:150px;overflow:auto;margin:8px 0 12px}.material-card{position:relative;height:72px;border:1px solid #39435a;border-radius:6px;overflow:hidden;background:#161c2b;cursor:pointer}.material-card.selected{border-color:#6d8bff}.material-card img,.material-card video,.material-card>span{width:100%;height:50px;object-fit:cover;display:grid;place-items:center}.material-card small{display:block;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px}.material-card .el-icon{position:absolute;right:3px;top:3px;color:#7f9aff}.prompt-label{display:flex;justify-content:space-between;margin:8px 0 6px;font-size:13px}.prompt-label em{font-size:10px;color:#d25e67;font-style:normal}.selected-assets{display:grid;gap:5px;max-height:150px;overflow:auto;margin-top:8px}.selected-assets article{display:grid;grid-template-columns:auto minmax(70px,1fr) 120px auto;gap:5px;align-items:center;background:#293248;border-radius:6px;padding:4px}.selected-assets b{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.audio-options{display:grid;gap:6px;margin-top:8px}.generate-button{width:100%;margin-top:12px}@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:1150px){.workbench{grid-template-columns:250px minmax(450px,1fr) 310px}}@media(max-width:850px){.omni-page{height:auto;overflow:auto}.workbench{height:auto;grid-template-columns:1fr}.shot-panel,.creation-panel{max-height:none}.center-stage{min-height:620px}.shot-list{grid-template-columns:repeat(2,1fr)}}
+.free-create-page {
+  min-height: 100vh;
+  background: #f5f7fa;
+  padding: 20px;
+}
+
+.page-header {
+  margin-bottom: 20px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: #1a1a2e;
+  margin: 0;
+}
+
+.page-desc {
+  color: #6b7280;
+  font-size: 14px;
+  margin: 0;
+}
+
+.create-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.input-panel {
+  width: 380px;
+  flex-shrink: 0;
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+
+.mode-tabs {
+  margin-bottom: 16px;
+}
+
+.form-section {
+  margin-bottom: 16px;
+}
+
+.form-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 6px;
+}
+
+.required {
+  color: #ef4444;
+}
+
+.prompt-input :deep(.el-textarea__inner) {
+  font-size: 14px;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+}
+
+.form-item {
+  flex: 1;
+}
+
+.form-item .el-select {
+  width: 100%;
+}
+
+.ref-image-zone {
+  border: 2px dashed #d1d5db;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s;
+  min-height: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  position: relative;
+}
+
+.ref-image-zone:hover {
+  border-color: #409eff;
+}
+
+.ref-preview {
+  max-width: 100%;
+  max-height: 150px;
+  border-radius: 6px;
+}
+
+.ref-actions {
+  margin-top: 8px;
+}
+
+.upload-icon {
+  font-size: 28px;
+  color: #9ca3af;
+}
+
+.upload-tip {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.generate-btn {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.result-panel {
+  flex: 1;
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  min-height: 400px;
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.result-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.empty-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  color: #9ca3af;
+  gap: 12px;
+}
+
+.empty-icon {
+  font-size: 48px;
+}
+
+.generating-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #409eff;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.result-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.result-media {
+  background: #f9fafb;
+  aspect-ratio: 16/9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.result-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: zoom-in;
+}
+
+.result-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-loading,
+.media-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.media-error {
+  color: #ef4444;
+}
+
+.result-meta {
+  padding: 8px 10px;
+}
+
+.result-prompt {
+  font-size: 12px;
+  color: #6b7280;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.result-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+}
+
+.image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.85);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+
+.preview-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
 </style>

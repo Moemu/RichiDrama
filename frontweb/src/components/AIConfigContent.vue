@@ -791,11 +791,6 @@ input_reference = (图片文件，可选)</pre>
           </el-select>
           <p class="field-tip">该配置被选为「默认」时，生成故事/图片/视频将使用此处指定的模型。</p>
         </el-form-item>
-        <el-form-item v-if="form.service_type === 'video'">
-          <template #label><span class="form-label-tip">全能能力</span></template>
-          <el-input v-model="form.video_capabilities" type="textarea" :rows="5" placeholder='可选 JSON，例如：{"supports":{"image_reference":{"max":9},"audio_reference":true,"video_reference":false},"limits":{"duration_seconds":{"min":4,"max":15}}}' />
-          <p class="field-tip">留空使用系统默认能力。此配置由全能视频的前后端共同读取，用于展示兼容性、自动匹配和提交校验。</p>
-        </el-form-item>
         <el-form-item v-if="isDeepSeekOfficialForm">
           <template #label>
             <span class="form-label-tip">思考模式
@@ -1195,7 +1190,6 @@ const form = ref({
   kling_access_key: '',
   kling_secret_key: '',
   kling_secret_key_base64: false,
-  video_capabilities: '',
   // TTS 专属字段
   voice_id: '',
   group_id: '',
@@ -1754,7 +1748,6 @@ function resetForm() {
     kling_access_key: '',
     kling_secret_key: '',
     kling_secret_key_base64: false,
-    video_capabilities: '',
   }
   formRef.value?.resetFields?.()
 }
@@ -1775,7 +1768,6 @@ function openEdit(row) {
   let kling_access_key = ''
   let kling_secret_key = ''
   let kling_secret_key_base64 = false
-  let video_capabilities = ''
   const deepseekSettings = resolveDeepSeekFormSettings(row)
   if (row.settings) {
     try {
@@ -1789,7 +1781,6 @@ function openEdit(row) {
         kling_secret_key = s.kling_secret_key || ''
         kling_secret_key_base64 = !!s.kling_secret_key_base64
       }
-      if (row.service_type === 'video' && s.video_capabilities) video_capabilities = JSON.stringify(s.video_capabilities, null, 2)
     } catch (_) {}
   }
   form.value = {
@@ -1812,7 +1803,6 @@ function openEdit(row) {
     kling_access_key,
     kling_secret_key,
     kling_secret_key_base64,
-    video_capabilities,
   }
   dialogVisible.value = true
 }
@@ -1862,16 +1852,6 @@ async function submit() {
         delete baseS.deepseek_reasoning_effort
       }
       settings = Object.keys(baseS).length ? JSON.stringify(baseS) : null
-    }
-    if (form.value.service_type === 'video') {
-      const previous = editingId.value ? list.value.find((r) => r.id === editingId.value) : null
-      const videoSettings = parseSettings(settings || previous?.settings)
-      const raw = String(form.value.video_capabilities || '').trim()
-      if (raw) {
-        try { videoSettings.video_capabilities = JSON.parse(raw) }
-        catch (_) { throw new Error('全能能力必须是合法 JSON') }
-      } else delete videoSettings.video_capabilities
-      settings = Object.keys(videoSettings).length ? JSON.stringify(videoSettings) : null
     }
     const payload = {
       service_type: form.value.service_type,

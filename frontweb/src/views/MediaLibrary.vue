@@ -13,7 +13,7 @@
           <el-icon><Upload /></el-icon>
           上传素材
         </el-button>
-        <input ref="uploadInput" type="file" accept="image/*,video/*,audio/*" multiple style="display:none" @change="onUpload" />
+        <input ref="uploadInput" type="file" accept="image/*,video/*" multiple style="display:none" @change="onUpload" />
       </div>
     </div>
 
@@ -23,7 +23,6 @@
         <el-radio-button value="all">全部</el-radio-button>
         <el-radio-button value="image">图片</el-radio-button>
         <el-radio-button value="video">视频</el-radio-button>
-        <el-radio-button value="audio">音频</el-radio-button>
       </el-radio-group>
       <el-input
         v-model="keyword"
@@ -52,9 +51,7 @@
         @click="toggleSelect(item)"
       >
         <div class="media-thumb">
-          <img v-if="item.type === 'video' && item.thumbnail_local_path" :src="thumbnailUrl(item)" class="thumb-img" />
-          <video v-else-if="item.type === 'video'" :src="itemUrl(item)" class="thumb-video" muted />
-          <div v-else-if="item.type === 'audio'" class="audio-thumb">🎵</div>
+          <video v-if="item.type === 'video'" :src="itemUrl(item)" class="thumb-video" muted />
           <img v-else :src="itemUrl(item)" class="thumb-img" />
           <div class="media-overlay">
             <el-icon v-if="selectedIds.has(item.id)" class="check-icon"><CircleCheck /></el-icon>
@@ -106,7 +103,6 @@
       <span>已选 {{ selectedIds.size }} 项</span>
       <el-button size="small" @click="selectedIds.clear()">取消选择</el-button>
       <el-button size="small" type="danger" plain @click="batchDelete">批量删除</el-button>
-      <el-button size="small" type="primary" @click="createWithSelected">用选中素材创作</el-button>
     </div>
 
     <!-- 预览弹窗 -->
@@ -119,7 +115,6 @@
           class="preview-video"
           autoplay
         />
-        <audio v-else-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" controls />
         <img v-else-if="previewItem" :src="itemUrl(previewItem)" class="preview-image" />
       </div>
       <div class="preview-meta">
@@ -138,8 +133,7 @@ import {
   ArrowLeft, Upload, Search, Loading, CircleCheck,
   ZoomIn, Delete, Files
 } from '@element-plus/icons-vue'
-import { omniVideoAPI } from '@/api/omniVideo'
-import { useRouter } from 'vue-router'
+import { uploadAPI } from '@/api/upload'
 import request from '@/utils/request'
 
 const loading = ref(false)
@@ -155,7 +149,6 @@ const selectedIds = reactive(new Set())
 const showPreview = ref(false)
 const previewItem = ref(null)
 const uploadInput = ref(null)
-const router = useRouter()
 let keywordTimer = null
 
 function triggerUpload() {
@@ -169,7 +162,7 @@ async function onUpload(e) {
   uploadProgress.value = { current: 0, total: files.length }
   for (const file of files) {
     try {
-      await omniVideoAPI.upload(file)
+      await uploadAPI.uploadImage(file)
       uploadProgress.value.current++
     } catch (err) {
       ElMessage.warning(`${file.name} 上传失败: ${err.message}`)
@@ -208,10 +201,9 @@ async function loadMedia() {
 function normalizeItem(item) {
   const url = item.url || item.image_url || item.video_url || ''
   const isVideo = url.match(/\.(mp4|webm|mov)$/i) || item.type === 'video'
-  const isAudio = item.type === 'audio'
   return {
     ...item,
-    type: isAudio ? 'audio' : isVideo ? 'video' : 'image',
+    type: isVideo ? 'video' : 'image',
     name: item.name || item.filename || (url.split('/').pop()),
   }
 }
@@ -236,14 +228,6 @@ function toggleSelect(item) {
   } else {
     selectedIds.add(item.id)
   }
-}
-function thumbnailUrl(item) {
-  return item?.thumbnail_local_path ? '/static/' + item.thumbnail_local_path.replace(/^\//, '') : itemUrl(item)
-}
-
-function createWithSelected() {
-  const ids = Array.from(selectedIds)
-  router.push({ path: '/free-create', query: ids.length ? { assets: ids.join(',') } : {} })
 }
 
 function openPreview(item) {
@@ -366,7 +350,6 @@ onMounted(loadMedia)
   height: 100%;
   object-fit: cover;
 }
-.audio-thumb { width: 100%; height: 100%; display: grid; place-items: center; font-size: 36px; background: #edf2ff; }
 
 .media-overlay {
   position: absolute;
