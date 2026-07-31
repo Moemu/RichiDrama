@@ -12,7 +12,9 @@
         <label>提示词<el-input v-model="prompt" type="textarea" :rows="7" placeholder="描述主体、动作、场景、镜头和风格…" /></label>
         <label>模型<el-input v-model="model" placeholder="留空使用当前默认模型" /></label>
         <label v-if="media === 'video'">时长（秒）<el-input-number v-model="duration" :min="1" :max="15" /></label>
-        <label>参考素材 URL<el-input v-model="reference" :placeholder="selectedMode.rule" /></label>
+        <template v-if="mode === 'first_last'"><ToolAssetSelector v-model="firstFrameAssetId" :types="['image']" label="首帧来源" @selected="applyFirstFrame" /><ToolAssetSelector v-model="lastFrameAssetId" :types="['image']" label="尾帧来源" @selected="applyLastFrame" /></template>
+        <ToolAssetSelector v-else-if="mode !== 'text'" v-model="selectedAssetId" :types="media === 'image' ? ['image'] : ['image', 'video']" label="参考素材来源" @selected="applySelectedAsset" />
+        <label>公开素材链接（可选）<el-input v-model="reference" :placeholder="selectedMode.rule" /></label>
         <small>{{ media === 'image' ? '参考素材可来自素材库或公开链接。' : '单镜头最长 15 秒；模型能力决定可用参考类型。' }}</small>
         <el-button type="primary" :loading="running" :disabled="!prompt.trim()" @click="submit">{{ running ? '正在提交任务…' : `生成${media === 'image' ? '图片' : '视频'}` }}</el-button>
       </aside>
@@ -49,8 +51,9 @@ import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
+import ToolAssetSelector from '@/components/ToolAssetSelector.vue'
 const props = defineProps({ media: { type: String, required: true } })
-const router = useRouter(), prompt = ref(''), model = ref(''), reference = ref(''), duration = ref(5), running = ref(false), importing = ref(false), items = ref([]), mode = ref('text'), featured = ref(null)
+const router = useRouter(), prompt = ref(''), model = ref(''), reference = ref(''), selectedAssetId = ref(null), firstFrameAssetId = ref(null), lastFrameAssetId = ref(null), firstFrameAssetUrl = ref(''), lastFrameAssetUrl = ref(''), duration = ref(5), running = ref(false), importing = ref(false), items = ref([]), mode = ref('text'), featured = ref(null)
 const modes = computed(() => props.media === 'image' ? [
   { label:'文生图', value:'text', hint:'从文字开始构图', rule:'不需要参考素材' }, { label:'单图生图', value:'image', hint:'基于一张图再创作', rule:'填写一张参考素材 URL' }, { label:'多参考生图', value:'multi', hint:'融合多个参考元素', rule:'用英文逗号分隔多个 URL' }, { label:'组生组图', value:'batch', hint:'共享风格批量出图', rule:'用提示词逐项创建' },
 ] : [
@@ -59,9 +62,12 @@ const modes = computed(() => props.media === 'image' ? [
 const selectedMode = computed(() => modes.value.find((item) => item.value === mode.value) || modes.value[0])
 const statusText = (status) => ({ pending:'排队中', processing:'生成中', completed:'已完成', failed:'生成失败' }[status] || status || '草稿')
 const mediaUrl = (item) => item?.local_path ? `/static/${item.local_path}` : item?.video_url || ''
+const applySelectedAsset = (asset) => { reference.value = asset?.local_path || asset?.url || '' }
+const applyFirstFrame = (asset) => { firstFrameAssetUrl.value = asset?.local_path || asset?.url || '' }
+const applyLastFrame = (asset) => { lastFrameAssetUrl.value = asset?.local_path || asset?.url || '' }
 const formatDate = (value) => value ? new Date(value).toLocaleString() : '刚刚'
 async function load() { const out = props.media === 'image' ? await imagesAPI.list({ page_size:30, drama_id:0 }) : await videosAPI.list({ page_size:30, drama_id:0 }); items.value = out.items || out || []; featured.value = items.value.find((item) => item.id === featured.value?.id) || featured.value || items.value[0] || null }
-async function submit() { if (!prompt.value.trim()) return ElMessage.warning('请输入提示词'); running.value = true; try { const refs = reference.value.split(',').map((item) => item.trim()).filter(Boolean); if (props.media === 'image') await imagesAPI.create({ drama_id:0, prompt:prompt.value, model:model.value || undefined, image_url:reference.value || undefined, reference_images:mode.value === 'multi' ? refs : undefined }); else { const body = { drama_id:0, prompt:prompt.value, model:model.value || undefined, duration:duration.value }; if (mode.value === 'image') body.image_url = refs[0]; if (mode.value === 'multi') body.reference_image_urls = refs; if (mode.value === 'first_last') { if (refs.length !== 2) throw new Error('请用逗号填写首帧与尾帧 URL'); body.first_frame_url = refs[0]; body.last_frame_url = refs[1] } await videosAPI.create(body) } ElMessage.success('任务已提交，记录已保存'); await load() } catch (error) { ElMessage.error(error.message) } finally { running.value = false } }
+async function submit() { if (!prompt.value.trim()) return ElMessage.warning('请输入提示词'); running.value = true; try { const refs = reference.value.split(',').map((item) => item.trim()).filter(Boolean); if (props.media === 'image') await imagesAPI.create({ drama_id:0, prompt:prompt.value, model:model.value || undefined, image_url:reference.value || undefined, reference_images:mode.value === 'multi' ? refs : undefined }); else { const body = { drama_id:0, prompt:prompt.value, model:model.value || undefined, duration:duration.value }; if (mode.value === 'image') body.image_url = refs[0]; if (mode.value === 'multi') body.reference_image_urls = refs; if (mode.value === 'first_last') { const first = firstFrameAssetUrl.value || refs[0], last = lastFrameAssetUrl.value || refs[1]; if (!first || !last) throw new Error('请选择或填写首帧与尾帧素材'); body.first_frame_url = first; body.last_frame_url = last } await videosAPI.create(body) } ElMessage.success('任务已提交，记录已保存'); await load() } catch (error) { ElMessage.error(error.message) } finally { running.value = false } }
 async function importAsset() { importing.value = true; try { const path = props.media === 'image' ? `/assets/import/image/${featured.value.id}` : `/assets/import/video/${featured.value.id}`; const asset = await request.post(path); ElMessage.success('已导入素材库'); return asset } catch (error) { ElMessage.error(error.message); return null } finally { importing.value = false } }
 async function continueOmni() { const asset = await importAsset(); if (asset?.id) router.push({ path:'/free-create', query:{ asset_id:asset.id } }) }
 watch(() => props.media, () => { featured.value = null; load() }); onMounted(load)
