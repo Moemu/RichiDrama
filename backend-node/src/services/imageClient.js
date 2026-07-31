@@ -812,8 +812,9 @@ function resolveImageRef(value, filesBaseUrl, storageLocalPath) {
   const s = String(value).trim();
   const baseUrl = (filesBaseUrl || '').replace(/\/$/, '');
   // isLocalhost: 只要 URL 本身或配置的 base_url 含 localhost/127，都视为本地
-  const isLocalhostUrl = /localhost|127\.0\.0\.1/i.test(s);
-  const isLocalhostBase = baseUrl && /localhost|127\.0\.0\.1/i.test(baseUrl);
+  const privateHostPattern = /localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\./i;
+  const isLocalhostUrl = privateHostPattern.test(s);
+  const isLocalhostBase = baseUrl && privateHostPattern.test(baseUrl);
   const isLocalhost = isLocalhostUrl || isLocalhostBase;
 
   function toPublicUrl(v) {
@@ -839,13 +840,13 @@ function resolveImageRef(value, filesBaseUrl, storageLocalPath) {
   if (!relPath) return toPublicUrl(s);
   const filePath = path.join(storageLocalPath, relPath);
   try {
-    if (!fs.existsSync(filePath)) return toPublicUrl(s);
+    if (!fs.existsSync(filePath)) return isLocalhost ? null : toPublicUrl(s);
     const buf = fs.readFileSync(filePath);
     const ext = path.extname(filePath).toLowerCase();
     const mime = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.bmp': 'image/bmp' }[ext] || 'image/png';
     return 'data:' + mime + ';base64,' + buf.toString('base64');
   } catch (e) {
-    return toPublicUrl(s);
+    return isLocalhost ? null : toPublicUrl(s);
   }
 }
 

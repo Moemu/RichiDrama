@@ -512,8 +512,22 @@ async function generateTextWithVision(db, log, serviceType, userPrompt, systemPr
   // 解析图片为 base64 data URL 或 HTTP URL
   let imageUrlForApi;
   let imageLogInfo = {};
+  // 本地文件必须优先于同一资产记录上的 URL。资产 url 可能只是
+  // localhost/static 预览地址，外部视觉模型无法访问，需改为 data URL。
+  if (imageSource.localAbsPath) {
+    if (!fs.existsSync(imageSource.localAbsPath)) {
+      throw new Error(`图片文件不存在：${imageSource.localAbsPath}`);
+    }
+    const localBuffer = fs.readFileSync(imageSource.localAbsPath);
+    const localExt = path.extname(imageSource.localAbsPath).toLowerCase();
+    const localMime = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' }[localExt] || 'image/jpeg';
+    imageSource = { ...imageSource, imageUrl: `data:${localMime};base64,${localBuffer.toString('base64')}`, localAbsPath: null };
+  }
   if (imageSource.imageUrl) {
     imageUrlForApi = imageSource.imageUrl;
+    if (/^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/i.test(imageUrlForApi)) {
+      throw new Error('本地或内网图片不能直接发送给外部视觉模型；请保留素材的本地文件，或使用可公开访问的 URL');
+    }
     if (imageUrlForApi.startsWith('data:')) {
       // base64 data URL：只记录类型和大小，不记录内容
       const mimeMatch = imageUrlForApi.match(/^data:([^;]+);base64,/);

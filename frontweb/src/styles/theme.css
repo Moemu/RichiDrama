@@ -856,6 +856,58 @@ html.dark body .el-button--primary:not(.is-link):not(.is-plain) {
   --el-button-hover-border-color: #d4d4d4 !important;
   --el-button-hover-text-color: #111 !important;
 }
+
+/* AI workbench readability contract: generated content, history and controls
+   always inherit the active theme tokens rather than legacy page-local blues. */
+body .tool-workbench, body .media-tool {
+  color: var(--text-primary) !important;
+}
+body .tool-workbench .tool-form label,
+body .tool-workbench .run-item,
+body .tool-workbench .run-item b,
+body .tool-workbench .result,
+body .tool-workbench .result pre,
+body .tool-workbench .status,
+body .tool-workbench .empty b,
+body .media-tool .control-panel label,
+body .media-tool .featured footer,
+body .media-tool .featured footer b {
+  color: var(--text-primary) !important;
+}
+body .tool-workbench .workbench-title p,
+body .tool-workbench small,
+body .tool-workbench .run-item small,
+body .tool-workbench .history-empty,
+body .tool-workbench .empty,
+body .tool-workbench .status .saving,
+body .media-tool .mode-info span,
+body .media-tool .status-key,
+body .media-tool .history-card small,
+body .media-tool .history-card em,
+body .media-tool .featured footer small {
+  color: var(--text-muted) !important;
+}
+body .tool-workbench .result pre {
+  background: var(--bg-inner) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
+  font-family: var(--font-sans) !important;
+  font-size: 14px !important;
+  line-height: 1.8 !important;
+}
+body .tool-workbench .status,
+body .tool-workbench .run-item,
+body .media-tool .mode-info,
+body .media-tool .featured footer {
+  background: var(--bg-inner) !important;
+  border-color: var(--border-color) !important;
+}
+body .tool-workbench .dot.processing { background: #b7791f !important; }
+body .tool-workbench .dot.completed { background: #2f855a !important; }
+body .tool-workbench .dot.failed { background: #c53030 !important; }
+body .tool-workbench .dot.processing,
+body .tool-workbench .dot.completed,
+body .tool-workbench .dot.failed { box-shadow: 0 0 0 2px var(--bg-card); }
 body .header-library .el-button:not(.el-button--primary),
 body .header-actions .el-button:not(.el-button--primary) {
   --el-button-bg-color: var(--bg-card) !important;
