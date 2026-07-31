@@ -14,6 +14,8 @@ function create(db, log, body) {
   validateShotAssetLimits(assets);
   const capability = capabilityService.resolve(db, body.model, assets);
   if (!capability.model) throw new Error('请先在 AI 配置中启用视频模型');
+  const creationMode = body.creation_mode || body.settings?.creation_mode || 'multi_reference';
+  validateCreationMode(creationMode, assets, capability);
   const routed = routeAssets(expandVideoReferences(db, log, assets, capability.supports), capability.supports, body.audio_strategy);
   enforceSd2IdentityAssets(routed, capability);
   const now = new Date().toISOString();
@@ -29,7 +31,7 @@ function create(db, log, body) {
       imageUrls.length ? JSON.stringify(imageUrls) : null, task.id, now, now);
   const videoGenerationId = Number(result.lastInsertRowid);
   const postProcess = { keep_original_audio: !!body.keep_original_audio, audio_volume: clamp(body.audio_volume, 0, 2, 1), audio_fade_seconds: clamp(body.audio_fade_seconds, 0, 10, 0) };
-  const requestSnapshot = { prompt, negative_prompt: body.negative_prompt || '', model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
+  const requestSnapshot = { prompt, prompt_document: body.prompt_document || null, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
   const job = db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(videoGenerationId, prompt, body.negative_prompt || null, body.model || 'auto', capability.model,
@@ -42,8 +44,8 @@ function create(db, log, body) {
   for (const asset of routed) insertAsset.run(jobId, asset.id, asset.ordinal, asset.alias, asset.type, asset.role, asset.usage, asset.send_to_model ? 1 : 0, null, JSON.stringify(publicAsset(asset)), now);
   if (body.shot_id && body.sequence_id) {
     const shot = db.prepare('SELECT id FROM omni_video_sequence_shots WHERE id = ? AND sequence_id = ? AND deleted_at IS NULL').get(Number(body.shot_id), Number(body.sequence_id));
-    if (shot) db.prepare('UPDATE omni_video_sequence_shots SET omni_job_id = ?, prompt = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?').run(
-      jobId, prompt, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model || 'auto', aspect_ratio: body.aspect_ratio || '16:9', duration: Math.min(15, Number(body.duration) || 5), resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
+    if (shot) db.prepare('UPDATE omni_video_sequence_shots SET omni_job_id = ?, prompt = ?, prompt_document_json = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?').run(
+      jobId, prompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model || 'auto', creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: Math.min(15, Number(body.duration) || 5), resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
   }
   setImmediate(() => videoService.processVideoGeneration(db, log, videoGenerationId));
   return { omni_job_id: jobId, video_generation_id: videoGenerationId, task_id: task.id, status: 'processing', resolved_model: capability.model, routing_summary: buildSummary(routed) };
@@ -69,6 +71,16 @@ function routeAssets(assets, supports, audioStrategy) {
     const certified = asset.seedance2_asset && String(asset.seedance2_asset.status || '').toLowerCase() === 'active' && String(asset.seedance2_asset.asset_url || '').startsWith('asset://');
     return { ...asset, model_url: certified ? asset.seedance2_asset.asset_url : (asset.local_path || asset.url), send_to_model: send, strategy };
   });
+}
+
+function validateCreationMode(mode, assets, capability) {
+  if (!['multi_reference', 'first_last_frame'].includes(mode)) throw new Error('不支持的视频创作模式');
+  if (mode !== 'first_last_frame') return;
+  const first = assets.filter((asset) => asset.usage === 'first_frame');
+  const last = assets.filter((asset) => asset.usage === 'last_frame');
+  if (first.length !== 1 || last.length !== 1 || first[0].type !== 'image' || last[0].type !== 'image') throw new Error('首尾帧生视频必须且只能选择一张图片首帧和一张图片尾帧');
+  if (assets.some((asset) => !['first_frame', 'last_frame'].includes(asset.usage))) throw new Error('首尾帧生视频仅支持首帧、尾帧和提示词');
+  if (!capability.supports?.first_last_frame) throw new Error(`模型“${capability.model}”不支持首尾帧生视频，请切换模型或创作模式`);
 }
 
 function validateShotAssetLimits(assets) {
@@ -130,11 +142,11 @@ function retry(db, log, id) {
   return create(db, log, {
     prompt: snapshot.prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
     aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
-    audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
+    creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
     audio_volume: snapshot.post_process?.audio_volume, audio_fade_seconds: snapshot.post_process?.audio_fade_seconds,
     assets: snapshot.assets.map((asset) => ({ asset_id: asset.asset_id, alias: asset.alias, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, send_to_model: asset.send_to_model })),
   });
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry, validateShotAssetLimits, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, retry, validateShotAssetLimits, validateCreationMode, SHOT_ASSET_LIMITS };

@@ -1271,10 +1271,8 @@ html.light .drama-detail .header {
   -webkit-text-fill-color: #6d6d7a;
 }
 html.light .drama-detail .logo-main {
-  background: linear-gradient(135deg, #7c3aed, #6366f1);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #3479ae;
+  -webkit-text-fill-color: #3479ae;
 }
 html.light .drama-detail .logo-sub {
   color: #9ca3af;
@@ -1495,8 +1493,8 @@ html.light .episode-title { color: #18181b; }
 html.light .res-tab:hover { background: rgba(0,0,0,0.04); }
 html.light .res-tab--lib.active { color: #2563eb; }
 html.light .res-tab--lib.active::after { background: #2563eb; }
-html.light .res-tab--drama.active { color: #7c3aed; }
-html.light .res-tab--drama.active::after { background: #7c3aed; }
+html.light .res-tab--drama.active { color: #3479ae; }
+html.light .res-tab--drama.active::after { background: #3479ae; }
 
 /* 本剧制作资源列表 */
 .drama-res-list { display: flex; flex-wrap: wrap; gap: 12px; padding: 4px 0 8px; }
@@ -1538,4 +1536,5 @@ html.light .btn-theme {
   --el-button-hover-border-color: rgba(99, 102, 241, 0.5);
   --el-button-hover-text-color: #4f46e5;
 }
+.drama-detail{background:#f5f5f5!important;color:#262626!important}.drama-detail .header{background:#fff!important;border-color:#e5e5e5!important;box-shadow:none!important;backdrop-filter:none!important}.drama-detail .logo-main{background:none!important;color:#171717!important;-webkit-text-fill-color:#171717!important;filter:none!important}.drama-detail .logo-sub,.drama-detail .page-title{color:#737373!important;-webkit-text-fill-color:#737373!important}.drama-detail .section.card,.drama-detail .episode-card{background:#fff!important;border-color:#e5e5e5!important;box-shadow:none!important;backdrop-filter:none!important}.drama-detail .section.card:hover,.drama-detail .episode-card:hover{background:#fafafa!important;border-color:#171717!important;box-shadow:inset 2px 0 0 #171717!important}.drama-detail :deep(.el-button--primary){--el-button-bg-color:#171717!important;--el-button-border-color:#171717!important;--el-button-text-color:#fff!important;--el-button-hover-bg-color:#404040!important;--el-button-hover-border-color:#404040!important}.drama-detail .btn-theme{--el-button-bg-color:#fff!important;--el-button-border-color:#d4d4d4!important;--el-button-text-color:#262626!important}
 </style>

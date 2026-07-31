@@ -1,11 +1,13 @@
 import { createApp, h } from 'vue'
-import './styles/theme.css'
 // 初始化主题（必须在挂载前执行）
 import './composables/useTheme.js'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import { ElConfigProvider } from 'element-plus'
 import 'element-plus/dist/index.css'
+// Load our visual system after Element Plus so its neutral tokens and
+// component refinements are the final cascade layer.
+import './styles/theme.css'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'

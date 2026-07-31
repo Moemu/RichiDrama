@@ -23,14 +23,12 @@
           <el-button class="btn-library" title="全能视频" @click="createOmniProject">
             <el-icon><MagicStick /></el-icon>全能视频
           </el-button>
+          <el-button class="btn-library" title="已删除全能项目" @click="manageDeletedOmniProjects">已删除项目</el-button>
           <el-button class="btn-library" title="AI 工具箱" @click="$router.push('/ai-tools')">
             <el-icon><MagicStick /></el-icon>AI 工具箱
           </el-button>
           <el-button class="btn-library" title="媒体素材库" @click="$router.push('/media-library')">
             <el-icon><Files /></el-icon>素材库
-          </el-button>
-          <el-button v-if="!vendorLockEnabled" class="btn-wechat" title="扫码联系作者" @click="showWechat = true">
-            <el-icon><ChatDotSquare /></el-icon>微信我
           </el-button>
           <el-button class="btn-theme" :title="isDark ? '切换到浅色模式' : '切换到暗色模式'" @click="toggleTheme">
             <el-icon><Sunny v-if="isDark" /><Moon v-else /></el-icon>
@@ -52,7 +50,15 @@
 
     <main class="main">
       <div v-loading="loading" class="projects-wrap">
-        <div class="project-grid">
+        <section class="projects-heading">
+          <div>
+            <p class="projects-kicker">PROJECT WORKSPACE</p>
+            <h2>{{ dramas.length || omniProjects.length ? '项目工作台' : '开始你的第一个短剧项目' }}</h2>
+            <p>{{ dramas.length || omniProjects.length ? '管理剧本、分镜与生成素材。' : '创建项目后，依次完成剧本、角色、场景、分镜与成片制作。' }}</p>
+          </div>
+          <span v-if="dramas.length || omniProjects.length" class="projects-count">{{ dramas.length + omniProjects.length }} 个项目</span>
+        </section>
+        <div class="project-grid" :class="{ 'is-empty': !loading && dramas.length === 0 && omniProjects.length === 0 }">
           <!-- 操作卡片：始终作为第一个格子 -->
           <div class="project-card action-card">
             <div class="action-card-inner">
@@ -333,14 +339,6 @@
       </template>
     </el-dialog>
 
-    <!-- 微信二维码 -->
-    <el-dialog v-if="!vendorLockEnabled" v-model="showWechat" title="微信联系作者" width="320px" align-center>
-      <div style="text-align:center;padding:8px 0 4px">
-        <img src="/wx.jpg" alt="微信二维码" style="width:240px;height:240px;object-fit:contain;border-radius:8px;" />
-        <p style="margin:12px 0 0;font-size:13px;color:var(--text-secondary,#a1a1aa);">扫码添加微信，欢迎交流</p>
-      </div>
-    </el-dialog>
-
     <!-- 图片放大预览 -->
     <Teleport to="body">
       <div v-if="previewImageUrl" class="image-preview-overlay" @click="previewImageUrl = null">
@@ -376,7 +374,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit, Delete, Setting, Plus, User, PictureFilled, Box, Sunny, Moon, ChatDotSquare, Download, Upload, QuestionFilled, FolderOpened, MagicStick, Files } from '@element-plus/icons-vue'
+import { Edit, Delete, Setting, Plus, User, PictureFilled, Box, Sunny, Moon, Download, Upload, QuestionFilled, FolderOpened, MagicStick, Files } from '@element-plus/icons-vue'
 import { useTheme } from '@/composables/useTheme'
 import { dramaAPI } from '@/api/drama'
 import { characterLibraryAPI } from '@/api/characterLibrary'
@@ -454,7 +452,6 @@ const omniProjects = ref([])
 const total = ref(0)
 
 const showAiConfigDialog = ref(false)
-const showWechat = ref(false)
 const vendorLockEnabled = ref(false)
 
 // 图片预览
@@ -797,6 +794,22 @@ async function deleteOmniProject(project) {
   } catch (_) {}
 }
 
+async function manageDeletedOmniProjects() {
+  try {
+    const projects = await omniVideoAPI.listDeletedSequences()
+    if (!projects.length) return ElMessage.info('没有已删除的全能项目')
+    const lines = projects.map((item) => `${item.id}：${item.name || '未命名全能项目'}（${item.shot_count || 0} 个镜头）`).join('\n')
+    const { value } = await ElMessageBox.prompt(`${lines}\n\n输入项目 ID 恢复；输入 purge:ID 永久清理。永久清理只删除项目编排，保留成片、素材与任务历史。`, '已删除全能项目', { inputPlaceholder: '例如：12 或 purge:12' })
+    const valueText = String(value || '').trim()
+    if (!valueText) return
+    const purge = valueText.startsWith('purge:'); const id = Number(purge ? valueText.slice(6) : valueText)
+    if (!projects.some((item) => item.id === id)) throw new Error('请输入列表中的项目 ID')
+    if (purge) await omniVideoAPI.purgeSequence(id); else await omniVideoAPI.restoreSequence(id)
+    ElMessage.success(purge ? '项目编排已永久清理，成片与素材仍保留' : '全能项目已恢复')
+    loadList()
+  } catch (error) { if (error !== 'cancel') ElMessage.error(error.message || '操作失败') }
+}
+
 function onExport(d) {
   if (exportingId.value) return
   exportingId.value = d.id
@@ -898,7 +911,8 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 16px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 .logo {
   margin: 0;
@@ -912,11 +926,9 @@ onMounted(async () => {
   font-size: 1.1rem;
   font-weight: 700;
   letter-spacing: -0.01em;
-  background: linear-gradient(135deg, #a5b4fc 0%, #c084fc 50%, #f0abfc 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.35));
+  color: #9dc8e5;
+  -webkit-text-fill-color: #9dc8e5;
+  filter: none;
 }
 .logo-sub {
   font-size: 0.68rem;
@@ -934,13 +946,27 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: 20px;
+  margin-left: 12px;
+  flex: 0 0 auto;
 }
 .header-actions {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.header-actions::-webkit-scrollbar { display: none; }
+.header-library .el-button,
+.header-actions .el-button {
+  flex: 0 0 auto;
+  padding-inline: 10px;
+  font-size: 13px;
 }
 
 /* 资源库按钮 —— 靛紫调 */
@@ -985,24 +1011,6 @@ html.light .btn-theme {
 }
 
 /* 微信我按钮 —— 绿调 */
-.btn-wechat {
-  --el-button-bg-color: rgba(34, 197, 94, 0.1);
-  --el-button-border-color: rgba(34, 197, 94, 0.3);
-  --el-button-text-color: #22c55e;
-  --el-button-hover-bg-color: rgba(34, 197, 94, 0.2);
-  --el-button-hover-border-color: rgba(34, 197, 94, 0.5);
-  --el-button-hover-text-color: #16a34a;
-  transition: all 0.2s;
-}
-html.light .btn-wechat {
-  --el-button-bg-color: rgba(21, 128, 61, 0.08);
-  --el-button-border-color: rgba(21, 128, 61, 0.3);
-  --el-button-text-color: #166534;
-  --el-button-hover-bg-color: rgba(21, 128, 61, 0.14);
-  --el-button-hover-border-color: rgba(21, 128, 61, 0.5);
-  --el-button-hover-text-color: #14532d;
-}
-
 /* AI配置按钮 —— 琥珀调 */
 .btn-settings {
   --el-button-bg-color: rgba(234, 179, 8, 0.1);
@@ -1041,6 +1049,38 @@ html.light .btn-import {
 .projects-wrap {
   min-height: 200px;
 }
+.projects-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 22px 0 18px;
+}
+.projects-kicker {
+  margin: 0 0 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .12em;
+}
+.projects-heading h2 {
+  margin: 0;
+  color: var(--text-bright);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 1.25;
+}
+.projects-heading p:not(.projects-kicker) {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.projects-count {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 13px;
+}
 .empty {
   text-align: center;
   padding: 48px 24px;
@@ -1059,6 +1099,10 @@ html.light .btn-import {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 18px;
+}
+.project-grid.is-empty {
+  grid-template-columns: minmax(0, 720px);
+  justify-content: start;
 }
 .project-card {
   position: relative;
@@ -1107,6 +1151,28 @@ html.light .btn-import {
   justify-content: center;
   box-shadow: inset 0 0 40px rgba(99, 102, 241, 0.04);
 }
+.project-grid.is-empty .action-card {
+  min-height: 238px;
+  padding: 30px 34px;
+  border-style: solid;
+}
+.project-grid.is-empty .action-card-inner {
+  align-items: flex-start;
+  max-width: 560px;
+}
+.project-grid.is-empty .action-card-title {
+  font-size: 18px;
+}
+.project-grid.is-empty .action-card-title::after {
+  content: '从一个简短想法开始，建立完整的短剧制作流程。';
+  display: block;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+.project-grid.is-empty .action-card-buttons { justify-content: flex-start; }
 .action-card:hover {
   border-color: rgba(99, 102, 241, 0.65);
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.07) 100%);
@@ -1258,7 +1324,7 @@ html.light .btn-import {
 }
 .badge-style {
   background: rgba(168, 85, 247, 0.1);
-  color: #c084fc;
+  color: #4b91c8;
   border: 1px solid rgba(168, 85, 247, 0.25);
 }
 .badge-genre {
@@ -1335,11 +1401,9 @@ html.light .btn-import {
 
 /* ===== 亮色模式适配 ===== */
 html.light .film-list {
-  background: #f5f3ff;
-  color: #1e1b4b;
-  background-image:
-    radial-gradient(ellipse 70% 45% at 50% -10%, rgba(99, 102, 241, 0.1) 0%, transparent 70%),
-    radial-gradient(ellipse 50% 35% at 85% 55%, rgba(139, 92, 246, 0.06) 0%, transparent 60%);
+  background: #f4f7f8;
+  color: #1e2d38;
+  background-image: none;
 }
 html.light .header {
   background: rgba(248, 246, 255, 0.88);
@@ -1347,11 +1411,10 @@ html.light .header {
   box-shadow: 0 1px 0 rgba(99, 102, 241, 0.1), 0 4px 16px rgba(99, 102, 241, 0.06);
 }
 html.light .logo-main {
-  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #9333ea 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.2));
+  background: none;
+  color: #3479ae;
+  -webkit-text-fill-color: #3479ae;
+  filter: none;
 }
 html.light .logo-sub {
   color: #9ca3af;
@@ -1419,4 +1482,6 @@ html.light .badge-status--draft {
   border-radius: 8px;
   object-fit: contain;
 }
+/* LensRhyme monochrome project desk */
+.film-list{background:#f5f5f5!important;color:#262626!important}.header{background:#fff!important;border-color:#e5e5e5!important;box-shadow:none!important;backdrop-filter:none!important}.film-list .logo-main,html.light .film-list .logo-main{background:none!important;background-image:none!important;color:#171717!important;-webkit-text-fill-color:#171717!important;filter:none!important}.film-list .logo-sub,html.light .film-list .logo-sub{color:#737373!important;-webkit-text-fill-color:#737373!important}.btn-library,.btn-wechat,.btn-theme,.btn-settings,.btn-import{background:#fff!important;border-color:#d4d4d4!important;color:#262626!important;box-shadow:none!important}.btn-library:hover,.btn-wechat:hover,.btn-theme:hover,.btn-settings:hover,.btn-import:hover{background:#f5f5f5!important;border-color:#171717!important;color:#171717!important}.btn-new,.action-btn-new{--el-button-bg-color:#171717!important;--el-button-border-color:#171717!important;--el-button-text-color:#fff!important;--el-button-hover-bg-color:#404040!important;--el-button-hover-border-color:#404040!important;background:#171717!important;border-color:#171717!important;color:#fff!important;box-shadow:none!important}.project-card,.omni-project-card,.action-card{background:#fff!important;border-color:#e5e5e5!important;background-image:none!important;box-shadow:none!important;backdrop-filter:none!important}.project-card::before{display:none!important}.project-card:hover,.action-card:hover{background:#fafafa!important;border-color:#171717!important;box-shadow:inset 2px 0 0 #171717!important}.action-card{border-style:dashed!important}.action-card-title,.project-title{color:#171717!important}.project-desc,.project-meta,.example-hint-text{color:#737373!important}.badge,.badge-omni,.badge-storyboards,.badge-status,.badge-ratio,.badge-style,.badge-genre{background:#f5f5f5!important;border-color:#d4d4d4!important;color:#404040!important}.header :deep(.el-button--primary){--el-button-bg-color:#171717!important;--el-button-border-color:#171717!important;--el-button-text-color:#fff!important}
 </style>

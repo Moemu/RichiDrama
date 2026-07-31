@@ -32,6 +32,7 @@ export const omniVideoAPI = {
   updateSequence(sequenceId, body) { return request.put(`/omni-video-sequences/${sequenceId}`, body) },
   deleteSequence(sequenceId) { return request.delete(`/omni-video-sequences/${sequenceId}`) },
   restoreSequence(sequenceId) { return request.post(`/omni-video-sequences/${sequenceId}/restore`) },
+  purgeSequence(sequenceId) { return request.delete(`/omni-video-sequences/${sequenceId}/purge`) },
   addShot(sequenceId, body = {}) { return request.post(`/omni-video-sequences/${sequenceId}/shots`, body) },
   updateShot(sequenceId, shotId, body) { return request.put(`/omni-video-sequences/${sequenceId}/shots/${shotId}`, body) },
   deleteShot(sequenceId, shotId) { return request.delete(`/omni-video-sequences/${sequenceId}/shots/${shotId}`) },

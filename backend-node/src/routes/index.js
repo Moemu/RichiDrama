@@ -48,6 +48,7 @@ function setupRouter(cfg, db, log) {
   const assets = assetRoutes(db, log, cfg);
   const audio = audioRoutes(db, log, cfg);
   const promptOverrides = promptOverridesRoutes.routes(db, log);
+  const tools = require('./tools')(db, log);
 
   // ---------- dramas ----------
   r.get('/dramas', drama.listDramas);
@@ -220,10 +221,24 @@ function setupRouter(cfg, db, log) {
   r.put('/omni-video-sequences/:id', omniVideo.updateSequence);
   r.delete('/omni-video-sequences/:id', omniVideo.deleteSequence);
   r.post('/omni-video-sequences/:id/restore', omniVideo.restoreSequence);
+  r.delete('/omni-video-sequences/:id/purge', omniVideo.purgeSequence);
   r.post('/omni-video-sequences/:id/shots', omniVideo.addShot);
   r.put('/omni-video-sequences/:id/shots/reorder', omniVideo.reorderShots);
   r.put('/omni-video-sequences/:id/shots/:shotId', omniVideo.updateShot);
   r.delete('/omni-video-sequences/:id/shots/:shotId', omniVideo.deleteShot);
+
+  // ---------- AI 工具箱（独立运行历史） ----------
+  r.get('/tool-templates', tools.templates);
+  r.post('/tool-templates', tools.createTemplate);
+  r.put('/tool-templates/:id', tools.updateTemplate);
+  r.get('/tool-runs', tools.list);
+  r.get('/tool-runs/:id', tools.get);
+  r.delete('/tool-runs/:id', tools.remove);
+  r.post('/tool-runs/:id/restore', tools.restore);
+  r.post('/tool-runs/:id/retry', tools.retry);
+  r.post('/tool-runs/:id/import-drama', tools.importDrama);
+  r.get('/tool-runs/:id/stream', tools.stream);
+  r.post('/tools/:type/runs', tools.execute);
   r.get('/omni-video-jobs', omniVideo.list);
   r.post('/omni-video-jobs', omniVideo.create);
   r.post('/omni-video-jobs/:id/retry', omniVideo.retry);

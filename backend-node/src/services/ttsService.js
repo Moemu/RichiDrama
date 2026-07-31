@@ -113,6 +113,103 @@ async function synthesizeWithOpenai(text, voice, apiKey, baseUrl, model, speed) 
 }
 
 /**
+ * 使用豆包语音（火山引擎 TTS）并发合成接口合成语音
+ * 参考 Go 版示例：POST {base_url}/api/v1/tts （或 settings.endpoint 指定的中间层路径）
+ * 认证头格式为 "Bearer;{token}"（注意是分号），返回 code=3000 表示成功，data 为 base64 音频。
+ * @param {string} text 待合成文本
+ * @param {{ apiKey: string, baseUrl: string, settings?: object }} opts
+ *   - settings.appid / settings.cluster 必填（火山引擎接入信息）
+ *   - settings.voice_type 默认 BV001
+ *   - settings.endpoint 覆盖请求路径（如 tts_middle_layer/tts），缺省 /api/v1/tts
+ *   - settings.speed/volume/pitch 取值范围 1~100（火山要求），缺省 10
+ */
+function synthesizeWithDoubao(text, opts) {
+  const settings = opts.settings || {};
+  const appid = String(settings.appid || '').trim();
+  const cluster = String(settings.cluster || '').trim();
+  const token = opts.apiKey || settings.token || '';
+  if (!appid || !cluster) {
+    throw new Error('豆包语音 TTS 缺少 appid 或 cluster，请在「AI 配置」TTS 配置的 settings 中填写 { appid, cluster, voice_type }');
+  }
+  if (!token) {
+    throw new Error('豆包语音 TTS 缺少 Access Token（api_key）');
+  }
+  const endpoint = String(settings.endpoint || '/api/v1/tts');
+  const base = (opts.baseUrl || 'https://openspeech.bytedance.com').replace(/\/+$/, '');
+  const url = base + (endpoint.startsWith('/') ? endpoint : '/' + endpoint);
+  // 火山并发合成要求 speed/volume/pitch 范围 [1,100]，缺省 10
+  const clampVolc = (v, dflt) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return dflt;
+    return Math.max(1, Math.min(100, Math.round(n)));
+  };
+  const body = JSON.stringify({
+    app: { appid, token: 'access_token', cluster },
+    user: { uid: 'LocalMiniDrama' },
+    audio: {
+      voice_type: settings.voice_type || 'BV001',
+      encoding: settings.encoding || 'mp3',
+      speed: clampVolc(settings.speed, 10),
+      volume: clampVolc(settings.volume, 10),
+      pitch: clampVolc(settings.pitch, 10),
+    },
+    request: {
+      reqid: randomUUID(),
+      text,
+      text_type: 'plain',
+      operation: 'query',
+    },
+  });
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const mod = parsed.protocol === 'https:' ? https : http;
+    const reqOpts = {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        // 豆包特有：Bearer 后面是分号，不是空格
+        'Authorization': `Bearer;${token}`,
+      },
+    };
+    const req = mod.request(reqOpts, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(new Error(`豆包 TTS HTTP ${res.statusCode}: ${buf.toString('utf-8').slice(0, 500)}`));
+          return;
+        }
+        let data;
+        try {
+          data = JSON.parse(buf.toString('utf-8'));
+        } catch (e) {
+          reject(new Error(`豆包 TTS 返回非 JSON: ${buf.toString('utf-8').slice(0, 200)}`));
+          return;
+        }
+        if (data.code !== 3000) {
+          reject(new Error(`豆包 TTS 合成失败 [code:${data.code}] ${data.Message || data.message || ''}`));
+          return;
+        }
+        const audioHex = data.data;
+        if (!audioHex) { reject(new Error('豆包 TTS 未返回音频数据')); return; }
+        // data 是 base64 编码的音频
+        resolve(Buffer.from(audioHex, 'base64'));
+      });
+    });
+    const timer = setTimeout(() => { req.destroy(); reject(new Error('豆包 TTS 请求超时')); }, 30000);
+    req.on('error', (e) => { clearTimeout(timer); reject(e); });
+    req.on('close', () => clearTimeout(timer));
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
  * 合成 TTS 并保存到本地文件
  * @returns {{ local_path: string, audio_url: string }}
  */
@@ -144,6 +241,13 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
       groupId,
       ttsModel || 'speech-02-hd'
     );
+  } else if (provider === 'doubao' || provider === '豆包语音' || provider === 'volcengine_tts') {
+    // 豆包语音（火山引擎 TTS）：必须在 openai/base_url 分支之前判断，否则会被当作 OpenAI 兼容接口导致 404
+    audioBuffer = await synthesizeWithDoubao(text, {
+      apiKey: ttsConfig.api_key,
+      baseUrl: ttsConfig.base_url,
+      settings: ttsSettings,
+    });
   } else if (provider === 'openai' || ttsConfig.base_url) {
     console.log('==c sxy synthesizeWithOpenai', text, voiceId, ttsConfig.api_key, ttsConfig.base_url, ttsModel, finalSpeed);
     audioBuffer = await synthesizeWithOpenai(
@@ -155,7 +259,7 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
       finalSpeed
     );
   } else {
-    throw new Error(`不支持的 TTS provider: ${provider}，目前支持 openai、minimax`);
+    throw new Error(`不支持的 TTS provider: ${provider}，目前支持 openai、minimax、doubao(豆包语音)`);
   }
 
   // 保存到本地

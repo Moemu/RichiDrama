@@ -141,4 +141,15 @@ function restoreSequence(db, id) {
   return get(db, sequence.id);
 }
 
-module.exports = { ensureDefault, list, get, createSequence, updateSequence, createShot, updateShot, deleteShot, deleteSequence, restoreSequence, reorder, listShots };
+function purgeSequence(db, id) {
+  const sequence = db.prepare('SELECT id FROM omni_video_sequences WHERE id = ? AND deleted_at IS NOT NULL').get(Number(id));
+  if (!sequence) throw new Error('请先将项目移入已删除列表');
+  const tx = db.transaction(() => {
+    // 任务和视频成片保留：只断开已删除镜头，确保历史可追溯。
+    db.prepare('DELETE FROM omni_video_sequence_shots WHERE sequence_id = ?').run(sequence.id);
+    db.prepare('DELETE FROM omni_video_sequences WHERE id = ?').run(sequence.id);
+  }); tx();
+  return true;
+}
+
+module.exports = { ensureDefault, list, get, createSequence, updateSequence, createShot, updateShot, deleteShot, deleteSequence, restoreSequence, purgeSequence, reorder, listShots };

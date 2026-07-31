@@ -17,6 +17,7 @@ module.exports = function routes(db, log, cfg) { return {
   updateSequence(req, res) { try { response.success(res, sequenceService.updateSequence(db, req.params.id, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
   deleteSequence(req, res) { try { sequenceService.deleteSequence(db, req.params.id); response.success(res, { ok: true }); } catch (err) { response.badRequest(res, err.message); } },
   restoreSequence(req, res) { try { response.success(res, sequenceService.restoreSequence(db, req.params.id)); } catch (err) { response.badRequest(res, err.message); } },
+  purgeSequence(req, res) { try { sequenceService.purgeSequence(db, req.params.id); response.success(res, { ok: true }); } catch (err) { response.badRequest(res, err.message); } },
   addShot(req, res) { try { response.created(res, sequenceService.createShot(db, req.params.id, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
   updateShot(req, res) { try { response.success(res, sequenceService.updateShot(db, req.params.id, req.params.shotId, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
   deleteShot(req, res) { try { sequenceService.deleteShot(db, req.params.id, req.params.shotId); response.success(res, { ok: true }); } catch (err) { response.badRequest(res, err.message); } },

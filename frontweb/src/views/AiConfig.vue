@@ -97,10 +97,8 @@ html.light .header {
   -webkit-text-fill-color: #6d6d7a;
 }
 html.light .logo-main {
-  background: linear-gradient(135deg, #7c3aed, #6366f1);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #3479ae;
+  -webkit-text-fill-color: #3479ae;
 }
 html.light .logo-sub {
   color: #9ca3af;
@@ -128,4 +126,5 @@ html.light .main {
   border-color: rgba(139, 92, 246, 0.15);
   box-shadow: 0 4px 20px rgba(139, 92, 246, 0.08);
 }
+.ai-config-page,.main{background:#f5f5f5!important;color:#262626!important}.header{background:#fff!important;border-color:#e5e5e5!important;box-shadow:none!important;backdrop-filter:none!important}.logo-main{background:none!important;color:#171717!important;-webkit-text-fill-color:#171717!important}.logo-sub,.page-title{color:#737373!important;-webkit-text-fill-color:#737373!important}.main{border-color:#e5e5e5!important;box-shadow:none!important}.main :deep(.el-button--primary){--el-button-bg-color:#171717!important;--el-button-border-color:#171717!important;--el-button-text-color:#fff!important}
 </style>

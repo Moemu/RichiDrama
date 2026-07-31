@@ -50,6 +50,27 @@ const router = createRouter({
       name: 'ai-tools',
       component: () => import('@/views/AITools.vue'),
       meta: { title: 'AI 工具箱' }
+    },
+    {
+      path: '/ai-tools/:kind(script-analysis|script-analysis-stream|script-writing|reverse-prompt)',
+      name: 'tool-workbench',
+      component: () => import('@/views/ToolWorkbench.vue'),
+      props: (route) => ({ kind: ({ 'script-analysis': 'script_analysis', 'script-analysis-stream': 'script_analysis_stream', 'script-writing': 'script_writing', 'reverse-prompt': 'reverse_prompt' })[route.params.kind] }),
+      meta: { title: 'AI 工具工作台' }
+    },
+    {
+      path: '/ai-tools/image-generation',
+      name: 'tool-image-generation',
+      component: () => import('@/views/ToolMediaGeneration.vue'),
+      props: { media: 'image' },
+      meta: { title: '图片生成工作台' }
+    },
+    {
+      path: '/ai-tools/video-generation',
+      name: 'tool-video-generation',
+      component: () => import('@/views/ToolMediaGeneration.vue'),
+      props: { media: 'video' },
+      meta: { title: '视频生成工作台' }
     }
   ]
 })
