@@ -53,7 +53,15 @@
 
     <main class="main">
       <div v-loading="loading" class="projects-wrap">
-        <div class="project-grid">
+        <section class="projects-heading">
+          <div>
+            <p class="projects-kicker">PROJECT WORKSPACE</p>
+            <h2>{{ dramas.length || omniProjects.length ? '项目工作台' : '开始你的第一个短剧项目' }}</h2>
+            <p>{{ dramas.length || omniProjects.length ? '管理剧本、分镜与生成素材。' : '创建项目后，依次完成剧本、角色、场景、分镜与成片制作。' }}</p>
+          </div>
+          <span v-if="dramas.length || omniProjects.length" class="projects-count">{{ dramas.length + omniProjects.length }} 个项目</span>
+        </section>
+        <div class="project-grid" :class="{ 'is-empty': !loading && dramas.length === 0 && omniProjects.length === 0 }">
           <!-- 操作卡片：始终作为第一个格子 -->
           <div class="project-card action-card">
             <div class="action-card-inner">
@@ -915,7 +923,8 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 16px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 .logo {
   margin: 0;
@@ -949,13 +958,27 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: 20px;
+  margin-left: 12px;
+  flex: 0 0 auto;
 }
 .header-actions {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.header-actions::-webkit-scrollbar { display: none; }
+.header-library .el-button,
+.header-actions .el-button {
+  flex: 0 0 auto;
+  padding-inline: 10px;
+  font-size: 13px;
 }
 
 /* 资源库按钮 —— 靛紫调 */
@@ -1056,6 +1079,38 @@ html.light .btn-import {
 .projects-wrap {
   min-height: 200px;
 }
+.projects-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 22px 0 18px;
+}
+.projects-kicker {
+  margin: 0 0 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .12em;
+}
+.projects-heading h2 {
+  margin: 0;
+  color: var(--text-bright);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 1.25;
+}
+.projects-heading p:not(.projects-kicker) {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.projects-count {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 13px;
+}
 .empty {
   text-align: center;
   padding: 48px 24px;
@@ -1074,6 +1129,10 @@ html.light .btn-import {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 18px;
+}
+.project-grid.is-empty {
+  grid-template-columns: minmax(0, 720px);
+  justify-content: start;
 }
 .project-card {
   position: relative;
@@ -1122,6 +1181,28 @@ html.light .btn-import {
   justify-content: center;
   box-shadow: inset 0 0 40px rgba(99, 102, 241, 0.04);
 }
+.project-grid.is-empty .action-card {
+  min-height: 238px;
+  padding: 30px 34px;
+  border-style: solid;
+}
+.project-grid.is-empty .action-card-inner {
+  align-items: flex-start;
+  max-width: 560px;
+}
+.project-grid.is-empty .action-card-title {
+  font-size: 18px;
+}
+.project-grid.is-empty .action-card-title::after {
+  content: '从一个简短想法开始，建立完整的短剧制作流程。';
+  display: block;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+.project-grid.is-empty .action-card-buttons { justify-content: flex-start; }
 .action-card:hover {
   border-color: rgba(99, 102, 241, 0.65);
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.07) 100%);

@@ -711,3 +711,158 @@ html.light .el-button--primary:not(.is-link):not(.is-plain) {
     scroll-behavior: auto !important;
   }
 }
+
+/* =====================================================
+   Global monochrome workbench refinement
+
+   Page styles in this app pre-date the design system and use scoped,
+   page-local palettes.  This final layer intentionally normalizes the
+   shared surfaces, controls and workspace primitives without touching any
+   business markup or Vue state.
+   ===================================================== */
+:root {
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / .04);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / .04), 0 2px 4px -2px rgb(0 0 0 / .04);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --el-font-family: var(--font-sans);
+  --el-font-size-base: 14px;
+  --el-component-size: 36px;
+  --el-component-size-small: 32px;
+  --el-border-radius-base: var(--radius-md);
+  --el-border-radius-small: var(--radius-sm);
+  --el-box-shadow: var(--shadow-sm);
+  --el-box-shadow-light: var(--shadow-md);
+}
+
+html, body, button, input, textarea, select { font-family: var(--font-sans); }
+body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+html.light body { background: #f5f5f5; }
+html.dark body { background: #0a0a0a; }
+
+/* Element Plus: remove the blue enterprise defaults and use quiet surfaces. */
+html.light {
+  --el-bg-color: #fff;
+  --el-bg-color-page: #f5f5f5;
+  --el-bg-color-overlay: #fff;
+  --el-fill-color: #f5f5f5;
+  --el-fill-color-light: #fafafa;
+  --el-fill-color-blank: #fff;
+  --el-text-color-primary: #171717;
+  --el-text-color-regular: #404040;
+  --el-text-color-secondary: #737373;
+  --el-text-color-placeholder: #a3a3a3;
+  --el-border-color: #e5e5e5;
+  --el-border-color-light: #ededed;
+  --el-border-color-lighter: #f5f5f5;
+  --el-mask-color: rgb(0 0 0 / .42);
+}
+html.dark {
+  --el-bg-color: #111;
+  --el-bg-color-page: #0a0a0a;
+  --el-bg-color-overlay: #111;
+  --el-fill-color: #181818;
+  --el-fill-color-light: #222;
+  --el-fill-color-blank: #111;
+  --el-text-color-primary: #fafafa;
+  --el-text-color-regular: #e5e5e5;
+  --el-text-color-secondary: #a3a3a3;
+  --el-text-color-placeholder: #737373;
+  --el-border-color: #303030;
+  --el-border-color-light: #262626;
+  --el-border-color-lighter: #1d1d1d;
+  --el-mask-color: rgb(0 0 0 / .62);
+}
+
+.el-button { font-weight: 500; transition: color .2s ease-out, background-color .2s ease-out, border-color .2s ease-out, opacity .2s ease-out; }
+.el-button--primary:not(.is-link):not(.is-plain) { box-shadow: none !important; }
+.el-button--primary:not(.is-link):not(.is-plain):hover { opacity: .8; }
+.el-button:focus-visible, .el-input__wrapper.is-focus, .el-textarea__wrapper:focus-within, .el-select__wrapper.is-focused { outline: none; box-shadow: 0 0 0 1px var(--text-subtle) !important; }
+.el-input__wrapper, .el-textarea__wrapper, .el-select__wrapper { background: var(--bg-inner) !important; box-shadow: 0 0 0 1px var(--border-color) !important; }
+.el-input__inner, .el-textarea__inner { color: var(--text-primary) !important; }
+.el-dialog, .el-message-box, .el-popper, .el-select-dropdown, .el-picker__popper { border: 1px solid var(--border-color) !important; box-shadow: var(--shadow-md) !important; }
+.el-dialog__header, .el-dialog__footer { border-color: var(--border-color); }
+.el-card, .el-collapse, .el-collapse-item__header, .el-collapse-item__wrap, .el-table, .el-table tr, .el-table th.el-table__cell, .el-table td.el-table__cell { background: var(--bg-card) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; }
+.el-table th.el-table__cell { color: var(--text-muted) !important; font-size: 12px; font-weight: 600; }
+.el-tabs__nav-wrap::after { background: var(--border-color) !important; }
+.el-tabs__item { color: var(--text-muted) !important; font-weight: 500; }
+.el-tabs__item.is-active, .el-tabs__item:hover { color: var(--text-primary) !important; }
+.el-tabs__active-bar { background: var(--text-primary) !important; }
+.el-tag { --el-tag-bg-color: var(--bg-hover); --el-tag-border-color: var(--border-color); --el-tag-text-color: var(--text-primary); }
+
+/* Shared workspace shell and surfaces across every route.  The body selector
+   deliberately outranks legacy scoped component rules. */
+html.light body .film-list, html.light body .drama-detail, html.light body .film-create, html.light body .ai-config,
+html.light body .drama-canvas-page, html.light body .tools-page, html.light body .tool-workbench,
+html.light body .media-tool, html.light body .media-library-page, html.light body .omni-page { background: #f5f5f5 !important; color: #262626 !important; }
+html.dark body .film-list, html.dark body .drama-detail, html.dark body .film-create, html.dark body .ai-config,
+html.dark body .drama-canvas-page, html.dark body .tools-page, html.dark body .tool-workbench,
+html.dark body .media-tool, html.dark body .media-library-page, html.dark body .omni-page { background: #0a0a0a !important; color: #e5e5e5 !important; }
+
+body .header, body .page-header, body .topbar, body .workbench-header, body .media-header {
+  background: var(--bg-card) !important; border-color: var(--border-color) !important; box-shadow: none !important; backdrop-filter: none !important;
+}
+body .logo, body .logo-main, body .project-title, body .episode-title, body .section-title,
+body .workbench-title h1, body .tools-page h1, body .media-tool h1, body .media-tool h2 { color: var(--text-bright) !important; -webkit-text-fill-color: currentColor !important; background-image: none !important; }
+body .logo-sub, body .page-title, body .project-desc, body .project-meta, body .episode-preview,
+body .episode-num, body .section-count, body .breadcrumb, body .eyebrow, body .hero-copy,
+body .tool-card > p, body .tool-card footer, body .workbench-title p, body .media-header p { color: var(--text-muted) !important; }
+
+body .card, body .section.card, body .project-card, body .omni-project-card, body .action-card,
+body .episode-card, body .library-item, body .tool-card, body .tool-form, body .run-history,
+body .result, body .control-panel, body .preview-stage, body .generation-history, body .history-card,
+body .filter-bar, body .upload-limits, body .batch-bar, body .panel, body .shot-card,
+body .material-card, body .advanced-settings, body .selected-assets article {
+  background: var(--bg-card) !important; border-color: var(--border-color) !important; box-shadow: none !important; backdrop-filter: none !important; background-image: none !important;
+}
+body .project-card::before, body .episode-card::before { display: none !important; }
+body .card:hover, body .section.card:hover, body .project-card:hover, body .omni-project-card:hover,
+body .episode-card:hover, body .library-item:hover, body .tool-card:hover, body .tool-card:focus-visible,
+body .history-card:hover, body .history-card.active, body .shot-card.active, body .material-card.selected {
+  background: var(--bg-hover) !important; border-color: var(--text-primary) !important; box-shadow: inset 2px 0 0 var(--text-primary) !important; transform: none !important;
+}
+body .badge, body .badge-omni, body .badge-storyboards, body .badge-status, body .badge-ratio,
+body .badge-style, body .badge-genre, body .ep-stat--status, body .type-badge {
+  background: var(--bg-hover) !important; border: 1px solid var(--border-color) !important; color: var(--text-primary) !important;
+}
+body .quick-nav, body .canvas-sidebar, body .nav-sidebar, body .sidebar, body .player-tools,
+body .shot-tabs, body .shot-script, body .time-ruler, body .center-stage, body .video-stage,
+body .result pre, body .featured, body .empty-result { background: var(--bg-inner) !important; border-color: var(--border-color) !important; box-shadow: none !important; }
+body .nav-item:hover, body .nav-sub-item:hover, body .nav-step:hover, body .sidebar-item:hover,
+body .res-tab:hover, body .res-tab.active { background: var(--bg-hover) !important; color: var(--text-primary) !important; }
+body .res-tab--lib.active, body .res-tab--drama.active, body .res-tab--lib.active::after, body .res-tab--drama.active::after { color: var(--text-primary) !important; background: var(--text-primary) !important; }
+
+/* Motion remains purposeful and accessible: no layout lift, only subtle state feedback. */
+body .project-card, body .episode-card, body .tool-card, body .library-item, body .history-card, body .shot-card, body .material-card { transition: color .2s ease-out, background-color .2s ease-out, border-color .2s ease-out, box-shadow .2s ease-out !important; }
+
+/* Some legacy pages set Element Plus colour variables on the button root.
+   Reset those local variables at the final cascade point. */
+html.light body .el-button--primary:not(.is-link):not(.is-plain) {
+  --el-button-bg-color: #171717 !important;
+  --el-button-border-color: #171717 !important;
+  --el-button-text-color: #fff !important;
+  --el-button-hover-bg-color: #404040 !important;
+  --el-button-hover-border-color: #404040 !important;
+  --el-button-hover-text-color: #fff !important;
+}
+html.dark body .el-button--primary:not(.is-link):not(.is-plain) {
+  --el-button-bg-color: #f5f5f5 !important;
+  --el-button-border-color: #f5f5f5 !important;
+  --el-button-text-color: #111 !important;
+  --el-button-hover-bg-color: #d4d4d4 !important;
+  --el-button-hover-border-color: #d4d4d4 !important;
+  --el-button-hover-text-color: #111 !important;
+}
+body .header-library .el-button:not(.el-button--primary),
+body .header-actions .el-button:not(.el-button--primary) {
+  --el-button-bg-color: var(--bg-card) !important;
+  --el-button-border-color: var(--border-muted) !important;
+  --el-button-text-color: var(--text-primary) !important;
+  --el-button-hover-bg-color: var(--bg-hover) !important;
+  --el-button-hover-border-color: var(--text-primary) !important;
+  --el-button-hover-text-color: var(--text-primary) !important;
+  box-shadow: none !important;
+}
