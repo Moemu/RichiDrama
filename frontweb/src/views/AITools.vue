@@ -1,20 +1,31 @@
 <template>
   <main class="tools-page">
-    <header><el-button text @click="$router.back()">返回</el-button><h1>AI 工具箱</h1><p>复用已有创作、素材与任务能力。</p></header>
-    <section class="tool-grid">
-      <article v-for="tool in tools" :key="tool.title" class="tool-card" @click="$router.push(tool.to)"><b>{{ tool.title }}</b><span>{{ tool.description }}</span></article>
+    <header class="tools-hero">
+      <div class="crumb"><el-button text @click="$router.push('/')">← 返回项目</el-button><span>AI 工具箱</span></div>
+      <div class="hero-content"><div><p class="eyebrow">LOCAL MINI DRAMA · WORKBENCH</p><h1>从灵感到镜头的独立工作台</h1><p class="hero-copy">工具运行独立保存；确认满意后，再导入短剧项目或素材库。</p></div><div class="hero-actions"><el-button @click="$router.push('/media-library')">素材库</el-button><el-button type="primary" @click="$router.push('/free-create')">进入全能创作</el-button></div></div>
+      <div class="workflow"><span><b>1</b> 输入创意或素材</span><i></i><span><b>2</b> 生成与复核</span><i></i><span><b>3</b> 按需导入项目</span></div>
+    </header>
+    <section v-for="group in groups" :key="group.title" class="tool-group">
+      <div class="group-heading"><div><p class="eyebrow">{{ group.kicker }}</p><h2>{{ group.title }}</h2></div><p>{{ group.description }}</p></div>
+      <div class="tool-grid"><article v-for="tool in group.tools" :key="tool.title" class="tool-card" tabindex="0" @click="$router.push(tool.to)" @keydown.enter="$router.push(tool.to)"><div class="card-top"><span class="tool-icon" :class="tool.tone">{{ tool.icon }}</span><span class="type-label">{{ tool.label }}</span></div><h3>{{ tool.title }}</h3><p>{{ tool.description }}</p><dl><div><dt>输入</dt><dd>{{ tool.input }}</dd></div><div><dt>产出</dt><dd>{{ tool.output }}</dd></div></dl><footer>进入工作台 <span>→</span></footer></article></div>
     </section>
   </main>
 </template>
 <script setup>
 const tools = [
-  { title: '全能创作', description: '以镜头编排图片、视频、音频参考并生成成片。', to: '/free-create' },
-  { title: '媒体素材库', description: '上传、重命名、管理素材与真人 SD2 认证。', to: '/media-library' },
-  { title: '图片与视频创作', description: '进入项目列表后新建短剧或继续已有项目。', to: '/' },
-  { title: '首尾帧提取', description: '在已完成成片的全能创作工作台中提取并复用。', to: '/free-create' },
-  { title: '提示词引用修复', description: '在全能创作中粘贴提示词后自动恢复可识别的 @素材引用。', to: '/free-create' },
+  { title: '剧本分析', icon: '◎', tone: 'blue', label: '文本策划', input: '剧本与项目设定', output: '角色、场景、镜头建议', description: '将剧本拆解为可以直接进入制作流程的结构化信息。', to: '/ai-tools/script-analysis', group: 'writing' },
+  { title: '剧本分析（流式）', icon: '≋', tone: 'copper', label: '批量处理', input: '多个 TXT / 剧本', output: '可续写的分析记录', description: '适合长剧本与批量拆解，运行过程持续保存。', to: '/ai-tools/script-analysis-stream', group: 'writing' },
+  { title: '剧本创作', icon: '✦', tone: 'green', label: '文本策划', input: '创意、题材、集数', output: '分集短剧正文', description: '从灵感扩写为可编辑的短剧内容，再按需导入项目。', to: '/ai-tools/script-writing', group: 'writing' },
+  { title: '图片生成', icon: '▣', tone: 'blue', label: '视觉生成', input: '提示词与参考图', output: '图片生成记录', description: '支持文生图、图生图、多参考与组生组图。', to: '/ai-tools/image-generation', group: 'visual' },
+  { title: '视频生成', icon: '▶', tone: 'copper', label: '视频工作流', input: '提示词、首尾帧、参考', output: '视频任务与成片', description: '按模型能力选择文生、图生、首尾帧或多参考模式。', to: '/ai-tools/video-generation', group: 'visual' },
+  { title: '反推提示词', icon: '◌', tone: 'green', label: '素材分析', input: '图片或视频素材', output: '镜头与风格提示词', description: '从视觉素材提炼主体、构图、光影、运动与完整提示词。', to: '/ai-tools/reverse-prompt', group: 'visual' },
+]
+const groups = [
+  { title: '文本策划', kicker: 'PLAN THE STORY', description: '先把故事结构和制作信息理顺，再进入视觉生产。', tools: tools.filter((item) => item.group === 'writing') },
+  { title: '视觉与视频', kicker: 'MAKE THE SHOT', description: '所有结果独立留存，可直接导入素材库或继续全能创作。', tools: tools.filter((item) => item.group === 'visual') },
 ]
 </script>
 <style scoped>
-.tools-page{min-height:100vh;padding:32px;background:#171d2d;color:#e7ebf5}.tools-page header{max-width:960px;margin:auto}.tools-page h1{margin:12px 0 6px}.tools-page p{color:#aab4c9}.tool-grid{max-width:960px;margin:28px auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}.tool-card{display:grid;gap:10px;padding:22px;border:1px solid #3b4966;border-radius:12px;background:#20273a;cursor:pointer}.tool-card:hover{border-color:#7394ff}.tool-card span{font-size:13px;color:#aab4c9;line-height:1.6}
+.tools-page{min-height:100vh;padding:28px 32px 56px;background:#10151d;color:#f2f0ea}.tools-hero,.tool-group{max-width:1240px;margin:auto}.crumb{display:flex;align-items:center;gap:10px;color:#9facba;font-size:13px}.hero-content{display:flex;justify-content:space-between;gap:24px;align-items:end;padding:30px 0 24px}.eyebrow{margin:0 0 7px;color:#7ba9cc;font-size:11px;letter-spacing:.12em;font-weight:700}.hero-content h1{margin:0;font-size:clamp(25px,3vw,38px);letter-spacing:-.035em}.hero-copy{max-width:590px;margin:12px 0 0;color:#aab4c0;line-height:1.65}.hero-actions{display:flex;gap:8px;flex:none}.hero-actions :deep(.el-button--primary){--el-button-bg-color:#4b91c8;--el-button-border-color:#4b91c8;--el-button-hover-bg-color:#5ba1d6;--el-button-hover-border-color:#5ba1d6}.workflow{display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid #334050;border-radius:8px;background:#181f29;color:#c8d0d7;font-size:13px}.workflow span{display:flex;align-items:center;gap:8px}.workflow b{display:grid;place-items:center;width:21px;height:21px;border-radius:50%;background:#27435a;color:#eaf4fb;font-size:11px}.workflow i{height:1px;flex:1;max-width:72px;background:#415266}.tool-group{padding-top:42px}.group-heading{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:16px}.group-heading h2{margin:0;font-size:22px}.group-heading>p{max-width:430px;margin:0;color:#9facba;font-size:13px;line-height:1.6}.tool-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.tool-card{display:flex;flex-direction:column;min-height:245px;padding:18px;border:1px solid #334050;border-radius:10px;background:#181f29;cursor:pointer;outline:none;transition:border-color .15s,transform .15s,background .15s}.tool-card:hover,.tool-card:focus-visible{border-color:#4b91c8;background:#1c2631;transform:translateY(-2px)}.card-top{display:flex;align-items:center;justify-content:space-between}.tool-icon{display:grid;place-items:center;width:34px;height:34px;border-radius:8px;background:#22384a;color:#b8dcf5;font-weight:700;font-size:18px}.tool-icon.copper{background:#43331f;color:#e4bc86}.tool-icon.green{background:#203d32;color:#a9dbc1}.type-label{color:#9facba;font-size:11px}.tool-card h3{margin:18px 0 7px;font-size:17px}.tool-card>p{min-height:42px;margin:0;color:#aab4c0;font-size:13px;line-height:1.6}.tool-card dl{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:18px 0}.tool-card dl div{border-left:2px solid #42566a;padding-left:8px}.tool-card dt{color:#8895a4;font-size:10px}.tool-card dd{margin:3px 0 0;color:#d5dce2;font-size:11px;line-height:1.35}.tool-card footer{display:flex;justify-content:space-between;margin-top:auto;padding-top:12px;border-top:1px solid #2e3a48;color:#9fc8e8;font-size:13px}.tool-card footer span{font-size:18px;line-height:12px}@media(max-width:900px){.tools-page{padding:20px}.hero-content,.group-heading{align-items:flex-start;flex-direction:column}.tool-grid{grid-template-columns:1fr 1fr}.workflow{overflow:auto}.workflow i{min-width:30px}}@media(max-width:580px){.tools-page{padding:16px}.tool-grid{grid-template-columns:1fr}.hero-actions{width:100%}.hero-actions .el-button{flex:1}.workflow{font-size:12px}.workflow i{display:none}}
+.hero-actions :deep(.el-button--primary){--el-button-bg-color:#171717!important;--el-button-border-color:#171717!important;--el-button-text-color:#fff!important;--el-button-hover-bg-color:#404040!important;--el-button-hover-border-color:#404040!important}.tool-icon,.tool-icon.copper,.tool-icon.green,.workflow b{background:#ededed!important;color:#171717!important}.tool-card:hover,.tool-card:focus-visible{border-color:#171717!important;background:#f5f5f5!important}.eyebrow,.tool-card footer{color:#737373!important}
 </style>

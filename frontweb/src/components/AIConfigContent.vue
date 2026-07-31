@@ -2401,7 +2401,7 @@ onMounted(() => {
 /* 分镜图片生成 — 紫色 */
 .type-storyboard_image {
   background: rgba(139, 92, 246, 0.12);
-  color: #8b5cf6;
+  color: #3479ae;
   border-color: rgba(139, 92, 246, 0.25);
 }
 /* 视频 — 橙色 */

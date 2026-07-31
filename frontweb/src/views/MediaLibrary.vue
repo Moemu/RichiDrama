@@ -2,7 +2,7 @@
   <div class="media-library-page">
     <div class="page-header">
       <div class="header-left">
-        <el-button text @click="$router.back()">
+        <el-button text @click="$router.push('/')">
           <el-icon><ArrowLeft /></el-icon>
           返回
         </el-button>
@@ -82,7 +82,7 @@
         </div>
         <div class="media-info">
           <span class="media-name" :title="item.name" @dblclick.stop="renameItem(item)">{{ item.name || '未命名' }}</span>
-          <span class="media-meta">{{ formatSize(item.size) }}</span>
+          <div class="media-meta-row"><span class="media-meta">{{ formatSize(item.size) }}</span><span v-if="item.type === 'image' && item.requires_sd2_identity" class="identity-state" :class="sd2Status(item)">真人 · {{ sd2Label(item) }}</span></div>
         </div>
       </div>
 
@@ -128,6 +128,7 @@
         <div class="meta-row"><span>名称：</span>{{ previewItem?.name || '未命名' }}</div>
         <div class="meta-row"><span>大小：</span>{{ formatSize(previewItem?.size) }}</div>
         <div class="meta-row"><span>创建时间：</span>{{ previewItem?.created_at }}</div>
+        <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人／需要身份一致性</el-checkbox><el-button v-if="previewItem?.requires_sd2_identity" text size="small" :loading="certifyingId === previewItem?.id" @click="certify(previewItem)">{{ sd2Status(previewItem) === 'active' ? '认证可用' : '认证 / 刷新' }}</el-button></div>
       </div>
     </el-dialog>
   </div>
@@ -156,6 +157,7 @@ const total = ref(0)
 const selectedIds = reactive(new Set())
 const showPreview = ref(false)
 const previewItem = ref(null)
+const certifyingId = ref(null)
 const uploadInput = ref(null)
 const router = useRouter()
 let keywordTimer = null
@@ -271,6 +273,17 @@ async function renameItem(item) {
     Object.assign(item, updated)
     ElMessage.success('素材名称已更新')
   } catch (_) {}
+}
+
+function sd2Status(item) { return String(item?.seedance2_asset?.status || 'none').toLowerCase() }
+function sd2Label(item) { return ({ active: '认证可用', processing: '认证中', stale: '需刷新', failed: '认证失败', none: '未认证' })[sd2Status(item)] || '未认证' }
+async function setIdentity(item, value) {
+  try { const updated = await omniVideoAPI.updateAsset(item.id, { requires_sd2_identity: !!value }); Object.assign(item, updated); if (value) await certify(item) } catch (error) { ElMessage.error(error.message || '真人声明保存失败') }
+}
+async function certify(item) {
+  if (!item || certifyingId.value === item.id || sd2Status(item) === 'active') return
+  certifyingId.value = item.id
+  try { const out = sd2Status(item) === 'processing' ? await omniVideoAPI.refreshAssetCertification(item.id) : await omniVideoAPI.certifyAsset(item.id); item.seedance2_asset = out.seedance2_asset; ElMessage.success('SD2 认证状态已更新') } catch (error) { ElMessage.error(error.message || 'SD2 认证失败') } finally { certifyingId.value = null }
 }
 
 async function batchDelete() {
@@ -432,6 +445,13 @@ onMounted(loadMedia)
   color: #9ca3af;
 }
 
+.media-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 4px; }
+.identity-state { padding: 2px 5px; border-radius: 4px; font-size: 10px; white-space: nowrap; background: #eef2f5; color: #667085; }
+.identity-state.active { background: #e6f4eb; color: #28734b; }
+.identity-state.processing { background: #fff5dc; color: #966916; }
+.identity-state.stale,.identity-state.failed { background: #fce9e9; color: #ad4949; }
+.sd2-preview-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
+
 .empty-media {
   grid-column: 1 / -1;
   display: flex;
@@ -504,4 +524,5 @@ onMounted(loadMedia)
   font-weight: 500;
   color: #374151;
 }
+.media-library-page{background:#f5f5f5!important;color:#262626!important}.page-header,.filter-bar,.media-card,.upload-limits,.batch-bar{background:#fff!important;border-color:#e5e5e5!important;box-shadow:none!important}.media-card:hover,.media-card.selected{background:#fafafa!important;border-color:#171717!important;box-shadow:inset 2px 0 0 #171717!important}.media-library-page :deep(.el-button--primary){--el-button-bg-color:#171717!important;--el-button-border-color:#171717!important;--el-button-text-color:#fff!important;--el-button-hover-bg-color:#404040!important;--el-button-hover-border-color:#404040!important}.type-filter :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner){background:#171717!important;border-color:#171717!important;color:#fff!important;box-shadow:none!important}
 </style>

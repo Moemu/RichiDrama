@@ -15,6 +15,13 @@ html.dark {
   --text-subtle:   #71717a;
   --text-faint:    #52525b;
   --shadow:        0 2px 12px rgba(0,0,0,.4);
+  --el-color-primary: #4b91c8;
+  --el-color-primary-light-3: #78add5;
+  --el-color-primary-light-5: #9fc8e4;
+  --el-color-primary-light-7: #c9e0f0;
+  --el-color-primary-light-8: #e2eff7;
+  --el-color-primary-light-9: #f0f8fc;
+  --el-color-primary-dark-2: #3479ae;
 }
 
 /* =====================================================
@@ -245,15 +252,15 @@ html.light span, html.light label, html.light p {
    亮色模式增强 — 更现代的视觉效果
    ===================================================== */
 
-/* 主色改为紫色系 */
+/* 工作台主色：冷蓝，避免紫色和装饰性渐变 */
 html.light {
-  --el-color-primary: #7c3aed;
-  --el-color-primary-light-3: #a78bfa;
-  --el-color-primary-light-5: #c4b5fd;
-  --el-color-primary-light-7: #ddd6fe;
-  --el-color-primary-light-8: #ede9fe;
-  --el-color-primary-light-9: #f5f3ff;
-  --el-color-primary-dark-2: #6d28d9;
+  --el-color-primary: #3479ae;
+  --el-color-primary-light-3: #6da8d0;
+  --el-color-primary-light-5: #9dc8e5;
+  --el-color-primary-light-7: #cfe4f2;
+  --el-color-primary-light-8: #e5f1f8;
+  --el-color-primary-light-9: #f1f8fc;
+  --el-color-primary-dark-2: #245b88;
 }
 
 /* 卡片升级 */
@@ -266,17 +273,16 @@ html.light .el-card {
 
 /* 页面标题区美化 */
 html.light .header {
-  background: linear-gradient(135deg, #ffffff 0%, #faf9ff 100%) !important;
+  background: #ffffff !important;
   border-bottom: 1px solid #e8e8ef !important;
   box-shadow: 0 1px 8px rgba(0,0,0,.05) !important;
 }
 
 /* Logo 加紫色渐变 */
 html.light .logo {
-  background: linear-gradient(135deg, #7c3aed, #a78bfa) !important;
-  -webkit-background-clip: text !important;
-  -webkit-text-fill-color: transparent !important;
-  background-clip: text !important;
+  background: none !important;
+  color: #3479ae !important;
+  -webkit-text-fill-color: #3479ae !important;
 }
 
 /* 项目卡片美化 */
@@ -289,21 +295,21 @@ html.light .project-card {
 }
 html.light .project-card:hover {
   transform: translateY(-2px) !important;
-  box-shadow: 0 4px 12px rgba(124,58,237,.12), 0 12px 32px rgba(124,58,237,.06) !important;
-  border-color: #a78bfa !important;
+  box-shadow: 0 4px 12px rgba(52,121,174,.12), 0 12px 32px rgba(52,121,174,.06) !important;
+  border-color: #9dc8e5 !important;
 }
 
 /* 操作卡片（快速开始）美化 */
 html.light .action-card {
-  background: linear-gradient(135deg, #faf5ff 0%, #f5f3ff 100%) !important;
-  border: 2px dashed #c4b5fd !important;
+  background: #f1f8fc !important;
+  border: 2px dashed #9dc8e5 !important;
 }
 html.light .action-card:hover {
-  border-color: #a78bfa !important;
-  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%) !important;
+  border-color: #4b91c8 !important;
+  background: #e5f1f8 !important;
 }
 html.light .action-card-title {
-  color: #7c3aed !important;
+  color: #3479ae !important;
 }
 
 /* Section card 美化 */
@@ -320,8 +326,8 @@ html.light .library-item {
   transition: box-shadow 0.15s, border-color 0.15s !important;
 }
 html.light .library-item:hover {
-  box-shadow: 0 2px 8px rgba(124,58,237,.1) !important;
-  border-color: #c4b5fd !important;
+  box-shadow: 0 2px 8px rgba(52,121,174,.1) !important;
+  border-color: #9dc8e5 !important;
 }
 
 /* Storyboard 卡片 */
@@ -337,12 +343,12 @@ html.light .el-table {
   overflow: hidden !important;
 }
 html.light .el-table th.el-table__cell {
-  background: #f8f7ff !important;
-  color: #4c1d95 !important;
+  background: #f1f8fc !important;
+  color: #245b88 !important;
   font-weight: 600 !important;
 }
 html.light .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
-  background: #fdfcff !important;
+  background: #f9fcfe !important;
 }
 
 /* 表格内 link 按钮颜色恢复（防被 tr color !important 覆盖） */
@@ -361,13 +367,13 @@ html.light .el-button {
 }
 /* 勿作用于 is-plain：否则背景被强制为实色渐变而字色仍为 plain 主色，对比度丢失 */
 html.light .el-button--primary:not(.is-link):not(.is-plain) {
-  background: linear-gradient(135deg, #7c3aed, #6d28d9) !important;
-  border-color: transparent !important;
-  box-shadow: 0 2px 8px rgba(124,58,237,.25) !important;
+  background: #3479ae !important;
+  border-color: #3479ae !important;
+  box-shadow: 0 2px 8px rgba(52,121,174,.25) !important;
 }
 html.light .el-button--primary:not(.is-link):not(.is-plain):hover {
-  background: linear-gradient(135deg, #6d28d9, #5b21b6) !important;
-  box-shadow: 0 4px 12px rgba(124,58,237,.35) !important;
+  background: #245b88 !important;
+  box-shadow: 0 4px 12px rgba(52,121,174,.35) !important;
 }
 html.light .el-button.is-link {
   background: transparent !important;
@@ -378,21 +384,21 @@ html.light .el-button.is-link {
 /* 输入框 */
 html.light .el-input__wrapper {
   border-radius: 8px !important;
-  box-shadow: 0 0 0 1px #ddd6fe !important;
+  box-shadow: 0 0 0 1px #cfe4f2 !important;
   transition: box-shadow 0.2s !important;
 }
 html.light .el-input__wrapper:hover {
-  box-shadow: 0 0 0 1px #a78bfa !important;
+  box-shadow: 0 0 0 1px #9dc8e5 !important;
 }
 html.light .el-input__wrapper.is-focus {
-  box-shadow: 0 0 0 2px #7c3aed !important;
+  box-shadow: 0 0 0 2px #3479ae !important;
 }
 html.light .el-textarea__wrapper {
   border-radius: 8px !important;
-  box-shadow: 0 0 0 1px #ddd6fe !important;
+  box-shadow: 0 0 0 1px #cfe4f2 !important;
 }
 html.light .el-textarea__wrapper:hover {
-  box-shadow: 0 0 0 1px #a78bfa !important;
+  box-shadow: 0 0 0 1px #9dc8e5 !important;
 }
 
 /* 对话框 */
@@ -409,16 +415,16 @@ html.light .episode-card {
 }
 html.light .episode-card:hover {
   transform: translateY(-1px) !important;
-  box-shadow: 0 4px 16px rgba(124,58,237,.1) !important;
-  border-color: #a78bfa !important;
+  box-shadow: 0 4px 16px rgba(52,121,174,.1) !important;
+  border-color: #9dc8e5 !important;
 }
 
 /* page bg 更细腻 */
 html.light {
-  --bg-page: #f4f2fa;
+  --bg-page: #f4f7f8;
 }
 html.light html, html.light body, html.light #app, html.light .app {
-  background: #f4f2fa !important;
+  background: #f4f7f8 !important;
 }
 
 /* 资产管理 header banner */
@@ -433,16 +439,49 @@ html.light .el-tabs__item {
   font-weight: 500 !important;
 }
 html.light .el-tabs__item.is-active {
-  color: #7c3aed !important;
+  color: #3479ae !important;
   font-weight: 600 !important;
 }
 html.light .el-tabs__active-bar {
-  background: #7c3aed !important;
+  background: #3479ae !important;
   border-radius: 2px !important;
 }
 html.light .el-tabs__nav-wrap::after {
   background: #ebebf0 !important;
 }
+
+/* 最终主题收口：项目页共用组件一律使用蓝 / 铜语义色。
+   保留旧规则是为了兼容业务样式，但不得让紫色和渐变重新进入可见界面。 */
+html.light .header,
+html.light .logo,
+html.light .action-card,
+html.light .action-card:hover {
+  background-image: none !important;
+}
+html.light .logo,
+html.light .logo-main { color: #3479ae !important; -webkit-text-fill-color: #3479ae !important; }
+html.light .action-card { background: #f1f8fc !important; border-color: #9dc8e5 !important; }
+html.light .action-card:hover { background: #e5f1f8 !important; border-color: #6da8d0 !important; }
+html.light .action-card-title,
+html.light .el-tabs__item.is-active { color: #3479ae !important; }
+html.light .el-button--primary:not(.is-link):not(.is-plain) {
+  background: #3479ae !important;
+  border-color: #3479ae !important;
+  box-shadow: 0 2px 8px rgba(52,121,174,.22) !important;
+}
+html.light .el-button--primary:not(.is-link):not(.is-plain):hover {
+  background: #245b88 !important;
+  border-color: #245b88 !important;
+  box-shadow: 0 4px 12px rgba(52,121,174,.28) !important;
+}
+html.light .el-input__wrapper,
+html.light .el-textarea__wrapper { box-shadow: 0 0 0 1px #cfe4f2 !important; }
+html.light .el-input__wrapper:hover,
+html.light .el-textarea__wrapper:hover { box-shadow: 0 0 0 1px #6da8d0 !important; }
+html.light .el-input__wrapper.is-focus { box-shadow: 0 0 0 2px #3479ae !important; }
+html.light .project-card:hover,
+html.light .episode-card:hover,
+html.light .library-item:hover { border-color: #6da8d0 !important; box-shadow: 0 4px 16px rgba(52,121,174,.12) !important; }
 
 /* 导航 tab（按钮型）美化 */
 html.light .el-radio-button__inner {
@@ -481,4 +520,194 @@ html.dark .el-message--error {
 }
 html.light .el-message--error {
   box-shadow: 0 4px 20px rgba(245, 108, 108, 0.18);
+}
+
+/* =====================================================
+   LensRhyme monochrome workspace contract
+   Black/white is structural. Status colours are reserved for task state.
+   This section deliberately comes last so legacy page-local visual accents
+   cannot fragment the product experience.
+   ===================================================== */
+:root,
+html.dark {
+  --bg-page: #0a0a0a;
+  --bg-card: #111111;
+  --bg-inner: #181818;
+  --bg-hover: #222222;
+  --border-color: #303030;
+  --border-muted: #404040;
+  --text-primary: #e5e5e5;
+  --text-bright: #fafafa;
+  --text-muted: #a3a3a3;
+  --text-subtle: #737373;
+  --text-faint: #525252;
+  --el-color-primary: #f5f5f5;
+  --el-color-primary-light-3: #ffffff;
+  --el-color-primary-light-5: #e5e5e5;
+  --el-color-primary-light-7: #d4d4d4;
+  --el-color-primary-light-8: #c7c7c7;
+  --el-color-primary-light-9: #b5b5b5;
+  --el-color-primary-dark-2: #d4d4d4;
+}
+
+html.light {
+  --bg-page: #f5f5f5;
+  --bg-card: #ffffff;
+  --bg-inner: #fafafa;
+  --bg-hover: #f0f0f0;
+  --border-color: #e5e5e5;
+  --border-muted: #d4d4d4;
+  --text-primary: #262626;
+  --text-bright: #171717;
+  --text-muted: #737373;
+  --text-subtle: #a3a3a3;
+  --text-faint: #a3a3a3;
+  --el-color-primary: #171717;
+  --el-color-primary-light-3: #404040;
+  --el-color-primary-light-5: #737373;
+  --el-color-primary-light-7: #a3a3a3;
+  --el-color-primary-light-8: #d4d4d4;
+  --el-color-primary-light-9: #f5f5f5;
+  --el-color-primary-dark-2: #000000;
+}
+
+.el-button,
+.el-input__wrapper,
+.el-textarea__wrapper,
+.el-radio-button__inner,
+.el-select__wrapper,
+.el-tag,
+.el-card,
+.el-dialog,
+.el-message-box {
+  border-radius: 7px !important;
+}
+
+.el-button--primary:not(.is-link):not(.is-plain) {
+  --el-button-bg-color: #f5f5f5 !important;
+  --el-button-border-color: #f5f5f5 !important;
+  --el-button-text-color: #111111 !important;
+  --el-button-hover-bg-color: #d4d4d4 !important;
+  --el-button-hover-border-color: #d4d4d4 !important;
+  --el-button-active-bg-color: #ffffff !important;
+  --el-button-active-border-color: #ffffff !important;
+}
+html.light .el-button--primary:not(.is-link):not(.is-plain) {
+  --el-button-bg-color: #171717 !important;
+  --el-button-border-color: #171717 !important;
+  --el-button-text-color: #ffffff !important;
+  --el-button-hover-bg-color: #404040 !important;
+  --el-button-hover-border-color: #404040 !important;
+}
+
+.el-input__wrapper,
+.el-textarea__wrapper,
+.el-select__wrapper {
+  box-shadow: 0 0 0 1px var(--border-color) !important;
+}
+.el-input__wrapper.is-focus,
+.el-textarea__wrapper:focus-within,
+.el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--text-bright) !important;
+}
+
+/* Workspace pages share a plain canvas and one-panel language. */
+.tools-page,
+.tool-workbench,
+.media-tool,
+.omni-page,
+.media-library-page {
+  background: var(--bg-page) !important;
+  color: var(--text-primary) !important;
+}
+.tools-page .tools-hero,
+.tool-workbench .workbench-header,
+.media-tool .media-header,
+.omni-page .topbar,
+.media-library-page .page-header {
+  border-color: var(--border-color) !important;
+}
+.tools-page .workflow,
+.tools-page .tool-card,
+.tool-workbench .tool-form,
+.tool-workbench .run-history,
+.tool-workbench .result,
+.media-tool .input-panel,
+.media-tool .history-panel,
+.media-tool .result-panel,
+.omni-page .panel,
+.omni-page .player-tools,
+.omni-page .shot-tabs,
+.omni-page .shot-script,
+.media-library-page .filter-bar,
+.media-library-page .upload-limits {
+  background: var(--bg-card) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+  box-shadow: none !important;
+}
+.tools-page .tool-card:hover,
+.tools-page .tool-card:focus-visible,
+.tool-workbench .run-item:hover,
+.tool-workbench .run-item.active,
+.omni-page .shot-card.active,
+.omni-page .material-card.selected,
+.media-library-page .media-card.selected {
+  background: var(--bg-hover) !important;
+  border-color: var(--text-bright) !important;
+  box-shadow: inset 2px 0 0 var(--text-bright) !important;
+}
+.tools-page .tool-icon,
+.tools-page .tool-icon.copper,
+.tools-page .tool-icon.green,
+.tools-page .workflow b,
+.tool-workbench .title-mark,
+.tool-workbench .panel-kicker > span,
+.media-tool .title-icon,
+.omni-page .empty-play,
+.omni-page .render-play {
+  background: var(--bg-hover) !important;
+  color: var(--text-bright) !important;
+}
+.tools-page .eyebrow,
+.tools-page .tool-card footer,
+.tool-workbench .saving,
+.tool-workbench .empty > span,
+.media-tool .eyebrow,
+.media-tool .result-link,
+.omni-page .material-card .el-icon {
+  color: var(--text-muted) !important;
+}
+.tools-page .workflow i,
+.tools-page .tool-card dl div,
+.tool-workbench .run-item,
+.tool-workbench .status,
+.tool-workbench .result pre,
+.omni-page .time-ruler div,
+.omni-page .advanced-settings,
+.omni-page .dropzone,
+.omni-page .selected-assets article {
+  border-color: var(--border-color) !important;
+  background-color: var(--bg-inner) !important;
+}
+.omni-page .time-ruler i,
+.omni-page .render-ring {
+  background: var(--text-bright) !important;
+  border-color: var(--text-bright) !important;
+}
+.omni-page .mode-switch :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner),
+.omni-page .mode-switch .el-radio-button__original-radio:checked + .el-radio-button__inner {
+  background: var(--text-bright) !important;
+  border-color: var(--text-bright) !important;
+  color: var(--bg-page) !important;
+  box-shadow: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

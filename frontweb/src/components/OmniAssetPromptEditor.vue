@@ -19,8 +19,9 @@
       </button>
       <p v-if="!pickerAssets.length" class="pa-empty">没有匹配的素材</p>
     </div>
-    <div v-if="referenced.length" class="hints">
-      <el-tag v-for="asset in referenced" :key="asset.id" size="small" effect="plain">@{{ asset.alias || asset.name }}</el-tag>
+    <div v-if="referenced.length || unresolved.length" class="hints">
+      <el-tag v-for="asset in referenced" :key="asset.id" size="small" effect="plain" closable @close="removeReference(asset)">@{{ asset.alias || asset.name }}</el-tag>
+      <el-tag v-for="item in unresolved" :key="item.alias" type="warning" size="small" effect="plain">@{{ item.alias }} 待关联（名称重复）</el-tag>
     </div>
   </div>
 </template>
@@ -48,9 +49,17 @@ const pickerAssets = computed(() =>
     .map((a) => ({ ...a, _chosen: props.chosenIds.has(a.id) }))
     .slice(0, 30)
 )
-const referenced = computed(() =>
-  (props.assets || []).filter((asset) => text.value.includes(`@${asset.alias || asset.name}`))
-)
+const referenced = computed(() => {
+  const tokens = referencesFromText(text.value)
+  return tokens.flatMap((alias) => {
+    const matches = (props.assets || []).filter((asset) => (asset.alias || asset.name) === alias)
+    return matches.length === 1 ? matches : []
+  })
+})
+const unresolved = computed(() => referencesFromText(text.value).flatMap((alias) => {
+  const matches = (props.assets || []).filter((asset) => (asset.alias || asset.name) === alias)
+  return matches.length > 1 ? [{ alias, candidates: matches.map((asset) => asset.id) }] : []
+}))
 
 function onInput(value) {
   emit('update:modelValue', value)
@@ -58,12 +67,23 @@ function onInput(value) {
   showPicker.value = /@[^\s@]*$/.test(value)
 }
 
+function referencesFromText(value) {
+  return [...new Set([...String(value || '').matchAll(/@([^\s@]+)/g)].map((match) => match[1]))]
+}
 function syncReferences(value) {
-  const refs = (props.assets || []).filter((asset) => {
-    const name = asset.alias || asset.name
-    return name && String(value || '').includes(`@${name}`)
-  }).map((asset) => ({ asset_id: asset.id, alias: asset.alias || asset.name }))
-  emit('references', { text: value || '', refs })
+  const refs = []; const unresolvedRefs = []
+  referencesFromText(value).forEach((alias) => {
+    const matches = (props.assets || []).filter((asset) => (asset.alias || asset.name) === alias)
+    if (matches.length === 1) refs.push({ asset_id: matches[0].id, alias })
+    if (matches.length > 1) unresolvedRefs.push({ alias, candidate_asset_ids: matches.map((asset) => asset.id) })
+  })
+  emit('references', { text: value || '', refs, unresolved: unresolvedRefs })
+}
+
+function removeReference(asset) {
+  const token = `@${asset.alias || asset.name}`
+  text.value = text.value.replace(token, '').replace(/\s{2,}/g, ' ').trim()
+  emit('update:modelValue', text.value); syncReferences(text.value)
 }
 
 /** 插入素材 @引用；若未选中则通知父组件加入创作 */
@@ -109,8 +129,8 @@ function onDrop(e) {
 .editor :deep(.el-textarea__inner) { transition: border-color 0.2s, background 0.2s; }
 .drop-hint {
   position: absolute; inset: 0; display: grid; place-items: center;
-  background: #4d7cff1a; border: 2px dashed #4d7cff; border-radius: 6px;
-  color: #4d7cff; font-size: 13px; font-weight: 600; pointer-events: none; z-index: 4;
+  background: #4b91c81a; border: 2px dashed #4b91c8; border-radius: 6px;
+  color: #3479ae; font-size: 13px; font-weight: 600; pointer-events: none; z-index: 4;
 }
 .asset-picker {
   position: absolute; z-index: 5; left: 0; right: 0; top: 100%;
@@ -124,7 +144,7 @@ function onDrop(e) {
 .asset-picker button:hover { background: #f1f5ff; }
 .pa-icon { font-size: 14px; }
 .pa-name { flex: 1; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pa-chosen { font-size: 10px; color: #4d7cff; background: #eaf1ff; padding: 1px 5px; border-radius: 3px; }
+.pa-chosen { font-size: 10px; color: #3479ae; background: #e8f3fa; padding: 1px 5px; border-radius: 3px; }
 .pa-empty { font-size: 12px; color: #9aa6ba; text-align: center; padding: 12px; }
 .hints { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
 </style>

@@ -1,23 +1,73 @@
 @echo off
-set ROOT=%~dp0
+chcp 65001 >nul
+setlocal
+rem ============================================================================
+rem 一键启动本地开发环境：后端 (5679) + 前端 (3013)
+rem 双击运行即可。关闭时直接关掉弹出的两个 cmd 窗口。
+rem ----------------------------------------------------------------------------
+rem 【为什么不能直接 npm run dev】
+rem   后端必须带 CFG_IMAGE_PROXY__USE_FOR_VIDEO=false 启动，否则视频生成会把
+rem   本地参考图传到中转图床，本地图床响应慢会把异步任务阻塞数分钟。
+rem   详见 AGENTS.md「本地调试启动」。线上不设该变量，不受影响。
+rem ============================================================================
 
-echo [0/2] Checking port 5679...
-netstat -ano > "%TEMP%\lmd_netstat.txt" 2>&1
-findstr ":5679 " "%TEMP%\lmd_netstat.txt" | findstr "LISTENING" > "%TEMP%\lmd_port.txt" 2>&1
-for /f "tokens=5" %%a in (%TEMP%\lmd_port.txt) do (
-  echo   Killing old process on port 5679 ^(PID %%a^)...
+set ROOT=%~dp0
+set BACKEND_PORT=5679
+set FRONTEND_PORT=3013
+
+echo ===========================================
+echo  LocalMiniDrama 本地开发环境一键启动
+echo ===========================================
+
+rem [1/3] 清理残留旧进程（避免端口冲突把 Vite 挤到别的端口）
+echo.
+echo [1/3] 清理旧进程...
+call :kill_port %BACKEND_PORT%
+call :kill_port %FRONTEND_PORT%
+
+rem [2/3] 启动后端（从 backend-node 目录启动 + 本地调试环境变量）
+echo.
+echo [2/3] 启动后端 (:%BACKEND_PORT%)...
+start "LMD-Backend" cmd /k "cd /d %ROOT%backend-node && set CFG_IMAGE_PROXY__USE_FOR_VIDEO=false && echo 后端运行中，按 Ctrl+C 停止 && npm run dev"
+
+rem [3/3] 启动前端
+echo.
+echo [3/3] 启动前端 (:%FRONTEND_PORT%)...
+start "LMD-Frontend" cmd /k "cd /d %ROOT%frontweb && echo 前端运行中，按 Ctrl+C 停止 && npm run dev"
+
+echo.
+echo ===========================================
+echo  已启动。等待后端就绪后打开浏览器...
+echo   前端: http://localhost:%FRONTEND_PORT%/
+echo   后端: http://localhost:%BACKEND_PORT%/api/v1
+echo ===========================================
+
+echo 等待后端健康检查...
+set /a tries=0
+:waitloop
+set /a tries+=1
+powershell -Command "try { $r=Invoke-RestMethod 'http://localhost:%BACKEND_PORT%/health' -TimeoutSec 2; if ($r.status -eq 'ok') { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+if %errorlevel%==0 (
+  echo [OK] 后端就绪
+  goto openbrowser
+)
+if %tries% geq 40 (
+  echo [WARN] 后端 40s 内未就绪，请查看后端窗口日志
+  goto openbrowser
+)
+timeout /t 1 /nobreak >nul
+goto waitloop
+
+:openbrowser
+timeout /t 1 /nobreak >nul
+start http://localhost:%FRONTEND_PORT%/
+endlocal
+exit /b
+
+:kill_port
+rem 杀掉占用某端口的进程 %1
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%1 " ^| findstr "LISTENING"') do (
+  echo   端口 %1 被 PID %%a 占用，正在停止...
   taskkill /PID %%a /F >nul 2>&1
 )
-del "%TEMP%\lmd_netstat.txt" >nul 2>&1
-del "%TEMP%\lmd_port.txt" >nul 2>&1
-
-echo [1/2] Starting backend (backend-node)...
-start "Backend" cmd /k "cd /d %ROOT%backend-node && npm run dev"
-
-echo [2/2] Starting frontend (frontweb)...
-start "Frontend" cmd /k "cd /d %ROOT%frontweb && npm run dev"
-
-echo Done. Backend: http://127.0.0.1:3013  Frontend: http://127.0.0.1:5173
-
-timeout /t 3 /nobreak >nul
-start http://127.0.0.1:3013
+exit /b
