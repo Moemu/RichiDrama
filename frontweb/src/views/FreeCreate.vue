@@ -37,7 +37,21 @@
       <aside class="panel creation-panel" aria-label="创作输入与生成设置">
         <div class="panel-title"><b>视频生成方式</b><el-tag size="small" type="info">{{ creationMode === 'first_last_frame' ? '首尾帧生视频' : '多参考生视频' }}</el-tag></div>
         <el-radio-group v-model="creationMode" size="small" class="mode-switch"><el-radio-button label="multi_reference">多参考生视频</el-radio-button><el-radio-button label="first_last_frame">首尾帧生视频</el-radio-button></el-radio-group>
-        <small class="mode-note">{{ creationMode === 'first_last_frame' ? '必须且只能设置一张图片首帧与一张图片尾帧；模型不支持时不可提交。' : '图片、视频、音频可按用途自由编排，按模型能力自动路由。' }}</small>
+        <small class="mode-note">{{ creationMode === 'first_last_frame' ? '必须设置一张首帧（必填），尾帧可选；模型不支持时不可提交。' : '图片、视频、音频可按用途自由编排，按模型能力自动路由。' }}</small>
+        <div v-if="creationMode === 'first_last_frame'" class="frame-slots">
+          <div class="frame-slot" :class="{ filled: !!firstFrameAsset, required: true }" @click="openFramePicker('first_frame')">
+            <img v-if="firstFrameAsset" :src="assetUrl(firstFrameAsset)" />
+            <el-button v-if="firstFrameAsset" text size="small" class="frame-clear" @click.stop="clearFrame('first_frame')">清除</el-button>
+            <span v-if="!firstFrameAsset" class="frame-tag req">必填</span>
+            <div v-if="!firstFrameAsset" class="frame-empty"><el-icon><Picture /></el-icon><span class="frame-label">首帧 <em class="req">*</em></span><small>点击选择</small></div>
+          </div>
+          <div class="frame-slot" :class="{ filled: !!lastFrameAsset }" @click="openFramePicker('last_frame')">
+            <img v-if="lastFrameAsset" :src="assetUrl(lastFrameAsset)" />
+            <el-button v-if="lastFrameAsset" text size="small" class="frame-clear" @click.stop="clearFrame('last_frame')">清除</el-button>
+            <span v-if="!lastFrameAsset" class="frame-tag">选填</span>
+            <div v-if="!lastFrameAsset" class="frame-empty"><el-icon><Picture /></el-icon><span class="frame-label">尾帧</span><small>点击选择</small></div>
+          </div>
+        </div>
         <details class="advanced-settings"><summary>镜头与模型设置 <span>模型、比例、时长、分辨率、音频</span></summary><GenerationSettings v-model="generationSettings" :max-duration="15" /><div class="parameters"><label>音频<el-select v-model="audioStrategy" size="small"><el-option label="音频参考" value="reference_only"/><el-option label="成片混音" value="post_mix"/></el-select></label></div></details>
 
         <div class="materials-title"><b>当前镜头素材</b><div><el-button text size="small" @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
@@ -66,6 +80,15 @@
         <el-button class="generate-button" type="primary" size="large" :loading="creating" :disabled="!canCreate" @click="create">{{ creating ? '准备并生成中…' : '生成当前镜头' }}</el-button>
       </aside>
     </section>
+
+    <el-dialog v-model="framePicker.open" :title="framePicker.target === 'first_frame' ? '选择首帧' : '选择尾帧'" width="540px" append-to-body>
+      <div class="frame-picker-grid">
+        <article v-for="asset in pickerImageAssets" :key="asset.id" class="frame-picker-card" :class="{ active: framePickerValue && framePickerValue.id === asset.id }" @click="confirmFrame(asset)">
+          <img :src="assetUrl(asset)" /><small>{{ asset.alias || asset.name }}</small>
+        </article>
+      </div>
+      <div v-if="!pickerImageAssets.length" class="frame-picker-empty">还没有图片素材，请先在上方上传图片</div>
+    </el-dialog>
   </main>
 </template>
 
@@ -73,7 +96,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, CircleCheckFilled, Delete, Edit, Upload, VideoCamera, WarningFilled } from '@element-plus/icons-vue'
+import { ArrowLeft, CircleCheckFilled, Delete, Edit, Picture, Upload, VideoCamera, WarningFilled } from '@element-plus/icons-vue'
 import { omniVideoAPI } from '@/api/omniVideo'
 import OmniAssetPromptEditor from '@/components/OmniAssetPromptEditor.vue'
 import GenerationSettings from '@/components/GenerationSettings.vue'
@@ -97,7 +120,11 @@ const generationSettings = computed({ get: () => ({ video_model: model.value, as
 const selectionCounts = computed(() => chosenAssets.value.reduce((result, asset) => { if (Object.prototype.hasOwnProperty.call(result, asset.type)) result[asset.type] += 1; return result }, { image: 0, video: 0, audio: 0 }))
 const firstFrameCount = computed(() => chosenAssets.value.filter((asset) => asset.usage === 'first_frame').length)
 const lastFrameCount = computed(() => chosenAssets.value.filter((asset) => asset.usage === 'last_frame').length)
-const canCreate = computed(() => prompt.value.trim() && (creationMode.value !== 'first_last_frame' || (firstFrameCount.value === 1 && lastFrameCount.value === 1 && chosenAssets.value.length === 2 && currentCapability.value?.supports?.first_last_frame)))
+const firstFrameAsset = computed(() => chosenAssets.value.find((asset) => asset.usage === 'first_frame') || null)
+const lastFrameAsset = computed(() => chosenAssets.value.find((asset) => asset.usage === 'last_frame') || null)
+const pickerImageAssets = computed(() => assets.value.filter((asset) => asset.type === 'image'))
+const framePicker = ref({ open: false, target: 'first_frame' })
+const canCreate = computed(() => prompt.value.trim() && (creationMode.value !== 'first_last_frame' || (firstFrameCount.value === 1 && lastFrameCount.value <= 1 && currentCapability.value?.supports?.first_last_frame)))
 const nativeImageLimit = computed(() => Math.min(shotLimits.value.image, Number(currentCapability.value?.supports?.image_reference?.max || 0)))
 const limitSummary = computed(() => `单文件：图片 ${uploadLimits.value?.files?.image?.max_mb || 30}MB、视频 ${uploadLimits.value?.files?.video?.max_mb || 50}MB、音频 ${uploadLimits.value?.files?.audio?.max_mb || 15}MB；单镜头最多 ${shotLimits.value.total} 个素材。`)
 const selectionSummary = computed(() => `已选 ${chosenAssets.value.length}/${shotLimits.value.total}；图片 ${selectionCounts.value.image}/${shotLimits.value.image}，视频 ${selectionCounts.value.video}/${shotLimits.value.video}，音频 ${selectionCounts.value.audio}/${shotLimits.value.audio}${currentCapability.value ? `；当前模型原生图片参考 ${selectionCounts.value.image}/${nativeImageLimit.value}` : ''}`)
@@ -134,6 +161,26 @@ function setPromptReferences(value) { promptDocument.value = value || { text: pr
 function showCertificationError(error) { ElMessage.error(error?.message || 'SD2 认证失败，请检查资产库配置后重试') }
 async function setRealPerson(asset, value) { asset.requires_sd2_identity = !!value; try { const updated = await omniVideoAPI.updateAsset(asset.id, { requires_sd2_identity: !!value }); Object.assign(asset, updated); if (value) certify(asset).catch(showCertificationError); } catch (error) { asset.requires_sd2_identity = !value; ElMessage.error(error.message || '真人声明保存失败') } }
 function onUsageChange(asset) { if (asset.type === 'image' && asset.usage === 'identity' && !asset.requires_sd2_identity) { asset.usage = 'reference'; ElMessage.warning('请先勾选“真人／身份一致性”后再选择人物一致性用途'); } else if (asset.type === 'image' && asset.usage === 'identity' && sd2Status(asset) !== 'active') certify(asset).catch(showCertificationError); scheduleSave() }
+/** 首尾帧占位选择器：当前目标位置已选的素材（用于对话框高亮） */
+const framePickerValue = computed(() => framePicker.value.target === 'first_frame' ? firstFrameAsset.value : lastFrameAsset.value)
+function openFramePicker(target) { framePicker.value = { open: true, target } }
+function confirmFrame(asset) {
+  const target = framePicker.value.target
+  // 若该图片尚未加入当前镜头，先加入素材池
+  if (!selected.value.has(asset.id)) toggle(asset)
+  // 腾出目标位置：把原来占该位置的图改回普通参考
+  const occupant = target === 'first_frame' ? firstFrameAsset.value : lastFrameAsset.value
+  if (occupant && occupant.id !== asset.id) occupant.usage = 'reference'
+  // 如果该图原本占着另一个帧位置，清空那一边（避免一张图既是首帧又是尾帧）
+  if (asset.usage === 'first_frame' || asset.usage === 'last_frame') asset.usage = 'reference'
+  asset.usage = target
+  framePicker.value.open = false
+  scheduleSave()
+}
+function clearFrame(target) {
+  const occupant = target === 'first_frame' ? firstFrameAsset.value : lastFrameAsset.value
+  if (occupant) { occupant.usage = 'reference'; scheduleSave() }
+}
 function pickFiles() { fileInput.value?.click() }
 function dropFiles(event) { upload(event.dataTransfer.files) }
 function uploadFiles(event) { upload(event.target.files); event.target.value = '' }
@@ -161,9 +208,51 @@ onMounted(() => { const importedAssetId = Number(route.query.asset_id); if (!Num
 .omni-page{background:#101010!important;color:#f3f1ec!important;--el-text-color-primary:#f3f1ec;--el-text-color-regular:#d5d2cb;--el-text-color-secondary:#bcb8b0;--el-text-color-placeholder:#96928a;--el-text-color-disabled:#7d7972;--el-border-color:#46443f;--el-border-color-light:#3d3b37;--el-fill-color-blank:#202020;--el-fill-color:#272727;--el-fill-color-light:#2d2d2d;--el-bg-color:#202020;--el-bg-color-overlay:#252525}.topbar{background:#181818!important;border-color:#484641!important}.panel{background:#181818!important;border-color:#484641!important}.center-stage{background:#101010!important}.player-tools,.shot-tabs,.shot-script{background:#1b1b1b!important;border-color:#484641!important}.shot-card{background:#202020!important;border-color:#45433f!important}.shot-card.active,.material-card.selected{border-color:#f0eee8!important;box-shadow:inset 2px 0 0 #f0eee8!important;background:#30302e!important}.shot-number{background:#f0eee8!important;color:#252525!important}.video-stage{background:#0c0c0c!important}.video-stage b{color:#f5f3ee!important}.video-stage small{color:#d1cec7!important}.time-ruler{background:#181818!important;color:#d4d1ca!important}.time-ruler div{background:#494742!important}.time-ruler i{background:#f0eee8!important}.shot-heading small,.shot-state,.shot-tabs,.parameters label,.selection-limit-note,.upload-limit-note{color:#c4c1ba!important}.shot-tabs .active,.panel-title b,.materials-title b,.shot-title b,.selected-assets b{color:#f3f1ec!important}.drag-handle{color:#c4c1ba!important}.mode-switch :deep(.el-radio-button__inner){background:#252525!important;border-color:#4a4843!important;color:#dedbd4!important}.omni-page :deep(.el-button--primary){--el-button-bg-color:#f0eee8!important;--el-button-border-color:#f0eee8!important;--el-button-text-color:#252525!important;--el-button-hover-bg-color:#fffdf7!important;--el-button-hover-border-color:#fffdf7!important;--el-color-primary:#f0eee8!important}.omni-page :deep(.el-button.is-text){color:#dedbd4!important}.omni-page :deep(.el-button.is-text:hover){background:#30302e!important;color:#fffdf7!important}.omni-page :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner){background:#f0eee8!important;border-color:#f0eee8!important;box-shadow:none!important;color:#252525!important}.omni-page :deep(.el-input__wrapper),.omni-page :deep(.el-select__wrapper),.omni-page :deep(.el-textarea__inner),.omni-page :deep(.el-input-number__decrease),.omni-page :deep(.el-input-number__increase){background:#292929!important;box-shadow:0 0 0 1px #55524c inset!important;color:#f3f1ec!important}.omni-page :deep(.el-input__inner),.omni-page :deep(.el-select__selected-item),.omni-page :deep(.el-textarea__inner){color:#f3f1ec!important}.omni-page :deep(.el-input__inner::placeholder),.omni-page :deep(.el-textarea__inner::placeholder){color:#aaa69e!important}.mode-note{border-left-color:#aaa69e!important;background:#292826!important;color:#e2dfd8!important}.advanced-settings,.identity-options{background:#222222!important;border-color:#4a4843!important}.advanced-settings summary,.advanced-settings summary span{color:#d8d5ce!important}.dropzone,.material-card{background:#1e1e1e!important;border-color:#4b4944!important;color:#d2cfc8!important}.dropzone:hover{background:#292826!important;border-color:#aaa69e!important}.selected-assets article{background:#2a2a28!important}.empty-play,.render-play{background:#353532!important;color:#f3f1ec!important}.render-ring{border-color:#f0eee866!important}.material-card .el-icon,.prompt-label em{color:#d1cec7!important}
 /* SD2 认证为操作性信息，单独提升文字与状态对比度。 */
 .identity-options{display:grid;gap:9px;padding:11px!important}.identity-heading{display:grid;gap:3px;padding-bottom:8px;border-bottom:1px solid #4a4843}.identity-heading b{color:#f5f3ee!important;font-size:13px}.identity-heading small,.identity-help{color:#c8c5be!important;line-height:1.45}.identity-row{display:grid;gap:4px}.identity-row :deep(.el-checkbox__label){color:#f0eee8!important;font-size:12px}.identity-status{display:flex;align-items:center;flex-wrap:wrap;gap:3px;color:#d8d5ce!important;line-height:1.4}.identity-status.is-active{color:#e8f1e9!important}.identity-status.is-processing{color:#f0e1bd!important}.identity-status.is-failed,.identity-status.is-invalid{color:#f1c6c3!important}.identity-status :deep(.el-button){margin-left:3px!important;color:#f3f1ec!important;text-decoration:underline;text-underline-offset:2px}
+/* 音频后期控件：显式指定标签、滑杆与数字输入的前景色，避免默认灰色沉入深色面板。 */
+.audio-options{color:#f3f1ec!important}
+.audio-options :deep(.el-checkbox__label){color:#f3f1ec!important;font-size:12px}
+.audio-options :deep(.el-checkbox__inner){background:#292929!important;border-color:#77736b!important}
+.audio-options :deep(.el-checkbox.is-checked .el-checkbox__inner){background:#4b91c8!important;border-color:#4b91c8!important}
+.audio-options :deep(.el-slider__runway){background:#4a4843!important}
+.audio-options :deep(.el-slider__bar){background:#4b91c8!important}
+.audio-options :deep(.el-slider__button){background:#f3f1ec!important;border-color:#4b91c8!important}
+.audio-options :deep(.el-input-number){width:100%}
+.audio-options :deep(.el-input-number .el-input__wrapper){background:#292929!important;box-shadow:0 0 0 1px #55524c inset!important}
+.audio-options :deep(.el-input-number .el-input__inner){color:#f3f1ec!important}
+.audio-options :deep(.el-input-number__decrease),.audio-options :deep(.el-input-number__increase){background:#292929!important;color:#d5d2cb!important;border-color:#55524c!important}
+.generate-button.el-button--primary{background:#4b91c8!important;border-color:#4b91c8!important;color:#fff!important;box-shadow:0 2px 8px #0006}
+.generate-button.el-button--primary:hover{background:#5ba1d6!important;border-color:#5ba1d6!important;color:#fff!important}
+.generate-button.el-button--primary.is-disabled{background:#3d5262!important;border-color:#3d5262!important;color:#b8c1c7!important;box-shadow:none}
 /* 缩放与窄屏：三栏按可用宽度收缩，避免中间预览被固定最小宽度挤出视口。 */
 .omni-page{min-width:0;min-height:100dvh}.topbar{min-width:0;gap:8px}.topbar-left,.topbar-actions{min-width:0}.topbar-left{overflow:hidden}.topbar-left>span{white-space:nowrap}.sequence-name{width:clamp(104px,14vw,180px);min-width:0}.workbench{width:100%;min-width:0;grid-template-columns:minmax(196px,260px) minmax(0,1fr) minmax(270px,320px)}.center-stage,.panel,.player-tools,.shot-tabs,.shot-script{min-width:0}.player-tools,.shot-tabs{overflow:hidden}.shot-tabs{gap:clamp(10px,2vw,26px);white-space:nowrap}.selected-assets article{grid-template-columns:auto minmax(0,1fr) minmax(92px,120px) auto}.selected-assets b{min-width:0}.material-pool{grid-template-columns:repeat(auto-fit,minmax(58px,1fr))}
 @media(max-width:1180px){.workbench{grid-template-columns:minmax(184px,22vw) minmax(0,1fr) minmax(244px,27vw)}.panel{padding:10px}.selected-assets article{grid-template-columns:auto minmax(0,1fr) 92px auto}.player-tools{padding:0 10px}.time-ruler{padding:0 10px}}
 @media(max-width:960px){.workbench{grid-template-columns:minmax(176px,23vw) minmax(0,1fr) minmax(226px,29vw)}.shot-actions{gap:4px}.shot-actions .el-button{padding-left:5px;padding-right:5px}.shot-preview{height:94px}.material-pool{grid-template-columns:repeat(3,1fr)}.selected-assets article{grid-template-columns:auto minmax(0,1fr) auto}.selected-assets .el-select{grid-column:2 / -1}.prompt-label{gap:8px}.prompt-label em{max-width:55%;text-align:right}.time-ruler{font-size:11px}}
 @media(max-width:760px){.omni-page{height:auto;overflow:auto}.topbar{height:auto;min-height:58px;flex-wrap:wrap;padding:8px 12px}.topbar-left{flex:1}.topbar-actions{margin-left:auto}.workbench{height:auto;grid-template-columns:minmax(0,1fr)}.center-stage{order:-1;min-height:500px}.shot-panel{max-height:380px}.creation-panel{max-height:none}.shot-list{display:flex;overflow:auto}.shot-card{min-width:190px}.shot-preview{height:100px}.shot-tabs,.player-tools{overflow:auto}.sequence-name{width:min(40vw,180px)}}
+/* 左侧分镜管理：统一纵向流自适应宽度，卡片宽度跟随面板，不出横向滚动条。 */
+.shot-list{display:flex!important;flex-direction:column;gap:9px;overflow-y:auto;overflow-x:hidden}
+.shot-card{width:100%;min-width:0!important;box-sizing:border-box}
+.shot-card .shot-title{flex-wrap:wrap;row-gap:4px}
+@media(max-width:760px){.shot-list{display:flex!important;flex-direction:column;overflow-y:auto;overflow-x:hidden}.shot-card{min-width:0!important;width:100%}}
+/* 首尾帧强制占位框：高亮、必填强调、filled 态展示缩略图。 */
+.frame-slots{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 4px}
+.frame-slot{position:relative;height:120px;border:2px dashed #6b6862;border-radius:9px;overflow:hidden;cursor:pointer;background:#1e1e1e;display:flex;align-items:center;justify-content:center;transition:border-color .15s,background .15s}
+.frame-slot:hover{border-color:#aaa69e;background:#292826}
+.frame-slot.filled{border-style:solid;border-color:#f0eee8}
+.frame-slot.required:not(.filled){border-color:#d6a854;background:#26221a}
+.frame-slot.required:not(.filled):hover{border-color:#e6bd6e;background:#2e2a1f}
+.frame-slot img{width:100%;height:100%;object-fit:cover}
+.frame-empty{display:flex;flex-direction:column;align-items:center;gap:4px;color:#bcb8b0}
+.frame-empty .el-icon{font-size:26px;color:#8f8d86}
+.frame-label{font-size:13px;color:#dedbd4}
+.frame-label .req{color:#d6a854;font-style:normal;margin-left:2px}
+.frame-empty small{font-size:10px;color:#96928a}
+.frame-tag{position:absolute;left:6px;top:6px;font-size:10px;padding:1px 6px;border-radius:4px;background:#3a3733;color:#c4c1ba}
+.frame-tag.req{background:#5a4622;color:#e6bd6e}
+.frame-clear{position:absolute;right:3px;top:3px;background:#00000080!important;color:#f3f1ec!important}
+.frame-picker-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-height:380px;overflow:auto}
+.frame-picker-card{border:2px solid #4a4843;border-radius:7px;overflow:hidden;cursor:pointer;background:#1e1e1e}
+.frame-picker-card.active{border-color:#f0eee8;box-shadow:0 0 0 1px #f0eee8}
+.frame-picker-card img{width:100%;height:72px;object-fit:cover;display:block}
+.frame-picker-card small{display:block;padding:3px 4px;font-size:10px;color:#c4c1ba;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.frame-picker-empty{padding:30px 0;text-align:center;color:#96928a}
 </style>
