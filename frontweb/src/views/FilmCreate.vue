@@ -65,7 +65,7 @@
           :key="step.key"
           class="nav-step"
           :class="['status-' + step.status]"
-          @click="scrollToAnchor(step.anchor)"
+          @click="navigateWorkflowStep(step.key)"
         >
           <!-- 左侧连接线 -->
           <div class="step-connector-wrap">
@@ -183,6 +183,21 @@
     </nav>
 
     <main class="main">
+      <section class="workflow-shell" aria-label="短剧制作工作流">
+        <div class="workflow-head">
+          <div>
+            <span class="workflow-kicker">制作工作流</span>
+            <h2>{{ workflowStageMeta.title }}</h2>
+            <p>{{ workflowStageMeta.description }}</p>
+          </div>
+          <span class="workflow-episode">{{ currentEpisode?.title || '请选择剧集' }}</span>
+        </div>
+        <div class="workflow-steps" role="tablist" aria-label="工作阶段">
+          <button v-for="(step, index) in workflowStages" :key="step.key" type="button" class="workflow-step" :class="{ active: workflowStage === step.key, complete: step.complete }" role="tab" :aria-selected="workflowStage === step.key" @click="setWorkflowStage(step.key)">
+            <span>{{ index + 1 }}</span>{{ step.label }}
+          </button>
+        </div>
+      </section>
       <!-- 角色/道具/场景上传图片用，单例放在外层避免 v-for 导致 ref 为数组 -->
       <input
         ref="resourceImageFileInput"
@@ -190,6 +205,14 @@
         accept="image/jpeg,image/png,image/gif,image/webp"
         style="display: none"
         @change="onResourceImageFileChange"
+      />
+      <input
+        ref="resourceMediaFileInput"
+        type="file"
+        multiple
+        accept="image/*,video/*,audio/*"
+        style="display: none"
+        @change="onResourceMediaFileChange"
       />
       <!-- 分镜图上传图片用，单例放在外层避免 v-for 导致 ref 为数组 -->
       <input
@@ -200,7 +223,7 @@
         @change="onSbImageFileChange"
       />
       <!-- 剧本工作台：单卡片 + 选项卡（创作 / 选择） -->
-      <section class="section card script-workbench-unified">
+      <section v-show="workflowStage === 'script'" class="section card script-workbench-unified">
         <el-tabs v-model="scriptWorkbenchMode" class="script-workbench-tabs">
           <el-tab-pane label="创作剧本" name="create">
             <div class="script-pane-inner">
@@ -343,6 +366,10 @@
           </el-tab-pane>
         </el-tabs>
       </section>
+      <div v-show="workflowStage === 'script'" class="workflow-next-action">
+        <span>剧本确认后，再集中准备可复用资源。</span>
+        <el-button type="primary" :disabled="!scriptContent?.trim()" @click="setWorkflowStage('resources')">进入统一资源管理</el-button>
+      </div>
 
       <el-dialog
         v-model="showSelectScriptDialog"
@@ -368,7 +395,7 @@
       </el-dialog>
 
       <!-- 一键全流程生成 -->
-      <section class="section card pipeline-section">
+      <section v-if="workflowStage === 'script' && showLegacyPipeline" class="section card pipeline-section">
         <div class="one-click-actions">
           <span class="one-click-label">🚀 一键全流程</span>
           <el-select v-if="false" v-model="projectAspectRatio" style="width: 130px" @change="() => saveProjectSettings(false)">
@@ -458,10 +485,50 @@
       </section>
 
       <!-- 素材编排：统一资源库（常驻左侧，作用于当前选中分镜；点击分镜卡片切换） -->
-      <section class="section card resource-panel">
+      <section v-show="workflowStage === 'resources'" class="section card resource-center">
+        <div class="resource-center-heading">
+          <div>
+            <h2 class="section-title">统一资源管理</h2>
+            <p class="section-desc">先准备角色、场景、道具和上传媒体；分镜阶段只从这里选择并引用，不再重复建库。</p>
+          </div>
+          <el-button type="primary" plain :loading="resourceMediaUploading" @click="openResourceMediaUpload"><el-icon><Upload /></el-icon>上传媒体素材</el-button>
+        </div>
+        <div class="resource-center-grid">
+          <article class="resource-center-group">
+            <header><b>角色</b><span>{{ characters.length }}</span></header>
+            <div class="resource-center-actions"><el-button size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button><el-button size="small" @click="openAddCharacter">添加角色</el-button></div>
+            <div v-if="characters.length" class="resource-center-list"><div v-for="char in characters" :key="char.id" class="resource-center-item"><img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" alt="" /><span v-else class="resource-center-placeholder">角色</span><div><b>{{ char.name }}</b><small>{{ char.appearance || char.description || '待补充描述' }}</small></div><el-button size="small" text :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char)">生成图</el-button></div></div>
+            <p v-else class="resource-center-empty">从剧本提取角色，或手动添加。</p>
+          </article>
+          <article class="resource-center-group">
+            <header><b>场景</b><span>{{ scenes.length }}</span></header>
+            <div class="resource-center-actions"><el-button size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button><el-button size="small" @click="openAddScene">添加场景</el-button></div>
+            <div v-if="scenes.length" class="resource-center-list"><div v-for="scene in scenes" :key="scene.id" class="resource-center-item"><img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" alt="" /><span v-else class="resource-center-placeholder">场景</span><div><b>{{ scene.location }}</b><small>{{ scene.description || scene.prompt || '待补充描述' }}</small></div><el-button size="small" text :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid)">生成图</el-button></div></div>
+            <p v-else class="resource-center-empty">从当前剧本提取场景。</p>
+          </article>
+          <article class="resource-center-group">
+            <header><b>道具</b><span>{{ props.length }}</span></header>
+            <div class="resource-center-actions"><el-button size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button><el-button size="small" @click="showAddProp = true">添加道具</el-button></div>
+            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item"><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><el-button size="small" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid)">生成图</el-button></div></div>
+            <p v-else class="resource-center-empty">从当前剧本提取道具。</p>
+          </article>
+        </div>
+        <div class="resource-media-library">
+          <header><div><b>媒体素材库</b><small>上传的图片、视频、音频会在分镜引用区统一可用。</small></div><span>{{ universalLibraryAssets.length }} 项</span></header>
+          <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card"><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><small>{{ asset.name || `素材 ${asset.id}` }}</small></article></div>
+          <p v-else class="resource-center-empty">还没有上传媒体素材。</p>
+        </div>
+      </section>
+
+      <div v-show="workflowStage === 'resources'" class="workflow-next-action">
+        <span>资源会在分镜中按需选择、拖入提示词并形成 @ 引用。</span>
+        <el-button type="primary" :disabled="!currentEpisodeId" @click="setWorkflowStage('storyboard')">进入分镜管理</el-button>
+      </div>
+
+      <section v-show="workflowStage === 'storyboard'" class="section card resource-panel storyboard-reference-panel">
         <div class="collapse-header" style="cursor:default">
-          <h2 class="section-title">素材编排</h2>
-          <span class="sb-omni-left-hint">点击分镜卡片切换</span>
+          <h2 class="section-title">当前分镜引用</h2>
+          <span class="sb-omni-left-hint">从统一资源库选择，拖入提示词形成 @ 引用</span>
         </div>
         <div class="resource-panel-body">
           <template v-if="activeSb">
@@ -469,13 +536,8 @@
               <span class="sb-omni-left-sb-idx">#{{ storyboards.findIndex((s) => Number(s.id) === Number(activeSb.id)) + 1 }}</span>
               <span class="sb-omni-left-sb-name">{{ activeSb.title || '未命名分镜' }}</span>
             </div>
-            <div class="sb-omni-material-panel" @dragover.prevent="sbOmniLibDragging = true" @dragleave.prevent="sbOmniLibDragging = false" @drop.prevent="(e) => onSbOmniLibDrop(e, activeSb)">
-              <div v-if="sbOmniLibDragging" class="sb-omni-material-dropzone sb-omni-material-dropzone--active">松开上传图片 / 视频 / 音频</div>
-              <div class="sb-omni-material-upload-row">
-                <el-button size="small" type="primary" plain :loading="sbOmniUploadingIds.has(activeSb.id)" @click="onSbOmniUploadClick(activeSb)">上传素材</el-button>
-                <span class="sb-omni-material-drop-hint">统一资源库：媒体素材 + 场景/角色/道具图，点击选用，拖到提示词框直接引用</span>
-              </div>
-              <div class="sb-omni-material-note">{{ sbUniversalUploadLimitNote }}</div>
+            <div class="sb-omni-material-panel">
+              <div class="sb-omni-material-note">统一资源库：媒体素材 + 本镜关联的场景/角色/道具图；点击选用，拖到提示词框直接引用。</div>
               <div v-if="(sbOmniAssetIds[activeSb.id] || []).length" class="sb-omni-material-summary">
                 已选 {{ (sbOmniAssetIds[activeSb.id] || []).length }}/{{ sbOmniShotLimits.total }}；图片 {{ sbOmniSelectedCounts(activeSb).image }}/{{ sbOmniShotLimits.image }}，视频 {{ sbOmniSelectedCounts(activeSb).video }}/{{ sbOmniShotLimits.video }}，音频 {{ sbOmniSelectedCounts(activeSb).audio }}/{{ sbOmniShotLimits.audio }}
               </div>
@@ -487,7 +549,7 @@
                   class="sb-omni-material-card"
                   :class="{ selected: sbOmniPoolItemSelected(activeSb, item) }"
                   :title="(item.name || '素材') + ': 点击选用；拖到提示词框直接引用'"
-                  :draggable="item.poolType === 'asset'"
+                  draggable="true"
                   @dragstart="onSbOmniAssetDragStart($event, item)"
                   @click="onSbOmniPoolToggle(activeSb, item)"
                 >
@@ -496,7 +558,7 @@
                   <small>{{ item.name }}</small>
                   <span v-if="sbOmniPoolItemSelected(activeSb, item)" class="sb-omni-material-card-check">✓</span>
                 </div>
-                <div v-if="!sbOmniPoolItems(activeSb).length" class="sb-omni-material-pool-empty">暂无素材：点「上传素材」或到「媒体素材库」上传图片/视频/音频</div>
+                <div v-if="!sbOmniPoolItems(activeSb).length" class="sb-omni-material-pool-empty">暂无素材，请返回「统一资源管理」上传或生成素材。</div>
               </div>
               <template v-if="getSelectedUniversalLibraryAssets(activeSb).length">
                 <div class="sb-omni-material-label">已选素材（↑↓ 调整 @图片N 顺序）</div>
@@ -541,7 +603,7 @@
       </section>
 
       <!-- 6. 分镜生成 -->
-      <section id="anchor-storyboard" class="section card">
+      <section v-show="workflowStage === 'storyboard'" id="anchor-storyboard" class="section card">
         <h2 class="section-title">
           <span>5. 分镜生成</span>
           <span class="step-desc">根据剧本、角色、场景自动生成分镜头脚本</span>
@@ -1379,8 +1441,13 @@
         <div v-else-if="storyboards.length === 0" class="empty-tip">请先生成分镜</div>
       </section>
 
+      <div v-show="workflowStage === 'storyboard'" class="workflow-next-action">
+        <span>{{ storyboards.length ? `已有 ${storyboards.length} 个分镜；生成完成后即可检查并合成。` : '请先生成至少一个分镜。' }}</span>
+        <el-button type="primary" :disabled="!storyboards.length" @click="setWorkflowStage('merge')">进入视频合成</el-button>
+      </div>
+
       <!-- 7. 视频配置 + AI 模型配置 -->
-      <section class="section card">
+      <section v-show="workflowStage === 'merge'" class="section card">
         <h2 class="section-title">视频配置</h2>
         <div class="config-grid">
           <el-form-item label="分辨率">
@@ -1439,13 +1506,19 @@
       </section>
 
       <!-- 8. 合成视频 -->
-      <section id="anchor-video" class="section card">
+      <section v-show="workflowStage === 'merge'" id="anchor-video" class="section card">
         <h2 class="section-title">合成视频</h2>
+        <div class="merge-readiness" :class="{ ready: mergeReadiness.total > 0 && mergeReadiness.missing === 0 }">
+          <b>镜头就绪：{{ mergeReadiness.ready }} / {{ mergeReadiness.total }}</b>
+          <span v-if="mergeReadiness.missing">还有 {{ mergeReadiness.missing }} 个分镜没有可用于合成的视频。</span>
+          <span v-else-if="mergeReadiness.total">全部分镜视频已就绪，可以合成当前集。</span>
+          <span v-else>请先在分镜管理中生成镜头视频。</span>
+        </div>
         <el-button
           type="primary"
           size="large"
           :loading="videoStatus === 'generating'"
-          :disabled="!currentEpisodeId || storyboards.length === 0 || videoStatus === 'generating'"
+          :disabled="!currentEpisodeId || mergeReadiness.total === 0 || mergeReadiness.missing > 0 || videoStatus === 'generating'"
           @click="onGenerateVideo"
         >
           合成视频
@@ -2663,6 +2736,33 @@ const characters = computed(() => store.characters)
 const scenes = computed(() => store.scenes)
 const props = computed(() => store.props)
 const storyboards = computed(() => store.storyboards)
+const workflowStage = ref('script')
+const showLegacyPipeline = ref(false)
+const resourceMediaFileInput = ref(null)
+const resourceMediaUploading = ref(false)
+const workflowStages = computed(() => [
+  { key: 'script', label: '剧本管理', complete: !!scriptContent.value?.trim() },
+  { key: 'resources', label: '统一资源', complete: characters.value.length + scenes.value.length + props.value.length + universalLibraryAssets.value.length > 0 },
+  { key: 'storyboard', label: '分镜管理', complete: storyboards.value.length > 0 },
+  { key: 'merge', label: '视频合成', complete: !!currentEpisode.value?.video_url },
+])
+const workflowStageMeta = computed(() => ({
+  script: { title: '剧本管理', description: '确定故事与当前集剧本，再进入资源准备。' },
+  resources: { title: '统一资源管理', description: '集中维护角色、场景、道具和媒体素材。' },
+  storyboard: { title: '分镜管理', description: '为每个分镜拖入素材并用 @ 引用，再生成镜头视频。' },
+  merge: { title: '视频合成', description: '检查镜头视频就绪状态后合成当前集成片。' },
+}[workflowStage.value] || {}))
+function setWorkflowStage(stage) {
+  if (['script', 'resources', 'storyboard', 'merge'].includes(stage)) workflowStage.value = stage
+}
+function navigateWorkflowStep(step) {
+  setWorkflowStage(step)
+  nextTick(() => {
+    const anchor = step === 'script' ? 'anchor-script' : step === 'storyboard' ? 'anchor-storyboard' : step === 'merge' ? 'anchor-video' : null
+    if (anchor) scrollToAnchor(anchor)
+    else window.scrollTo({ top: 0, behavior: 'smooth' })
+  })
+}
 /** 当前操作分镜（左侧素材编排面板作用目标）：默认第一个分镜，点击分镜卡片切换 */
 const activeSbId = ref(null)
 const activeSb = computed(() => {
@@ -2686,6 +2786,11 @@ const currentEpisode = computed(() => store.currentEpisode)
 const currentEpisodeId = computed(() => store.currentEpisode?.id ?? null)
 const videoProgress = computed(() => store.videoProgress)
 const videoStatus = computed(() => store.videoStatus)
+const mergeReadiness = computed(() => {
+  const total = storyboards.value.length
+  const ready = storyboards.value.filter((sb) => getSbAllVideos(sb.id).length > 0).length
+  return { total, ready, missing: Math.max(0, total - ready) }
+})
 
 function trackFilmCreateAction(_action, _payload = {}) {
   // 单机版：无埋点上报
@@ -2962,14 +3067,14 @@ const navSteps = computed(() => {
     || epRunning.some((t) => t.resourceType === GEN_RESOURCE.SB_VIDEO)
   const videoStatus = sbVideoGen ? 'generating' : sbVideoAllDone ? 'done' : sbVideoSome ? 'partial' : 'pending'
 
+  const resourcesGenerating = charGen || propGen || sceneGen
+  const resourceCount = charList.length + propList.length + sceneList.length + universalLibraryAssets.value.length
+  const resourcesReady = charStatus === 'done' && propStatus === 'done' && sceneStatus === 'done'
   return [
-    { key: 'script',   label: '故事剧本',   anchor: 'anchor-script',     status: scriptStatus,    count: hasScript ? 1 : 0 },
-    { key: 'chars',    label: '角色',        anchor: 'anchor-characters', status: charStatus,      count: charList.length },
-    { key: 'props',    label: '道具',        anchor: 'anchor-props',      status: propStatus,      count: propList.length },
-    { key: 'scenes',   label: '场景',        anchor: 'anchor-scenes',     status: sceneStatus,     count: sceneList.length },
-    { key: 'sb',       label: '分镜脚本',   anchor: 'anchor-storyboard', status: sbScriptStatus,  count: sbList.length },
-    { key: 'sbimg',    label: '分镜图',      anchor: 'anchor-storyboard', status: sbImgStatus,     count: sbList.length },
-    { key: 'video',    label: '分镜视频',   anchor: 'anchor-video',      status: videoStatus,     count: 0 },
+    { key: 'script', label: '剧本管理', status: scriptStatus, count: hasScript ? 1 : 0 },
+    { key: 'resources', label: '统一资源', status: resourcesGenerating ? 'generating' : resourcesReady ? 'done' : resourceCount ? 'partial' : 'pending', count: resourceCount },
+    { key: 'storyboard', label: '分镜管理', status: sbScriptGen || sbImgGen || sbVideoGen ? 'generating' : sbVideoAllDone ? 'done' : (sbList.length ? 'partial' : 'pending'), count: sbList.length },
+    { key: 'merge', label: '视频合成', status: videoStatus === 'generating' ? 'generating' : currentEpisodeVideoUrl.value ? 'done' : sbVideoSome ? 'partial' : 'pending', count: 0 },
   ]
 })
 
@@ -6005,6 +6110,31 @@ function onSbOmniUploadClick(sb) {
   sbOmniFileInput.value?.click()
 }
 
+function openResourceMediaUpload() {
+  resourceMediaFileInput.value?.click()
+}
+
+async function onResourceMediaFileChange(e) {
+  const files = Array.from(e.target?.files || [])
+  e.target.value = ''
+  if (!files.length) return
+  resourceMediaUploading.value = true
+  try {
+    for (const file of files) {
+      const result = await omniVideoAPI.upload(file, { name: file.name, drama_id: dramaId.value })
+      const asset = result?.asset
+      if (asset && !universalLibraryAssets.value.some((item) => Number(item.id) === Number(asset.id))) {
+        universalLibraryAssets.value = [asset, ...universalLibraryAssets.value]
+      }
+    }
+    ElMessage.success(`已加入 ${files.length} 个统一媒体素材`)
+  } catch (err) {
+    ElMessage.error(err?.message || '媒体素材上传失败')
+  } finally {
+    resourceMediaUploading.value = false
+  }
+}
+
 async function onSbOmniFileInputChange(e) {
   const files = e.target?.files
   const target = sbOmniUploadTargetId.value
@@ -6109,8 +6239,9 @@ async function onUniversalSegmentPickAsset(sb, slot) {
 /** 素材库卡片拖拽：携带素材信息供提示词编辑区接收（实体候选需先勾选导入素材库） */
 function onSbOmniAssetDragStart(e, item) {
   if (!e?.dataTransfer || !item) return
-  if (item.poolType === 'entity') return
-  const payload = JSON.stringify({ assetId: Number(item.id), alias: item.name || `素材${item.id}` })
+  const payload = JSON.stringify(item.poolType === 'entity'
+    ? { alias: item.name || '资源', entity: item.entity || null }
+    : { assetId: Number(item.id), alias: item.name || `素材${item.id}` })
   e.dataTransfer.effectAllowed = 'copy'
   e.dataTransfer.setData('application/json', payload)
   e.dataTransfer.setData('text/plain', payload)
@@ -6118,8 +6249,12 @@ function onSbOmniAssetDragStart(e, item) {
 
 /** 素材拖入提示词编辑区：加入本镜已选，并在文本末尾追加 @图片N 引用 */
 async function onUniversalSegmentDropAsset(sb, payload) {
-  if (!sb?.id || !payload?.assetId) return
-  const assetId = Number(payload.assetId)
+  if (!sb?.id || !payload) return
+  let assetId = Number(payload.assetId)
+  if (!Number.isFinite(assetId) && payload.entity) {
+    assetId = await ensureEntityAsset(sb, { entity: payload.entity, name: payload.alias })
+  }
+  if (!Number.isFinite(assetId)) return
   if (!sbOmniAssetSelected(sb, assetId)) {
     await setSbOmniAssetSelected(sb, assetId, true)
   }
@@ -11462,4 +11597,6 @@ html.light .frame-layout-anchor {
 .main-generation-controls{display:flex;align-items:center;gap:10px;flex:1;min-width:420px;padding:6px 10px;border:1px solid var(--el-border-color);border-radius:8px;background:var(--el-fill-color-light)}.main-generation-controls .generation-settings{flex:1;min-width:0;padding:0;border:0;background:transparent}.main-generation-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);white-space:nowrap}.sd2-resource-control{font-weight:600}.asset-btns{display:flex;flex-wrap:wrap;gap:6px}.asset-btns .sd2-resource-control{margin-left:0}@media(max-width:900px){.main-generation-controls{min-width:0;flex-wrap:wrap}.main-generation-controls .generation-settings{flex-basis:100%}}
 .sb-inline-generation-settings{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:8px 12px;border:1px solid var(--el-border-color);border-radius:8px;background:var(--el-fill-color-light)}.sb-inline-generation-settings .generation-settings{flex:1;min-width:0;padding:0;border:0;background:transparent}.sb-inline-generation-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);white-space:nowrap}.sb-inline-generation-hint{font-size:11px;color:var(--el-text-color-secondary);white-space:nowrap}@media(max-width:900px){.sb-inline-generation-settings{align-items:stretch;flex-wrap:wrap}.sb-inline-generation-settings .generation-settings{flex-basis:100%}.sb-inline-generation-hint{width:100%}}
 .sb-omni-controls{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:9px 10px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-blank)}.sb-omni-control-row,.sb-omni-frame-row,.sb-omni-frame-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sb-omni-control-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);min-width:48px}.sb-omni-control-hint{font-size:12px;color:var(--el-text-color-secondary)}.sb-omni-frame-slot{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--el-text-color-secondary);padding:4px 7px;background:var(--el-fill-color-light);border-radius:4px;max-width:100%;min-width:0}.sb-omni-frame-slot-label{font-weight:600;color:var(--el-text-color-primary);white-space:nowrap}.sb-omni-frame-thumb{width:34px;height:24px;object-fit:cover;border-radius:3px;flex:none}.sb-omni-frame-pick,.sb-omni-frame-upload{padding:0 4px;white-space:nowrap}.sb-universal-library-caret{margin-left:2px}.sb-universal-library-btn--static{font-size:12px;color:var(--el-text-color-secondary);padding:2px 8px;border:1px solid var(--el-border-color-lighter);border-radius:4px;white-space:nowrap}.sb-omni-left-sb-title{display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 8px;border:1px solid var(--el-border-color-lighter);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-left-sb-idx{font-size:11px;font-weight:700;color:#fff;background:#6366f1;border-radius:4px;padding:1px 5px;flex:none}.sb-omni-left-sb-name{font-size:13px;font-weight:600;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.sb-omni-left-hint{font-size:11px;color:var(--el-text-color-secondary)}.sb-omni-selected-strip{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:8px;padding:5px 8px;border:1px dashed var(--el-border-color);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-selected-strip-label{font-size:11px;font-weight:600;color:var(--el-text-color-secondary);flex:none}.sb-omni-selected-strip-item{display:inline-flex;align-items:center;gap:3px;border:1px solid var(--el-border-color-lighter);border-radius:4px;padding:1px 4px;background:var(--el-fill-color-blank)}.sb-omni-selected-strip-item img{width:20px;height:16px;object-fit:cover;border-radius:2px}.sb-omni-selected-strip-item em{font-size:10px;font-style:normal;color:var(--el-color-primary)}.sb-omni-material-panel{display:flex;flex-direction:column;gap:8px;margin-top:0;padding:10px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-blank);min-width:0}.sb-omni-material-dropzone{height:44px;display:flex;align-items:center;justify-content:center;gap:7px;border:1px dashed var(--el-color-primary);border-radius:7px;color:var(--el-color-primary);background:var(--el-color-primary-light-9);font-size:12px;text-align:center}.sb-omni-material-auto-refs{font-size:11px;line-height:1.5;color:var(--el-color-primary);padding:5px 8px;background:var(--el-color-primary-light-9);border-radius:5px}.sb-omni-material-upload-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sb-omni-material-drop-hint{font-size:11px;color:var(--el-text-color-secondary)}.sb-omni-material-note{font-size:11px;line-height:1.5;color:var(--el-text-color-secondary)}.sb-omni-material-summary{font-size:12px;line-height:1.5;color:var(--el-text-color-primary);padding:5px 8px;background:var(--el-fill-color-light);border-radius:5px}.sb-omni-material-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);margin-top:2px}.sb-omni-material-pool{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;max-height:240px;overflow:auto;padding-right:2px}.sb-omni-material-card{position:relative;border:1px solid var(--el-border-color);border-radius:6px;padding:3px;cursor:pointer;background:var(--el-fill-color-blank);overflow:hidden}.sb-omni-material-card:hover{border-color:var(--el-color-primary)}.sb-omni-material-card.selected{border-color:var(--el-color-primary);box-shadow:0 0 0 1px var(--el-color-primary)}.sb-omni-material-card img{width:100%;height:52px;object-fit:cover;border-radius:4px;display:block}.sb-omni-material-card-icon{display:flex;height:52px;align-items:center;justify-content:center;font-size:20px;background:var(--el-fill-color-light);border-radius:4px}.sb-omni-material-card small{display:block;margin-top:3px;font-size:10px;line-height:1.3;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-material-card-check{position:absolute;right:4px;top:4px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--el-color-primary);color:#fff;font-size:12px;font-weight:700}.sb-omni-material-pool-empty{grid-column:1/-1;font-size:12px;color:var(--el-text-color-secondary);padding:12px 0;text-align:center}.sb-omni-material-selected-list{display:flex;flex-direction:column;gap:5px;max-height:280px;overflow:auto;padding-right:2px}.sb-omni-material-selected-row{display:grid;grid-template-columns:34px minmax(0,1fr) 118px auto auto auto auto auto;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--el-border-color-lighter);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-material-selected-name{display:flex;align-items:center;gap:6px;min-width:0}.sb-omni-material-selected-name b{font-size:12px;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-material-at{font-size:10px;font-style:normal;color:var(--el-color-primary);background:var(--el-color-primary-light-9);padding:1px 5px;border-radius:3px;white-space:nowrap}.sb-universal-library-thumb{width:34px;height:24px;object-fit:cover;border-radius:3px}.sb-universal-library-type{display:inline-flex;width:34px;height:24px;align-items:center;justify-content:center;font-size:12px;color:var(--el-text-color-secondary);background:var(--el-fill-color-light);border-radius:3px;flex:none}.sb-universal-library-usage{width:118px;flex:none}.sb-universal-library-move{padding:0 4px}.sb-universal-library-sd2{padding:0 5px;font-size:10px;color:var(--el-text-color-secondary);white-space:nowrap;border-radius:4px}.sb-universal-library-sd2:hover{color:var(--el-color-primary)}.sb-universal-identity-row{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:8px;border:1px solid var(--el-border-color-lighter);border-radius:7px;background:var(--el-fill-color-light)}.sb-universal-identity-status{display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-size:11px;color:var(--el-text-color-secondary);line-height:1.4}.sb-universal-identity-status.is-active{color:var(--el-color-success)}.sb-universal-identity-status.is-processing{color:var(--el-color-warning)}.sb-universal-identity-status.is-failed,.sb-universal-identity-status.is-invalid{color:var(--el-color-danger)}.sb-universal-frame-actions{display:flex;flex-wrap:wrap;gap:6px}.sb-universal-frame-actions .el-button{margin:0}.sb-omni-frame-picker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;max-height:420px;overflow:auto}.sb-omni-frame-picker-card{border:1px solid var(--el-border-color);border-radius:7px;padding:5px;cursor:pointer;background:var(--el-fill-color-blank)}.sb-omni-frame-picker-card:hover{border-color:var(--el-color-primary)}.sb-omni-frame-picker-card.active{border-color:var(--el-color-primary);box-shadow:0 0 0 1px var(--el-color-primary)}.sb-omni-frame-picker-card img{width:100%;height:64px;object-fit:cover;border-radius:4px}.sb-omni-frame-picker-card small{display:block;margin-top:4px;font-size:11px;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-frame-picker-empty{font-size:12px;color:var(--el-text-color-secondary);text-align:center;padding:18px 0}@media(max-width:900px){.sb-omni-control-row{align-items:flex-start}.sb-omni-audio-row{flex-direction:column}.sb-omni-control-hint{width:100%}.sb-omni-frame-row{flex-direction:column;align-items:stretch}.sb-omni-frame-slot{justify-content:flex-start}.sb-omni-material-selected-row{grid-template-columns:34px minmax(0,1fr) auto auto auto}.sb-omni-material-selected-row .sb-universal-library-usage{grid-column:2 / -1;width:100%}}
+.workflow-shell{margin:0 0 18px;padding:22px 24px;border:1px solid #ded8ce;border-radius:14px;background:#fffdf9;box-shadow:0 8px 24px #372d2010}.workflow-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.workflow-head h2{margin:3px 0 4px;color:#28231d;font-size:22px}.workflow-head p{margin:0;color:#746c62;font-size:13px}.workflow-kicker{font-size:11px;font-weight:700;letter-spacing:.08em;color:#8c6a44}.workflow-episode{padding:6px 9px;border-radius:99px;background:#f5efe5;color:#6b5842;font-size:12px}.workflow-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:20px}.workflow-step{display:flex;align-items:center;justify-content:center;gap:8px;min-height:42px;border:1px solid #dfd8ce;border-radius:8px;background:#fff;color:#756c61;cursor:pointer;font:inherit;font-size:13px}.workflow-step span{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#eee9e1;color:#746b60;font-size:11px}.workflow-step:hover{border-color:#a68b68;color:#514333}.workflow-step.active{border-color:#755d43;background:#3d342a;color:#fff}.workflow-step.active span{background:#fff;color:#3d342a}.workflow-step.complete:not(.active) span{background:#d9e7da;color:#45624a}.resource-center{background:#fffdf9!important}.resource-center-heading,.resource-media-library>header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.resource-center-heading{margin-bottom:18px}.resource-center-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.resource-center-group,.resource-media-library{border:1px solid #e2ddd5;border-radius:10px;background:#fff;padding:14px}.resource-center-group>header,.resource-media-library>header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.resource-center-group>header b,.resource-media-library b{color:#302a23}.resource-center-group>header span,.resource-media-library>header>span{display:grid;place-items:center;min-width:22px;height:22px;border-radius:99px;background:#f0ebe3;color:#735e46;font-size:11px}.resource-center-actions{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.resource-center-list{display:grid;gap:7px;max-height:315px;overflow:auto}.resource-center-item{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:8px;align-items:center;padding:6px;border-radius:7px;background:#faf8f5}.resource-center-item img,.resource-center-placeholder{width:42px;height:36px;border-radius:5px;object-fit:cover}.resource-center-placeholder{display:grid;place-items:center;background:#ece6dc;color:#8a7e6d;font-size:10px}.resource-center-item b,.resource-center-item small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-center-item b{font-size:12px;color:#3e372f}.resource-center-item small{margin-top:3px;color:#8a8176;font-size:11px}.resource-center-empty{margin:18px 0;color:#92877b;font-size:12px}.resource-media-library{margin-top:14px}.resource-media-library header small{display:block;margin-top:4px;color:#8c8378;font-size:12px}.resource-media-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:9px}.resource-media-card{overflow:hidden;border:1px solid #e7e2da;border-radius:7px;background:#faf8f5}.resource-media-card img,.resource-media-card>span{display:grid;width:100%;height:62px;object-fit:cover;place-items:center;background:#efe9df;color:#857765;font-size:12px}.resource-media-card small{display:block;padding:5px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#5c5247;font-size:11px}.storyboard-reference-panel{border-color:#e0d6c8!important;background:#fffdf9!important}@media(max-width:900px){.workflow-head{flex-direction:column}.workflow-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.resource-center-grid{grid-template-columns:1fr}}
+.workflow-next-action{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:12px 0 22px;padding:14px 16px;border:1px solid #ded8ce;border-radius:10px;background:#f9f5ee;color:#665b4e;font-size:13px}.merge-readiness{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 14px;padding:11px 13px;border:1px solid #ead6b1;border-radius:8px;background:#fff7e8;color:#89622c;font-size:13px}.merge-readiness.ready{border-color:#c9dfca;background:#f0f8ef;color:#426c46}.merge-readiness b{color:inherit}@media(max-width:680px){.workflow-next-action{align-items:stretch;flex-direction:column}.workflow-next-action .el-button{width:100%}}
 </style>
