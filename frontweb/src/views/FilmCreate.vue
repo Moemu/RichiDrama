@@ -525,7 +525,19 @@
         <el-button type="primary" :disabled="!currentEpisodeId" @click="setWorkflowStage('storyboard')">进入分镜管理</el-button>
       </div>
 
-      <div v-show="workflowStage === 'storyboard'" class="storyboard-workspace">
+      <section v-show="workflowStage === 'storyboard'" class="section card storyboard-workbench-toolbar">
+        <div>
+          <h2 class="section-title">分镜工作台</h2>
+          <p class="section-desc">复用全能创作的镜头工作台：左侧统一素材、中央提示词与预览、右侧镜头列表可拖动排序。</p>
+        </div>
+        <div class="row gap">
+          <el-button type="primary" :loading="storyboardGenerating" :disabled="!currentEpisodeId || storyboardGenerating" @click="onGenerateStoryboard">{{ storyboards.length ? '重新生成分镜' : 'AI 生成分镜' }}</el-button>
+          <el-button :disabled="!currentEpisodeId" @click="onAddSingleStoryboard">添加镜头</el-button>
+        </div>
+      </section>
+      <FreeCreate v-if="workflowStage === 'storyboard' && currentEpisodeId" :project-episode-id="currentEpisodeId" :project-drama-id="dramaId" embedded @reordered="loadDrama" />
+
+      <div v-if="false" class="storyboard-workspace">
       <section class="section card resource-panel storyboard-reference-panel">
         <div class="collapse-header" style="cursor:default">
           <h2 class="section-title">当前分镜引用</h2>
@@ -2576,6 +2588,7 @@ import { exportStoryboardSheet } from '@/utils/exportStoryboardSheet'
 import StylePickerButton from '@/components/StylePickerButton.vue'
 import AIConfigContent from '@/components/AIConfigContent.vue'
 import UniversalSegmentOmniAtEditor from '@/components/UniversalSegmentOmniAtEditor.vue'
+import FreeCreate from '@/views/FreeCreate.vue'
 import {
   generationStyleOptions,
   getStylePromptEn,
