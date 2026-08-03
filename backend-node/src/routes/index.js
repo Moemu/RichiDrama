@@ -191,6 +191,8 @@ function setupRouter(cfg, db, log) {
   r.post('/props/:id/add-to-library', prop.addToLibrary);
   r.post('/props/:id/add-to-material-library', prop.addToMaterialLibrary);
   r.post('/props/:id/extract-from-image', prop.extractPropFromImage);
+  r.post('/props/:id/sd2-certify', prop.sd2Certify);
+  r.post('/props/:id/sd2-certify/refresh', prop.sd2CertifyRefresh);
 
   // ---------- vision: 从图片提取描述（不依赖已有实体 ID）----------
   r.post('/extract-description-from-image', async (req, res) => {
@@ -272,6 +274,8 @@ function setupRouter(cfg, db, log) {
   r.post('/scenes/:scene_id/add-to-library', scenes.addToLibrary);
   r.post('/scenes/:scene_id/add-to-material-library', scenes.addToMaterialLibrary);
   r.post('/scenes/:scene_id/extract-from-image', scenes.extractFromImage);
+  r.post('/scenes/:scene_id/sd2-certify', scenes.sd2Certify);
+  r.post('/scenes/:scene_id/sd2-certify/refresh', scenes.sd2CertifyRefresh);
 
   // ---------- images ----------
   r.get('/images', images.list);
@@ -311,6 +315,7 @@ function setupRouter(cfg, db, log) {
 
   // ---------- storyboards ----------
   r.get('/storyboards/episode/:episode_id/generate', storyboards.episodeStoryboardsGenerate);
+  r.put('/storyboards/reorder', storyboards.reorder);
   r.post('/storyboards', storyboards.create);
   r.post('/storyboards/:id/insert-before', storyboards.insertBefore);
   r.get('/storyboards/:id', storyboards.getOne);

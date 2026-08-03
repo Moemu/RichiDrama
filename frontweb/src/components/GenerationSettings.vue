@@ -22,7 +22,7 @@
     </label>
     <label>宽高比
       <el-select :model-value="value.aspect_ratio || '16:9'" size="small" @update:model-value="set('aspect_ratio', $event)">
-        <el-option label="16:9" value="16:9" /><el-option label="9:16" value="9:16" /><el-option label="1:1" value="1:1" />
+        <el-option label="16:9" value="16:9" /><el-option label="9:16" value="9:16" /><el-option label="1:1" value="1:1" /><el-option label="3:4" value="3:4" /><el-option label="4:3" value="4:3" /><el-option label="21:9" value="21:9" />
       </el-select>
     </label>
   </section>
@@ -36,14 +36,22 @@ import { omniVideoAPI } from '@/api/omniVideo'
 const props = defineProps({ modelValue: { type: Object, default: () => ({}) }, showTextModel: { type: Boolean, default: false }, maxDuration: { type: Number, default: 60 } })
 const emit = defineEmits(['update:modelValue'])
 const textModels = ref([]), videoModels = ref([])
+let modelOptionsCache = null
+let modelOptionsPromise = null
 const value = computed(() => props.modelValue || {})
 const duration = computed(() => Math.min(props.maxDuration, Math.max(1, Number(value.value.duration) || 5)))
 function set(key, next) { emit('update:modelValue', { ...value.value, [key]: key === 'duration' ? Math.min(props.maxDuration, Math.max(1, Number(next) || 5)) : next }) }
 function configModels(configs) { return [...new Set((configs || []).filter((item) => item.is_active !== false).flatMap((item) => Array.isArray(item.model) ? item.model : item.model ? [item.model] : []).filter(Boolean))] }
 onMounted(async () => {
-  const [text, video] = await Promise.allSettled([aiAPI.list('text'), omniVideoAPI.capabilities()])
-  if (text.status === 'fulfilled') textModels.value = configModels(text.value)
-  if (video.status === 'fulfilled') videoModels.value = Array.isArray(video.value) ? video.value : []
+  if (!modelOptionsPromise) {
+    modelOptionsPromise = Promise.allSettled([aiAPI.list('text'), omniVideoAPI.capabilities()]).then(([text, video]) => ({
+      text: text.status === 'fulfilled' ? configModels(text.value) : [],
+      video: video.status === 'fulfilled' && Array.isArray(video.value) ? video.value : [],
+    })).then((result) => { modelOptionsCache = result; return result })
+  }
+  const options = modelOptionsCache || await modelOptionsPromise
+  textModels.value = options.text
+  videoModels.value = options.video
 })
 </script>
 

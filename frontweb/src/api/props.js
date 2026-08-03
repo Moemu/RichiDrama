@@ -38,5 +38,11 @@ export const propAPI = {
   },
   putRefImage(id, refImagePath) {
     return request.put(`/props/${id}`, { ref_image: refImagePath ?? null })
+  },
+  certifySd2(id) {
+    return request.post(`/props/${id}/sd2-certify`, {})
+  },
+  refreshSd2(id) {
+    return request.post(`/props/${id}/sd2-certify/refresh`, {})
   }
 }

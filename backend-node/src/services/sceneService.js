@@ -3,6 +3,7 @@ const imageClient = require('./imageClient');
 const aiClient = require('./aiClient');
 const promptI18n = require('./promptI18n');
 const { mergeCfgStyleWithDrama } = require('../utils/dramaStyleMerge');
+const assetSd2Service = require('./assetSd2Service');
 
 function applySceneStyleOverride(cfg, styleOverride) {
   const o = (styleOverride || '').toString().trim();
@@ -18,7 +19,7 @@ function applySceneStyleOverride(cfg, styleOverride) {
   };
 }
 function updateScene(db, log, sceneId, req) {
-  const row = db.prepare('SELECT id FROM scenes WHERE id = ? AND deleted_at IS NULL').get(Number(sceneId));
+  const row = db.prepare('SELECT * FROM scenes WHERE id = ? AND deleted_at IS NULL').get(Number(sceneId));
   if (!row) return { ok: false, error: 'scene not found' };
   const updates = [];
   const params = [];
@@ -32,6 +33,9 @@ function updateScene(db, log, sceneId, req) {
   if (req.extra_images !== undefined) { updates.push('extra_images = ?'); params.push(req.extra_images ?? null); }
   if (req.ref_image !== undefined) { updates.push('ref_image = ?'); params.push(req.ref_image ?? null); }
   if (updates.length === 0) return { ok: true };
+  if (req.image_url != null || req.local_path !== undefined) {
+    assetSd2Service.markResourceStale(db, 'scene', row, req);
+  }
   params.push(new Date().toISOString(), sceneId);
   db.prepare('UPDATE scenes SET ' + updates.join(', ') + ', updated_at = ? WHERE id = ?').run(...params);
   log.info('Scene updated', { scene_id: sceneId });
@@ -121,6 +125,7 @@ function listByDramaId(db, dramaId) {
     image_url: row.image_url,
     local_path: row.local_path,
     extra_images: row.extra_images || null,
+    seedance2_asset: assetSd2Service.parse(row.seedance2_asset),
     status: row.status,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -140,6 +145,7 @@ function getSceneById(db, id) {
     image_url: row.image_url,
     local_path: row.local_path,
     extra_images: row.extra_images || null,
+    seedance2_asset: assetSd2Service.parse(row.seedance2_asset),
     status: row.status,
     created_at: row.created_at,
     updated_at: row.updated_at

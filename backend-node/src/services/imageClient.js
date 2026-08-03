@@ -9,6 +9,7 @@ const taskService = require('./taskService');
 const { loadConfig } = require('../config');
 const { postJSONWithTimeout } = require('./aiClient');
 const seedance2AssetGuards = require('../utils/seedance2AssetGuards');
+const assetSd2Service = require('./assetSd2Service');
 
 /** 图生 POST 使用 Node http(s)，默认 10 分钟，避免 undici fetch 大包体/慢链路下模糊失败 */
 const IMAGE_HTTP_TIMEOUT_MS = 600000;
@@ -1773,13 +1774,14 @@ function createAndGenerateImage(db, log, opts) {
       if (sceneIdNum != null) {
         try {
           // 旧图追加到 extra_images，与上传逻辑保持一致
-          const oldScene = db.prepare('SELECT local_path, image_url, extra_images FROM scenes WHERE id = ?').get(sceneIdNum);
+          const oldScene = db.prepare('SELECT id, local_path, image_url, extra_images, seedance2_asset FROM scenes WHERE id = ?').get(sceneIdNum);
           const oldPath = oldScene?.local_path || oldScene?.image_url || '';
           let extras = [];
           try { extras = oldScene?.extra_images ? JSON.parse(oldScene.extra_images) : []; } catch (_) {}
           if (!Array.isArray(extras)) extras = [];
           if (oldPath && !extras.includes(oldPath)) extras.push(oldPath);
           const extraJson = extras.length ? JSON.stringify(extras) : null;
+          assetSd2Service.markResourceStale(db, 'scene', oldScene, { image_url: result.image_url, local_path: localPath });
           db.prepare('UPDATE scenes SET image_url = ?, local_path = ?, extra_images = ?, updated_at = ? WHERE id = ?').run(
             result.image_url,
             localPath,

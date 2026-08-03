@@ -1,6 +1,7 @@
 const propService = require('../services/propService');
 const propLibraryService = require('../services/propLibraryService');
 const response = require('../response');
+const assetSd2Service = require('../services/assetSd2Service');
 
 function listProps(db) {
   return (req, res) => {
@@ -126,6 +127,25 @@ function getPropById(db, log) {
   };
 }
 
+function sd2Certify(db, log, cfg) {
+  return async (req, res) => {
+    try {
+      const out = await assetSd2Service.certifyResource(db, log, cfg, 'prop', req.params.id);
+      if (!out.ok) return response.badRequest(res, out.error);
+      response.success(res, { message: 'SD2 素材认证已更新', seedance2_asset: out.seedance2_asset });
+    } catch (err) { log.error('props sd2-certify', { error: err.message }); response.internalError(res, err.message); }
+  };
+}
+function sd2CertifyRefresh(db, log, cfg) {
+  return async (req, res) => {
+    try {
+      const out = await assetSd2Service.refreshResource(db, log, cfg, 'prop', req.params.id);
+      if (!out.ok) return response.badRequest(res, out.error);
+      response.success(res, { message: 'SD2 认证状态已刷新', seedance2_asset: out.seedance2_asset });
+    } catch (err) { log.error('props sd2-certify-refresh', { error: err.message }); response.internalError(res, err.message); }
+  };
+}
+
 function generatePropPrompt(db, log, cfg) {
   return async (req, res) => {
     const id = parseInt(req.params.id, 10);
@@ -177,5 +197,7 @@ module.exports = function propRoutes(db, log, cfg) {
     addToLibrary: addToLibrary(db, log),
     addToMaterialLibrary: addToMaterialLibrary(db, log),
     extractPropFromImage: extractPropFromImage(db, log, cfg),
+    sd2Certify: sd2Certify(db, log, cfg),
+    sd2CertifyRefresh: sd2CertifyRefresh(db, log, cfg),
   };
 };

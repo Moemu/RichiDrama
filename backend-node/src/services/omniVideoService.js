@@ -23,9 +23,9 @@ function create(db, log, body) {
   const imageUrls = routed.filter((asset) => asset.send_to_model && asset.type === 'image').map((asset) => asset.model_url || asset.local_path || asset.url).filter(Boolean);
   const first = routed.find((asset) => asset.usage === 'first_frame' && asset.send_to_model);
   const last = routed.find((asset) => asset.usage === 'last_frame' && asset.send_to_model);
-  const result = db.prepare(`INSERT INTO video_generations (drama_id, provider, prompt, model, duration, aspect_ratio, resolution, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, status, task_id, created_at, updated_at)
-    VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)`)
-    .run(body.provider || 'chatfire', prompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null,
+  const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, provider, prompt, model, duration, aspect_ratio, resolution, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, status, task_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)`)
+    .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.provider || 'chatfire', prompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null,
       body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
       imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null,
       imageUrls.length ? JSON.stringify(imageUrls) : null, task.id, now, now);
@@ -52,6 +52,23 @@ function create(db, log, body) {
 }
 
 function resolveAsset(db, input, ordinal) {
+  // 外部引用条目（场景/角色/道具等非素材库图片）：提供 url 或 local_path 即可，无需 assets 行
+  const hasAssetId = input.asset_id != null && String(input.asset_id).trim() !== '';
+  if (!hasAssetId && (input.url || input.local_path)) {
+    const alias = String(input.alias || '参考图').slice(0, 80);
+    return {
+      id: null, drama_id: null, name: alias, type: String(input.type || 'image').toLowerCase(),
+      category: null, url: input.url || null, local_path: input.local_path || null,
+      file_size: null, mime_type: null, width: null, height: null, duration: null,
+      source_type: 'reference', parent_asset_id: null, thumbnail_local_path: null,
+      metadata: null, tags: null, processing_status: 'ready', error_msg: null,
+      seedance2_asset: null, requires_sd2_identity: false, image_gen_id: null, video_gen_id: null,
+      created_at: null, updated_at: null,
+      ordinal: Number(input.ordinal) || ordinal + 1,
+      alias, role: input.role || 'reference', usage: input.usage || 'reference',
+      requested_send: input.send_to_model !== false,
+    };
+  }
   const row = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(input.asset_id));
   if (!row) throw new Error(`素材 ${input.asset_id} 不存在或已删除`);
   if (row.processing_status && row.processing_status !== 'ready') throw new Error(`素材“${row.name || row.id}”尚未准备完成`);
@@ -144,7 +161,11 @@ function retry(db, log, id) {
     aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
     creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
     audio_volume: snapshot.post_process?.audio_volume, audio_fade_seconds: snapshot.post_process?.audio_fade_seconds,
-    assets: snapshot.assets.map((asset) => ({ asset_id: asset.asset_id, alias: asset.alias, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, send_to_model: asset.send_to_model })),
+    assets: snapshot.assets.map((asset) => ({
+      asset_id: asset.asset_id, alias: asset.alias, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, send_to_model: asset.send_to_model,
+      // 外部引用条目（场景/角色/道具等非素材库图片）依赖 url / local_path / type 重建
+      url: asset.url || null, local_path: asset.local_path || null, type: asset.type || 'image',
+    })),
   });
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }

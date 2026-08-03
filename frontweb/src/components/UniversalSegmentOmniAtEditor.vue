@@ -10,6 +10,8 @@
       @blur="onBlur"
       @keydown="onKeydown"
       @paste="onPaste"
+      @dragover.prevent
+      @drop.prevent="onDropAsset"
       @compositionstart="composing = true"
       @compositionend="composing = false"
     />
@@ -21,12 +23,13 @@
         role="listbox"
         @mousedown.prevent
       >
-        <div v-if="!slots.length" class="omni-at-menu-empty">当前没有可用的参考图（请为场景 / 角色 / 物品选择带图素材）</div>
+        <div v-if="!slots.length" class="omni-at-menu-empty">当前没有参考素材（请先在本镜「素材库」勾选或上传图片/视频/音频）</div>
         <button
           v-for="s in slots"
-          :key="s.index"
+          :key="s.index + (s.kind || '')"
           type="button"
           class="omni-at-menu-item"
+          :class="{ 'is-addable': s.addable }"
           role="option"
           @click="onPickSlot(s.index)"
         >
@@ -35,10 +38,10 @@
             <span v-else class="omni-at-menu-thumb-ph">{{ (s.name || '?')[0] }}</span>
           </span>
           <span class="omni-at-menu-meta">
-            <span class="omni-at-menu-tag" :class="'omni-at-menu-tag--' + s.kind">{{ kindLabel(s.kind) }}</span>
+            <span class="omni-at-menu-tag" :class="'omni-at-menu-tag--' + s.kind">{{ s.addable ? '追加' : kindLabel(s.kind) }}</span>
             <span class="omni-at-menu-name">{{ s.name }}</span>
             <span class="omni-at-menu-at">{{ menuPrimaryAt(s) }}</span>
-            <span class="omni-at-menu-at-sub">提交 {{ canonicalAt(s.index) }}</span>
+            <span class="omni-at-menu-at-sub">{{ s.addable ? '点击追加并引用' : '提交 ' + canonicalAt(s.index) }}</span>
           </span>
         </button>
       </div>
@@ -61,11 +64,11 @@ import { DocumentCopy } from '@element-plus/icons-vue'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
-  /** { index: number, kind: 'scene'|'character'|'prop', name: string, thumbUrl: string }[] */
+  /** { index: number, kind: 'scene'|'character'|'prop'|'asset', name: string, thumbUrl: string, assetId?: number }[] */
   slots: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['update:modelValue', 'blur'])
+const emit = defineEmits(['update:modelValue', 'blur', 'pick', 'drop-asset'])
 
 const wrapRef = ref(null)
 const editorRef = ref(null)
@@ -362,6 +365,29 @@ function onChipClick(e) {
   menuOpen.value = true
 }
 
+/** 素材库卡片拖入编辑区：透传给父组件（加入已选 + 在文本末尾追加 @图片N） */
+function onDropAsset(e) {
+  const raw = e.dataTransfer?.getData('application/json') || e.dataTransfer?.getData('text/plain')
+  if (!raw) return
+  let data = null
+  try { data = JSON.parse(raw) } catch (_) { data = null }
+  if (data && data.assetId != null) {
+    emit('drop-asset', { assetId: Number(data.assetId), alias: String(data.alias || data.name || '').slice(0, 80) })
+  }
+}
+
+function emitPick(index) {
+  const slot = slotByIndex(index)
+  if (!slot) return
+  emit('pick', {
+    index: Number(slot.index),
+    kind: slot.kind,
+    name: slot.name,
+    assetId: slot.assetId != null ? Number(slot.assetId) : null,
+    asset: slot.asset || null,
+  })
+}
+
 function onPickSlot(index) {
   const el = editorRef.value
   if (!el) return
@@ -373,6 +399,7 @@ function onPickSlot(index) {
     const next = serializeEditor(el)
     skipNextModelWatch = true
     emit('update:modelValue', next)
+    emitPick(index)
     closeMenu()
     return
   }
@@ -387,6 +414,7 @@ function onPickSlot(index) {
   const next = serializeEditor(el)
   skipNextModelWatch = true
   emit('update:modelValue', next)
+  emitPick(index)
   nextTick(() => {
     const pos = at - 1 + (`@图片${index}`).length
     setCaretCanonicalOffset(el, pos)
@@ -670,6 +698,17 @@ html.light .omni-at-menu-thumb-wrap {
 .omni-at-menu-tag--prop {
   background: rgba(245, 158, 11, 0.2);
   color: #fcd34d;
+}
+.omni-at-menu-tag--asset {
+  background: rgba(168, 85, 247, 0.2);
+  color: #d8b4fe;
+}
+.omni-at-menu-item.is-addable {
+  border-left: 2px dashed rgba(168, 85, 247, 0.55);
+}
+html.light .omni-at-menu-tag--asset {
+  color: #6b21a8;
+  background: #f3e8ff;
 }
 html.light .omni-at-menu-tag {
   color: #475569;

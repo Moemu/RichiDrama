@@ -27,7 +27,7 @@ function normalizeStoryboardShotNumber(rawOrSb) {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
-/** 同集相同 storyboard_number 多行时保留 id 最大的一条（通常为最新入库） */
+/** 同集相同 storyboard_number 多行时保留 id 最大的一条（通常为最新入库）；保持输入顺序（sort_order 已由查询排好） */
 function dedupeStoryboardRowsByNumber(rows) {
   const byNum = new Map();
   const extras = [];
@@ -40,11 +40,7 @@ function dedupeStoryboardRowsByNumber(rows) {
       extras.push(r);
     }
   }
-  return [...byNum.values(), ...extras].sort(
-    (a, b) =>
-      normalizeStoryboardShotNumber(a.storyboard_number) - normalizeStoryboardShotNumber(b.storyboard_number) ||
-      Number(a.id) - Number(b.id)
-  );
+  return [...byNum.values(), ...extras];
 }
 
 function isMaxTokensParamError(errMsg) {
@@ -226,7 +222,7 @@ function buildFallbackUniversalSeedanceLine(sb, d, styleHint) {
 function getStoryboardsForEpisode(db, episodeId) {
   const rows = dedupeStoryboardRowsByNumber(
     db.prepare(
-      'SELECT * FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY storyboard_number ASC, id ASC'
+      'SELECT * FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY sort_order ASC, storyboard_number ASC, id ASC'
     ).all(episodeId)
   );
   return rows.map((r) => {
@@ -240,6 +236,7 @@ function getStoryboardsForEpisode(db, episodeId) {
       episode_id: r.episode_id,
       scene_id: r.scene_id,
       storyboard_number: r.storyboard_number,
+      sort_order: r.sort_order ?? 0,
       title: r.title,
       description: r.description,
       location: r.location,
@@ -1569,10 +1566,36 @@ function splitStoryboardByAudio(db, log, storyboardId) {
   };
 }
 
+/**
+ * 分镜拖拽排序：按传入 ids 顺序重写 sort_order（0-based），不动 storyboard_number。
+ * 校验所有分镜属于同一集，返回排序后的分镜列表。
+ */
+function reorderStoryboards(db, log, episodeId, ids) {
+  const list = Array.isArray(ids) ? ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0) : [];
+  if (!list.length) throw new Error('缺少分镜顺序列表');
+  const rows = db.prepare('SELECT id, episode_id FROM storyboards WHERE id IN (' + list.map(() => '?').join(',') + ') AND deleted_at IS NULL').all(...list);
+  const validIds = new Set(rows.map((r) => Number(r.id)));
+  const wrongEpisode = rows.find((r) => Number(r.episode_id) !== Number(episodeId));
+  if (wrongEpisode) throw new Error(`分镜 #${wrongEpisode.id} 不属于该集，无法排序`);
+  const now = new Date().toISOString();
+  const update = db.prepare('UPDATE storyboards SET sort_order = ?, updated_at = ? WHERE id = ?');
+  const tx = db.transaction(() => {
+    let order = 0;
+    for (const id of list) {
+      if (!validIds.has(id)) continue;
+      update.run(order++, now, id);
+    }
+  });
+  tx();
+  log.info('Storyboards reordered', { episode_id: episodeId, count: list.length });
+  return getStoryboardsForEpisode(db, episodeId);
+}
+
 module.exports = {
   normalizeStoryboardShotNumber,
   dedupeStoryboardRowsByNumber,
   getStoryboardsForEpisode,
+  reorderStoryboards,
   generateStoryboard,
   /** 与分镜入库时一致的「视频提示词」拼装（供经典模式润色等复用） */
   composeStoryboardVideoPrompt: generateVideoPrompt,

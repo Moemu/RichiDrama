@@ -6,6 +6,7 @@ export const omniVideoAPI = {
     form.append('file', file)
     form.append('name', options.name || file.name || '')
     if (options.category) form.append('category', options.category)
+    if (options.drama_id) form.append('drama_id', String(options.drama_id))
     return request.post('/media/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
   capabilities() { return request.get('/video-model-capabilities') },
@@ -15,6 +16,8 @@ export const omniVideoAPI = {
   list() { return request.get('/omni-video-jobs') },
   get(id) { return request.get(`/omni-video-jobs/${id}`) },
   assets(params) { return request.get('/assets', { params: params || {} }) },
+  /** 创建素材记录（如把场景/角色/道具图导入素材池统一管理） */
+  createAsset(body) { return request.post('/assets', body || {}) },
   updateAsset(id, body) { return request.put(`/assets/${id}`, body) },
   uploadLimits() { return request.get('/upload-limits') },
   certifyAsset(id) { return request.post(`/assets/${id}/sd2-certify`) },

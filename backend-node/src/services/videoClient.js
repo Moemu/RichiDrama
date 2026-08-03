@@ -3288,13 +3288,11 @@ function buildSd2ActiveAssetUrlLookup(db, dramaId) {
   const urlToAsset = new Map();
   const relPathToAsset = new Map();
   if (!db || !dramaId) return { urlToAsset, relPathToAsset };
-  let rows = [];
-  try {
-    rows = db.prepare(
-      'SELECT image_url, local_path, seedance2_asset FROM characters WHERE drama_id = ? AND deleted_at IS NULL'
-    ).all(Number(dramaId));
-  } catch (_) {
-    return { urlToAsset, relPathToAsset };
+  const rows = [];
+  for (const table of ['characters', 'scenes', 'props']) {
+    try {
+      rows.push(...db.prepare(`SELECT image_url, local_path, seedance2_asset FROM ${table} WHERE drama_id = ? AND deleted_at IS NULL`).all(Number(dramaId)));
+    } catch (_) { /* older databases may not have every resource table */ }
   }
   for (const row of rows) {
     const asset = parseJsonColumnForVideo(row.seedance2_asset);
@@ -4234,4 +4232,5 @@ module.exports = {
   formatVideoPostBodyForLog,
   isSeedance2FamilyModel,
   normalizeVolcengineDuration,
+  buildSd2ActiveAssetUrlLookup,
 };

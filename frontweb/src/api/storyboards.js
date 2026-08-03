@@ -76,6 +76,10 @@ export const storyboardsAPI = {
   update(id, data) {
     return request.put(`/storyboards/${id}`, data)
   },
+  /** 分镜拖拽排序：body = { episode_id, ids: [有序分镜 id 列表] } */
+  reorder(data) {
+    return request.put('/storyboards/reorder', data)
+  },
   delete(id) {
     return request.delete(`/storyboards/${id}`)
   },
