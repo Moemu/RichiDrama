@@ -84,6 +84,10 @@ function getStorageRoot() {
 async function resolveVideoToLocalPath(videoUrl, baseUrl, storageRoot, tempDir, index, log) {
   if (!videoUrl || typeof videoUrl !== 'string') return null;
   const u = videoUrl.trim();
+  if (/\.(?:jpg|jpeg|png|gif|webp)(?:[?#].*)?$/i.test(u)) {
+    log.warn('Video merge: rejected image path as video input', { index, url: u });
+    return null;
+  }
   // 1) URL 以 baseUrl 开头（如 http://localhost:5679/static）-> 对应 storageRoot 下相对路径
   if (baseUrl && (u.startsWith(baseUrl) || u.startsWith(baseUrl.replace(/\/$/, '')))) {
     const base = baseUrl.replace(/\/$/, '');
@@ -141,7 +145,15 @@ function runFfmpegConcat(localPaths, outputPath, log) {
       '-f', 'concat',
       '-safe', '0',
       '-i', listFile,
-      '-c', 'copy',
+      // 不使用 stream copy：不同供应商的视频编码、音轨或时间基不一致时，
+      // copy 会生成能下载但浏览器显示 0:00 的损坏 MP4。统一重编码并写入
+      // faststart 索引，确保在线播放和 Range 请求都可用。
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '23',
+      '-pix_fmt', 'yuv420p',
+      '-an',
+      '-movflags', '+faststart',
       '-y',
       outputPath,
     ];
@@ -173,6 +185,17 @@ async function processVideoMerge(db, log, mergeId, baseUrl) {
     scenes = JSON.parse(r.scenes || '[]');
   } catch (_) {
     log.warn('video merge parse scenes failed', { merge_id: mergeId });
+  }
+  const originalSceneCount = scenes.length;
+  scenes = scenes.filter((scene) => {
+    const url = scene?.video_url == null ? '' : String(scene.video_url).trim();
+    return url && !/\.(?:jpg|jpeg|png|gif|webp)(?:[?#].*)?$/i.test(url);
+  });
+  if (scenes.length !== originalSceneCount) {
+    log.warn('Video merge: removed non-video scene inputs', {
+      merge_id: mergeId,
+      removed: originalSceneCount - scenes.length,
+    });
   }
   const now = new Date().toISOString();
   db.prepare('UPDATE video_merges SET status = ? WHERE id = ?').run('processing', mergeId);

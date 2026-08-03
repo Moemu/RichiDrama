@@ -756,9 +756,14 @@ function getVideoUrlForStoryboard(db, storyboardId, baseUrl) {
 
   // 辅助函数：构造完整 URL，优先使用本地路径（避免远程URL过期导致无法合并）
   const buildUrl = (videoUrl, localPath) => {
-    if (localPath && String(localPath).trim() && baseUrl) {
+    // storyboards.local_path 历史上通常保存的是分镜图片（images/*.jpg），
+    // 不能因为有 local_path 就把图片当作视频交给 ffmpeg。只有明确的视频扩展名
+    // 才能覆盖 video_url；否则继续使用真实的视频 URL。
+    const local = localPath && String(localPath).trim();
+    const isVideoPath = local && /\.(?:mp4|webm|mov|m4v|avi|mkv)(?:[?#].*)?$/i.test(local);
+    if (isVideoPath && baseUrl) {
       const base = (baseUrl || '').replace(/\/$/, '');
-      const p = String(localPath).replace(/^\//, '');
+      const p = local.replace(/^\//, '');
       return p ? base + '/' + p : null;
     }
     if (videoUrl && String(videoUrl).trim()) return videoUrl;
@@ -870,4 +875,5 @@ module.exports = {
   finalizeEpisode,
   downloadEpisodeVideo,
   generateStoryboard,
+  getVideoUrlForStoryboard,
 };

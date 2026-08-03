@@ -255,12 +255,14 @@ function getConfigFromModelMap(db, sceneKey) {
 }
 
 async function generateText(db, log, serviceType, userPrompt, systemPrompt, options = {}) {
-  const { model: preferredModel, temperature = 0.7, json_mode = false, min_max_tokens = null, streamCallback = null, scene_key = null } = options;
+  const { model: preferredModelRaw, temperature = 0.7, json_mode = false, min_max_tokens = null, streamCallback = null, scene_key = null } = options;
+  const preferredModel = preferredModelRaw && preferredModelRaw !== 'auto' ? preferredModelRaw : undefined;
 
   // F2: 若传入 scene_key，优先从 ai_model_map 查找对应的模型路由配置
   let config = null;
   let routedModelOverride = null;
-  if (scene_key) {
+  // A direct per-shot selection must win over the default scene routing.
+  if (scene_key && !preferredModel) {
     const mapped = getConfigFromModelMap(db, scene_key);
     if (mapped) {
       config = mapped.config;
@@ -282,7 +284,7 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
     throw new Error(`未配置文本模型，请在「AI 配置」中添加 ${serviceType} 类型 且已启用的配置`);
   }
   // scene_key 路由的模型覆盖优先级 > preferredModel
-  const effectivePreferredModel = routedModelOverride || preferredModel;
+  const effectivePreferredModel = preferredModel || routedModelOverride;
   const model = getModelFromConfig(config, effectivePreferredModel);
   const url = buildChatUrl(config);
 
@@ -362,10 +364,13 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
  * @param {(delta: string) => void} onDelta 仅增量片段（UTF-8 字符串）
  */
 async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt, options = {}, onDelta) {
-  const { model: preferredModel, temperature = 0.7, json_mode = false, min_max_tokens = null, scene_key = null } = options;
+  const { model: preferredModelRaw, temperature = 0.7, json_mode = false, min_max_tokens = null, scene_key = null } = options;
+  const preferredModel = preferredModelRaw && preferredModelRaw !== 'auto' ? preferredModelRaw : undefined;
   let config = null;
   let routedModelOverride = null;
-  if (scene_key) {
+  // Streamed text must follow the same priority as normal text: an explicit
+  // per-shot model selection cannot be overridden by scene routing.
+  if (scene_key && !preferredModel) {
     const mapped = getConfigFromModelMap(db, scene_key);
     if (mapped) {
       config = mapped.config;
@@ -384,7 +389,7 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
   if (!config) {
     throw new Error(`未配置文本模型，请在「AI 配置」中添加 ${serviceType} 类型 且已启用的配置`);
   }
-  const effectivePreferredModel = routedModelOverride || preferredModel;
+  const effectivePreferredModel = preferredModel || routedModelOverride;
   const model = getModelFromConfig(config, effectivePreferredModel);
   const url = buildChatUrl(config);
 

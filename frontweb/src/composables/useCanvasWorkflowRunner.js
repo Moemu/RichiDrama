@@ -57,6 +57,7 @@ export async function runVideoStep(drama, sb, genOpts) {
   const absoluteFirst = toAbsoluteMediaUrl(imgPath)
   const absoluteLast = last ? toAbsoluteMediaUrl(last) : undefined
   const prompt = sb.video_prompt || sb.polished_prompt || sb.image_prompt || sb.description || ''
+  const selectedVideoModel = sb.video_model && sb.video_model !== 'auto' ? sb.video_model : undefined
   const res = await videosAPI.create({
     drama_id: drama.id,
     storyboard_id: sb.id,
@@ -65,8 +66,9 @@ export async function runVideoStep(drama, sb, genOpts) {
     first_frame_url: absoluteFirst || undefined,
     last_frame_url: absoluteLast,
     style: genOpts.style || undefined,
-    aspect_ratio: genOpts.aspectRatio,
-    resolution: genOpts.videoResolution || undefined,
+    model: selectedVideoModel,
+    aspect_ratio: sb.video_aspect_ratio || genOpts.aspectRatio,
+    resolution: sb.video_resolution || genOpts.videoResolution || undefined,
     duration: sb.duration || undefined,
   })
   if (res?.task_id) {

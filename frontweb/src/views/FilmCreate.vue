@@ -1629,10 +1629,12 @@
         <div v-if="currentEpisodeVideoUrl" class="video-preview-wrap">
           <p class="video-preview-label">本集合成视频预览</p>
           <video
+            :key="currentEpisodeVideoUrl"
             :src="currentEpisodeVideoUrl"
             controls
             class="video-preview-player"
             preload="metadata"
+            @error="onEpisodeVideoError"
           />
         </div>
       </section>
@@ -2347,6 +2349,9 @@
           </el-radio-group>
           <div class="vp-mode-hint">全能模式：中间为片段描述；生视频时使用 <strong>AI 配置里当前启用的视频</strong>（接口规范 <code>kling_omni</code> 或 <code>volcengine_omni</code>，模型如 <code>kling-video-o1</code>、<code>doubao-seedance-2-0-260128</code> 等）并合并场景/角色/道具等参考图（不含经典分镜主图）。经典字段保留，可随时切回。</div>
         </el-form-item>
+        <el-form-item label="生成参数">
+          <GenerationSettings :model-value="sbGenerationSettings[videoParamsTarget.id] || {}" :show-text-model="true" @update:model-value="setSbGenerationSettings(videoParamsTarget.id, $event)" />
+        </el-form-item>
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="标题">
@@ -2365,11 +2370,6 @@
           </el-col>
         </el-row>
         <el-row :gutter="12">
-          <el-col :span="6">
-            <el-form-item label="时长(秒)">
-              <el-input-number v-model="sbDuration[videoParamsTarget.id]" :min="1" :max="60" style="width:100%" />
-            </el-form-item>
-          </el-col>
           <el-col :span="6">
             <el-form-item label="景别">
               <el-select v-model="sbShotType[videoParamsTarget.id]" placeholder="景别" style="width:100%">
@@ -2615,6 +2615,7 @@ import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Setting, Plus, Minus, Sunny, Moon, MagicStick, Upload, Delete, Check, Loading, WarningFilled, User, Box, Picture, Film, VideoCamera, Document, InfoFilled, Refresh, ZoomIn, QuestionFilled, DocumentAdd, Expand, Fold, VideoPlay, Grid, Close } from '@element-plus/icons-vue'
 import { useTheme } from '@/composables/useTheme'
+import GenerationSettings from '@/components/GenerationSettings.vue'
 import { useFilmStore } from '@/stores/film'
 import { useGenerationTaskStore, GEN_RESOURCE } from '@/stores/generationTaskStore'
 import { syncGeneratingSetsFromStore, buildEpisodeContext, buildExtractTaskMeta, isEpisodeExtractRunning } from '@/composables/useGenerationTaskSync'
@@ -2788,8 +2789,18 @@ const currentEpisodeVideoUrl = computed(() => {
   if (!url || !String(url).trim()) return ''
   const s = String(url).trim()
   if (s.startsWith('http://') || s.startsWith('https://')) return s
-  return '/static/' + s.replace(/^\//, '')
+  // 每次合成完成后 URL 都带完成时间，避免 Chromium 复用旧的 Range
+  // 缓存条目（ERR_CACHE_OPERATION_NOT_SUPPORTED）而不重新读取成片。
+  const version = currentEpisode.value?.updated_at || currentEpisode.value?.video_updated_at || ''
+  const query = version ? `?v=${encodeURIComponent(version)}` : ''
+  return '/static/' + s.replace(/^\//, '') + query
 })
+
+function onEpisodeVideoError(event) {
+  const mediaError = event?.target?.error
+  const detail = mediaError?.message || (mediaError?.code ? `媒体错误 ${mediaError.code}` : '浏览器无法读取成片文件')
+  videoErrorMsg.value = `${detail}。请刷新页面后重试；若仍失败，请检查后端静态文件服务。`
+}
 
 const storyboardGenerating = computed(() =>
   isEpisodeExtractRunning(genStore, dramaId.value, currentEpisodeId.value, GEN_RESOURCE.GENERATE_STORYBOARD)
@@ -3175,6 +3186,7 @@ const sbLayoutDescription = ref({})  // 空间布局与人物站位描述（生�
 const regeneratingLayoutSbIds = reactive(new Set())  // 正在 AI 重新生成布局描述的分镜 id 集合
 /** 分镜创作模式：classic | universal（默认 classic，存库 storyboards.creation_mode） */
 const sbCreationMode = ref({})
+const sbGenerationSettings = ref({})
 /** 全能模式片段描述（存库 universal_segment_text，与经典参考图字段独立） */
 const sbUniversalSegmentText = ref({})
 // 分镜图片/视频列表（由 /images?storyboard_id=xx 和 /videos?storyboard_id=xx 拉取）
@@ -4155,7 +4167,10 @@ async function ensureProfessionalFramePrompt(sb, slot, { forceRegenerate = false
     if (cached) return cached
   }
   try {
-    const genRes = await storyboardsAPI.generateFramePrompt(sb.id, { frame_type: frameType })
+    const genRes = await storyboardsAPI.generateFramePrompt(sb.id, {
+      frame_type: frameType,
+      model: getSbTextModel(sb),
+    })
     if (!genRes?.task_id) throw new Error('帧提示词任务未创建')
     const pollRes = await pollTask(genRes.task_id)
     if (pollRes?.status !== 'completed') {
@@ -4489,6 +4504,7 @@ function syncStoryboardStateFromEpisode(ep) {
   const nextDof = {}
   const nextLayoutDescription = {}
   const nextCreationMode = {}
+  const nextGenerationSettings = {}
   const nextUniversalSegment = {}
   for (const sb of boards) {
     nextScene[sb.id] = sb.scene_id ?? null
@@ -4514,6 +4530,13 @@ function syncStoryboardStateFromEpisode(ep) {
     nextCharIds[sb.id] = charList.map((c) => (typeof c === 'object' && c != null ? Number(c.id) : Number(c))).filter((n) => Number.isFinite(n))
     nextPropIds[sb.id] = Array.isArray(sb.prop_ids) ? sb.prop_ids : []
     nextCreationMode[sb.id] = sb.creation_mode === 'universal' ? 'universal' : 'classic'
+    nextGenerationSettings[sb.id] = {
+      text_model: sb.text_model || 'auto',
+      video_model: sb.video_model || 'auto',
+      duration: sb.duration != null ? Number(sb.duration) : 5,
+      resolution: sb.video_resolution || videoResolution.value || '720p',
+      aspect_ratio: sb.video_aspect_ratio || projectAspectRatio.value || '16:9',
+    }
     nextUniversalSegment[sb.id] = (sb.universal_segment_text ?? '').toString()
   }
   sbCharacterIds.value = nextCharIds
@@ -4538,6 +4561,7 @@ function syncStoryboardStateFromEpisode(ep) {
   sbDof.value = nextDof
   sbLayoutDescription.value = nextLayoutDescription
   sbCreationMode.value = nextCreationMode
+  sbGenerationSettings.value = nextGenerationSettings
   sbUniversalSegmentText.value = nextUniversalSegment
 }
 
@@ -5827,11 +5851,31 @@ function universalSegmentDurationSecForSb(sb) {
 
 /** 提交视频 API 时使用的时长：优先本分镜配置，其次项目「每段秒数」 */
 function getSbVideoDurationForApi(sb) {
-  const perSb = Number(sbDuration.value[sb?.id] ?? sb?.duration)
+  const perSb = Number(sbGenerationSettings.value[sb?.id]?.duration ?? sbDuration.value[sb?.id] ?? sb?.duration)
   if (Number.isFinite(perSb) && perSb > 0) return perSb
   const clip = Number(videoClipDuration.value)
   if (Number.isFinite(clip) && clip > 0) return clip
   return undefined
+}
+
+function getSbVideoRequestSettings(sb) {
+  const settings = sbGenerationSettings.value[sb?.id] || {}
+  return {
+    model: settings.video_model && settings.video_model !== 'auto' ? settings.video_model : undefined,
+    aspect_ratio: settings.aspect_ratio || projectAspectRatio.value || '16:9',
+    resolution: settings.resolution || videoResolution.value || undefined,
+    duration: getSbVideoDurationForApi(sb),
+  }
+}
+
+function getSbTextModel(sb) {
+  const selected = sbGenerationSettings.value[sb?.id]?.text_model
+  return selected && selected !== 'auto' ? selected : undefined
+}
+
+function setSbGenerationSettings(id, settings) {
+  sbGenerationSettings.value = { ...sbGenerationSettings.value, [id]: settings }
+  sbDuration.value = { ...sbDuration.value, [id]: settings.duration }
 }
 
 /** 全能提示词生成/润色：提交当前编辑区中的分镜字段（避免未点保存时仍用库内旧对白） */
@@ -5900,6 +5944,7 @@ async function onGenerateUniversalSegmentPrompt(sb, opts = {}) {
       sb.id,
       {
         duration: durationSec,
+        model: getSbTextModel(sb),
         field_overrides: buildUniversalSegmentFieldOverrides(sb),
         ...(force ? { force_without_reference_images: true } : {}),
       },
@@ -5945,6 +5990,7 @@ async function onPolishUniversalSegmentPromptStream(sb, opts = {}) {
       {
         duration: durationSec,
         draft_universal_segment_text: draft,
+        model: getSbTextModel(sb),
         field_overrides: buildUniversalSegmentFieldOverrides(sb),
         ...(force ? { force_without_reference_images: true } : {}),
       },
@@ -6015,6 +6061,7 @@ async function polishUniversalSegmentsAfterGeneration(opts = {}) {
           {
             duration: durationSec,
             draft_universal_segment_text: draft,
+            model: getSbTextModel(sb),
             field_overrides: buildUniversalSegmentFieldOverrides(sb),
             force_without_reference_images: true,
           },
@@ -6343,6 +6390,10 @@ async function onSaveSbVideoFields(sb) {
       location: (sbLocation.value[sb.id] || '').toString().trim() || null,
       time: (sbTime.value[sb.id] || '').toString().trim() || null,
       duration: Number(sbDuration.value[sb.id]) || 5,
+      text_model: getSbTextModel(sb) || null,
+      video_model: sbGenerationSettings.value[sb.id]?.video_model || null,
+      video_resolution: sbGenerationSettings.value[sb.id]?.resolution || null,
+      video_aspect_ratio: sbGenerationSettings.value[sb.id]?.aspect_ratio || null,
       action: (sbAction.value[sb.id] || '').toString().trim() || null,
       dialogue: (sbDialogue.value[sb.id] || '').toString().trim() || null,
       narration: (sbNarration.value[sb.id] || '').toString().trim() || null,
@@ -6476,7 +6527,7 @@ async function onRegenerateLayoutDescription(sb) {
   if (!sb?.id) return
   regeneratingLayoutSbIds.add(sb.id)
   try {
-    const res = await storyboardsAPI.regenerateLayoutDescription(sb.id)
+    const res = await storyboardsAPI.regenerateLayoutDescription(sb.id, { model: getSbTextModel(sb) })
     const newText = res?.layout_description || res?.data?.layout_description
     if (newText) {
       // 直接用本次 AI 返回的结果更新本地编辑状态（响应里已包含新文本）
@@ -6591,9 +6642,7 @@ async function onGenerateSbVideo(sb) {
       last_frame_url: universalOmniApi ? undefined : vLast,
       reference_image_urls: referenceUrls,
       style: getSelectedStyle(),
-      aspect_ratio: projectAspectRatio.value || '16:9',
-      resolution: videoResolution.value || undefined,
-      duration: getSbVideoDurationForApi(sb),
+      ...getSbVideoRequestSettings(sb),
     })
     if (res?.task_id) {
       const pollRes = await pollTask(res.task_id, () => loadSingleStoryboardMedia(sb.id), meta)
@@ -7001,9 +7050,7 @@ async function startBatchVideoGeneration() {
             last_frame_url: vLast,
             reference_image_urls: refUrls,
             style: getSelectedStyle(),
-            aspect_ratio: projectAspectRatio.value || '16:9',
-            resolution: videoResolution.value || undefined,
-            duration: getSbVideoDurationForApi(sb),
+            ...getSbVideoRequestSettings(sb),
           })
           if (res?.task_id) {
             const meta = buildSbGenMeta(sb, GEN_RESOURCE.SB_VIDEO, '分镜视频')
@@ -7698,9 +7745,7 @@ async function runOneClickPipeline(textOnly = false) {
               last_frame_url: vLast,
               reference_image_urls: refUrls,
               style,
-              aspect_ratio: projectAspectRatio.value || '16:9',
-              resolution: videoResolution.value || undefined,
-              duration: getSbVideoDurationForApi(sb),
+              ...getSbVideoRequestSettings(sb),
             })
             if (res?.task_id) {
               const meta = buildSbGenMeta(sb, GEN_RESOURCE.SB_VIDEO, '分镜视频')
@@ -8038,9 +8083,7 @@ async function runRepairPipeline() {
               first_frame_url: vFirst,
               last_frame_url: vLast,
               reference_image_urls: refUrls,
-              aspect_ratio: projectAspectRatio.value || '16:9',
-              resolution: videoResolution.value || undefined,
-              duration: getSbVideoDurationForApi(sb),
+              ...getSbVideoRequestSettings(sb),
             })
             if (res?.task_id) {
               const meta = buildSbGenMeta(sb, GEN_RESOURCE.SB_VIDEO, '分镜视频')

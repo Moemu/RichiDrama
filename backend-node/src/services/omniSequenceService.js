@@ -80,7 +80,7 @@ function createShot(db, sequenceId, body) {
   const stamp = now();
   const out = db.prepare(`INSERT INTO omni_video_sequence_shots
     (sequence_id, title, sort_order, prompt, assets_json, settings_json, created_at, updated_at)
-    VALUES (?, ?, ?, '', '[]', ?, ?, ?)`).run(Number(sequenceId), body.title || '未命名镜头', order, JSON.stringify({ model: 'auto', aspect_ratio: '16:9', duration: 5, audio_strategy: 'reference_only' }), stamp, stamp);
+    VALUES (?, ?, ?, '', '[]', ?, ?, ?)`).run(Number(sequenceId), body.title || '未命名镜头', order, JSON.stringify({ model: 'auto', aspect_ratio: '16:9', duration: 5, resolution: '720p', audio_strategy: 'reference_only' }), stamp, stamp);
   normalizeOrder(db, sequenceId);
   return listShots(db, sequenceId).find((s) => s.id === Number(out.lastInsertRowid));
 }
@@ -90,6 +90,7 @@ function updateShot(db, sequenceId, shotId, body) {
   if (!shot) throw new Error('镜头不存在');
   const settings = body.settings !== undefined ? { ...parse(shot.settings_json, {}), ...body.settings } : parse(shot.settings_json, {});
   if (settings.duration != null) settings.duration = Math.min(15, Math.max(1, Number(settings.duration) || 5));
+  if (settings.resolution != null && !['480p', '720p', '1080p'].includes(String(settings.resolution))) settings.resolution = '720p';
   db.prepare(`UPDATE omni_video_sequence_shots SET title = ?, prompt = ?, prompt_document_json = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?`).run(
     body.title ?? shot.title, body.prompt ?? shot.prompt, body.prompt_document !== undefined ? JSON.stringify(body.prompt_document) : shot.prompt_document_json,
     body.assets !== undefined ? JSON.stringify(body.assets) : shot.assets_json, JSON.stringify(settings), now(), shot.id);

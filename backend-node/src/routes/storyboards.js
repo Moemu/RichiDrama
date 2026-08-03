@@ -342,7 +342,7 @@ function routes(db, log) {
       try {
         const id = Number(req.params.id);
         if (!id) return response.badRequest(res, '缺少分镜 id');
-        const newLayout = await framePromptService.regenerateLayoutDescription(db, log, id);
+        const newLayout = await framePromptService.regenerateLayoutDescription(db, log, id, req.body?.model);
         response.success(res, {
           layout_description: newLayout,
           message: '布局描述已由 AI 重新生成并保存',
@@ -512,7 +512,7 @@ function routes(db, log) {
 
         const polishedPrompt = await aiClient.generateText(
           db, log, 'text', userPromptLines.join('\n'), promptI18n.getImagePolishPrompt(),
-          { scene_key: 'image_polish', max_tokens: 300, temperature: 0.3 }
+          { scene_key: 'image_polish', model: sb.text_model || undefined, max_tokens: 300, temperature: 0.3 }
         );
 
         if (!polishedPrompt || polishedPrompt.trim().length < 10) {
@@ -530,7 +530,7 @@ function routes(db, log) {
         const snapshotPrompt = promptI18n.getContinuitySnapshotPrompt();
         const snapshotUserPrompt = [`PROMPT: ${polished}`, `ASSETS: ${assetNames || 'none'}`].join('\n');
         aiClient.generateText(db, log, 'text', snapshotUserPrompt, snapshotPrompt, {
-          scene_key: 'image_polish', max_tokens: 200, temperature: 0.1,
+          scene_key: 'image_polish', model: sb.text_model || undefined, max_tokens: 200, temperature: 0.1,
         }).then((snapshotJson) => {
           if (!snapshotJson?.trim()) return;
           const cleaned = snapshotJson.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -566,7 +566,7 @@ function routes(db, log) {
           'text',
           userPrompt,
           promptI18n.getUniversalOmniSegmentPrompt(),
-          { scene_key: 'image_polish', max_tokens: 2400, temperature: 0.28 }
+          { scene_key: 'image_polish', model: req.body?.model || db.prepare('SELECT text_model FROM storyboards WHERE id = ?').get(sbId)?.text_model || undefined, max_tokens: 2400, temperature: 0.28 }
         );
         if (!out || String(out).trim().length < 20) {
           return response.badRequest(res, 'AI 返回内容过短，请检查文本模型配置');
@@ -597,6 +597,7 @@ function routes(db, log) {
         return response.badRequest(res, built.message);
       }
       const { userPrompt, durationLabel, durationSec } = built;
+      const textModel = req.body?.model || db.prepare('SELECT text_model FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(sbId)?.text_model || undefined;
 
       res.status(200);
       res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
@@ -618,6 +619,7 @@ function routes(db, log) {
           promptI18n.getUniversalOmniSegmentPrompt(),
           {
             scene_key: 'image_polish',
+            model: textModel,
             max_tokens: 2400,
             temperature: 0.28,
             silence_timeout_ms: 180000,
@@ -670,6 +672,7 @@ function routes(db, log) {
         return response.badRequest(res, built.message);
       }
       const { userPrompt: baseUser, durationLabel, durationSec, episodeId, storyboardNumber } = built;
+      const textModel = req.body?.model || db.prepare('SELECT text_model FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(sbId)?.text_model || undefined;
 
       let scriptText = '';
       try {
@@ -740,6 +743,7 @@ function routes(db, log) {
           promptI18n.getUniversalOmniPolishPrompt(),
           {
             scene_key: 'image_polish',
+            model: textModel,
             max_tokens: 4096,
             temperature: 0.52,
             silence_timeout_ms: 180000,
@@ -997,6 +1001,7 @@ function routes(db, log) {
           promptI18n.getClassicVideoPromptPolishPrompt(),
           {
             scene_key: 'image_polish',
+            model: req.body?.model || sbRow.text_model || undefined,
             max_tokens: 3600,
             temperature: 0.28,
             silence_timeout_ms: 180000,

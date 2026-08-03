@@ -129,8 +129,8 @@ export const storyboardsAPI = {
     return request.post(`/storyboards/${id}/link-tail-frame`, data || {})
   },
   /** 一键 AI 重新生成/优化本分镜的 layout_description（空间布局合同），自动参考上下分镜 */
-  regenerateLayoutDescription(id) {
-    return request.post(`/storyboards/${id}/regenerate-layout-description`, {})
+  regenerateLayoutDescription(id, body = {}) {
+    return request.post(`/storyboards/${id}/regenerate-layout-description`, body)
   },
   /** 按后端最新规则重建单镜 video_prompt（含音色锚点，不调用 AI） */
   rebuildVideoPrompt(id) {

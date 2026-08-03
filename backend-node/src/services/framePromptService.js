@@ -88,6 +88,7 @@ function loadStoryboard(db, storyboardId) {
         movement: row.movement,
         lighting_style: row.lighting_style,
         depth_of_field: row.depth_of_field,
+        text_model: row.text_model || null,
         layout_description: row.layout_description || null,   // 画面布局与人物站位合同（首尾帧强制一致核心）
       }
     : null;
@@ -510,6 +511,11 @@ async function processFramePromptGeneration(db, log, taskId, storyboardId, frame
     }
   } catch (_) {}
 
+  // 请求显式指定的模型优先；否则使用该分镜保存的文本模型。这样后台异步任务
+  // 不依赖前端仍在页面上，重试或批量调用也会落到同一模型。
+  const requestedModel = model && model !== 'auto' ? model : undefined;
+  const storedModel = sb.text_model && sb.text_model !== 'auto' ? sb.text_model : undefined;
+  const effectiveModel = requestedModel || storedModel;
   const scene = loadScene(db, sb.scene_id);
   const characterNames = loadStoryboardCharacterNames(db, storyboardId);
   const allDramaNames = loadDramaCharacterNamesForStoryboard(db, storyboardId);
@@ -530,7 +536,7 @@ async function processFramePromptGeneration(db, log, taskId, storyboardId, frame
   try {
     if (frameType === 'first' || frameType === 'key' || frameType === 'last') {
       const frameKind = frameType;
-      const single = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, frameKind, sanitizeOpts);
+      const single = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, frameKind, sanitizeOpts);
       saveFramePrompt(db, log, storyboardId, frameType, single.prompt, single.description, '');
       combinedPrompt = single.prompt;
       description = single.description;
@@ -539,35 +545,35 @@ async function processFramePromptGeneration(db, log, taskId, storyboardId, frame
       layout = `horizontal_${count}`;
       const prompts = [];
       if (count === 3) {
-        const first = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'first', sanitizeOpts);
-        const key = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'key', sanitizeOpts);
-        const last = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'last', sanitizeOpts);
+        const first = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'first', sanitizeOpts);
+        const key = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'key', sanitizeOpts);
+        const last = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'last', sanitizeOpts);
         prompts.push(first.prompt, key.prompt, last.prompt);
         description = '分镜板组合提示词';
       } else if (count === 4) {
-        const first = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'first', sanitizeOpts);
-        const key1 = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'key', sanitizeOpts);
-        const key2 = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'key', sanitizeOpts);
-        const last = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'last', sanitizeOpts);
+        const first = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'first', sanitizeOpts);
+        const key1 = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'key', sanitizeOpts);
+        const key2 = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'key', sanitizeOpts);
+        const last = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'last', sanitizeOpts);
         prompts.push(first.prompt, key1.prompt, key2.prompt, last.prompt);
         description = '分镜板组合提示词';
       } else {
-        prompts.push((await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'first', sanitizeOpts)).prompt);
+        prompts.push((await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'first', sanitizeOpts)).prompt);
         for (let i = 0; i < count - 2; i++) {
-          prompts.push((await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'key', sanitizeOpts)).prompt);
+          prompts.push((await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'key', sanitizeOpts)).prompt);
         }
-        prompts.push((await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'last', sanitizeOpts)).prompt);
+        prompts.push((await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'last', sanitizeOpts)).prompt);
         description = '分镜板组合提示词';
       }
       combinedPrompt = prompts.join('\n---\n');
       saveFramePrompt(db, log, storyboardId, frameType, combinedPrompt, description, layout);
     } else if (frameType === 'action') {
       layout = 'horizontal_5';
-      const first = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'first', sanitizeOpts);
-      const key1 = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'key', sanitizeOpts);
-      const key2 = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'key', sanitizeOpts);
-      const key3 = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'key', sanitizeOpts);
-      const last = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, model, 'last', sanitizeOpts);
+      const first = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'first', sanitizeOpts);
+      const key1 = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'key', sanitizeOpts);
+      const key2 = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'key', sanitizeOpts);
+      const key3 = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'key', sanitizeOpts);
+      const last = await generateSingleFrame(db, log, cfg, sb, scene, characterNames, effectiveModel, 'last', sanitizeOpts);
       combinedPrompt = [first.prompt, key1.prompt, key2.prompt, key3.prompt, last.prompt].join('\n---\n');
       description = '动作序列组合提示词';
       saveFramePrompt(db, log, storyboardId, frameType, combinedPrompt, description, layout);
@@ -626,7 +632,7 @@ module.exports = {
  * 自动参考上下分镜，保证前后连贯性
  * @returns {string} 新的 layout_description 文本
  */
-async function regenerateLayoutDescription(db, log, storyboardId) {
+async function regenerateLayoutDescription(db, log, storyboardId, model) {
   const sid = Number(storyboardId);
   const sb = db.prepare('SELECT * FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(sid);
   if (!sb) throw new Error('分镜不存在');
@@ -672,6 +678,7 @@ async function regenerateLayoutDescription(db, log, storyboardId) {
   log.info('[布局重生成] 开始', { storyboard_id: sid, has_prev: !!prevSb, has_next: !!nextSb });
 
   const raw = await aiClient.generateText(db, log, 'text', userPrompt, systemPrompt, {
+    model: model || sb.text_model || undefined,
     max_tokens: 300,
     temperature: 0.35,
   });
