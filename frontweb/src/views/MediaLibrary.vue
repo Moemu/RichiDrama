@@ -1,5 +1,6 @@
 <template>
   <div class="media-library-page">
+    <div v-if="canConcatSelected" class="concat-bar"><el-button @click="concatSelectedVideos">拼接选中的视频</el-button></div>
     <div class="page-header">
       <div class="header-left">
         <el-button text @click="$router.push('/')">
@@ -36,6 +37,7 @@
       >
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
+      <el-checkbox v-model="favoriteOnly" class="favorite-filter" @change="loadMedia">只看收藏</el-checkbox>
     </div>
 
     <!-- 上传进度 -->
@@ -69,6 +71,7 @@
               >
                 <el-icon><ZoomIn /></el-icon>
               </el-button>
+              <el-button size="small" plain :type="item.is_favorite ? 'warning' : 'info'" :title="item.is_favorite ? '取消收藏' : '收藏素材'" @click.stop="toggleFavorite(item)"><el-icon><StarFilled v-if="item.is_favorite" /><Star v-else /></el-icon></el-button>
               <el-button
                 size="small"
                 type="danger"
@@ -83,12 +86,14 @@
         <div class="media-info">
           <span class="media-name" :title="item.name" @dblclick.stop="renameItem(item)">{{ item.name || '未命名' }}</span>
           <div class="media-meta-row"><span class="media-meta">{{ formatSize(item.size) }}</span><span v-if="item.type === 'image' && item.requires_sd2_identity" class="identity-state" :class="sd2Status(item)">真人 · {{ sd2Label(item) }}</span></div>
+          <div v-if="item.tags?.length" class="media-tags"><el-tag v-for="tag in item.tags.slice(0, 3)" :key="tag" size="small" effect="plain">{{ tag }}</el-tag></div>
         </div>
       </div>
 
       <div v-if="!loading && mediaItems.length === 0" class="empty-media">
         <el-icon class="empty-icon"><Files /></el-icon>
-        <p>暂无素材，点击上传按钮添加</p>
+        <div><b>素材库还是空的</b><p>上传图片、视频或音频后，可在自由创作和项目分镜中直接复用。</p></div>
+        <div class="empty-media-actions"><el-button type="primary" @click="triggerUpload"><el-icon><Upload /></el-icon>上传首个素材</el-button><el-button @click="$router.push('/free-create')">先去自由创作</el-button></div>
       </div>
     </div>
 
@@ -121,43 +126,63 @@
           class="preview-video"
           autoplay
         />
+        <div v-if="previewItem?.type === 'video'" class="trim-controls"><el-input-number v-model="trimStart" :min="0" :max="Math.max(0, trimEnd - .1)" :step=".1" size="small"/><span>至</span><el-input-number v-model="trimEnd" :min="trimStart + .1" :max="Number(previewItem.duration) || 3600" :step=".1" size="small"/><el-button size="small" :loading="trimming" @click="trimVideo">裁切为新素材</el-button></div>
         <audio v-else-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" controls />
+        <AudioWaveform v-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" />
         <img v-else-if="previewItem" :src="itemUrl(previewItem)" class="preview-image" />
       </div>
       <div class="preview-meta">
         <div class="meta-row"><span>名称：</span>{{ previewItem?.name || '未命名' }}</div>
         <div class="meta-row"><span>大小：</span>{{ formatSize(previewItem?.size) }}</div>
         <div class="meta-row"><span>创建时间：</span>{{ previewItem?.created_at }}</div>
+        <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔，例如：人物, 夜景" @change="saveTags" /></div>
         <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人／需要身份一致性</el-checkbox><el-button v-if="previewItem?.requires_sd2_identity" text size="small" :loading="certifyingId === previewItem?.id" @click="certify(previewItem)">{{ sd2Status(previewItem) === 'active' ? '认证可用' : '认证 / 刷新' }}</el-button></div>
+        <section v-if="previewItem" class="asset-lineage">
+          <div class="asset-lineage-title"><span>版本与来源</span><el-button text size="small" :loading="lineageLoading" @click="loadLineage(previewItem.id)">刷新</el-button></div>
+          <div v-if="lineageLoading" class="asset-lineage-empty">正在加载素材谱系…</div>
+          <template v-else>
+            <div v-if="lineage?.ancestors?.length" class="asset-lineage-list"><button v-for="item in lineage.ancestors" :key="`parent-${item.id}`" type="button" @click="openLineageItem(item)">上游 · {{ item.name || `#${item.id}` }}<small v-if="item.deleted_at"> 已删除</small></button></div>
+            <div class="asset-lineage-current">当前 · {{ lineage?.current?.name || previewItem.name }}</div>
+            <div v-if="lineage?.descendants?.length" class="asset-lineage-list"><button v-for="item in lineage.descendants" :key="`child-${item.id}`" type="button" @click="openLineageItem(item)">派生 · {{ item.name || `#${item.id}` }}<small v-if="item.deleted_at"> 已删除</small></button></div>
+            <div v-if="!lineage?.ancestors?.length && !lineage?.descendants?.length" class="asset-lineage-empty">这是根素材，还没有裁切或关键帧等派生版本。</div>
+          </template>
+        </section>
       </div>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, Upload, Search, Loading, CircleCheck,
-  ZoomIn, Delete, Files
+  ZoomIn, Delete, Files, Star, StarFilled
 } from '@element-plus/icons-vue'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { useRouter } from 'vue-router'
 import request from '@/utils/request'
+import AudioWaveform from '@/components/AudioWaveform.vue'
 
 const loading = ref(false)
 const uploading = ref(false)
 const uploadProgress = ref({ current: 0, total: 0 })
 const mediaItems = ref([])
 const mediaType = ref('all')
+const favoriteOnly = ref(false)
 const keyword = ref('')
 const page = ref(1)
 const pageSize = ref(30)
 const total = ref(0)
 const selectedIds = reactive(new Set())
+const selectedMedia = computed(() => mediaItems.value.filter((item) => selectedIds.has(item.id)))
+const canConcatSelected = computed(() => selectedMedia.value.length >= 2 && selectedMedia.value.every((item) => item.type === 'video'))
 const showPreview = ref(false)
 const previewItem = ref(null)
 const certifyingId = ref(null)
+const editableTags = ref('')
+const trimStart = ref(0), trimEnd = ref(5), trimming = ref(false)
+const lineage = ref(null), lineageLoading = ref(false)
 const uploadInput = ref(null)
 const router = useRouter()
 let keywordTimer = null
@@ -173,8 +198,9 @@ async function onUpload(e) {
   uploadProgress.value = { current: 0, total: files.length }
   for (const file of files) {
     try {
-      await omniVideoAPI.upload(file)
+      const item = await omniVideoAPI.upload(file)
       uploadProgress.value.current++
+      if (item?.deduplicated) ElMessage.info(`${file.name} 已存在，已复用素材记录`)
     } catch (err) {
       ElMessage.warning(`${file.name} 上传失败: ${err.message}`)
     }
@@ -199,6 +225,7 @@ async function loadMedia() {
     }
     if (mediaType.value !== 'all') params.type = mediaType.value
     if (keyword.value) params.keyword = keyword.value
+    if (favoriteOnly.value) params.favorite = 1
     const res = await request.get('/assets', { params })
     mediaItems.value = (res?.items || []).map(normalizeItem)
     total.value = res?.total || 0
@@ -250,9 +277,76 @@ function createWithSelected() {
   router.push({ path: '/free-create', query: ids.length ? { assets: ids.join(',') } : {} })
 }
 
-function openPreview(item) {
+async function openPreview(item) {
   previewItem.value = item
+  editableTags.value = Array.isArray(item.tags) ? item.tags.join(', ') : ''
+  trimStart.value = 0; trimEnd.value = Number(item.duration) || 5
   showPreview.value = true
+  await loadLineage(item.id)
+}
+
+async function loadLineage(id) {
+  if (!id) return
+  lineageLoading.value = true
+  try { lineage.value = await omniVideoAPI.assetLineage(id) } catch (_) { lineage.value = null } finally { lineageLoading.value = false }
+}
+
+function openLineageItem(item) {
+  if (!item || item.deleted_at) return
+  const visible = mediaItems.value.find((entry) => entry.id === item.id)
+  if (visible) return openPreview(visible)
+  previewItem.value = normalizeItem(item)
+  editableTags.value = Array.isArray(item.tags) ? item.tags.join(', ') : ''
+  trimStart.value = 0; trimEnd.value = Number(item.duration) || 5
+  loadLineage(item.id)
+}
+
+async function trimVideo() {
+  if (!previewItem.value || trimming.value) return
+  trimming.value = true
+  try {
+    const item = await omniVideoAPI.trimAsset(previewItem.value.id, { start_seconds: trimStart.value, end_seconds: trimEnd.value })
+    mediaItems.value.unshift(normalizeItem(item)); total.value++
+    ElMessage.success('已裁切为新的派生素材，原视频未修改')
+  } catch (error) { ElMessage.error(error.message || '裁切视频失败') } finally { trimming.value = false }
+}
+
+async function concatSelectedVideos() {
+  if (!canConcatSelected.value) return
+  try {
+    await ElMessageBox.confirm(`将按当前素材排序拼接 ${selectedMedia.value.length} 段视频，并保留原素材。`, '拼接视频', { type: 'info' })
+    const item = await omniVideoAPI.concatAssets(selectedMedia.value.map((entry) => entry.id))
+    mediaItems.value.unshift(normalizeItem(item)); total.value++
+    selectedIds.clear()
+    ElMessage.success('已拼接为新的派生视频素材')
+  } catch (error) {
+    if (error !== 'cancel' && error?.message !== 'cancel') ElMessage.error(error.message || '拼接视频失败')
+  }
+}
+
+async function saveTags() {
+  if (!previewItem.value) return
+  const tags = [...new Set(editableTags.value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean))].slice(0, 12)
+  try {
+    const updated = await omniVideoAPI.updateAsset(previewItem.value.id, { tags })
+    Object.assign(previewItem.value, updated)
+    const index = mediaItems.value.findIndex((item) => item.id === updated.id)
+    if (index >= 0) Object.assign(mediaItems.value[index], updated)
+    editableTags.value = tags.join(', ')
+    ElMessage.success('素材标签已更新')
+  } catch (error) {
+    ElMessage.error(error.message || '素材标签更新失败')
+  }
+}
+
+async function toggleFavorite(item) {
+  try {
+    const updated = await omniVideoAPI.updateAsset(item.id, { is_favorite: !item.is_favorite })
+    Object.assign(item, updated)
+    ElMessage.success(item.is_favorite ? '已收藏素材' : '已取消收藏')
+  } catch (error) {
+    ElMessage.error(error.message || '收藏状态更新失败')
+  }
 }
 
 async function deleteItem(item) {
@@ -307,7 +401,7 @@ onMounted(loadMedia)
 <style scoped>
 .media-library-page {
   min-height: 100vh;
-  background: #f5f7fa;
+  background: var(--bg-page);
   padding: 20px;
 }
 
@@ -327,7 +421,7 @@ onMounted(loadMedia)
 .page-title {
   font-size: 22px;
   font-weight: 600;
-  color: #1a1a2e;
+  color: var(--text-primary);
   margin: 0;
 }
 
@@ -338,7 +432,8 @@ onMounted(loadMedia)
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
-.upload-limits { margin: -8px 0 14px; color: #6b7280; font-size: 12px; }
+.upload-limits { margin: -8px 0 14px; color: var(--text-muted); font-size: 12px; }
+.concat-bar { position:fixed; right:24px; bottom:24px; z-index:20; }
 
 .search-input {
   width: 240px;
@@ -349,7 +444,7 @@ onMounted(loadMedia)
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
-  color: #409eff;
+  color: var(--accent);
   font-size: 14px;
 }
 
@@ -361,26 +456,26 @@ onMounted(loadMedia)
 }
 
 .media-card {
-  background: #fff;
+  background: var(--bg-surface);
   border-radius: 8px;
   overflow: hidden;
-  border: 2px solid transparent;
+  border: 2px solid var(--border-subtle);
   cursor: pointer;
   transition: all .2s;
-  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  box-shadow: var(--shadow-sm);
 }
 
 .media-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,.1);
+  box-shadow: var(--shadow-md);
 }
 
 .media-card.selected {
-  border-color: #409eff;
+  border-color: var(--accent);
 }
 
 .media-thumb {
   aspect-ratio: 1;
-  background: #f3f4f6;
+  background: var(--bg-raised);
   overflow: hidden;
   position: relative;
 }
@@ -391,7 +486,7 @@ onMounted(loadMedia)
   height: 100%;
   object-fit: cover;
 }
-.audio-thumb { width: 100%; height: 100%; display: grid; place-items: center; font-size: 36px; background: #edf2ff; }
+.audio-thumb { width: 100%; height: 100%; display: grid; place-items: center; font-size: 36px; background: var(--bg-hover); }
 
 .media-overlay {
   position: absolute;
@@ -417,8 +512,8 @@ onMounted(loadMedia)
   top: 8px;
   right: 8px;
   font-size: 20px;
-  color: #409eff;
-  background: #fff;
+  color: var(--accent);
+  background: var(--bg-surface);
   border-radius: 50%;
 }
 
@@ -434,7 +529,7 @@ onMounted(loadMedia)
 .media-name {
   display: block;
   font-size: 12px;
-  color: #374151;
+  color: var(--text-regular);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -442,15 +537,16 @@ onMounted(loadMedia)
 
 .media-meta {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--text-faint);
 }
 
 .media-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 4px; }
-.identity-state { padding: 2px 5px; border-radius: 4px; font-size: 10px; white-space: nowrap; background: #eef2f5; color: #667085; }
-.identity-state.active { background: #e6f4eb; color: #28734b; }
-.identity-state.processing { background: #fff5dc; color: #966916; }
-.identity-state.stale,.identity-state.failed { background: #fce9e9; color: #ad4949; }
-.sd2-preview-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
+.identity-state { padding: 2px 5px; border-radius: 4px; font-size: 10px; white-space: nowrap; background: var(--bg-hover); color: var(--text-muted); }
+.identity-state.active { background: var(--bg-active); color: var(--text-primary); }
+.identity-state.processing { background: var(--bg-raised); color: var(--text-regular); }
+.identity-state.stale,.identity-state.failed { background: var(--bg-elevated); color: var(--text-muted); }
+.trim-controls { display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap; }
+.sd2-preview-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
 
 .empty-media {
   grid-column: 1 / -1;
@@ -458,10 +554,18 @@ onMounted(loadMedia)
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 300px;
-  color: #9ca3af;
-  gap: 12px;
+  min-height: 300px;
+  padding: 28px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  gap: 14px;
+  text-align: center;
 }
+.empty-media b { color: var(--text-primary); font-size: 15px; }
+.empty-media p { margin: 7px 0 0; font-size: 13px; line-height: 1.6; }
+.empty-media-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
 .empty-icon {
   font-size: 48px;
@@ -478,8 +582,8 @@ onMounted(loadMedia)
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  background: #1a1a2e;
-  color: #fff;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   padding: 10px 20px;
   border-radius: 24px;
   display: flex;
@@ -516,13 +620,18 @@ onMounted(loadMedia)
 
 .meta-row {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-muted);
   margin-bottom: 4px;
 }
 
 .meta-row span {
   font-weight: 500;
-  color: #374151;
+  color: var(--text-regular);
 }
-.media-library-page{background:#f5f5f5!important;color:#262626!important}.page-header,.filter-bar,.media-card,.upload-limits,.batch-bar{background:#fff!important;border-color:#e5e5e5!important;box-shadow:none!important}.media-card:hover,.media-card.selected{background:#fafafa!important;border-color:#171717!important;box-shadow:inset 2px 0 0 #171717!important}.media-library-page :deep(.el-button--primary){--el-button-bg-color:#171717!important;--el-button-border-color:#171717!important;--el-button-text-color:#fff!important;--el-button-hover-bg-color:#404040!important;--el-button-hover-border-color:#404040!important}.type-filter :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner){background:#171717!important;border-color:#171717!important;color:#fff!important;box-shadow:none!important}
+.asset-lineage { margin-top:14px; padding-top:12px; border-top:1px solid var(--border-subtle); }
+.asset-lineage-title { display:flex; align-items:center; justify-content:space-between; font-size:13px; font-weight:600; color:var(--text-regular); }
+.asset-lineage-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+.asset-lineage-list button,.asset-lineage-current { border:1px solid var(--border-color); border-radius:5px; padding:4px 7px; background:var(--bg-raised); color:var(--text-regular); font-size:12px; }
+.asset-lineage-list button { cursor:pointer; }.asset-lineage-list button:hover { border-color:var(--accent); color:var(--text-primary); }
+.asset-lineage-list small { color:var(--text-faint); }.asset-lineage-current { margin-top:7px; border-color:var(--border-strong); background:var(--bg-hover); color:var(--text-primary); }.asset-lineage-empty { margin-top:7px; color:var(--text-faint); font-size:12px; }
 </style>

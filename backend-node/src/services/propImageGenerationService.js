@@ -6,6 +6,7 @@ const propService = require('./propService');
 const uploadService = require('./uploadService');
 const storageLayout = require('./storageLayout');
 const { aspectRatioToSize } = require('./imageService');
+const assetSd2Service = require('./assetSd2Service');
 
 function appendPrompt(base, extra) {
   const add = (extra || '').toString().trim();
@@ -128,6 +129,7 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
   if (!Array.isArray(extras)) extras = [];
   if (oldPath && !extras.includes(oldPath)) extras.push(oldPath);
   const extraJson = extras.length ? JSON.stringify(extras) : null;
+  assetSd2Service.markResourceStale(db, 'prop', { ...oldProp, id: propId, seedance2_asset: prop.seedance2_asset }, { image_url: result.image_url, local_path: localPath });
   try {
     db.prepare(
       'UPDATE props SET image_url = ?, local_path = ?, extra_images = ?, updated_at = ? WHERE id = ?'

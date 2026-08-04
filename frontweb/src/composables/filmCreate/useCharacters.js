@@ -202,7 +202,15 @@ export function useCharacters(deps) {
       const file = dataUrlToFile(refImg.dataUrl, refImg.filename || 'reference.png')
       const uploadRes = await uploadAPI.uploadImage(file, { dramaId: dramaId.value })
       const refPath = uploadRes.local_path || uploadRes.url || ''
-      await characterAPI.putRefImage(characterId, refPath)
+      if (!refPath) throw new Error('上传未返回图片地址')
+      // 自定义上传的角色图既是参考图，也是该角色的可用主图。
+      // 仅保存 ref_image 会让它无法进入统一素材库，最终不能用于分镜引用。
+      await characterAPI.putImage(characterId, {
+        ref_image: refPath,
+        local_path: uploadRes.local_path || null,
+        image_url: uploadRes.url || refPath,
+      })
+      await characterAPI.addToMaterialLibrary(characterId)
     } catch (e) {
       console.warn('[saveCharRefImage] 保存参考图失败:', e.message)
     }

@@ -438,6 +438,7 @@ function rowToScene(r) {
     local_path: r.local_path,
     extra_images: r.extra_images || null,
     ref_image: r.ref_image || null,
+    seedance2_asset: parseJsonColumn(r.seedance2_asset),
     status: r.status || 'pending',
     error_msg: r.error_msg,
     created_at: r.created_at,
@@ -457,6 +458,7 @@ function rowToProp(r) {
     local_path: r.local_path,
     extra_images: r.extra_images || null,
     ref_image: r.ref_image || null,
+    seedance2_asset: parseJsonColumn(r.seedance2_asset),
     negative_prompt: r.negative_prompt || null,
     error_msg: r.error_msg,
     created_at: r.created_at,
@@ -642,6 +644,7 @@ function saveCharacters(db, log, dramaId, req) {
     const ins = db.prepare('INSERT OR IGNORE INTO episode_characters (episode_id, character_id) VALUES (?, ?)');
     for (const cid of characterIds) ins.run(req.episode_id, cid);
   }
+  require('./assetMappingService').syncEntities(db, log, 'character', characterIds);
   db.prepare('UPDATE dramas SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), did);
   log.info('Characters saved', { drama_id: dramaId, count: chars.length });
   return true;

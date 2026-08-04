@@ -12,10 +12,6 @@
           <el-icon><ArrowLeft /></el-icon>返回列表
         </el-button>
         <div class="header-actions">
-          <el-button class="btn-theme" :title="isDark ? '切换到浅色模式' : '切换到暗色模式'" @click="toggleTheme">
-            <el-icon><Sunny v-if="isDark" /><Moon v-else /></el-icon>
-            {{ isDark ? '浅色' : '暗色' }}
-          </el-button>
           <el-button type="primary" @click="goCreate">
             <el-icon><VideoPlay /></el-icon>进入制作
           </el-button>
@@ -560,12 +556,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, VideoPlay, Plus, Delete, Sunny, Moon, PictureFilled, Grid } from '@element-plus/icons-vue'
+import { ArrowLeft, VideoPlay, Plus, Delete, PictureFilled, Grid } from '@element-plus/icons-vue'
 import EpisodeBatchImportDialog from '@/components/EpisodeBatchImportDialog.vue'
-import { useTheme } from '@/composables/useTheme'
 import { dramaAPI } from '@/api/drama'
 import { characterLibraryAPI } from '@/api/characterLibrary'
 import { sceneLibraryAPI } from '@/api/sceneLibrary'
@@ -576,11 +571,12 @@ import { taskAPI } from '@/api/task'
 import { characterAPI } from '@/api/characters'
 import { sceneAPI } from '@/api/scenes'
 import { propAPI } from '@/api/props'
+import { useGenerationTaskStore } from '@/stores/generationTaskStore'
 import { stylePromptMetadataForSave, backfillDramaStylePromptMetadataIfNeeded } from '@/constants/styleOptions'
 
 const route = useRoute()
-const { isDark, toggle: toggleTheme } = useTheme()
 const router = useRouter()
+const generationTasks = useGenerationTaskStore()
 const dramaId = Number(route.params.id)
 
 // 图片编辑 – 文件输入 refs（各资源类型独立）
@@ -619,7 +615,7 @@ async function doUploadLibImg(event, form, api, reloadFn) {
     if (!url) { ElMessage.error('上传未返回地址'); return }
     form.image_url = url
     form.local_path = data?.local_path ?? null
-    await api.update(form.id, { image_url: url, local_path: null })
+    await api.update(form.id, { image_url: url, local_path: data?.local_path ?? null })
     reloadFn()
     ElMessage.success('图片已更新')
   } catch (e) { ElMessage.error(e.message || '上传失败') }
@@ -635,16 +631,9 @@ async function doGenerateLibImg(form, prompt, api, reloadFn) {
     const imgData = res?.data ?? res
     const taskId = imgData?.task_id
     if (!taskId) throw new Error('未返回任务ID')
-    let task = null
-    for (let i = 0; i < 300; i++) {
-      await new Promise(r => setTimeout(r, 1500))
-      const tr = await taskAPI.get(taskId)
-      task = tr?.data ?? tr
-      if (task.status === 'completed') break
-      if (task.status === 'failed') throw new Error(task.error || '生成失败')
-    }
-    if (!task || task.status !== 'completed') throw new Error('生成超时')
-    const result = task.result
+    const poll = await generationTasks.pollTask(taskId, { dramaId, episodeId: 0, resourceType: 'library_image', resourceId: form.id }, null, { ElMessage, maxAttempts: 450, interval: 2000 })
+    if (poll.status !== 'completed') throw new Error(poll.error || '生成超时')
+    const result = poll.result
     const imageUrl = result?.image_url
     const localPath = result?.local_path ?? null
     if (!imageUrl && !localPath) throw new Error('未获取到图片地址')
@@ -699,7 +688,7 @@ async function uploadDramaCharImg(event) {
     if (!url) { ElMessage.error('上传未返回地址'); return }
     form.image_url = url
     form.local_path = data?.local_path ?? null
-    await characterAPI.putImage(form.id, { image_url: url, local_path: null })
+    await characterAPI.putImage(form.id, { image_url: url, local_path: data?.local_path ?? null })
     loadDrama()
     ElMessage.success('图片已更新')
   } catch (e) { ElMessage.error(e.message || '上传失败') }
@@ -769,7 +758,7 @@ async function uploadDramaSceneImg(event) {
     if (!url) { ElMessage.error('上传未返回地址'); return }
     form.image_url = url
     form.local_path = data?.local_path ?? null
-    await sceneAPI.update(form.id, { image_url: url, local_path: null })
+    await sceneAPI.update(form.id, { image_url: url, local_path: data?.local_path ?? null })
     loadDrama()
     ElMessage.success('图片已更新')
   } catch (e) { ElMessage.error(e.message || '上传失败') }
@@ -841,7 +830,7 @@ async function uploadDramaPropImg(event) {
     if (!url) { ElMessage.error('上传未返回地址'); return }
     form.image_url = url
     form.local_path = data?.local_path ?? null
-    await propAPI.update(form.id, { image_url: url, local_path: null })
+    await propAPI.update(form.id, { image_url: url, local_path: data?.local_path ?? null })
     loadDrama()
     ElMessage.success('图片已更新')
   } catch (e) { ElMessage.error(e.message || '上传失败') }
@@ -1203,15 +1192,17 @@ watch(activeResTab, (tab) => {
   else if (tab === 'lib-prop') loadPropList()
 })
 
+let importBatchTimer = null
 onMounted(() => {
   loadDrama()
   loadCharList()
   if (route.query.importBatch) {
-    setTimeout(() => {
+    importBatchTimer = setTimeout(() => {
       episodeBatchImportDialogRef.value?.openDialog?.()
     }, 0)
   }
 })
+onBeforeUnmount(() => { if (importBatchTimer) clearTimeout(importBatchTimer) })
 </script>
 
 <style scoped>
@@ -1536,5 +1527,5 @@ html.light .btn-theme {
   --el-button-hover-border-color: rgba(99, 102, 241, 0.5);
   --el-button-hover-text-color: #4f46e5;
 }
-.drama-detail{background:#f5f5f5!important;color:#262626!important}.drama-detail .header{background:#fff!important;border-color:#e5e5e5!important;box-shadow:none!important;backdrop-filter:none!important}.drama-detail .logo-main{background:none!important;color:#171717!important;-webkit-text-fill-color:#171717!important;filter:none!important}.drama-detail .logo-sub,.drama-detail .page-title{color:#737373!important;-webkit-text-fill-color:#737373!important}.drama-detail .section.card,.drama-detail .episode-card{background:#fff!important;border-color:#e5e5e5!important;box-shadow:none!important;backdrop-filter:none!important}.drama-detail .section.card:hover,.drama-detail .episode-card:hover{background:#fafafa!important;border-color:#171717!important;box-shadow:inset 2px 0 0 #171717!important}.drama-detail :deep(.el-button--primary){--el-button-bg-color:#171717!important;--el-button-border-color:#171717!important;--el-button-text-color:#fff!important;--el-button-hover-bg-color:#404040!important;--el-button-hover-border-color:#404040!important}.drama-detail .btn-theme{--el-button-bg-color:#fff!important;--el-button-border-color:#d4d4d4!important;--el-button-text-color:#262626!important}
+.drama-detail { background: var(--bg-page); background-image: none; color: var(--text-primary); }
 </style>

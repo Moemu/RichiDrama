@@ -1,5 +1,8 @@
 <template>
   <div class="film-create" :class="{ 'sidebar-collapsed': navCollapsed }">
+    <!-- 全能素材上传：上传素材 / 首尾帧参考图（共享隐藏 input） -->
+    <input ref="sbOmniFileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="onSbOmniFileInputChange" />
+    <input ref="sbOmniFrameFileInput" hidden type="file" accept="image/*" @change="onSbOmniFrameFileInputChange" />
     <!-- 顶部 -->
     <header class="header">
       <div class="header-inner">
@@ -62,7 +65,7 @@
           :key="step.key"
           class="nav-step"
           :class="['status-' + step.status]"
-          @click="scrollToAnchor(step.anchor)"
+          @click="navigateWorkflowStep(step.key)"
         >
           <!-- 左侧连接线 -->
           <div class="step-connector-wrap">
@@ -110,10 +113,21 @@
             </div>
             <div
               class="nav-sub-item"
+              :class="{ 'sb-nav-dragging': navDragSbId === sb.id, 'sb-nav-over': navDragOverSbId === sb.id }"
               :title="sb.title || '分镜 ' + (i + 1)"
+              draggable="true"
+              @dragstart="onSbNavDragStart(sb)"
+              @dragend="onSbNavDragEnd"
+              @dragover.prevent="onSbNavDragOver(sb)"
+              @dragleave="navDragOverSbId = null"
+              @drop.prevent="onSbNavDrop(sb)"
               @click="scrollToAnchor('sb-' + sb.id)"
             >
-              {{ i + 1 }}. {{ sb.title || '分镜' }}
+              <span class="nav-sb-title">{{ i + 1 }}. {{ sb.title || '分镜' }}</span>
+              <span class="nav-sb-move">
+                <el-button text size="small" :disabled="i === 0" @click.stop="moveSbOrder(sb, -1)">↑</el-button>
+                <el-button text size="small" :disabled="i === storyboards.length - 1" @click.stop="moveSbOrder(sb, 1)">↓</el-button>
+              </span>
             </div>
           </template>
         </div>
@@ -169,6 +183,21 @@
     </nav>
 
     <main class="main">
+      <section class="workflow-shell" aria-label="短剧制作工作流">
+        <div class="workflow-head">
+          <div>
+            <span class="workflow-kicker">制作工作流</span>
+            <h2>{{ workflowStageMeta.title }}</h2>
+            <p>{{ workflowStageMeta.description }}</p>
+          </div>
+          <span class="workflow-episode">{{ currentEpisode?.title || '请选择剧集' }}</span>
+        </div>
+        <div class="workflow-steps" role="tablist" aria-label="工作阶段">
+          <button v-for="(step, index) in workflowStages" :key="step.key" type="button" class="workflow-step" :class="{ active: workflowStage === step.key, complete: step.complete }" role="tab" :aria-selected="workflowStage === step.key" @click="setWorkflowStage(step.key)">
+            <span>{{ index + 1 }}</span>{{ step.label }}
+          </button>
+        </div>
+      </section>
       <!-- 角色/道具/场景上传图片用，单例放在外层避免 v-for 导致 ref 为数组 -->
       <input
         ref="resourceImageFileInput"
@@ -176,6 +205,14 @@
         accept="image/jpeg,image/png,image/gif,image/webp"
         style="display: none"
         @change="onResourceImageFileChange"
+      />
+      <input
+        ref="resourceMediaFileInput"
+        type="file"
+        multiple
+        accept="image/*,video/*,audio/*"
+        style="display: none"
+        @change="onResourceMediaFileChange"
       />
       <!-- 分镜图上传图片用，单例放在外层避免 v-for 导致 ref 为数组 -->
       <input
@@ -186,7 +223,7 @@
         @change="onSbImageFileChange"
       />
       <!-- 剧本工作台：单卡片 + 选项卡（创作 / 选择） -->
-      <section class="section card script-workbench-unified">
+      <section v-show="workflowStage === 'script'" class="section card script-workbench-unified">
         <el-tabs v-model="scriptWorkbenchMode" class="script-workbench-tabs">
           <el-tab-pane label="创作剧本" name="create">
             <div class="script-pane-inner">
@@ -329,6 +366,10 @@
           </el-tab-pane>
         </el-tabs>
       </section>
+      <div v-show="workflowStage === 'script'" class="workflow-next-action">
+        <span>剧本确认后，再集中准备可复用资源。</span>
+        <el-button type="primary" :disabled="!scriptContent?.trim()" @click="setWorkflowStage('resources')">进入统一资源管理</el-button>
+      </div>
 
       <el-dialog
         v-model="showSelectScriptDialog"
@@ -354,10 +395,10 @@
       </el-dialog>
 
       <!-- 一键全流程生成 -->
-      <section class="section card pipeline-section">
+      <section v-if="workflowStage === 'script' && showLegacyPipeline" class="section card pipeline-section">
         <div class="one-click-actions">
           <span class="one-click-label">🚀 一键全流程</span>
-          <el-select v-model="projectAspectRatio" style="width: 130px" @change="() => saveProjectSettings(false)">
+          <el-select v-if="false" v-model="projectAspectRatio" style="width: 130px" @change="() => saveProjectSettings(false)">
             <el-option label="16:9 横屏" value="16:9" />
             <el-option label="9:16 竖屏" value="9:16" />
             <el-option label="3:4 竖版" value="3:4" />
@@ -365,7 +406,7 @@
             <el-option label="4:3" value="4:3" />
             <el-option label="21:9 宽银幕" value="21:9" />
           </el-select>
-          <el-select v-model="videoClipDuration" style="width: 105px" @change="() => saveProjectSettings(false)">
+          <el-select v-if="false" v-model="videoClipDuration" style="width: 105px" @change="() => saveProjectSettings(false)">
             <el-option label="4秒/段" :value="4" />
             <el-option label="5秒/段" :value="5" />
             <el-option label="8秒/段" :value="8" />
@@ -373,6 +414,8 @@
             <el-option label="12秒/段" :value="12" />
             <el-option label="15秒/段" :value="15" />
           </el-select>
+          <GenerationSettings :model-value="projectGenerationSettings" :max-duration="15" @update:model-value="setProjectGenerationSettings" />
+          <el-button size="small" plain @click="applyProjectGenerationSettingsToStoryboards">应用到全部分镜</el-button>
           <el-select v-model="scriptLanguage" placeholder="分镜语言" clearable style="width: 105px">
             <el-option label="中文" value="zh" />
             <el-option label="英文" value="en" />
@@ -441,366 +484,149 @@
         </div>
       </section>
 
-      <!-- 资源管理：角色 / 道具 / 场景 -->
-      <section class="section card resource-panel">
-        <div class="collapse-header" @click="resourcePanelCollapsed = !resourcePanelCollapsed">
-          <h2 class="section-title">资源管理</h2>
-          <el-icon class="collapse-icon"><ArrowUp v-if="!resourcePanelCollapsed" /><ArrowDown v-else /></el-icon>
+      <!-- 素材编排：统一资源库（常驻左侧，作用于当前选中分镜；点击分镜卡片切换） -->
+      <section v-show="workflowStage === 'resources'" class="section card resource-center">
+        <div class="resource-center-heading">
+          <div>
+            <h2 class="section-title">统一资源管理</h2>
+            <p class="section-desc">先准备角色、场景、道具和上传媒体；分镜阶段只从这里选择并引用，不再重复建库。</p>
+          </div>
+          <el-button type="primary" plain :loading="resourceMediaUploading" @click="openResourceMediaUpload"><el-icon><Upload /></el-icon>上传媒体素材</el-button>
         </div>
-        <div v-show="!resourcePanelCollapsed" class="resource-panel-body">
-          <!-- 角色生成 -->
-          <div id="anchor-characters" class="resource-block card">
-            <div class="collapse-header resource-block-header" @click="charactersBlockCollapsed = !charactersBlockCollapsed">
-              <h3 class="resource-block-title">角色生成</h3>
-              <el-icon class="collapse-icon"><ArrowUp v-if="!charactersBlockCollapsed" /><ArrowDown v-else /></el-icon>
-            </div>
-            <div v-show="!charactersBlockCollapsed" class="resource-block-body">
-              <div class="asset-actions">
-                <el-button type="primary" size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">
-                  剧本自动提取角色
-                </el-button>
-                <el-button size="small" :disabled="!dramaId" @click="openAddCharacter">添加角色</el-button>
-                <el-button size="small" @click="showCharLibrary = true">本剧角色库</el-button>
-              </div>
-              <div class="asset-list asset-list-two">
-                <div v-for="char in characters" :key="char.id" class="asset-item asset-item-left-right">
-                  <div class="asset-info">
-                    <div class="asset-name">
-                      <span style="display:inline-flex;align-items:center;gap:4px;flex:1;min-width:0;overflow:hidden">
-                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ char.name }}</span>
-                        <el-tag v-if="char.role" size="small" effect="plain" :type="char.role === 'main' ? 'danger' : char.role === 'supporting' ? 'warning' : 'info'" style="flex-shrink:0;padding:0 5px;font-size:11px;height:18px;line-height:18px">{{ charRoleLabel(char.role) }}</el-tag>
-                      </span>
-                      <el-button type="danger" text size="small" class="btn-delete-icon" title="删除" @click="onDeleteCharacter(char)">
-                        <el-icon><Delete /></el-icon>
-                      </el-button>
-                    </div>
-                    <div class="asset-desc-full">{{ char.appearance || char.description || '暂无描述' }}</div>
-                    <div class="asset-btns">
-                      <el-button size="small" @click="editCharacter(char)">编辑</el-button>
-                      <el-button size="small" :loading="addingCharToLibraryId === char.id" :disabled="!hasAssetImage(char)" @click="onAddCharacterToLibrary(char)">
-                        加入本剧库
-                      </el-button>
-                      <el-button size="small" :loading="addingCharToMaterialId === char.id" :disabled="!hasAssetImage(char)" @click="onAddCharacterToMaterialLibrary(char)">
-                        加入素材库
-                      </el-button><el-button
-                        size="small"
-                        :type="char.seedance2_asset?.status === 'active' ? 'success' : 'warning'"
-                        plain
-                        :loading="sd2CertifyingId === char.id"
-                        :disabled="!hasAssetImage(char)"
-                        @click="onSd2PrimaryAction(char)"
-                      >
-                        {{ sd2ActionLabel(char) }}
-                      </el-button>
-                    </div>
+        <div class="resource-center-grid">
+          <article class="resource-center-group">
+            <header><b>角色</b><span>{{ characters.length }}</span></header>
+            <div class="resource-center-actions"><el-button size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button><el-button size="small" @click="openAddCharacter">添加角色</el-button></div>
+            <div v-if="characters.length" class="resource-center-list"><div v-for="char in characters" :key="char.id" class="resource-center-item"><img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" alt="" /><span v-else class="resource-center-placeholder">角色</span><div><b>{{ char.name }}</b><small>{{ char.appearance || char.description || '待补充描述' }}</small></div><el-button size="small" text :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char)">生成图</el-button></div></div>
+            <p v-else class="resource-center-empty">从剧本提取角色，或手动添加。</p>
+          </article>
+          <article class="resource-center-group">
+            <header><b>场景</b><span>{{ scenes.length }}</span></header>
+            <div class="resource-center-actions"><el-button size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button><el-button size="small" @click="openAddScene">添加场景</el-button></div>
+            <div v-if="scenes.length" class="resource-center-list"><div v-for="scene in scenes" :key="scene.id" class="resource-center-item"><img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" alt="" /><span v-else class="resource-center-placeholder">场景</span><div><b>{{ scene.location }}</b><small>{{ scene.description || scene.prompt || '待补充描述' }}</small></div><el-button size="small" text :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid)">生成图</el-button></div></div>
+            <p v-else class="resource-center-empty">从当前剧本提取场景。</p>
+          </article>
+          <article class="resource-center-group">
+            <header><b>道具</b><span>{{ props.length }}</span></header>
+            <div class="resource-center-actions"><el-button size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button><el-button size="small" @click="showAddProp = true">添加道具</el-button></div>
+            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item"><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="openPropAssetPicker(prop)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `prop-${prop.id}`" @click="onUploadResourceClick('prop', prop.id)">上传图</el-button><el-button size="small" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid)">生成图</el-button></div></div></div>
+            <p v-else class="resource-center-empty">从当前剧本提取道具。</p>
+          </article>
+        </div>
+        <div class="resource-media-library">
+          <header><div><b>媒体素材库</b><small>上传的图片、视频、音频会在分镜引用区统一可用。</small></div><span>{{ universalLibraryAssets.length }} 项</span></header>
+          <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card"><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><small>{{ asset.name || `素材 ${asset.id}` }}</small></article></div>
+          <p v-else class="resource-center-empty">还没有上传媒体素材。</p>
+        </div>
+      </section>
 
-                    <!-- Seedance 2.0 音色参考（仅该模型有效，其他模型不生效） -->
-                    <div class="sd2-voice-row" style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                      <template v-if="char.seedance2_voice_asset?.status === 'active'">
-                        <!-- 音色参考已设置：显示试听 + 更换 -->
-                        <el-button
-                          size="small"
-                          type="success"
-                          plain
-                          @click="playSd2Voice(char)"
-                        >
-                          <el-icon><VideoPlay /></el-icon>
-                          <span style="margin-left:4px">试听</span>
-                        </el-button>
-                        <el-button
-                          size="small"
-                          type="primary"
-                          plain
-                          :loading="sd2VoiceUploadingId === char.id"
-                          @click="onSd2VoiceReplace(char)"
-                        >
-                          更换
-                        </el-button>
-                        <span style="font-size:11px;color:#67c23a">音色已设置</span>
-                      </template>
-                      <template v-else>
-                        <el-button
-                          size="small"
-                          :type="char.seedance2_voice_asset?.status === 'stale' ? 'warning' : 'info'"
-                          plain
-                          :loading="sd2VoiceUploadingId === char.id"
-                          @click="onSd2VoicePrimaryAction(char)"
-                        >
-                          {{ sd2VoiceActionLabel(char) }}
-                        </el-button>
-                        <span v-if="char.seedance2_voice_asset?.status === 'stale'" style="font-size:11px;color:#e6a23c">需刷新</span>
-                      </template>
-                      <span style="font-size:10px;color:#909399">仅 Seedance 2.0 模型生效</span>
-                    </div>
-                    <div v-if="getCharAffectedStoryboards(char.id).length" class="asset-storyboard-link">
-                      <span class="asl-label">影响的分镜：</span>
-                      <span
-                        v-for="sb in getCharAffectedStoryboards(char.id)"
-                        :key="sb.id"
-                        class="asl-chip"
-                        title="点击跳转到该分镜"
-                        @click="scrollToStoryboard(sb.id)"
-                      >#{{ sb.storyboard_number }}</span>
-                      <span v-if="regenSbImagesForAsset.has('char-' + char.id) && regenSbImagesProgress['char-' + char.id]" class="asl-progress">
-                        {{ regenSbImagesProgress['char-' + char.id].current }}/{{ regenSbImagesProgress['char-' + char.id].total }}
-                      </span>
-                      <el-button
-                        size="small"
-                        class="asl-regen-btn"
-                        :loading="regenSbImagesForAsset.has('char-' + char.id)"
-                        @click="onRegenAffectedSbImages('char-' + char.id, getCharAffectedStoryboards(char.id))"
-                      >
-                        <span v-if="!regenSbImagesForAsset.has('char-' + char.id)">↻ 重新生成分镜图</span>
-                      </el-button>
-                    </div>
-                  </div>
-                  <div class="asset-cover-wrap">
-                    <div
-                      class="asset-cover"
-                      :class="{ 'asset-cover--clickable': hasAssetImage(char), 'asset-cover--dragover': dragOverResourceKey === 'char-' + char.id }"
-                      role="button"
-                      tabindex="0"
-                      @click="hasAssetImage(char) && openImagePreview(assetImageUrl(char))"
-                      @dragover="onResourceDragOver($event, 'character', char.id)"
-                      @dragleave="onResourceDragLeave($event, 'char-' + char.id)"
-                      @drop="onResourceDrop($event, 'character', char.id)"
+      <el-dialog v-model="showPropAssetPicker" :title="`为「${propAssetPickerTarget?.name || '道具'}」选择图片素材`" width="720px">
+        <div v-if="propAssetPickerImages.length" class="resource-media-grid prop-asset-picker-grid">
+          <button v-for="asset in propAssetPickerImages" :key="asset.id" type="button" class="resource-media-card prop-asset-picker-card" @click="bindAssetToProp(asset)">
+            <img :src="sbOmniAssetUrl(asset)" :alt="asset.name || '图片素材'" />
+            <small>{{ asset.name || `素材 ${asset.id}` }}</small>
+          </button>
+        </div>
+        <p v-else class="resource-center-empty">媒体素材库中还没有图片，请先上传图片素材。</p>
+      </el-dialog>
+
+      <div v-show="workflowStage === 'resources'" class="workflow-next-action">
+        <span>资源会在分镜中按需选择、拖入提示词并形成 @ 引用。</span>
+        <el-button type="primary" :disabled="!currentEpisodeId" @click="setWorkflowStage('storyboard')">进入分镜管理</el-button>
+      </div>
+
+      <section v-show="workflowStage === 'storyboard'" class="section card storyboard-workbench-toolbar">
+        <div>
+          <h2 class="section-title">分镜工作台</h2>
+          <p class="section-desc">复用全能创作的镜头工作台：左侧统一素材、中央提示词与预览、右侧镜头列表可拖动排序。</p>
+        </div>
+        <div class="row gap">
+          <el-button type="primary" :loading="storyboardGenerating" :disabled="!currentEpisodeId || storyboardGenerating" @click="onGenerateStoryboard">{{ storyboards.length ? '重新生成分镜' : 'AI 生成分镜' }}</el-button>
+          <el-button :disabled="!currentEpisodeId" @click="onAddSingleStoryboard">添加镜头</el-button>
+        </div>
+      </section>
+      <FreeCreate v-if="workflowStage === 'storyboard' && currentEpisodeId" :project-episode-id="currentEpisodeId" :project-drama-id="dramaId" embedded @reordered="loadDrama" @changed="loadDrama" />
+
+      <div v-if="false" class="storyboard-workspace">
+      <section class="section card resource-panel storyboard-reference-panel">
+        <div class="collapse-header" style="cursor:default">
+          <h2 class="section-title">当前分镜引用</h2>
+          <span class="sb-omni-left-hint">从统一资源库选择，拖入提示词形成 @ 引用</span>
+        </div>
+        <div class="resource-panel-body">
+          <template v-if="activeSb">
+            <div class="sb-omni-left-sb-title">
+              <span class="sb-omni-left-sb-idx">#{{ storyboards.findIndex((s) => Number(s.id) === Number(activeSb.id)) + 1 }}</span>
+              <span class="sb-omni-left-sb-name">{{ activeSb.title || '未命名分镜' }}</span>
+            </div>
+            <div class="sb-omni-material-panel">
+              <div class="sb-omni-material-note">统一资源库：媒体素材 + 本镜关联的场景/角色/道具图；点击选用，拖到提示词框直接引用。</div>
+              <div v-if="(sbOmniAssetIds[activeSb.id] || []).length" class="sb-omni-material-summary">
+                已选 {{ (sbOmniAssetIds[activeSb.id] || []).length }}/{{ sbOmniShotLimits.total }}；图片 {{ sbOmniSelectedCounts(activeSb).image }}/{{ sbOmniShotLimits.image }}，视频 {{ sbOmniSelectedCounts(activeSb).video }}/{{ sbOmniShotLimits.video }}，音频 {{ sbOmniSelectedCounts(activeSb).audio }}/{{ sbOmniShotLimits.audio }}
+              </div>
+              <div class="sb-omni-material-label">素材库（点击选用）</div>
+              <div class="sb-omni-material-pool">
+                <div
+                  v-for="item in sbOmniPoolItems(activeSb)"
+                  :key="item.poolKey"
+                  class="sb-omni-material-card"
+                  :class="{ selected: sbOmniPoolItemSelected(activeSb, item) }"
+                  :title="(item.name || '素材') + ': 点击选用；拖到提示词框直接引用'"
+                  draggable="true"
+                  @dragstart="onSbOmniAssetDragStart($event, item)"
+                  @click="onSbOmniPoolToggle(activeSb, item)"
+                >
+                  <img v-if="item.type === 'image'" :src="item.thumbUrl || sbOmniAssetUrl(item)" alt="" />
+                  <span v-else class="sb-omni-material-card-icon">{{ item.type === 'audio' ? '🎵' : '🎬' }}</span>
+                  <small>{{ item.name }}</small>
+                  <span v-if="sbOmniPoolItemSelected(activeSb, item)" class="sb-omni-material-card-check">✓</span>
+                </div>
+                <div v-if="!sbOmniPoolItems(activeSb).length" class="sb-omni-material-pool-empty">暂无素材，请返回「统一资源管理」上传或生成素材。</div>
+              </div>
+              <template v-if="getSelectedUniversalLibraryAssets(activeSb).length">
+                <div class="sb-omni-material-label">已选素材（↑↓ 调整 @图片N 顺序）</div>
+                <div class="sb-omni-material-selected-list">
+                  <div v-for="(asset, index) in getSelectedUniversalLibraryAssets(activeSb)" :key="asset.id" class="sb-omni-material-selected-row">
+                    <img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" class="sb-universal-library-thumb" alt="" />
+                    <span v-else class="sb-universal-library-type">{{ asset.type === 'audio' ? '🎵' : '🎬' }}</span>
+                    <span class="sb-omni-material-selected-name">
+                      <b :title="asset.name || `素材${asset.id}`">{{ asset.name || `素材${asset.id}` }}</b>
+                      <em v-if="sbOmniEntryIndexByAssetId(activeSb)[asset.id]" class="sb-omni-material-at">@图片{{ sbOmniEntryIndexByAssetId(activeSb)[asset.id] }}</em>
+                    </span>
+                    <el-select
+                      :model-value="sbOmniAssetUsage[activeSb.id]?.[asset.id] || omniDefaultUsage(asset)"
+                      size="small"
+                      class="sb-universal-library-usage"
+                      @click.stop
+                      @change="(value) => onSbOmniAssetUsageChange(activeSb, asset, value)"
                     >
-                      <img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" class="cover-img" alt="" />
-                      <div v-else-if="char.error_msg || char.errorMsg" class="cover-placeholder error" :title="char.error_msg || char.errorMsg">{{ char.error_msg || char.errorMsg }}</div>
-                      <div v-else class="cover-placeholder">暂无图</div>
-                      <div v-if="dragOverResourceKey === 'char-' + char.id" class="asset-cover-drop-hint">松开上传</div>
-                    </div>
-                    <!-- 额外参考图条 -->
-                    <div v-if="parseExtraImages(char).length" class="extra-images-strip">
-                      <div v-for="ep in parseExtraImages(char)" :key="ep" class="extra-thumb" :title="'点击设为主图（悬停左上角可放大预览）'">
-                        <img :src="localPathToUrl(ep)" alt="" @click="onSetPrimaryImage('character', char, ep)" />
-                        <button class="thumb-preview-btn" title="放大预览" @click.stop="openImagePreview(localPathToUrl(ep))">
-                          <el-icon :size="10"><ZoomIn /></el-icon>
-                        </button>
-                        <button class="extra-thumb-remove" title="移除" @click.stop="onRemoveExtraImage('character', char, ep)">×</button>
-                      </div>
-                    </div>
-                    <div class="asset-cover-actions">
-                      <el-button type="primary" size="small" :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char)">
-                        <el-icon v-if="!generatingCharIds.has(char.id)"><MagicStick /></el-icon>
-                        AI 生成
-                      </el-button>
-                      <el-button type="success" size="small" :loading="uploadingResourceId === 'char-' + char.id" @click="onUploadResourceClick('character', char.id)">
-                        <el-icon v-if="uploadingResourceId !== 'char-' + char.id"><Upload /></el-icon>
-                        上传
-                      </el-button>
-                    </div>
+                      <el-option v-for="opt in omniUsageOptions(asset)" :key="opt.value" :label="opt.label" :value="opt.value" />
+                    </el-select>
+                    <el-button text size="small" class="sb-universal-library-move" :disabled="index <= 0" @click="moveSbOmniAsset(activeSb, asset.id, -1)">↑</el-button>
+                    <el-button text size="small" class="sb-universal-library-move" :disabled="index >= (sbOmniAssetIds[activeSb.id] || []).length - 1" @click="moveSbOmniAsset(activeSb, asset.id, 1)">↓</el-button>
+                    <el-button v-if="asset.type === 'image'" text size="small" class="sb-universal-library-sd2" :loading="sbOmniCertifyingIds.has(asset.id)" @click.stop="onSbOmniAssetCertify(activeSb, asset)">{{ sbOmniSd2ShortLabel(asset) }}</el-button>
+                    <el-button text size="small" type="danger" @click="removeSbOmniAsset(activeSb, asset.id)">移除</el-button>
                   </div>
                 </div>
-                <div v-if="characters.length === 0" class="empty-tip">暂无角色，请先「AI 生成角色」或在上一步保存剧本后提取</div>
+              </template>
+              <div v-for="asset in sbOmniIdentityAssets(activeSb)" :key="`sd2-${asset.id}`" class="sb-universal-identity-row">
+                <el-checkbox :model-value="!!asset.requires_sd2_identity" @change="(value) => onSbOmniAssetRealPersonToggle(activeSb, asset, value)">含真人／需身份一致性</el-checkbox>
+                <span class="sb-universal-identity-status" :class="`is-${sbOmniSd2Status(asset)}`">SD2 认证：{{ sbOmniSd2StatusLabel(asset) }}
+                  <el-button text size="small" :loading="sbOmniCertifyingIds.has(asset.id)" @click="onSbOmniAssetCertify(activeSb, asset)">{{ sbOmniSd2Status(asset) === 'active' ? '重新认证' : (sbOmniSd2Status(asset) === 'processing' ? '刷新状态' : '认证') }}</el-button>
+                </span>
+              </div>
+              <div v-if="(sbOmniCreationMode[activeSb.id] || 'multi_reference') === 'first_last_frame'" class="sb-universal-frame-actions">
+                <el-button v-for="asset in sbOmniFrameCandidates(activeSb)" :key="`f-${asset.id}`" size="small" plain @click="setSbOmniFrameAsset(activeSb, 'first', asset.id)">设为首帧：{{ asset.name || `素材${asset.id}` }}</el-button>
+                <el-button v-for="asset in sbOmniFrameCandidates(activeSb)" :key="`l-${asset.id}`" size="small" plain @click="setSbOmniFrameAsset(activeSb, 'last', asset.id)">设为尾帧：{{ asset.name || `素材${asset.id}` }}</el-button>
               </div>
             </div>
-          </div>
-
-          <!-- 道具生成 -->
-          <div id="anchor-props" class="resource-block card">
-            <div class="collapse-header resource-block-header" @click="propsBlockCollapsed = !propsBlockCollapsed">
-              <h3 class="resource-block-title">道具生成</h3>
-              <el-icon class="collapse-icon"><ArrowUp v-if="!propsBlockCollapsed" /><ArrowDown v-else /></el-icon>
-            </div>
-            <div v-show="!propsBlockCollapsed" class="resource-block-body">
-              <div class="asset-actions">
-                <el-button type="primary" size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取道具</el-button>
-                <el-button size="small" :disabled="!dramaId" @click="showAddProp = true">添加道具</el-button>
-                <el-button size="small" @click="showPropLibrary = true">本剧道具库</el-button>
-              </div>
-              <div class="prop-gen-mode" style="margin: 8px 0; font-size: 13px;">
-                <el-checkbox v-model="propUseQuadGrid">生成四视图道具（默认单图，纯色无缝背景）</el-checkbox>
-              </div>
-              <div class="asset-list asset-list-two">
-                <div v-for="prop in props" :key="prop.id" class="asset-item asset-item-left-right">
-                  <div class="asset-info">
-                    <div class="asset-name">
-                      <span>{{ prop.name }}</span>
-                      <el-button type="danger" text size="small" class="btn-delete-icon" title="删除" @click="onDeleteProp(prop)">
-                        <el-icon><Delete /></el-icon>
-                      </el-button>
-                    </div>
-                    <div class="asset-desc-full">{{ prop.description || prop.prompt || '暂无描述' }}</div>
-                    <div class="asset-btns">
-                      <el-button size="small" @click="editProp(prop)">编辑</el-button>
-                      <el-button size="small" :loading="addingPropToLibraryId === prop.id" :disabled="!hasAssetImage(prop)" @click="onAddPropToLibrary(prop)">
-                        加入本剧库
-                      </el-button>
-                      <el-button size="small" :loading="addingPropToMaterialId === prop.id" :disabled="!hasAssetImage(prop)" @click="onAddPropToMaterialLibrary(prop)">
-                        加入素材库
-                      </el-button></div>
-                    <div v-if="getPropAffectedStoryboards(prop.id).length" class="asset-storyboard-link">
-                      <span class="asl-label">影响的分镜：</span>
-                      <span
-                        v-for="sb in getPropAffectedStoryboards(prop.id)"
-                        :key="sb.id"
-                        class="asl-chip"
-                        title="点击跳转到该分镜"
-                        @click="scrollToStoryboard(sb.id)"
-                      >#{{ sb.storyboard_number }}</span>
-                      <span v-if="regenSbImagesForAsset.has('prop-' + prop.id) && regenSbImagesProgress['prop-' + prop.id]" class="asl-progress">
-                        {{ regenSbImagesProgress['prop-' + prop.id].current }}/{{ regenSbImagesProgress['prop-' + prop.id].total }}
-                      </span>
-                      <el-button
-                        size="small"
-                        class="asl-regen-btn"
-                        :loading="regenSbImagesForAsset.has('prop-' + prop.id)"
-                        @click="onRegenAffectedSbImages('prop-' + prop.id, getPropAffectedStoryboards(prop.id))"
-                      >
-                        <span v-if="!regenSbImagesForAsset.has('prop-' + prop.id)">↻ 重新生成分镜图</span>
-                      </el-button>
-                    </div>
-                  </div>
-                  <div class="asset-cover-wrap">
-                    <div
-                      class="asset-cover"
-                      :class="{ 'asset-cover--clickable': hasAssetImage(prop), 'asset-cover--dragover': dragOverResourceKey === 'prop-' + prop.id }"
-                      role="button"
-                      tabindex="0"
-                      @click="hasAssetImage(prop) && openImagePreview(assetImageUrl(prop))"
-                      @dragover="onResourceDragOver($event, 'prop', prop.id)"
-                      @dragleave="onResourceDragLeave($event, 'prop-' + prop.id)"
-                      @drop="onResourceDrop($event, 'prop', prop.id)"
-                    >
-                      <img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" class="cover-img" alt="" />
-                      <div v-else-if="prop.error_msg || prop.errorMsg" class="cover-placeholder error" :title="prop.error_msg || prop.errorMsg">{{ prop.error_msg || prop.errorMsg }}</div>
-                      <div v-else class="cover-placeholder">暂无图</div>
-                      <div v-if="dragOverResourceKey === 'prop-' + prop.id" class="asset-cover-drop-hint">松开上传</div>
-                    </div>
-                    <div v-if="parseExtraImages(prop).length" class="extra-images-strip">
-                      <div v-for="ep in parseExtraImages(prop)" :key="ep" class="extra-thumb" title="点击设为主图（悬停左上角可放大预览）">
-                        <img :src="localPathToUrl(ep)" alt="" @click="onSetPrimaryImage('prop', prop, ep)" />
-                        <button class="thumb-preview-btn" title="放大预览" @click.stop="openImagePreview(localPathToUrl(ep))">
-                          <el-icon :size="10"><ZoomIn /></el-icon>
-                        </button>
-                        <button class="extra-thumb-remove" title="移除" @click.stop="onRemoveExtraImage('prop', prop, ep)">×</button>
-                      </div>
-                    </div>
-                    <div class="asset-cover-actions">
-                      <el-tooltip :content="propUseQuadGrid ? '四视图道具（前/侧/后/顶，纯色无缝背景）' : '单图道具（纯色无缝背景）'" placement="top">
-                        <el-button type="primary" size="small" :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid)">
-                          <el-icon v-if="!generatingPropIds.has(prop.id)"><MagicStick /></el-icon>
-                          AI 生成
-                        </el-button>
-                      </el-tooltip>
-                      <el-button type="success" size="small" :loading="uploadingResourceId === 'prop-' + prop.id" @click="onUploadResourceClick('prop', prop.id)">
-                        <el-icon v-if="uploadingResourceId !== 'prop-' + prop.id"><Upload /></el-icon>
-                        上传
-                      </el-button>
-                    </div>
-                  </div>
-                </div>
-                <div v-if="props.length === 0" class="empty-tip">暂无道具，可从剧本提取或添加</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 场景生成 -->
-          <div id="anchor-scenes" class="resource-block card">
-            <div class="collapse-header resource-block-header" @click="scenesBlockCollapsed = !scenesBlockCollapsed">
-              <h3 class="resource-block-title">场景生成</h3>
-              <el-icon class="collapse-icon"><ArrowUp v-if="!scenesBlockCollapsed" /><ArrowDown v-else /></el-icon>
-            </div>
-            <div v-show="!scenesBlockCollapsed" class="resource-block-body">
-              <div class="asset-actions">
-                <el-button type="primary" size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">
-                  从剧本提取场景
-                </el-button>
-                <el-button size="small" :disabled="!dramaId" @click="openAddScene">添加场景</el-button>
-                <el-button size="small" @click="showSceneLibrary = true">本剧场景库</el-button>
-              </div>
-              <div class="scene-gen-mode" style="margin: 8px 0; font-size: 13px;">
-                <el-checkbox v-model="sceneUseQuadGrid">生成四宫格场景（默认单图）</el-checkbox>
-              </div>
-              <div class="asset-list asset-list-two">
-                <div v-for="scene in scenes" :key="scene.id" class="asset-item asset-item-left-right">
-                  <div class="asset-info">
-                    <div class="asset-name">
-                      <span>{{ scene.location }}</span>
-                      <el-button type="danger" text size="small" class="btn-delete-icon" title="删除" @click="onDeleteScene(scene)">
-                        <el-icon><Delete /></el-icon>
-                      </el-button>
-                    </div>
-                    <div class="asset-desc-full">{{ scene.description || scene.prompt || scene.time || '暂无描述' }}</div>
-                    <div class="asset-btns">
-                      <el-button size="small" @click="editScene(scene)">编辑</el-button>
-                      <el-button size="small" :loading="addingSceneToLibraryId === scene.id" :disabled="!hasAssetImage(scene)" @click="onAddSceneToLibrary(scene)">
-                        加入本剧库
-                      </el-button>
-                      <el-button size="small" :loading="addingSceneToMaterialId === scene.id" :disabled="!hasAssetImage(scene)" @click="onAddSceneToMaterialLibrary(scene)">
-                        加入素材库
-                      </el-button></div>
-                    <div v-if="getSceneAffectedStoryboards(scene.id).length" class="asset-storyboard-link">
-                      <span class="asl-label">影响的分镜：</span>
-                      <span
-                        v-for="sb in getSceneAffectedStoryboards(scene.id)"
-                        :key="sb.id"
-                        class="asl-chip"
-                        title="点击跳转到该分镜"
-                        @click="scrollToStoryboard(sb.id)"
-                      >#{{ sb.storyboard_number }}</span>
-                      <span v-if="regenSbImagesForAsset.has('scene-' + scene.id) && regenSbImagesProgress['scene-' + scene.id]" class="asl-progress">
-                        {{ regenSbImagesProgress['scene-' + scene.id].current }}/{{ regenSbImagesProgress['scene-' + scene.id].total }}
-                      </span>
-                      <el-button
-                        size="small"
-                        class="asl-regen-btn"
-                        :loading="regenSbImagesForAsset.has('scene-' + scene.id)"
-                        @click="onRegenAffectedSbImages('scene-' + scene.id, getSceneAffectedStoryboards(scene.id))"
-                      >
-                        <span v-if="!regenSbImagesForAsset.has('scene-' + scene.id)">↻ 重新生成分镜图</span>
-                      </el-button>
-                    </div>
-                  </div>
-                  <div class="asset-cover-wrap">
-                    <div
-                      class="asset-cover"
-                      :class="{ 'asset-cover--clickable': hasAssetImage(scene), 'asset-cover--dragover': dragOverResourceKey === 'scene-' + scene.id }"
-                      role="button"
-                      tabindex="0"
-                      @click="hasAssetImage(scene) && openImagePreview(assetImageUrl(scene))"
-                      @dragover="onResourceDragOver($event, 'scene', scene.id)"
-                      @dragleave="onResourceDragLeave($event, 'scene-' + scene.id)"
-                      @drop="onResourceDrop($event, 'scene', scene.id)"
-                    >
-                      <img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" class="cover-img" alt="" />
-                      <div v-else-if="scene.error_msg || scene.errorMsg" class="cover-placeholder error" :title="scene.error_msg || scene.errorMsg">{{ scene.error_msg || scene.errorMsg }}</div>
-                      <div v-else class="cover-placeholder">暂无图</div>
-                      <div v-if="dragOverResourceKey === 'scene-' + scene.id" class="asset-cover-drop-hint">松开上传</div>
-                    </div>
-                    <div v-if="parseExtraImages(scene).length" class="extra-images-strip">
-                      <div v-for="ep in parseExtraImages(scene)" :key="ep" class="extra-thumb" title="点击设为主图（悬停左上角可放大预览）">
-                        <img :src="localPathToUrl(ep)" alt="" @click="onSetPrimaryImage('scene', scene, ep)" />
-                        <button class="thumb-preview-btn" title="放大预览" @click.stop="openImagePreview(localPathToUrl(ep))">
-                          <el-icon :size="10"><ZoomIn /></el-icon>
-                        </button>
-                        <button class="extra-thumb-remove" title="移除" @click.stop="onRemoveExtraImage('scene', scene, ep)">×</button>
-                      </div>
-                    </div>
-                    <div class="asset-cover-actions">
-                      <el-tooltip :content="sceneUseQuadGrid ? '四宫格场景（正/侧/俯/仰）' : '单图场景'" placement="top">
-                        <el-button type="primary" size="small" :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid)">
-                          <el-icon v-if="!generatingSceneIds.has(scene.id)"><MagicStick /></el-icon>
-                          AI 生成
-                        </el-button>
-                      </el-tooltip>
-                      <el-button type="success" size="small" :loading="uploadingResourceId === 'scene-' + scene.id" @click="onUploadResourceClick('scene', scene.id)">
-                        <el-icon v-if="uploadingResourceId !== 'scene-' + scene.id"><Upload /></el-icon>
-                        上传
-                      </el-button>
-                    </div>
-                  </div>
-                </div>
-                <div v-if="scenes.length === 0" class="empty-tip">暂无场景，请从剧本提取</div>
-              </div>
-            </div>
-          </div>
+          </template>
+          <div v-else class="empty-tip">暂无分镜，先生成分镜后即可编排素材</div>
         </div>
       </section>
 
       <!-- 6. 分镜生成 -->
-      <section id="anchor-storyboard" class="section card">
+      <section id="anchor-storyboard" class="section card storyboard-editor-panel">
         <h2 class="section-title">
           <span>5. 分镜生成</span>
           <span class="step-desc">根据剧本、角色、场景自动生成分镜头脚本</span>
@@ -982,7 +808,17 @@
               </div>
             </div>
           <!-- 分镜控制栏（卡片外，缩进表示属于当前幕） -->
-          <div class="sb-ctrl-bar">
+          <div
+            class="sb-ctrl-bar"
+            :class="{ 'sb-ctrl-bar--active': Number(activeSbId) === Number(sb.id), 'sb-ctrl-bar--dragging': Number(navDragSbId) === Number(sb.id), 'sb-ctrl-bar--dragover': Number(navDragOverSbId) === Number(sb.id) }"
+            draggable="true"
+            @dragstart="onSbNavDragStart(sb)"
+            @dragend="onSbNavDragEnd"
+            @dragover.prevent="onSbNavDragOver(sb)"
+            @dragleave="navDragOverSbId = null"
+            @drop.prevent="onSbNavDrop(sb)"
+            @click="setActiveSbId(sb.id)"
+          >
             <span class="sb-ctrl-num">{{ i + 1 }}</span>
             <span class="sb-ctrl-title">{{ sb.title || '未命名分镜' }}</span>
             <el-tag v-if="sb.movement" size="small" effect="plain" type="info" class="sb-movement-tag">{{ getMovementLabel(sb.movement) }}</el-tag>
@@ -1000,13 +836,24 @@
             <el-button
               class="sb-ctrl-delete"
               type="danger"
-              text
+              plain
               size="small"
+              aria-label="删除当前分镜"
               :title="`删除分镜${i + 1}`"
-              @click="onDeleteSingleStoryboard(sb.id)"
+              @click.stop="onDeleteSingleStoryboard(sb.id)"
             >
-              <el-icon><Delete /></el-icon>
+              <el-icon><Delete /></el-icon><span>删除</span>
             </el-button>
+          </div>
+          <div class="sb-inline-generation-settings">
+            <span class="sb-inline-generation-label">分镜参数</span>
+            <GenerationSettings
+              :model-value="sbGenerationSettings[sb.id] || {}"
+              :show-text-model="true"
+              :max-duration="15"
+              @update:model-value="onInlineSbGenerationSettingsChange(sb, $event)"
+            />
+            <span class="sb-inline-generation-hint">参数会自动保存并用于本镜生成</span>
           </div>
           <div :id="'sb-' + sb.id" class="storyboard-row">
             <!-- 左：分镜脚本 -->
@@ -1192,7 +1039,7 @@
                     <el-tooltip placement="top" :show-after="280" :show-arrow="false" popper-class="sb-universal-tooltip-popper">
                       <template #content>
                         <div class="sb-universal-tooltip">
-                          全能生视频链路（<strong>AI 配置 · 视频</strong> 中选接口规范：<code>kling_omni</code> 可灵 Omni，或 <code>volcengine_omni</code> 火山即梦 Seedance 2.0 多图参考；模型如 <code>kling-video-o1</code>、<code>doubao-seedance-2-0-260128</code> 等以控制台为准）：此处为提交主提示词；只要本框有内容，生视频时<strong>只</strong>发送这段，不会拼接下方「视频提示词」里的动作/对话/旁白。参考图顺序一般为：场景 → 角色（多张）→ 物品（<strong>不含</strong>经典分镜中间主图）；请用 <strong>@图片1</strong>、<strong>@图片2</strong>…（<strong>@图片N 后建议加半角空格</strong>）对应参考图，勿用 @姓名 指图；有场景图时 <strong>@图片1</strong> 只表环境，人物从 <strong>@图片2</strong> 起。若场景参考是<strong>四宫格/多视角拼图</strong>，仅借空间与氛围，须在文案中写明<strong>单镜头完整画幅、禁止分屏宫格</strong>，避免成片模仿拼图布局。全能提示词下拉中「生成」会按<strong>本条分镜总时长</strong>与本集剧本、镜序、邻镜信息，自动决定子分镜数 M（第2行「由以下M个分镜…」），第4行起为「分镜1：T1秒:」…多行，且各段秒数之和等于本镜时长；第3行仍为环境/参考图约束；「生成」与「润色」均为<strong>流式输出</strong>到本框；「润色」在此基础上增强。若本框留空，则退回仅用「视频提示词」。
+                          全能生视频链路（<strong>AI 配置 · 视频</strong> 中选接口规范：<code>kling_omni</code> 可灵 Omni，或 <code>volcengine_omni</code> 火山即梦 Seedance 2.0 多图参考；模型如 <code>kling-video-o1</code>、<code>doubao-seedance-2-0-260128</code> 等以控制台为准）：此处为提交主提示词；只要本框有内容，生视频时<strong>只</strong>发送这段，不会拼接下方「视频提示词」里的动作/对话/旁白。参考图来自「素材库」勾选的素材（点上方「素材编排」打开：上传/媒体素材 + 本镜场景/角色/道具图统一在一个资源库，点击选用、↑↓ 调整顺序、拖到本框直接引用）；请用 <strong>@图片1</strong>、<strong>@图片2</strong>…（<strong>@图片N 后建议加半角空格</strong>）对应素材顺序，勿用 @姓名 指图。人物一致性素材请勾选「含真人」并完成 SD2 认证。若参考图是<strong>四宫格/多视角拼图</strong>，仅借空间与氛围，须在文案中写明<strong>单镜头完整画幅、禁止分屏宫格</strong>，避免成片模仿拼图布局。全能提示词下拉中「生成」会按<strong>本条分镜总时长</strong>与本集剧本、镜序、邻镜信息，自动决定子分镜数 M（第2行「由以下M个分镜…」），第4行起为「分镜1：T1秒:」…多行，且各段秒数之和等于本镜时长；第3行仍为环境/参考图约束；「生成」与「润色」均为<strong>流式输出</strong>到本框；「润色」在此基础上增强。若本框留空，则退回仅用「视频提示词」。
                         </div>
                       </template>
                       <el-icon class="sb-universal-hint-icon" tabindex="0" role="img" aria-label="片段说明">
@@ -1200,7 +1047,7 @@
                       </el-icon>
                     </el-tooltip>
                   </div>
-                  <el-dropdown
+                    <el-dropdown
                     trigger="click"
                     class="sb-universal-prompt-dd"
                     @command="(cmd) => onUniversalSegmentPromptMenu(sb, cmd)"
@@ -1234,17 +1081,100 @@
                         </el-dropdown-item>
                       </el-dropdown-menu>
                     </template>
-                  </el-dropdown>
-                </div>
+                    </el-dropdown>
+                    <span v-if="(sbOmniAssetIds[sb.id] || []).length" class="sb-universal-library-btn sb-universal-library-btn--static">素材 · {{ (sbOmniAssetIds[sb.id] || []).length }}</span>
+                  </div>
                 <UniversalSegmentOmniAtEditor
                   v-if="!generatingUniversalSegmentIds.has(sb.id)"
                   v-model="sbUniversalSegmentText[sb.id]"
                   :slots="getSbUniversalOmniRefSlots(sb)"
                   class="sb-universal-textarea"
                   @blur="() => onSaveUniversalSegmentField(sb)"
+                  @pick="(slot) => onUniversalSegmentPickAsset(sb, slot)"
+                  @drop-asset="(payload) => onUniversalSegmentDropAsset(sb, payload)"
                 />
+                <div v-if="getSelectedUniversalLibraryAssets(sb).length" class="sb-omni-selected-strip">
+                  <span class="sb-omni-selected-strip-label">参考</span>
+                  <div v-for="asset in getSelectedUniversalLibraryAssets(sb)" :key="asset.id" class="sb-omni-selected-strip-item" :title="(asset.name || `素材${asset.id}`) + '：在左侧素材编排中调整'">
+                    <img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" />
+                    <span v-else>{{ asset.type === 'audio' ? '🎵' : '🎬' }}</span>
+                    <em v-if="sbOmniEntryIndexByAssetId(sb)[asset.id]">@图片{{ sbOmniEntryIndexByAssetId(sb)[asset.id] }}</em>
+                  </div>
+                </div>
+                <div class="sb-omni-controls">
+                  <div class="sb-omni-control-row">
+                    <span class="sb-omni-control-label">创作模式</span>
+                    <el-radio-group
+                      :model-value="sbOmniCreationMode[sb.id] || 'multi_reference'"
+                      size="small"
+                      @change="(value) => onSbOmniModeChange(sb, value)"
+                    >
+                      <el-radio-button label="multi_reference">多参考</el-radio-button>
+                      <el-radio-button label="first_last_frame">首尾帧</el-radio-button>
+                    </el-radio-group>
+                    <span class="sb-omni-control-hint">
+                      {{ (sbOmniCreationMode[sb.id] || 'multi_reference') === 'first_last_frame' ? '仅提交一张首帧和一张尾帧' : '图片、视频、音频按模型能力路由' }}
+                    </span>
+                  </div>
+                  <div v-if="(sbOmniCreationMode[sb.id] || 'multi_reference') === 'first_last_frame'" class="sb-omni-frame-row">
+                    <span class="sb-omni-frame-slot">
+                      <span class="sb-omni-frame-slot-label">首帧</span>
+                      <img v-if="sbOmniFrameAsset(sb, 'first')" :src="sbOmniAssetUrl(sbOmniFrameAsset(sb, 'first'))" class="sb-omni-frame-thumb" alt="" />
+                      <el-button link size="small" class="sb-omni-frame-pick" @click="openSbOmniFramePicker(sb, 'first')">{{ sbOmniFrameAssetName(sb, 'first') }}</el-button>
+                      <el-button link size="small" class="sb-omni-frame-upload" :loading="sbOmniFrameUploading === 'first'" @click="onSbOmniFrameUpload(sb, 'first')">上传</el-button>
+                    </span>
+                    <span class="sb-omni-frame-slot">
+                      <span class="sb-omni-frame-slot-label">尾帧</span>
+                      <img v-if="sbOmniFrameAsset(sb, 'last')" :src="sbOmniAssetUrl(sbOmniFrameAsset(sb, 'last'))" class="sb-omni-frame-thumb" alt="" />
+                      <el-button link size="small" class="sb-omni-frame-pick" @click="openSbOmniFramePicker(sb, 'last')">{{ sbOmniFrameAssetName(sb, 'last') }}</el-button>
+                      <el-button link size="small" class="sb-omni-frame-upload" :loading="sbOmniFrameUploading === 'last'" @click="onSbOmniFrameUpload(sb, 'last')">上传</el-button>
+                    </span>
+                  </div>
+                  <div class="sb-omni-control-row sb-omni-audio-row">
+                    <span class="sb-omni-control-label">音频</span>
+                    <el-select
+                      :model-value="sbAudioStrategy[sb.id] || 'reference_only'"
+                      size="small"
+                      style="width: 132px"
+                      @change="(value) => onSbAudioSettingsChange(sb, { audio_strategy: value })"
+                    >
+                      <el-option label="原生参考" value="reference_only" />
+                      <el-option label="成片后混音" value="post_mix" />
+                    </el-select>
+                    <el-checkbox
+                      :model-value="!!sbKeepOriginalAudio[sb.id]"
+                      @change="(value) => onSbAudioSettingsChange(sb, { keep_original_audio: value })"
+                    >保留原声</el-checkbox>
+                    <el-input-number
+                      v-if="sbAudioStrategy[sb.id] === 'post_mix'"
+                      :model-value="Number(sbAudioVolume[sb.id] ?? 1)"
+                      :min="0"
+                      :max="2"
+                      :step="0.1"
+                      size="small"
+                      controls-position="right"
+                      @change="(value) => onSbAudioSettingsChange(sb, { audio_volume: value })"
+                    />
+                  </div>
+                  <div v-if="(sbOmniCreationMode[sb.id] || 'multi_reference') === 'first_last_frame'" class="sb-omni-frame-actions">
+                    <el-button
+                      v-for="asset in sbOmniFrameCandidates(sb)"
+                      :key="asset.id"
+                      size="small"
+                      plain
+                      @click="setSbOmniFrameAsset(sb, 'first', asset.id)"
+                    >设为首帧：{{ asset.name || `素材${asset.id}` }}</el-button>
+                    <el-button
+                      v-for="asset in sbOmniFrameCandidates(sb)"
+                      :key="`last-${asset.id}`"
+                      size="small"
+                      plain
+                      @click="setSbOmniFrameAsset(sb, 'last', asset.id)"
+                    >设为尾帧：{{ asset.name || `素材${asset.id}` }}</el-button>
+                  </div>
+                </div>
                 <el-input
-                  v-else
+                  v-if="generatingUniversalSegmentIds.has(sb.id)"
                   v-model="sbUniversalSegmentText[sb.id]"
                   type="textarea"
                   :rows="10"
@@ -1544,9 +1474,15 @@
         </div>
         <div v-else-if="storyboards.length === 0" class="empty-tip">请先生成分镜</div>
       </section>
+      </div>
+
+      <div v-show="workflowStage === 'storyboard'" class="workflow-next-action">
+        <span>{{ storyboards.length ? `已有 ${storyboards.length} 个分镜；生成完成后即可检查并合成。` : '请先生成至少一个分镜。' }}</span>
+        <el-button type="primary" :disabled="!storyboards.length" @click="setWorkflowStage('merge')">进入视频合成</el-button>
+      </div>
 
       <!-- 7. 视频配置 + AI 模型配置 -->
-      <section class="section card">
+      <section v-show="workflowStage === 'merge'" class="section card">
         <h2 class="section-title">视频配置</h2>
         <div class="config-grid">
           <el-form-item label="分辨率">
@@ -1605,13 +1541,19 @@
       </section>
 
       <!-- 8. 合成视频 -->
-      <section id="anchor-video" class="section card">
+      <section v-show="workflowStage === 'merge'" id="anchor-video" class="section card">
         <h2 class="section-title">合成视频</h2>
+        <div class="merge-readiness" :class="{ ready: mergeReadiness.total > 0 && mergeReadiness.missing === 0 }">
+          <b>镜头就绪：{{ mergeReadiness.ready }} / {{ mergeReadiness.total }}</b>
+          <span v-if="mergeReadiness.missing">还有 {{ mergeReadiness.missing }} 个分镜没有可用于合成的视频。</span>
+          <span v-else-if="mergeReadiness.total">全部分镜视频已就绪，可以合成当前集。</span>
+          <span v-else>请先在分镜管理中生成镜头视频。</span>
+        </div>
         <el-button
           type="primary"
           size="large"
           :loading="videoStatus === 'generating'"
-          :disabled="!currentEpisodeId || storyboards.length === 0 || videoStatus === 'generating'"
+          :disabled="!currentEpisodeId || mergeReadiness.total === 0 || mergeReadiness.missing > 0 || videoStatus === 'generating'"
           @click="onGenerateVideo"
         >
           合成视频
@@ -2590,6 +2532,23 @@
       </template>
     </el-dialog>
 
+    <!-- 全能首尾帧参考图选择 -->
+    <el-dialog v-model="sbOmniFramePicker.open" :title="(sbOmniFramePicker.target === 'first' ? '选择首帧' : '选择尾帧') + '（全能模式）'" width="560px" destroy-on-close>
+      <div class="sb-omni-frame-picker-grid">
+        <article
+          v-for="asset in sbOmniFramePickerImages"
+          :key="asset.id"
+          class="sb-omni-frame-picker-card"
+          :class="{ active: sbOmniFramePickerActive(sbOmniFramePicker.sbId, sbOmniFramePicker.target, asset.id) }"
+          @click="confirmSbOmniFrameAsset(asset)"
+        >
+          <img :src="sbOmniAssetUrl(asset)" alt="" />
+          <small>{{ asset.name || `素材${asset.id}` }}</small>
+        </article>
+      </div>
+      <div v-if="!sbOmniFramePickerImages.length" class="sb-omni-frame-picker-empty">暂无图片素材，请先点击分镜里的「上传」添加参考图</div>
+    </el-dialog>
+
     <!-- AI 配置弹窗（不跳转，避免本页内容丢失） -->
     <el-dialog v-model="showAiConfigDialog" title="AI 配置" width="90%" destroy-on-close class="ai-config-dialog">
       <AIConfigContent v-if="showAiConfigDialog" />
@@ -2628,6 +2587,7 @@ import { sceneAPI } from '@/api/scenes'
 import { taskAPI } from '@/api/task'
 import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
+import { omniVideoAPI } from '@/api/omniVideo'
 import { storyboardsAPI } from '@/api/storyboards'
 import { uploadAPI } from '@/api/upload'
 import { characterLibraryAPI } from '@/api/characterLibrary'
@@ -2639,6 +2599,7 @@ import { exportStoryboardSheet } from '@/utils/exportStoryboardSheet'
 import StylePickerButton from '@/components/StylePickerButton.vue'
 import AIConfigContent from '@/components/AIConfigContent.vue'
 import UniversalSegmentOmniAtEditor from '@/components/UniversalSegmentOmniAtEditor.vue'
+import FreeCreate from '@/views/FreeCreate.vue'
 import {
   generationStyleOptions,
   getStylePromptEn,
@@ -2722,6 +2683,42 @@ const isStoryGenRunning = computed(() => {
 const generationStyle = ref('')
 const projectAspectRatio = ref('16:9')
 const videoClipDuration = ref(5)
+const projectVideoModel = ref('auto')
+const universalLibraryAssets = ref([])
+/** 全能素材库：上传 / 拖拽 / 首尾帧上传 共享状态 */
+const sbOmniFileInput = ref(null)
+const sbOmniFrameFileInput = ref(null)
+const sbOmniUploadTargetId = ref(null)
+const sbOmniUploadingIds = ref(new Set())
+const sbOmniFrameUploadTarget = ref(null)
+const sbOmniFrameUploading = ref('')
+const sbOmniCertifyingIds = ref(new Set())
+const sbOmniLibDragging = ref(false)
+const sbUniversalUploadLimits = ref(null)
+const sbOmniFramePicker = ref({ open: false, sbId: null, target: 'first' })
+const sbOmniShotLimits = computed(() => {
+  const shot = sbUniversalUploadLimits.value?.shot
+  return { total: shot?.total ?? 12, image: shot?.image ?? 9, video: shot?.video ?? 3, audio: shot?.audio ?? 3 }
+})
+const sbUniversalUploadLimitNote = computed(() => {
+  const files = sbUniversalUploadLimits.value?.files
+  if (!files) return '上传后自动加入本镜，可在素材库面板调整用途与顺序'
+  return `单文件：图片 ${files.image?.max_mb || 30}MB、视频 ${files.video?.max_mb || 50}MB、音频 ${files.audio?.max_mb || 15}MB；本镜最多 ${sbOmniShotLimits.value.total} 个素材。`
+})
+const sbOmniFramePickerImages = computed(() => universalLibraryAssets.value.filter((a) => a.type === 'image'))
+const projectGenerationSettings = computed(() => ({
+  video_model: projectVideoModel.value || 'auto',
+  duration: Number(videoClipDuration.value) || 5,
+  resolution: videoResolution.value || '720p',
+  aspect_ratio: projectAspectRatio.value || '16:9',
+}))
+function setProjectGenerationSettings(next = {}) {
+  projectVideoModel.value = next.video_model || 'auto'
+  if (next.duration != null) videoClipDuration.value = Math.min(15, Math.max(1, Number(next.duration) || 5))
+  if (next.resolution) videoResolution.value = next.resolution
+  if (next.aspect_ratio) projectAspectRatio.value = next.aspect_ratio
+  saveProjectSettings(false)
+}
 
 /** 根据 value 查找样式选项对象 */
 function _findStyleOption(val) {
@@ -2775,10 +2772,61 @@ const characters = computed(() => store.characters)
 const scenes = computed(() => store.scenes)
 const props = computed(() => store.props)
 const storyboards = computed(() => store.storyboards)
+const workflowStage = ref('script')
+const showLegacyPipeline = ref(false)
+const resourceMediaFileInput = ref(null)
+const resourceMediaUploading = ref(false)
+const workflowStages = computed(() => [
+  { key: 'script', label: '剧本管理', complete: !!scriptContent.value?.trim() },
+  { key: 'resources', label: '统一资源', complete: characters.value.length + scenes.value.length + props.value.length + universalLibraryAssets.value.length > 0 },
+  { key: 'storyboard', label: '分镜管理', complete: storyboards.value.length > 0 },
+  { key: 'merge', label: '视频合成', complete: !!currentEpisode.value?.video_url },
+])
+const workflowStageMeta = computed(() => ({
+  script: { title: '剧本管理', description: '确定故事与当前集剧本，再进入资源准备。' },
+  resources: { title: '统一资源管理', description: '集中维护角色、场景、道具和媒体素材。' },
+  storyboard: { title: '分镜管理', description: '为每个分镜拖入素材并用 @ 引用，再生成镜头视频。' },
+  merge: { title: '视频合成', description: '检查镜头视频就绪状态后合成当前集成片。' },
+}[workflowStage.value] || {}))
+function setWorkflowStage(stage) {
+  if (['script', 'resources', 'storyboard', 'merge'].includes(stage)) workflowStage.value = stage
+}
+function navigateWorkflowStep(step) {
+  setWorkflowStage(step)
+  nextTick(() => {
+    const anchor = step === 'script' ? 'anchor-script' : step === 'storyboard' ? 'anchor-storyboard' : step === 'merge' ? 'anchor-video' : null
+    if (anchor) scrollToAnchor(anchor)
+    else window.scrollTo({ top: 0, behavior: 'smooth' })
+  })
+}
+/** 当前操作分镜（左侧素材编排面板作用目标）：默认第一个分镜，点击分镜卡片切换 */
+const activeSbId = ref(null)
+const activeSb = computed(() => {
+  const list = storyboards.value || []
+  const found = list.find((s) => Number(s.id) === Number(activeSbId.value))
+  return found || list[0] || null
+})
+function setActiveSbId(id) {
+  activeSbId.value = id != null ? Number(id) : null
+}
+watch(
+  () => storyboards.value?.length,
+  () => {
+    if (activeSbId.value == null || !(storyboards.value || []).some((s) => Number(s.id) === Number(activeSbId.value))) {
+      activeSbId.value = (storyboards.value || [])[0]?.id ?? null
+    }
+  },
+  { immediate: true }
+)
 const currentEpisode = computed(() => store.currentEpisode)
 const currentEpisodeId = computed(() => store.currentEpisode?.id ?? null)
 const videoProgress = computed(() => store.videoProgress)
 const videoStatus = computed(() => store.videoStatus)
+const mergeReadiness = computed(() => {
+  const total = storyboards.value.length
+  const ready = storyboards.value.filter((sb) => getSbAllVideos(sb.id).length > 0).length
+  return { total, ready, missing: Math.max(0, total - ready) }
+})
 
 function trackFilmCreateAction(_action, _payload = {}) {
   // 单机版：无埋点上报
@@ -3055,14 +3103,14 @@ const navSteps = computed(() => {
     || epRunning.some((t) => t.resourceType === GEN_RESOURCE.SB_VIDEO)
   const videoStatus = sbVideoGen ? 'generating' : sbVideoAllDone ? 'done' : sbVideoSome ? 'partial' : 'pending'
 
+  const resourcesGenerating = charGen || propGen || sceneGen
+  const resourceCount = charList.length + propList.length + sceneList.length + universalLibraryAssets.value.length
+  const resourcesReady = charStatus === 'done' && propStatus === 'done' && sceneStatus === 'done'
   return [
-    { key: 'script',   label: '故事剧本',   anchor: 'anchor-script',     status: scriptStatus,    count: hasScript ? 1 : 0 },
-    { key: 'chars',    label: '角色',        anchor: 'anchor-characters', status: charStatus,      count: charList.length },
-    { key: 'props',    label: '道具',        anchor: 'anchor-props',      status: propStatus,      count: propList.length },
-    { key: 'scenes',   label: '场景',        anchor: 'anchor-scenes',     status: sceneStatus,     count: sceneList.length },
-    { key: 'sb',       label: '分镜脚本',   anchor: 'anchor-storyboard', status: sbScriptStatus,  count: sbList.length },
-    { key: 'sbimg',    label: '分镜图',      anchor: 'anchor-storyboard', status: sbImgStatus,     count: sbList.length },
-    { key: 'video',    label: '分镜视频',   anchor: 'anchor-video',      status: videoStatus,     count: 0 },
+    { key: 'script', label: '剧本管理', status: scriptStatus, count: hasScript ? 1 : 0 },
+    { key: 'resources', label: '统一资源', status: resourcesGenerating ? 'generating' : resourcesReady ? 'done' : resourceCount ? 'partial' : 'pending', count: resourceCount },
+    { key: 'storyboard', label: '分镜管理', status: sbScriptGen || sbImgGen || sbVideoGen ? 'generating' : sbVideoAllDone ? 'done' : (sbList.length ? 'partial' : 'pending'), count: sbList.length },
+    { key: 'merge', label: '视频合成', status: videoStatus === 'generating' ? 'generating' : currentEpisodeVideoUrl.value ? 'done' : sbVideoSome ? 'partial' : 'pending', count: 0 },
   ]
 })
 
@@ -3187,8 +3235,18 @@ const regeneratingLayoutSbIds = reactive(new Set())  // 正在 AI 重新生成�
 /** 分镜创作模式：classic | universal（默认 classic，存库 storyboards.creation_mode） */
 const sbCreationMode = ref({})
 const sbGenerationSettings = ref({})
+const sd2ResourceCertifying = ref(null)
 /** 全能模式片段描述（存库 universal_segment_text，与经典参考图字段独立） */
 const sbUniversalSegmentText = ref({})
+const sbOmniAssetIds = ref({})
+const sbAudioStrategy = ref({})
+const sbKeepOriginalAudio = ref({})
+const sbAudioVolume = ref({})
+const sbAudioFadeSeconds = ref({})
+const sbOmniCreationMode = ref({})
+const sbOmniFirstFrameAssetId = ref({})
+const sbOmniLastFrameAssetId = ref({})
+const sbOmniAssetUsage = ref({})
 // 分镜图片/视频列表（由 /images?storyboard_id=xx 和 /videos?storyboard_id=xx 拉取）
 const sbImages = ref({})
 const sbVideos = ref({})
@@ -3260,6 +3318,9 @@ const resourceImageFileInput = ref(null)
 const resourceUploadType = ref(null) // 'character' | 'prop' | 'scene'
 const resourceUploadId = ref(null)
 const uploadingResourceId = ref(null) // 'char-1' | 'prop-2' | 'scene-3'
+const showPropAssetPicker = ref(false)
+const propAssetPickerTarget = ref(null)
+const propAssetPickerImages = computed(() => universalLibraryAssets.value.filter((asset) => asset.type === 'image' && asset.local_path))
 const dragOverResourceKey = ref(null) // 'char-1' | 'prop-2' | 'scene-3'
 const dragOverSbId = ref(null)
 // 公共库弹窗状态已移至各 composable
@@ -3574,11 +3635,16 @@ function assetImageUrl(item) {
     return '/static/' + p
   }
   if (item.image_url) return imageUrl(item.image_url)
+  const refImage = item.ref_image && String(item.ref_image).trim()
+  if (refImage) {
+    if (/^(https?:|data:|\/static\/)/i.test(refImage)) return refImage
+    return '/static/' + refImage.replace(/^\//, '')
+  }
   return ''
 }
 function hasAssetImage(item) {
   if (!item) return false
-  return !!(item.image_url || item.local_path)
+  return !!(item.image_url || item.local_path || item.ref_image)
 }
 function getSelectedStyle() {
   return getSelectedStylePrompt()
@@ -4506,6 +4572,15 @@ function syncStoryboardStateFromEpisode(ep) {
   const nextCreationMode = {}
   const nextGenerationSettings = {}
   const nextUniversalSegment = {}
+  const nextOmniAssetIds = {}
+  const nextAudioStrategy = {}
+  const nextKeepOriginalAudio = {}
+  const nextAudioVolume = {}
+  const nextAudioFadeSeconds = {}
+  const nextOmniCreationMode = {}
+  const nextOmniFirstFrameAssetId = {}
+  const nextOmniLastFrameAssetId = {}
+  const nextOmniAssetUsage = {}
   for (const sb of boards) {
     nextScene[sb.id] = sb.scene_id ?? null
     nextDialogue[sb.id] = sb.dialogue ?? ''
@@ -4532,12 +4607,21 @@ function syncStoryboardStateFromEpisode(ep) {
     nextCreationMode[sb.id] = sb.creation_mode === 'universal' ? 'universal' : 'classic'
     nextGenerationSettings[sb.id] = {
       text_model: sb.text_model || 'auto',
-      video_model: sb.video_model || 'auto',
-      duration: sb.duration != null ? Number(sb.duration) : 5,
+      video_model: sb.video_model || projectVideoModel.value || 'auto',
+      duration: sb.duration != null ? Number(sb.duration) : (Number(videoClipDuration.value) || 5),
       resolution: sb.video_resolution || videoResolution.value || '720p',
       aspect_ratio: sb.video_aspect_ratio || projectAspectRatio.value || '16:9',
     }
     nextUniversalSegment[sb.id] = (sb.universal_segment_text ?? '').toString()
+    nextOmniAssetIds[sb.id] = Array.isArray(sb.omni_asset_ids) ? sb.omni_asset_ids.map(Number).filter((id) => Number.isFinite(id)) : []
+    nextAudioStrategy[sb.id] = sb.audio_strategy || 'reference_only'
+    nextKeepOriginalAudio[sb.id] = !!sb.keep_original_audio
+    nextAudioVolume[sb.id] = Number(sb.audio_volume ?? 1)
+    nextAudioFadeSeconds[sb.id] = Number(sb.audio_fade_seconds ?? 0)
+    nextOmniCreationMode[sb.id] = sb.omni_creation_mode === 'first_last_frame' ? 'first_last_frame' : 'multi_reference'
+    nextOmniFirstFrameAssetId[sb.id] = sb.omni_first_frame_asset_id != null ? Number(sb.omni_first_frame_asset_id) : null
+    nextOmniLastFrameAssetId[sb.id] = sb.omni_last_frame_asset_id != null ? Number(sb.omni_last_frame_asset_id) : null
+    nextOmniAssetUsage[sb.id] = sb.omni_asset_usage && typeof sb.omni_asset_usage === 'object' ? { ...sb.omni_asset_usage } : {}
   }
   sbCharacterIds.value = nextCharIds
   sbPropIds.value = nextPropIds
@@ -4563,6 +4647,15 @@ function syncStoryboardStateFromEpisode(ep) {
   sbCreationMode.value = nextCreationMode
   sbGenerationSettings.value = nextGenerationSettings
   sbUniversalSegmentText.value = nextUniversalSegment
+  sbOmniAssetIds.value = nextOmniAssetIds
+  sbAudioStrategy.value = nextAudioStrategy
+  sbKeepOriginalAudio.value = nextKeepOriginalAudio
+  sbAudioVolume.value = nextAudioVolume
+  sbAudioFadeSeconds.value = nextAudioFadeSeconds
+  sbOmniCreationMode.value = nextOmniCreationMode
+  sbOmniFirstFrameAssetId.value = nextOmniFirstFrameAssetId
+  sbOmniLastFrameAssetId.value = nextOmniLastFrameAssetId
+  sbOmniAssetUsage.value = nextOmniAssetUsage
 }
 
 function onEpisodeSelect(epId) {
@@ -4597,6 +4690,8 @@ async function loadDrama() {
     generationStyle.value = d.style || ''
     projectAspectRatio.value = (d.metadata && d.metadata.aspect_ratio) ? d.metadata.aspect_ratio : '16:9'
     videoClipDuration.value = (d.metadata && d.metadata.video_clip_duration) ? Number(d.metadata.video_clip_duration) : 5
+    projectVideoModel.value = (d.metadata && d.metadata.video_model) ? d.metadata.video_model : 'auto'
+    if (d.metadata && d.metadata.video_resolution) videoResolution.value = d.metadata.video_resolution
     storyboardIncludeNarration.value = !!(d.metadata && d.metadata.storyboard_include_narration)
     storyboardUniversalOmni.value = !!(d.metadata && d.metadata.storyboard_universal_omni)
     storyboardUseFirstLastFrame.value = !!(d.metadata && d.metadata.storyboard_use_first_last_frame)
@@ -4624,6 +4719,7 @@ async function loadDrama() {
     }
     syncStoryboardStateFromEpisode(ep)
     await loadStoryboardMedia()
+    await loadUniversalLibraryAssets()
     await recoverAndSyncEpisodeTasks(ep?.id)
   } catch (e) {
     ElMessage.error(e.message || '加载失败')
@@ -4995,6 +5091,8 @@ async function saveProjectSettings(includeGenerationStyle = false) {
     story_style: storyStyle.value || undefined,
     aspect_ratio: projectAspectRatio.value || '16:9',
     video_clip_duration: videoClipDuration.value || 5,
+    video_model: projectVideoModel.value || 'auto',
+    video_resolution: videoResolution.value || '720p',
     storyboard_include_narration: !!storyboardIncludeNarration.value,
     storyboard_universal_omni: !!storyboardUniversalOmni.value,
     storyboard_use_first_last_frame: !!storyboardUseFirstLastFrame.value,
@@ -5309,6 +5407,28 @@ function onUploadResourceClick(type, id) {
   resourceImageFileInput.value?.click()
 }
 
+function openPropAssetPicker(prop) {
+  propAssetPickerTarget.value = prop
+  showPropAssetPicker.value = true
+}
+
+async function bindAssetToProp(asset) {
+  const prop = propAssetPickerTarget.value
+  if (!prop?.id || !asset?.local_path) return
+  try {
+    await propAPI.update(prop.id, {
+      local_path: asset.local_path,
+      image_url: asset.url || `/static/${String(asset.local_path).replace(/^\//, '')}`,
+    })
+    showPropAssetPicker.value = false
+    propAssetPickerTarget.value = null
+    await loadDrama()
+    ElMessage.success('图片已绑定到道具')
+  } catch (e) {
+    ElMessage.error(e.message || '绑定图片失败')
+  }
+}
+
 // 解析 extra_images JSON，返回 local_path 数组
 function parseExtraImages(item) {
   if (!item?.extra_images) return []
@@ -5370,6 +5490,11 @@ async function doUploadResourceImage(type, id, file) {
         await sceneAPI.update(id, { image_url: url, local_path: uploadedLocalPath ?? null })
       }
     }
+    // 角色/场景/道具图片是项目统一资源的一部分：上传完成后立即同步为可引用素材。
+    // 这样不论是手工上传还是后续重新打开项目，都能进入分镜工作台。
+    if (type === 'character') await characterAPI.addToMaterialLibrary(id)
+    else if (type === 'prop') await propAPI.addToMaterialLibrary(id)
+    else if (type === 'scene') await sceneAPI.addToMaterialLibrary(id)
     await loadDrama()
     ElMessage.success('上传成功')
   } catch (e) {
@@ -5858,10 +5983,450 @@ function getSbVideoDurationForApi(sb) {
   return undefined
 }
 
+async function setSbOmniAssetSelected(sb, assetId, checked) {
+  if (!sb?.id) return
+  const current = new Set((sbOmniAssetIds.value[sb.id] || []).map(Number))
+  const id = Number(assetId)
+  if (checked) current.add(id); else current.delete(id)
+  const ids = [...current]
+  sbOmniAssetIds.value = { ...sbOmniAssetIds.value, [sb.id]: ids }
+  const patch = { omni_asset_ids: ids }
+  // 取消勾选时同步清除首尾帧绑定，避免提交校验失败
+  if (!checked) {
+    if (Number(sbOmniFirstFrameAssetId.value[sb.id]) === id) patch.omni_first_frame_asset_id = null
+    if (Number(sbOmniLastFrameAssetId.value[sb.id]) === id) patch.omni_last_frame_asset_id = null
+  }
+  try {
+    await storyboardsAPI.update(sb.id, patch)
+    const row = (storyboards.value || []).find((item) => Number(item.id) === Number(sb.id))
+    if (row) Object.assign(row, patch)
+    if (!checked) {
+      if (Number(sbOmniFirstFrameAssetId.value[sb.id]) === id) sbOmniFirstFrameAssetId.value = { ...sbOmniFirstFrameAssetId.value, [sb.id]: null }
+      if (Number(sbOmniLastFrameAssetId.value[sb.id]) === id) sbOmniLastFrameAssetId.value = { ...sbOmniLastFrameAssetId.value, [sb.id]: null }
+    }
+  } catch (err) {
+    ElMessage.error(err?.message || '素材引用保存失败')
+  }
+}
+
+async function onSbOmniAssetUsageChange(sb, asset, usage) {
+  if (!sb?.id) return
+  const assetId = Number(asset?.id ?? asset)
+  const assetObj = asset && typeof asset === 'object' ? asset : (universalLibraryAssets.value.find((a) => Number(a.id) === assetId) || null)
+  // 人物一致性用途前置条件：必须先勾选「含真人」
+  if (usage === 'identity' && assetObj?.type === 'image' && !assetObj.requires_sd2_identity) {
+    ElMessage.warning('请先勾选「含真人／需身份一致性」后再选择人物一致性用途')
+    usage = 'reference'
+  }
+  const current = { ...(sbOmniAssetUsage.value[sb.id] || {}) }
+  if (usage) current[assetId] = usage
+  else delete current[assetId]
+  sbOmniAssetUsage.value = { ...sbOmniAssetUsage.value, [sb.id]: current }
+  try {
+    await storyboardsAPI.update(sb.id, { omni_asset_usage_json: current })
+    const row = (storyboards.value || []).find((item) => Number(item.id) === Number(sb.id))
+    if (row) row.omni_asset_usage = current
+    // 人物一致性用途自动触发 SD2 认证
+    if (usage === 'identity' && assetObj?.type === 'image' && sbOmniSd2Status(assetObj) !== 'active') {
+      onSbOmniAssetCertify(sb, assetObj).catch(() => {})
+    }
+  } catch (err) {
+    ElMessage.error(err?.message || '素材用途保存失败')
+  }
+}
+
+/** 本镜已选素材：严格按用户勾选顺序返回（@图片N 与提交顺序一致） */
+function getSelectedUniversalLibraryAssets(sb) {
+  const ids = (sbOmniAssetIds.value[sb?.id] || []).map(Number)
+  const byId = new Map(universalLibraryAssets.value.map((asset) => [Number(asset.id), asset]))
+  return ids.map((id) => byId.get(id)).filter(Boolean)
+}
+
+function sbOmniAssetSelected(sb, id) {
+  return (sbOmniAssetIds.value[sb?.id] || []).map(Number).includes(Number(id))
+}
+
+function sbOmniSelectedIndex(sb, id) {
+  return (sbOmniAssetIds.value[sb?.id] || []).map(Number).indexOf(Number(id))
+}
+
+function sbOmniSelectedCounts(sb) {
+  const counts = { image: 0, video: 0, audio: 0 }
+  for (const asset of getSelectedUniversalLibraryAssets(sb)) {
+    if (Object.prototype.hasOwnProperty.call(counts, asset.type)) counts[asset.type] += 1
+  }
+  return counts
+}
+
+/** 已选图片且用途为人物一致（identity）的素材，用于 SD2 认证区 */
+function sbOmniIdentityAssets(sb) {
+  if (!sb?.id) return []
+  const usageMap = sbOmniAssetUsage.value[sb.id] || {}
+  return getSelectedUniversalLibraryAssets(sb).filter((asset) => asset.type === 'image' && usageMap[Number(asset.id)] === 'identity')
+}
+
+/** 首尾帧模式的候选项：已选图片素材 */
+function sbOmniFrameCandidates(sb) {
+  return getSelectedUniversalLibraryAssets(sb).filter((asset) => asset.type === 'image')
+}
+
+function sbOmniAssetUrl(asset) {
+  if (!asset) return ''
+  return asset.local_path ? '/static/' + String(asset.local_path).replace(/^\/+/, '') : (asset.url || '')
+}
+
+function sbOmniFrameAsset(sb, position) {
+  const id = position === 'first' ? sbOmniFirstFrameAssetId.value[sb?.id] : sbOmniLastFrameAssetId.value[sb?.id]
+  if (id == null) return null
+  return universalLibraryAssets.value.find((a) => Number(a.id) === Number(id)) || null
+}
+
+function sbOmniFrameAssetName(sb, position) {
+  return sbOmniFrameAsset(sb, position)?.name || '未选择'
+}
+
+function sbOmniFramePickerActive(sbId, position, id) {
+  const current = position === 'first' ? sbOmniFirstFrameAssetId.value[sbId] : sbOmniLastFrameAssetId.value[sbId]
+  return current != null && Number(current) === Number(id)
+}
+
+function sbOmniSd2Status(asset) { return String(asset?.seedance2_asset?.status || 'none').toLowerCase() }
+function sbOmniSd2StatusLabel(asset) {
+  return ({ none: '未认证', processing: '认证中', active: '可用', invalid: '已失效', failed: '认证失败' })[sbOmniSd2Status(asset)] || '状态未知'
+}
+/** 已选素材行上的 SD2 短标签：真人图片可一键认证 */
+function sbOmniSd2ShortLabel(asset) {
+  return ({ none: 'SD2认证', processing: 'SD2认证中', active: 'SD2✓', invalid: 'SD2失效', failed: 'SD2重试' })[sbOmniSd2Status(asset)] || 'SD2认证'
+}
+
+const OMNI_USAGE_OPTIONS = {
+  image: [
+    { label: '普通参考', value: 'reference' },
+    { label: '人物一致', value: 'identity' },
+    { label: '主视觉', value: 'primary' },
+    { label: '场景', value: 'environment' },
+    { label: '道具', value: 'prop' },
+    { label: '风格', value: 'style' },
+    { label: '首帧', value: 'first_frame' },
+    { label: '尾帧', value: 'last_frame' },
+  ],
+  video: [
+    { label: '动作/镜头参考', value: 'motion' },
+    { label: '关键帧提取', value: 'keyframes' },
+    { label: '普通参考', value: 'reference' },
+    { label: '仅后期', value: 'post_process' },
+  ],
+  audio: [
+    { label: '音色/氛围参考', value: 'ambience' },
+    { label: '普通参考', value: 'reference' },
+    { label: '成片混音', value: 'post_mix' },
+  ],
+}
+function omniUsageOptions(asset) { return OMNI_USAGE_OPTIONS[asset?.type] || OMNI_USAGE_OPTIONS.image }
+function omniDefaultUsage(asset) { return asset?.type === 'video' ? 'motion' : asset?.type === 'audio' ? 'ambience' : 'reference' }
+function omniUsageLabel(usage) {
+  return (Object.values(OMNI_USAGE_OPTIONS).flat().find((opt) => opt.value === usage)?.label) || usage
+}
+
+async function moveSbOmniAsset(sb, assetId, dir) {
+  if (!sb?.id) return
+  const ids = [...(sbOmniAssetIds.value[sb.id] || [])].map(Number)
+  const from = ids.indexOf(Number(assetId))
+  const to = from + dir
+  if (from < 0 || to < 0 || to >= ids.length) return
+  const [moved] = ids.splice(from, 1)
+  ids.splice(to, 0, moved)
+  sbOmniAssetIds.value = { ...sbOmniAssetIds.value, [sb.id]: ids }
+  try {
+    await storyboardsAPI.update(sb.id, { omni_asset_ids: ids })
+    const row = (storyboards.value || []).find((item) => Number(item.id) === Number(sb.id))
+    if (row) row.omni_asset_ids = ids
+  } catch (err) {
+    ElMessage.error(err?.message || '素材排序保存失败')
+  }
+}
+
+function removeSbOmniAsset(sb, id) {
+  return setSbOmniAssetSelected(sb, id, false)
+}
+
+/** 上传素材 → 自动加入本镜并设置默认用途 */
+async function uploadSbOmniFiles(sb, files) {
+  const list = Array.from(files || [])
+  if (!list.length || !sb?.id) return
+  sbOmniUploadingIds.value.add(sb.id)
+  try {
+    for (const file of list) {
+      try {
+        const out = await omniVideoAPI.upload(file, { name: file.name, drama_id: dramaId.value })
+        if (!out?.asset) throw new Error('上传未返回素材')
+        const asset = { ...out.asset }
+        if (!universalLibraryAssets.value.some((a) => Number(a.id) === Number(asset.id))) {
+          universalLibraryAssets.value = [asset, ...universalLibraryAssets.value]
+        }
+        await setSbOmniAssetSelected(sb, asset.id, true)
+        await onSbOmniAssetUsageChange(sb, asset, omniDefaultUsage(asset))
+        ElMessage.success(`已上传「${asset.name || file.name}」并加入本镜`)
+      } catch (err) {
+        ElMessage.error(`${file.name}：${err?.message || '上传失败'}`)
+      }
+    }
+  } finally {
+    sbOmniUploadingIds.value.delete(sb.id)
+  }
+}
+
+function onSbOmniUploadClick(sb) {
+  sbOmniUploadTargetId.value = sb?.id || null
+  sbOmniFileInput.value?.click()
+}
+
+function openResourceMediaUpload() {
+  resourceMediaFileInput.value?.click()
+}
+
+async function onResourceMediaFileChange(e) {
+  const files = Array.from(e.target?.files || [])
+  e.target.value = ''
+  if (!files.length) return
+  resourceMediaUploading.value = true
+  try {
+    for (const file of files) {
+      const result = await omniVideoAPI.upload(file, { name: file.name, drama_id: dramaId.value })
+      const asset = result?.asset
+      if (asset && !universalLibraryAssets.value.some((item) => Number(item.id) === Number(asset.id))) {
+        universalLibraryAssets.value = [asset, ...universalLibraryAssets.value]
+      }
+    }
+    ElMessage.success(`已加入 ${files.length} 个统一媒体素材`)
+  } catch (err) {
+    ElMessage.error(err?.message || '媒体素材上传失败')
+  } finally {
+    resourceMediaUploading.value = false
+  }
+}
+
+async function onSbOmniFileInputChange(e) {
+  const files = e.target?.files
+  const target = sbOmniUploadTargetId.value
+  e.target.value = ''
+  sbOmniUploadTargetId.value = null
+  if (!target || !files || !files.length) return
+  const sb = (storyboards.value || []).find((item) => Number(item.id) === Number(target))
+  if (sb) await uploadSbOmniFiles(sb, files)
+}
+
+async function onSbOmniLibDrop(e, sb) {
+  sbOmniLibDragging.value = false
+  await uploadSbOmniFiles(sb, e.dataTransfer?.files || [])
+}
+
+/** 首尾帧模式：直接上传一张图并设为对应帧 */
+function onSbOmniFrameUpload(sb, position) {
+  sbOmniFrameUploadTarget.value = { sbId: sb?.id || null, position }
+  sbOmniFrameFileInput.value?.click()
+}
+
+async function onSbOmniFrameFileInputChange(e) {
+  const files = e.target?.files
+  const target = sbOmniFrameUploadTarget.value
+  e.target.value = ''
+  sbOmniFrameUploadTarget.value = null
+  if (!target?.sbId || !files || !files.length) return
+  const file = files[0]
+  sbOmniFrameUploading.value = target.position
+  try {
+    const out = await omniVideoAPI.upload(file, { name: file.name, drama_id: dramaId.value })
+    if (!out?.asset) throw new Error('上传未返回素材')
+    const asset = { ...out.asset }
+    if (!universalLibraryAssets.value.some((a) => Number(a.id) === Number(asset.id))) {
+      universalLibraryAssets.value = [asset, ...universalLibraryAssets.value]
+    }
+    const usage = target.position === 'first' ? 'first_frame' : 'last_frame'
+    await setSbOmniAssetSelected(target.sbId, asset.id, true)
+    await onSbOmniAssetUsageChange(target.sbId, asset, usage)
+    await setSbOmniFrameAsset(target.sbId, target.position, asset.id)
+    ElMessage.success(`已上传并设为${target.position === 'first' ? '首帧' : '尾帧'}`)
+  } catch (err) {
+    ElMessage.error(err?.message || '首尾帧参考图上传失败')
+  } finally {
+    sbOmniFrameUploading.value = ''
+  }
+}
+
+function openSbOmniFramePicker(sb, position) {
+  sbOmniFramePicker.value = { open: true, sbId: sb?.id || null, target: position }
+}
+
+function confirmSbOmniFrameAsset(asset) {
+  const { sbId, target } = sbOmniFramePicker.value
+  sbOmniFramePicker.value = { ...sbOmniFramePicker.value, open: false }
+  if (!sbId || !asset) return
+  setSbOmniFrameAsset(sbId, target, asset.id)
+}
+
+async function onSbOmniAssetRealPersonToggle(sb, asset, value) {
+  if (!asset) return
+  const prev = !!asset.requires_sd2_identity
+  asset.requires_sd2_identity = !!value
+  try {
+    const updated = await omniVideoAPI.updateAsset(asset.id, { requires_sd2_identity: !!value })
+    Object.assign(asset, updated || {})
+    if (value) {
+      onSbOmniAssetCertify(sb, asset).catch(() => {})
+    } else if (sbOmniAssetUsage.value[sb?.id]?.[asset.id] === 'identity') {
+      // 取消真人声明时，把人物一致性用途退回普通参考（后端会拒绝未声明的 identity 素材）
+      await onSbOmniAssetUsageChange(sb, asset, 'reference')
+    }
+  } catch (err) {
+    asset.requires_sd2_identity = prev
+    ElMessage.error(err?.message || '真人声明保存失败')
+  }
+}
+
+async function onSbOmniAssetCertify(sb, asset) {
+  if (!asset || asset.type !== 'image') return
+  sbOmniCertifyingIds.value.add(asset.id)
+  try {
+    const out = sbOmniSd2Status(asset) === 'processing'
+      ? await omniVideoAPI.refreshAssetCertification(asset.id)
+      : await omniVideoAPI.certifyAsset(asset.id)
+    if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
+    ElMessage.success(`「${asset.name || asset.id}」SD2 认证状态：${sbOmniSd2StatusLabel(asset)}`)
+  } catch (err) {
+    ElMessage.error(err?.message || 'SD2 认证失败，请检查素材库配置后重试')
+  } finally {
+    sbOmniCertifyingIds.value.delete(asset.id)
+  }
+}
+
+/** @ 编辑器选择素材槽位时自动加入本镜（素材库素材） */
+async function onUniversalSegmentPickAsset(sb, slot) {
+  if (!sb?.id || !slot || slot.kind !== 'asset' || !slot.assetId) return
+  if (sbOmniAssetSelected(sb, slot.assetId)) return
+  await setSbOmniAssetSelected(sb, slot.assetId, true)
+}
+
+/** 素材库卡片拖拽：携带素材信息供提示词编辑区接收（实体候选需先勾选导入素材库） */
+function onSbOmniAssetDragStart(e, item) {
+  if (!e?.dataTransfer || !item) return
+  const payload = JSON.stringify(item.poolType === 'entity'
+    ? { alias: item.name || '资源', entity: item.entity || null }
+    : { assetId: Number(item.id), alias: item.name || `素材${item.id}` })
+  e.dataTransfer.effectAllowed = 'copy'
+  e.dataTransfer.setData('application/json', payload)
+  e.dataTransfer.setData('text/plain', payload)
+}
+
+/** 素材拖入提示词编辑区：加入本镜已选，并在文本末尾追加 @图片N 引用 */
+async function onUniversalSegmentDropAsset(sb, payload) {
+  if (!sb?.id || !payload) return
+  let assetId = Number(payload.assetId)
+  if (!Number.isFinite(assetId) && payload.entity) {
+    assetId = await ensureEntityAsset(sb, { entity: payload.entity, name: payload.alias })
+  }
+  if (!Number.isFinite(assetId)) return
+  if (!sbOmniAssetSelected(sb, assetId)) {
+    await setSbOmniAssetSelected(sb, assetId, true)
+  }
+  const n = sbOmniEntryIndexByAssetId(sb)[assetId] || ((sbOmniAssetIds.value[sb.id] || []).length + sbOmniAutoRefCount(sb))
+  const token = `@图片${n} `
+  const current = (sbUniversalSegmentText.value[sb.id] ?? sb.universal_segment_text ?? '').toString().trim()
+  const next = current ? `${current} ${token}` : token
+  sbUniversalSegmentText.value = { ...sbUniversalSegmentText.value, [sb.id]: next }
+  onSaveUniversalSegmentField(sb)
+  ElMessage.success(`已引用「${payload.alias || `素材${assetId}`}」为 @图片${n}`)
+}
+
+async function loadUniversalLibraryAssets() {
+  // 素材池加载全部媒体素材（不按当前剧集过滤）：媒体素材库上传的图片/视频/音频
+  // 未绑定 drama_id，按剧集过滤会导致本地上传的素材（如音频）永远看不到、参考不了。
+  // 与媒体素材库页 /media-library、全能创作台 /free-create 的加载口径保持一致。
+  try {
+    const [result, limits] = await Promise.all([
+      loadAllUniversalLibraryAssets(),
+      omniVideoAPI.uploadLimits().catch(() => null),
+    ])
+    universalLibraryAssets.value = (result?.items || []).filter((asset) => ['image', 'video', 'audio'].includes(asset.type) && asset.processing_status !== 'processing')
+    sbUniversalUploadLimits.value = limits || null
+  } catch (_) {
+    universalLibraryAssets.value = []
+  }
+}
+
+async function loadAllUniversalLibraryAssets() {
+  const items = []
+  let page = 1
+  let total = Infinity
+  while (items.length < total) {
+    const result = await omniVideoAPI.assets({ page, page_size: 100 })
+    const batch = result?.items || []
+    items.push(...batch)
+    total = Number(result?.pagination?.total ?? items.length)
+    if (!batch.length || page >= Number(result?.pagination?.total_pages || 1)) break
+    page += 1
+  }
+  return { items }
+}
+
+async function setSbOmniFrameAsset(sb, position, assetId) {
+  if (!sb?.id) return
+  const id = assetId == null ? null : Number(assetId)
+  const field = position === 'first' ? 'omni_first_frame_asset_id' : 'omni_last_frame_asset_id'
+  const next = position === 'first' ? { ...sbOmniFirstFrameAssetId.value, [sb.id]: id } : { ...sbOmniLastFrameAssetId.value, [sb.id]: id }
+  if (position === 'first') sbOmniFirstFrameAssetId.value = next
+  else sbOmniLastFrameAssetId.value = next
+  const selected = new Set((sbOmniAssetIds.value[sb.id] || []).map(Number))
+  if (id != null) selected.add(id)
+  const ids = [...selected]
+  sbOmniAssetIds.value = { ...sbOmniAssetIds.value, [sb.id]: ids }
+  try {
+    await storyboardsAPI.update(sb.id, { [field]: id, omni_asset_ids: ids })
+    const row = (storyboards.value || []).find((item) => Number(item.id) === Number(sb.id))
+    if (row) Object.assign(row, { [field]: id, omni_asset_ids: ids })
+  } catch (err) {
+    ElMessage.error(err?.message || '首尾帧设置保存失败')
+  }
+}
+
+async function onSbOmniModeChange(sb, mode) {
+  if (!sb?.id) return
+  const value = mode === 'first_last_frame' ? 'first_last_frame' : 'multi_reference'
+  sbOmniCreationMode.value = { ...sbOmniCreationMode.value, [sb.id]: value }
+  try {
+    await storyboardsAPI.update(sb.id, { omni_creation_mode: value })
+    const row = (storyboards.value || []).find((item) => Number(item.id) === Number(sb.id))
+    if (row) row.omni_creation_mode = value
+  } catch (err) {
+    ElMessage.error(err?.message || '创作模式保存失败')
+  }
+}
+
+async function onSbAudioSettingsChange(sb, patch = {}) {
+  if (!sb?.id) return
+  const next = {
+    audio_strategy: patch.audio_strategy ?? sbAudioStrategy.value[sb.id] ?? 'reference_only',
+    keep_original_audio: patch.keep_original_audio ?? sbKeepOriginalAudio.value[sb.id] ?? false,
+    audio_volume: Number(patch.audio_volume ?? sbAudioVolume.value[sb.id] ?? 1),
+    audio_fade_seconds: Number(patch.audio_fade_seconds ?? sbAudioFadeSeconds.value[sb.id] ?? 0),
+  }
+  sbAudioStrategy.value = { ...sbAudioStrategy.value, [sb.id]: next.audio_strategy }
+  sbKeepOriginalAudio.value = { ...sbKeepOriginalAudio.value, [sb.id]: !!next.keep_original_audio }
+  sbAudioVolume.value = { ...sbAudioVolume.value, [sb.id]: next.audio_volume }
+  sbAudioFadeSeconds.value = { ...sbAudioFadeSeconds.value, [sb.id]: next.audio_fade_seconds }
+  try {
+    await storyboardsAPI.update(sb.id, next)
+  } catch (err) {
+    ElMessage.error(err?.message || '音频策略保存失败')
+  }
+}
+
 function getSbVideoRequestSettings(sb) {
   const settings = sbGenerationSettings.value[sb?.id] || {}
   return {
-    model: settings.video_model && settings.video_model !== 'auto' ? settings.video_model : undefined,
+    model: settings.video_model && settings.video_model !== 'auto'
+      ? settings.video_model
+      : (projectVideoModel.value && projectVideoModel.value !== 'auto' ? projectVideoModel.value : undefined),
     aspect_ratio: settings.aspect_ratio || projectAspectRatio.value || '16:9',
     resolution: settings.resolution || videoResolution.value || undefined,
     duration: getSbVideoDurationForApi(sb),
@@ -5876,6 +6441,90 @@ function getSbTextModel(sb) {
 function setSbGenerationSettings(id, settings) {
   sbGenerationSettings.value = { ...sbGenerationSettings.value, [id]: settings }
   sbDuration.value = { ...sbDuration.value, [id]: settings.duration }
+}
+
+let inlineSbSettingsSaveTimer = null
+function onInlineSbGenerationSettingsChange(sb, settings = {}) {
+  if (!sb?.id) return
+  setSbGenerationSettings(sb.id, settings)
+  clearTimeout(inlineSbSettingsSaveTimer)
+  inlineSbSettingsSaveTimer = setTimeout(async () => {
+    try {
+      await storyboardsAPI.update(sb.id, {
+        duration: Number(settings.duration) || 5,
+        text_model: settings.text_model && settings.text_model !== 'auto' ? settings.text_model : null,
+        video_model: settings.video_model && settings.video_model !== 'auto' ? settings.video_model : null,
+        video_resolution: settings.resolution || '720p',
+        video_aspect_ratio: settings.aspect_ratio || '16:9',
+      })
+      const row = (storyboards.value || []).find((item) => Number(item.id) === Number(sb.id))
+      if (row) Object.assign(row, {
+        duration: Number(settings.duration) || 5,
+        text_model: settings.text_model && settings.text_model !== 'auto' ? settings.text_model : null,
+        video_model: settings.video_model && settings.video_model !== 'auto' ? settings.video_model : null,
+        video_resolution: settings.resolution || '720p',
+        video_aspect_ratio: settings.aspect_ratio || '16:9',
+      })
+    } catch (err) {
+      ElMessage.error(err?.message || '分镜参数保存失败')
+    }
+  }, 350)
+}
+
+function sd2ResourceStatus(item) {
+  return String(item?.seedance2_asset?.status || 'none').toLowerCase()
+}
+function sd2ResourceActionLabel(item) {
+  const status = sd2ResourceStatus(item)
+  if (status === 'active') return '已认证'
+  if (status === 'processing' || status === 'pending') return '刷新认证'
+  if (status === 'stale' || status === 'failed' || status === 'invalid') return '重新认证'
+  return 'SD2认证'
+}
+async function onSd2ResourceAction(kind, item) {
+  if (!item?.id || !hasAssetImage(item)) return ElMessage.warning('请先上传图片再进行 SD2 认证')
+  const status = sd2ResourceStatus(item)
+  if (status === 'active') {
+    return ElMessage.info(`该${kind === 'scene' ? '场景' : '道具'}已认证，可直接用于人物一致性参考`)
+  }
+  sd2ResourceCertifying.value = `${kind}-${item.id}`
+  try {
+    const api = kind === 'scene' ? sceneAPI : propAPI
+    const res = (status === 'processing' || status === 'pending') ? await api.refreshSd2(item.id) : await api.certifySd2(item.id)
+    const cert = res?.seedance2_asset || res?.data?.seedance2_asset
+    if (cert) item.seedance2_asset = cert
+    ElMessage.success(cert?.status === 'active' ? 'SD2 认证已完成' : '认证任务已提交，可稍后刷新状态')
+  } catch (err) {
+    ElMessage.error(err?.message || 'SD2 认证失败')
+  } finally {
+    sd2ResourceCertifying.value = null
+  }
+}
+
+async function applyProjectGenerationSettingsToStoryboards() {
+  const shots = storyboards.value || []
+  if (!shots.length) return ElMessage.info('暂无可应用的分镜')
+  const settings = projectGenerationSettings.value
+  const next = { ...sbGenerationSettings.value }
+  try {
+    await Promise.all(shots.map(async (sb) => {
+      next[sb.id] = { ...(next[sb.id] || {}), ...settings }
+      await storyboardsAPI.update(sb.id, {
+        duration: settings.duration,
+        video_model: settings.video_model === 'auto' ? null : settings.video_model,
+        video_resolution: settings.resolution,
+        video_aspect_ratio: settings.aspect_ratio,
+      })
+    }))
+    sbGenerationSettings.value = next
+    const durationMap = { ...sbDuration.value }
+    shots.forEach((sb) => { durationMap[sb.id] = settings.duration })
+    sbDuration.value = durationMap
+    await saveProjectSettings(false)
+    ElMessage.success('项目视频参数已应用到全部分镜')
+  } catch (err) {
+    ElMessage.error(err?.message || '应用视频参数失败')
+  }
 }
 
 /** 全能提示词生成/润色：提交当前编辑区中的分镜字段（避免未点保存时仍用库内旧对白） */
@@ -6119,7 +6768,15 @@ function sbCanSubmitVideo(sb) {
   if (!sb) return false
   const vp = (sb.video_prompt || '').toString().trim()
   if (vp) return true
-  if (isSbUniversalMode(sb.id)) return !!sbUniversalSegmentTrimmed(sb)
+  if (isSbUniversalMode(sb.id)) {
+    if (!sbUniversalSegmentTrimmed(sb)) return false
+    if ((sbOmniCreationMode.value[sb.id] || 'multi_reference') === 'first_last_frame') {
+      const first = Number(sbOmniFirstFrameAssetId.value[sb.id])
+      const last = Number(sbOmniLastFrameAssetId.value[sb.id])
+      return Number.isFinite(first) && Number.isFinite(last) && first > 0 && last > 0 && first !== last
+    }
+    return true
+  }
   return false
 }
 
@@ -6135,63 +6792,208 @@ function buildSbVideoPromptForApi(sb, { preferClassicPrompt = false } = {}) {
   return vp
 }
 
-/** 全能模式：与 collectSbOmniReferenceAbsoluteUrls 同序的参考槽位（用于 @ 选择器缩略图） */
-function getSbUniversalOmniRefSlots(sb) {
-  if (!sb?.id) return []
-  const out = []
-  let idx = 1
-  const scene = getSbSelectedScene(sb.id)
-  if (scene && hasAssetImage(scene)) {
-    out.push({
-      index: idx++,
-      kind: 'scene',
-      name: (scene.name || '场景').toString(),
-      thumbUrl: assetImageUrl(scene),
-    })
-  }
-  for (const c of getSbSelectedCharacters(sb.id)) {
-    if (hasAssetImage(c)) {
-      out.push({
-        index: idx++,
-        kind: 'character',
-        name: (c.name || '角色').toString(),
-        thumbUrl: assetImageUrl(c),
-      })
-    }
-  }
-  for (const p of getSbSelectedProps(sb.id)) {
-    if (hasAssetImage(p)) {
-      out.push({
-        index: idx++,
-        kind: 'prop',
-        name: (p.name || '物品').toString(),
-        thumbUrl: assetImageUrl(p),
-      })
-    }
-  }
-  return out
+/** 场景/角色/道具实体 → 图片引用（优先本地相对路径，回退 image_url） */
+function entityImageRef(item) {
+  const localPath = item?.local_path && String(item.local_path).trim()
+  return { local_path: localPath || null, url: localPath ? '' : (item?.image_url || '') }
 }
 
-/** 全能模式：场景/角色/物品 → 绝对 URL 列表（不含经典分镜中间主图；供可灵 Omni / 火山多图参考，最多 10，方舟侧最多取 9 张） */
+/**
+ * 全能模式参考条目（提交顺序，@图片N 与之一一对应）：
+ * 多参考模式 = 本镜已选素材（用户勾选/排序顺序）；首尾帧模式 = 仅首帧、尾帧两张图。
+ * 场景/角色/道具图需在素材池勾选后（自动导入素材库）才会成为参考，不隐式自动加入。
+ */
+function sbOmniReferenceEntries(sb) {
+  if (!sb?.id) return []
+  const creationMode = sbOmniCreationMode.value[sb.id] || 'multi_reference'
+  const entries = []
+  if (creationMode === 'first_last_frame') {
+    const firstId = Number(sbOmniFirstFrameAssetId.value[sb.id])
+    const lastId = Number(sbOmniLastFrameAssetId.value[sb.id])
+    if (!Number.isFinite(firstId) || !Number.isFinite(lastId) || firstId <= 0 || lastId <= 0 || firstId === lastId) return []
+    const byId = new Map(universalLibraryAssets.value.map((a) => [Number(a.id), a]))
+    for (const [id, usage] of [[firstId, 'first_frame'], [lastId, 'last_frame']]) {
+      const asset = byId.get(id)
+      if (!asset) continue
+      entries.push({ asset_id: asset.id, type: 'image', alias: asset.name || `素材${asset.id}`, usage, role: 'reference', url: sbOmniAssetUrl(asset), thumbUrl: sbOmniAssetUrl(asset), asset, kind: 'asset', name: asset.name || `素材${asset.id}` })
+    }
+    return entries
+  }
+  const usageMap = sbOmniAssetUsage.value[sb.id] || {}
+  for (const asset of getSelectedUniversalLibraryAssets(sb)) {
+    entries.push({
+      asset_id: asset.id, type: asset.type, alias: asset.name || `素材${asset.id}`,
+      usage: usageMap[asset.id] || omniDefaultUsage(asset),
+      role: usageMap[asset.id] === 'identity' ? 'identity' : 'reference',
+      url: sbOmniAssetUrl(asset), thumbUrl: asset.type === 'image' ? sbOmniAssetUrl(asset) : '',
+      asset, kind: 'asset', name: asset.name || `素材${asset.id}`,
+    })
+  }
+  return entries
+}
+
+/** 实体图不再自动占位（统一走素材池勾选），固定返回 0 */
+function sbOmniAutoRefCount() {
+  return 0
+}
+
+/** 已选素材 assetId → @图片N 序号 */
+function sbOmniEntryIndexByAssetId(sb) {
+  const map = {}
+  sbOmniReferenceEntries(sb).forEach((entry, idx) => {
+    if (entry.asset_id != null) map[Number(entry.asset_id)] = idx + 1
+  })
+  return map
+}
+
+/**
+ * 统一资源库候选：媒体素材（assets）+ 本镜场景/角色/道具图（虚拟候选）。
+ * 一个分镜只用一个资源库自由勾选，实体图勾选时自动导入素材库（assets）。
+ */
+function sbOmniPoolItems(sb) {
+  const pool = universalLibraryAssets.value.map((a) => ({ ...a, poolKey: `asset-${a.id}`, poolType: 'asset' }))
+  if (!sb?.id) return pool
+  const existingPaths = new Set(pool.map((a) => String(a.local_path || '').trim()).filter(Boolean))
+  const pushEntity = (kind, entity) => {
+    if (!entity || !hasAssetImage(entity)) return
+    const lp = entity.local_path && String(entity.local_path).trim()
+    if (lp && existingPaths.has(lp)) return // 与媒体素材同一张图时不重复展示
+    const ref = entityImageRef(entity)
+    pool.push({
+      id: `${kind}-${entity.id}`,
+      assetId: null,
+      poolKey: `${kind}-${entity.id}`,
+      poolType: 'entity',
+      kind,
+      entity,
+      name: (entity.name || ({ scene: '场景', character: '角色', prop: '道具' }[kind] || '未命名')).toString(),
+      thumbUrl: assetImageUrl(entity),
+      local_path: ref.local_path,
+      url: ref.local_path ? '' : ref.url,
+      type: 'image',
+    })
+  }
+  pushEntity('scene', getSbSelectedScene(sb.id))
+  for (const c of getSbSelectedCharacters(sb.id)) pushEntity('character', c)
+  for (const p of getSbSelectedProps(sb.id)) pushEntity('prop', p)
+  return pool
+}
+
+/** 实体图 → 素材库 asset（已存在则复用），返回 assetId */
+async function ensureEntityAsset(sb, item) {
+  const entity = item?.entity
+  if (!entity) return null
+  const localPath = entity.local_path && String(entity.local_path).trim()
+  const imageUrl = entity.image_url || ''
+  const existing = universalLibraryAssets.value.find((a) => {
+    const p = String(a.local_path || '').trim()
+    return localPath ? p === localPath : (a.url || '') === imageUrl
+  })
+  if (existing) return existing.id
+  const created = await omniVideoAPI.createAsset({
+    drama_id: dramaId.value,
+    name: item.name,
+    type: 'image',
+    url: imageUrl || null,
+    local_path: localPath || null,
+    source_type: 'entity',
+    processing_status: 'ready',
+  })
+  const assetId = created?.id
+  if (assetId) universalLibraryAssets.value = [created, ...universalLibraryAssets.value]
+  return assetId
+}
+
+/** 资源库统一勾选：media 素材直接勾选；实体图自动导入素材库后勾选 */
+async function onSbOmniPoolToggle(sb, item) {
+  if (!sb?.id || !item) return
+  if (item.poolType === 'entity') {
+    try {
+      const assetId = await ensureEntityAsset(sb, item)
+      if (!assetId) throw new Error('导入素材库失败')
+      await setSbOmniAssetSelected(sb, assetId, true)
+      ElMessage.success(`「${item.name}」已加入本镜参考`)
+    } catch (err) {
+      ElMessage.error(err?.message || '加入素材库失败')
+    }
+    return
+  }
+  await setSbOmniAssetSelected(sb, item.id, !sbOmniAssetSelected(sb, item.id))
+}
+
+/** 资源库候选是否已勾选：实体项按对应素材是否已在已选中判断 */
+function sbOmniPoolItemSelected(sb, item) {
+  if (!sb?.id || !item) return false
+  if (item.poolType === 'asset') return sbOmniAssetSelected(sb, item.id)
+  const entity = item.entity
+  const localPath = entity?.local_path && String(entity.local_path).trim()
+  const imageUrl = entity?.image_url || ''
+  return universalLibraryAssets.value.some((a) => {
+    if (!sbOmniAssetSelected(sb, a.id)) return false
+    const p = String(a.local_path || '').trim()
+    return localPath ? p === localPath : (a.url || '') === imageUrl
+  })
+}
+
+/** 全能模式：参考槽位（@ 选择器），顺序与提交 payload 一一对应 */
+function getSbUniversalOmniRefSlots(sb) {
+  const slots = sbOmniReferenceEntries(sb).map((entry, idx) => ({
+    index: idx + 1,
+    kind: entry.kind || 'asset',
+    name: entry.name,
+    thumbUrl: entry.thumbUrl || '',
+    assetId: entry.asset_id != null ? Number(entry.asset_id) : null,
+    asset: entry.asset || null,
+  }))
+  // 多参考模式：追加「可追加素材」——素材池里未选的素材，点击后自动加入本镜并引用
+  if (!sb?.id) return slots
+  if ((sbOmniCreationMode.value[sb.id] || 'multi_reference') === 'first_last_frame') return slots
+  const selectedIds = new Set((sbOmniAssetIds.value[sb.id] || []).map(Number))
+  let idx = slots.length
+  for (const asset of universalLibraryAssets.value) {
+    if (selectedIds.has(Number(asset.id))) continue
+    idx += 1
+    slots.push({
+      index: idx,
+      kind: 'asset',
+      name: (asset.name || `素材${asset.id}`).toString(),
+      thumbUrl: asset.type === 'image' ? sbOmniAssetUrl(asset) : '',
+      assetId: Number(asset.id),
+      asset,
+      addable: true,
+    })
+    if (idx - slots.length >= 12) break // 限制未选素材菜单数量，避免过长
+  }
+  return slots
+}
+
+/** 全能模式：全部参考图片 → 绝对 URL（提交顺序，最多 10 张） */
 function collectSbOmniReferenceAbsoluteUrls(sb) {
   if (!sb?.id) return []
   const urls = []
   const seen = new Set()
-  function pushAbs(u) {
-    const abs = toAbsoluteImageUrl(u)
-    if (!abs || seen.has(abs)) return
+  for (const entry of sbOmniReferenceEntries(sb)) {
+    if (entry.type !== 'image') continue
+    const raw = entry.url || (entry.asset ? sbOmniAssetUrl(entry.asset) : '')
+    const abs = toAbsoluteImageUrl(raw)
+    if (!abs || seen.has(abs)) continue
     seen.add(abs)
     urls.push(abs)
   }
-  const scene = getSbSelectedScene(sb.id)
-  if (scene && hasAssetImage(scene)) pushAbs(assetImageUrl(scene))
-  for (const c of getSbSelectedCharacters(sb.id)) {
-    if (hasAssetImage(c)) pushAbs(assetImageUrl(c))
-  }
-  for (const p of getSbSelectedProps(sb.id)) {
-    if (hasAssetImage(p)) pushAbs(assetImageUrl(p))
-  }
   return urls.slice(0, 10)
+}
+
+function buildSbOmniAssetsPayload(sb) {
+  return sbOmniReferenceEntries(sb).map((entry, index) => ({
+    asset_id: entry.asset_id,
+    ordinal: index + 1,
+    alias: entry.alias,
+    role: entry.role,
+    usage: entry.usage,
+    send_to_model: true,
+    // 外部引用条目（场景/角色/道具等非素材库图片）：后端按 url/local_path 重建虚拟素材
+    ...(entry.asset_id == null ? { url: entry.url || null, local_path: entry.local_path || null, type: entry.type || 'image' } : {}),
+  }))
 }
 
 /** 非 Seedance2 全能降级：仅场景参考图（若有） */
@@ -6566,11 +7368,18 @@ async function onGenerateSbVideo(sb) {
     }
   }
   const omniRefs = universalOmniApi ? collectSbOmniReferenceAbsoluteUrls(sb) : []
+  const selectedOmniAssets = universalOmniApi ? getSelectedUniversalLibraryAssets(sb) : []
+  const omniAssetsPayload = universalOmniApi ? buildSbOmniAssetsPayload(sb) : []
+  const omniCreationMode = sbOmniCreationMode.value[sb.id] || 'multi_reference'
+  if (universalOmniApi && omniCreationMode === 'first_last_frame' && omniAssetsPayload.length !== 2) {
+    ElMessage.warning('首尾帧模式必须选择不同的首帧和尾帧素材')
+    return
+  }
   const sceneOnlyRefs = universal && !universalOmniApi ? collectSbSceneOnlyReferenceAbsoluteUrls(sb) : []
   const hasClassicFrame = !!getSbFirstFrameUrl(sb)
   let hasAnyImage = false
   if (universalOmniApi) {
-    hasAnyImage = omniRefs.length > 0
+    hasAnyImage = omniRefs.length > 0 || selectedOmniAssets.length > 0
   } else if (universal) {
     hasAnyImage = hasClassicFrame || sceneOnlyRefs.length > 0
   } else {
@@ -6588,7 +7397,7 @@ async function onGenerateSbVideo(sb) {
     try {
       await ElMessageBox.confirm(
         universalOmniApi
-          ? '当前没有可用的参考图（场景/角色/道具等；不含经典分镜主图），将按纯文案提交 Omni-Video（模型以 AI 配置为准），效果可能不稳定。确认继续？'
+          ? '当前没有已选的素材库素材（图片/视频/音频），将按纯文案提交 Omni-Video（模型以 AI 配置为准），效果可能不稳定。确认继续？'
           : '当前没有分镜主图且无场景参考图，将仅按文字提示词生成视频，效果可能不稳定。确认继续？',
         universalOmniApi ? '全能模式无参考图' : '全能降级无参考图',
         { confirmButtonText: '继续生成', cancelButtonText: '取消', type: 'warning' }
@@ -6633,17 +7442,38 @@ async function onGenerateSbVideo(sb) {
       referenceUrls = [...referenceUrls, vLast]
     }
     const preferClassicPrompt = universal && !universalOmniApi
-    const res = await videosAPI.create({
-      drama_id: dramaId.value,
-      storyboard_id: sb.id,
-      prompt: buildSbVideoPromptForApi(sb, { preferClassicPrompt }),
-      image_url: universalOmniApi ? undefined : ((vFirst || absoluteUrl) || undefined),
-      first_frame_url: universalOmniApi ? undefined : (vFirst || absoluteUrl || undefined),
-      last_frame_url: universalOmniApi ? undefined : vLast,
-      reference_image_urls: referenceUrls,
-      style: getSelectedStyle(),
-      ...getSbVideoRequestSettings(sb),
-    })
+    const requestSettings = getSbVideoRequestSettings(sb)
+    const res = universalOmniApi && omniAssetsPayload.length
+      ? await omniVideoAPI.create({
+          drama_id: dramaId.value,
+          storyboard_id: sb.id,
+          prompt: buildSbVideoPromptForApi(sb, { preferClassicPrompt: false }),
+          prompt_document: {
+            text: buildSbVideoPromptForApi(sb, { preferClassicPrompt: false }),
+            refs: omniAssetsPayload.map((asset) => ({ asset_id: asset.asset_id == null ? null : Number(asset.asset_id), alias: asset.alias, usage: asset.usage, ordinal: asset.ordinal })),
+          },
+          creation_mode: omniCreationMode,
+          model: requestSettings.model || 'auto',
+          aspect_ratio: requestSettings.aspect_ratio,
+          duration: requestSettings.duration,
+          resolution: requestSettings.resolution,
+          audio_strategy: sbAudioStrategy.value[sb.id] || 'reference_only',
+          keep_original_audio: !!sbKeepOriginalAudio.value[sb.id],
+          audio_volume: Number(sbAudioVolume.value[sb.id] ?? 1),
+          audio_fade_seconds: Number(sbAudioFadeSeconds.value[sb.id] ?? 0),
+          assets: omniAssetsPayload,
+        })
+      : await videosAPI.create({
+          drama_id: dramaId.value,
+          storyboard_id: sb.id,
+          prompt: buildSbVideoPromptForApi(sb, { preferClassicPrompt }),
+          image_url: universalOmniApi ? undefined : ((vFirst || absoluteUrl) || undefined),
+          first_frame_url: universalOmniApi ? undefined : (vFirst || absoluteUrl || undefined),
+          last_frame_url: universalOmniApi ? undefined : vLast,
+          reference_image_urls: referenceUrls,
+          style: getSelectedStyle(),
+          ...requestSettings,
+        })
     if (res?.task_id) {
       const pollRes = await pollTask(res.task_id, () => loadSingleStoryboardMedia(sb.id), meta)
       if (pollRes?.status === 'failed') {
@@ -6754,6 +7584,64 @@ async function onUsePrevTailAsFirst(sb) {
 }
 
 /** 生成期间轻量刷新分镜列表（只更新指定集 storyboards，不重载整个 drama） */
+/** 分镜拖拽排序状态 */
+const navDragSbId = ref(null)
+const navDragOverSbId = ref(null)
+const sbReorderSaving = ref(false)
+
+function onSbNavDragStart(sb) {
+  navDragSbId.value = sb?.id ?? null
+}
+function onSbNavDragEnd() {
+  navDragSbId.value = null
+  navDragOverSbId.value = null
+}
+function onSbNavDragOver(sb) {
+  navDragOverSbId.value = sb?.id ?? null
+}
+
+/** 提交新顺序到后端（重写 sort_order），随后刷新分镜列表 */
+async function persistSbOrder(ids) {
+  const epId = currentEpisodeId.value
+  if (!epId || !Array.isArray(ids) || ids.length < 2) return
+  sbReorderSaving.value = true
+  try {
+    await storyboardsAPI.reorder({ episode_id: epId, ids })
+    await refreshStoryboardsForEpisode(epId)
+  } catch (err) {
+    ElMessage.error(err?.message || '分镜排序保存失败')
+  } finally {
+    sbReorderSaving.value = false
+  }
+}
+
+async function moveSbOrder(sb, dir) {
+  const list = storyboards.value || []
+  const from = list.findIndex((s) => Number(s.id) === Number(sb.id))
+  const to = from + dir
+  if (from < 0 || to < 0 || to >= list.length) return
+  const next = [...list]
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  await persistSbOrder(next.map((s) => s.id))
+}
+
+async function onSbNavDrop(target) {
+  const fromId = navDragSbId.value
+  const toId = target?.id ?? null
+  navDragSbId.value = null
+  navDragOverSbId.value = null
+  if (!fromId || !toId || fromId === toId) return
+  const list = storyboards.value || []
+  const from = list.findIndex((s) => Number(s.id) === Number(fromId))
+  const to = list.findIndex((s) => Number(s.id) === Number(toId))
+  if (from < 0 || to < 0 || from === to) return
+  const next = [...list]
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  await persistSbOrder(next.map((s) => s.id))
+}
+
 async function refreshStoryboardsForEpisode(episodeId) {
   if (!episodeId) return
   try {
@@ -8829,6 +9717,14 @@ html.light .nav-sub-list { background: rgba(99,102,241,0.03); }
 html.light .nav-sub-item { color: #9ca3af; }
 .nav-sub-item:hover { color: #d4d4d8; background: rgba(255,255,255,0.04); }
 html.light .nav-sub-item:hover { color: #1e1b4b; background: rgba(99,102,241,0.06); }
+.nav-sub-item { display: flex; align-items: center; gap: 4px; }
+.nav-sub-item .nav-sb-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-sub-item .nav-sb-move { display: inline-flex; align-items: center; gap: 0; opacity: 0; transition: opacity 0.15s; flex: none; }
+.nav-sub-item:hover .nav-sb-move { opacity: 1; }
+.nav-sub-item .nav-sb-move .el-button { padding: 0 2px; font-size: 10px; margin: 0; }
+.nav-sub-item.sb-nav-dragging { opacity: 0.4; }
+.nav-sub-item.sb-nav-over { background: rgba(99,102,241,0.14); box-shadow: inset 2px 0 0 #6366f1; }
+html.light .nav-sub-item.sb-nav-over { background: rgba(99,102,241,0.10); }
 
 .main {
   margin-left: 180px;
@@ -9674,7 +10570,12 @@ html.light .storyboard-row:hover {
   margin-left: 32px;
   margin-bottom: 4px;
   height: 26px;
+  cursor: pointer;
+  border-radius: 4px;
 }
+.sb-ctrl-bar:hover { background: rgba(99, 102, 241, 0.05); }
+.sb-ctrl-bar--active { box-shadow: inset 2px 0 0 #6366f1; background: rgba(99, 102, 241, 0.08); }
+html.light .sb-ctrl-bar--active { background: rgba(99, 102, 241, 0.08); }
 .sb-ctrl-num {
   background: var(--el-color-primary);
   color: #fff;
@@ -9735,14 +10636,14 @@ html.light .sb-ctrl-config-btn.el-button:hover {
 }
 .sb-ctrl-delete {
   margin-left: auto;
-  opacity: 0.4;
-  transition: opacity 0.2s;
   height: 22px;
-  padding: 0 4px;
+  min-width: 52px;
+  padding: 0 7px;
+  color: #f09b9b !important;
+  border-color: rgba(214,107,107,.5) !important;
+  background: rgba(214,107,107,.08) !important;
 }
-.sb-ctrl-bar:hover .sb-ctrl-delete {
-  opacity: 1;
-}
+
 .sb-panel {
   flex: 1;
   min-width: 0;
@@ -10778,5 +11679,35 @@ html.light .frame-layout-anchor {
   margin-top: 4px;
   line-height: 1.4;
 }
-.film-create{background:#0a0a0a!important;background-image:none!important;color:#e5e5e5!important}.film-create .header{background:#111!important;border-color:#303030!important;box-shadow:none!important;backdrop-filter:none!important}.film-create .logo-main{background:none!important;color:#fafafa!important;-webkit-text-fill-color:#fafafa!important;filter:none!important}.film-create .logo-sub,.film-create .page-title{color:#a3a3a3!important;-webkit-text-fill-color:#a3a3a3!important}.film-create :deep(.el-button--primary){--el-button-bg-color:#f5f5f5!important;--el-button-border-color:#f5f5f5!important;--el-button-text-color:#111!important;--el-button-hover-bg-color:#d4d4d4!important;--el-button-hover-border-color:#d4d4d4!important}.film-create .btn-theme,.film-create .btn-ai-config,.film-create .btn-back-drama{--el-button-bg-color:#111!important;--el-button-border-color:#404040!important;--el-button-text-color:#e5e5e5!important}.film-create :deep(.el-card),.film-create :deep(.el-collapse),.film-create :deep(.el-collapse-item__header),.film-create :deep(.el-collapse-item__wrap){background:#111!important;border-color:#303030!important;box-shadow:none!important}
+.main-generation-controls{display:flex;align-items:center;gap:10px;flex:1;min-width:420px;padding:6px 10px;border:1px solid var(--el-border-color);border-radius:8px;background:var(--el-fill-color-light)}.main-generation-controls .generation-settings{flex:1;min-width:0;padding:0;border:0;background:transparent}.main-generation-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);white-space:nowrap}.sd2-resource-control{font-weight:600}.asset-btns{display:flex;flex-wrap:wrap;gap:6px}.asset-btns .sd2-resource-control{margin-left:0}@media(max-width:900px){.main-generation-controls{min-width:0;flex-wrap:wrap}.main-generation-controls .generation-settings{flex-basis:100%}}
+.sb-inline-generation-settings{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:8px 12px;border:1px solid var(--el-border-color);border-radius:8px;background:var(--el-fill-color-light)}.sb-inline-generation-settings .generation-settings{flex:1;min-width:0;padding:0;border:0;background:transparent}.sb-inline-generation-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);white-space:nowrap}.sb-inline-generation-hint{font-size:11px;color:var(--el-text-color-secondary);white-space:nowrap}@media(max-width:900px){.sb-inline-generation-settings{align-items:stretch;flex-wrap:wrap}.sb-inline-generation-settings .generation-settings{flex-basis:100%}.sb-inline-generation-hint{width:100%}}
+.sb-omni-controls{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:9px 10px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-blank)}.sb-omni-control-row,.sb-omni-frame-row,.sb-omni-frame-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sb-omni-control-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);min-width:48px}.sb-omni-control-hint{font-size:12px;color:var(--el-text-color-secondary)}.sb-omni-frame-slot{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--el-text-color-secondary);padding:4px 7px;background:var(--el-fill-color-light);border-radius:4px;max-width:100%;min-width:0}.sb-omni-frame-slot-label{font-weight:600;color:var(--el-text-color-primary);white-space:nowrap}.sb-omni-frame-thumb{width:34px;height:24px;object-fit:cover;border-radius:3px;flex:none}.sb-omni-frame-pick,.sb-omni-frame-upload{padding:0 4px;white-space:nowrap}.sb-universal-library-caret{margin-left:2px}.sb-universal-library-btn--static{font-size:12px;color:var(--el-text-color-secondary);padding:2px 8px;border:1px solid var(--el-border-color-lighter);border-radius:4px;white-space:nowrap}.sb-omni-left-sb-title{display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 8px;border:1px solid var(--el-border-color-lighter);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-left-sb-idx{font-size:11px;font-weight:700;color:#fff;background:#6366f1;border-radius:4px;padding:1px 5px;flex:none}.sb-omni-left-sb-name{font-size:13px;font-weight:600;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.sb-omni-left-hint{font-size:11px;color:var(--el-text-color-secondary)}.sb-omni-selected-strip{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:8px;padding:5px 8px;border:1px dashed var(--el-border-color);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-selected-strip-label{font-size:11px;font-weight:600;color:var(--el-text-color-secondary);flex:none}.sb-omni-selected-strip-item{display:inline-flex;align-items:center;gap:3px;border:1px solid var(--el-border-color-lighter);border-radius:4px;padding:1px 4px;background:var(--el-fill-color-blank)}.sb-omni-selected-strip-item img{width:20px;height:16px;object-fit:cover;border-radius:2px}.sb-omni-selected-strip-item em{font-size:10px;font-style:normal;color:var(--el-color-primary)}.sb-omni-material-panel{display:flex;flex-direction:column;gap:8px;margin-top:0;padding:10px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-blank);min-width:0}.sb-omni-material-dropzone{height:44px;display:flex;align-items:center;justify-content:center;gap:7px;border:1px dashed var(--el-color-primary);border-radius:7px;color:var(--el-color-primary);background:var(--el-color-primary-light-9);font-size:12px;text-align:center}.sb-omni-material-auto-refs{font-size:11px;line-height:1.5;color:var(--el-color-primary);padding:5px 8px;background:var(--el-color-primary-light-9);border-radius:5px}.sb-omni-material-upload-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sb-omni-material-drop-hint{font-size:11px;color:var(--el-text-color-secondary)}.sb-omni-material-note{font-size:11px;line-height:1.5;color:var(--el-text-color-secondary)}.sb-omni-material-summary{font-size:12px;line-height:1.5;color:var(--el-text-color-primary);padding:5px 8px;background:var(--el-fill-color-light);border-radius:5px}.sb-omni-material-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);margin-top:2px}.sb-omni-material-pool{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;max-height:240px;overflow:auto;padding-right:2px}.sb-omni-material-card{position:relative;border:1px solid var(--el-border-color);border-radius:6px;padding:3px;cursor:pointer;background:var(--el-fill-color-blank);overflow:hidden}.sb-omni-material-card:hover{border-color:var(--el-color-primary)}.sb-omni-material-card.selected{border-color:var(--el-color-primary);box-shadow:0 0 0 1px var(--el-color-primary)}.sb-omni-material-card img{width:100%;height:52px;object-fit:cover;border-radius:4px;display:block}.sb-omni-material-card-icon{display:flex;height:52px;align-items:center;justify-content:center;font-size:20px;background:var(--el-fill-color-light);border-radius:4px}.sb-omni-material-card small{display:block;margin-top:3px;font-size:10px;line-height:1.3;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-material-card-check{position:absolute;right:4px;top:4px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--el-color-primary);color:#fff;font-size:12px;font-weight:700}.sb-omni-material-pool-empty{grid-column:1/-1;font-size:12px;color:var(--el-text-color-secondary);padding:12px 0;text-align:center}.sb-omni-material-selected-list{display:flex;flex-direction:column;gap:5px;max-height:280px;overflow:auto;padding-right:2px}.sb-omni-material-selected-row{display:grid;grid-template-columns:34px minmax(0,1fr) 118px auto auto auto auto auto;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--el-border-color-lighter);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-material-selected-name{display:flex;align-items:center;gap:6px;min-width:0}.sb-omni-material-selected-name b{font-size:12px;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-material-at{font-size:10px;font-style:normal;color:var(--el-color-primary);background:var(--el-color-primary-light-9);padding:1px 5px;border-radius:3px;white-space:nowrap}.sb-universal-library-thumb{width:34px;height:24px;object-fit:cover;border-radius:3px}.sb-universal-library-type{display:inline-flex;width:34px;height:24px;align-items:center;justify-content:center;font-size:12px;color:var(--el-text-color-secondary);background:var(--el-fill-color-light);border-radius:3px;flex:none}.sb-universal-library-usage{width:118px;flex:none}.sb-universal-library-move{padding:0 4px}.sb-universal-library-sd2{padding:0 5px;font-size:10px;color:var(--el-text-color-secondary);white-space:nowrap;border-radius:4px}.sb-universal-library-sd2:hover{color:var(--el-color-primary)}.sb-universal-identity-row{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:8px;border:1px solid var(--el-border-color-lighter);border-radius:7px;background:var(--el-fill-color-light)}.sb-universal-identity-status{display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-size:11px;color:var(--el-text-color-secondary);line-height:1.4}.sb-universal-identity-status.is-active{color:var(--el-color-success)}.sb-universal-identity-status.is-processing{color:var(--el-color-warning)}.sb-universal-identity-status.is-failed,.sb-universal-identity-status.is-invalid{color:var(--el-color-danger)}.sb-universal-frame-actions{display:flex;flex-wrap:wrap;gap:6px}.sb-universal-frame-actions .el-button{margin:0}.sb-omni-frame-picker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;max-height:420px;overflow:auto}.sb-omni-frame-picker-card{border:1px solid var(--el-border-color);border-radius:7px;padding:5px;cursor:pointer;background:var(--el-fill-color-blank)}.sb-omni-frame-picker-card:hover{border-color:var(--el-color-primary)}.sb-omni-frame-picker-card.active{border-color:var(--el-color-primary);box-shadow:0 0 0 1px var(--el-color-primary)}.sb-omni-frame-picker-card img{width:100%;height:64px;object-fit:cover;border-radius:4px}.sb-omni-frame-picker-card small{display:block;margin-top:4px;font-size:11px;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-frame-picker-empty{font-size:12px;color:var(--el-text-color-secondary);text-align:center;padding:18px 0}@media(max-width:900px){.sb-omni-control-row{align-items:flex-start}.sb-omni-audio-row{flex-direction:column}.sb-omni-control-hint{width:100%}.sb-omni-frame-row{flex-direction:column;align-items:stretch}.sb-omni-frame-slot{justify-content:flex-start}.sb-omni-material-selected-row{grid-template-columns:34px minmax(0,1fr) auto auto auto}.sb-omni-material-selected-row .sb-universal-library-usage{grid-column:2 / -1;width:100%}}
+.workflow-shell{margin:0 0 18px;padding:22px 24px;border:1px solid #ded8ce;border-radius:14px;background:#fffdf9;box-shadow:0 8px 24px #372d2010}.workflow-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.workflow-head h2{margin:3px 0 4px;color:#28231d;font-size:22px}.workflow-head p{margin:0;color:#746c62;font-size:13px}.workflow-kicker{font-size:11px;font-weight:700;letter-spacing:.08em;color:#8c6a44}.workflow-episode{padding:6px 9px;border-radius:99px;background:#f5efe5;color:#6b5842;font-size:12px}.workflow-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:20px}.workflow-step{display:flex;align-items:center;justify-content:center;gap:8px;min-height:42px;border:1px solid #dfd8ce;border-radius:8px;background:#fff;color:#756c61;cursor:pointer;font:inherit;font-size:13px}.workflow-step span{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#eee9e1;color:#746b60;font-size:11px}.workflow-step:hover{border-color:#a68b68;color:#514333}.workflow-step.active{border-color:#755d43;background:#3d342a;color:#fff}.workflow-step.active span{background:#fff;color:#3d342a}.workflow-step.complete:not(.active) span{background:#d9e7da;color:#45624a}.resource-center{background:#fffdf9!important}.resource-center-heading,.resource-media-library>header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.resource-center-heading{margin-bottom:18px}.resource-center-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.resource-center-group,.resource-media-library{border:1px solid #e2ddd5;border-radius:10px;background:#fff;padding:14px}.resource-center-group>header,.resource-media-library>header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.resource-center-group>header b,.resource-media-library b{color:#302a23}.resource-center-group>header span,.resource-media-library>header>span{display:grid;place-items:center;min-width:22px;height:22px;border-radius:99px;background:#f0ebe3;color:#735e46;font-size:11px}.resource-center-actions{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.resource-center-list{display:grid;gap:7px;max-height:315px;overflow:auto}.resource-center-item{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:8px;align-items:center;padding:6px;border-radius:7px;background:#faf8f5}.resource-center-item img,.resource-center-placeholder{width:42px;height:36px;border-radius:5px;object-fit:cover}.resource-center-placeholder{display:grid;place-items:center;background:#ece6dc;color:#8a7e6d;font-size:10px}.resource-center-item b,.resource-center-item small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-center-item b{font-size:12px;color:#3e372f}.resource-center-item small{margin-top:3px;color:#8a8176;font-size:11px}.resource-center-empty{margin:18px 0;color:#92877b;font-size:12px}.resource-media-library{margin-top:14px}.resource-media-library header small{display:block;margin-top:4px;color:#8c8378;font-size:12px}.resource-media-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:9px}.resource-media-card{overflow:hidden;border:1px solid #e7e2da;border-radius:7px;background:#faf8f5}.resource-media-card img,.resource-media-card>span{display:grid;width:100%;height:62px;object-fit:cover;place-items:center;background:#efe9df;color:#857765;font-size:12px}.resource-media-card small{display:block;padding:5px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#5c5247;font-size:11px}.storyboard-reference-panel{border-color:#e0d6c8!important;background:#fffdf9!important}@media(max-width:900px){.workflow-head{flex-direction:column}.workflow-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.resource-center-grid{grid-template-columns:1fr}}
+.workflow-next-action{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:12px 0 22px;padding:14px 16px;border:1px solid #ded8ce;border-radius:10px;background:#f9f5ee;color:#665b4e;font-size:13px}.merge-readiness{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 14px;padding:11px 13px;border:1px solid #ead6b1;border-radius:8px;background:#fff7e8;color:#89622c;font-size:13px}.merge-readiness.ready{border-color:#c9dfca;background:#f0f8ef;color:#426c46}.merge-readiness b{color:inherit}@media(max-width:680px){.workflow-next-action{align-items:stretch;flex-direction:column}.workflow-next-action .el-button{width:100%}}
+.storyboard-workspace{display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr);align-items:start;gap:16px}.storyboard-workspace .storyboard-reference-panel{position:sticky;top:16px;margin:0;max-height:calc(100dvh - 32px);overflow:auto}.storyboard-workspace .storyboard-editor-panel{margin:0;min-width:0}.sb-ctrl-bar{cursor:grab}.sb-ctrl-bar:active{cursor:grabbing}.sb-ctrl-bar--dragging{opacity:.45}.sb-ctrl-bar--dragover{box-shadow:inset 0 3px 0 #7c6248!important;background:#f4eee4!important}@media(max-width:1100px){.storyboard-workspace{grid-template-columns:230px minmax(0,1fr)}}@media(max-width:820px){.storyboard-workspace{display:flex;flex-direction:column}.storyboard-workspace .storyboard-reference-panel{position:static;width:100%;max-height:none}.storyboard-workspace .storyboard-editor-panel{width:100%}}
+
+/* Workflow and resource-center are used inside the primary storyboard flow.
+   They must inherit the global workbench palette instead of their old warm light skin. */
+.workflow-shell,.resource-center,.storyboard-reference-panel{background:var(--bg-surface)!important;border-color:var(--border-color)!important;box-shadow:var(--shadow-sm)}
+.workflow-head h2,.resource-center-group>header b,.resource-media-library b{color:var(--text-primary)}
+.workflow-head p,.resource-center-empty,.resource-media-library header small{color:var(--text-muted)}
+.workflow-kicker{color:var(--text-faint)}
+.workflow-episode,.resource-center-group>header span,.resource-media-library>header>span{background:var(--bg-hover);color:var(--text-regular)}
+.workflow-step{border-color:var(--border-color);background:var(--bg-raised);color:var(--text-muted)}
+.workflow-step span{background:var(--bg-hover);color:var(--text-regular)}
+.workflow-step:hover{border-color:var(--border-strong);color:var(--text-primary)}
+.workflow-step.active{border-color:var(--accent);background:var(--accent);color:var(--accent-contrast)}
+.workflow-step.active span{background:var(--bg-surface);color:var(--text-primary)}
+.workflow-step.complete:not(.active) span{background:var(--bg-active);color:var(--text-primary)}
+.resource-center-group,.resource-media-library{border-color:var(--border-subtle);background:var(--bg-raised)}
+.resource-center-item,.resource-media-card{background:var(--bg-surface);border-color:var(--border-subtle)}
+.resource-center-placeholder,.resource-media-card img,.resource-media-card>span{background:var(--bg-hover);color:var(--text-muted)}
+.resource-center-item b{color:var(--text-regular)}
+.resource-center-item small,.resource-media-card small{color:var(--text-muted)}
+.resource-center-item-actions{display:flex;align-items:center;gap:2px;white-space:nowrap}.resource-center-item-actions .el-button{margin:0}.prop-asset-picker-grid{max-height:440px;overflow:auto;padding:2px}.prop-asset-picker-card{padding:0;cursor:pointer;text-align:left;font:inherit}.prop-asset-picker-card:hover{border-color:var(--el-color-primary)}
+.workflow-next-action{border-color:var(--border-color);background:var(--bg-raised);color:var(--text-regular)}
+.merge-readiness,.merge-readiness.ready{border-color:var(--border-color);background:var(--bg-hover);color:var(--text-regular)}
+.sb-ctrl-bar--dragover{box-shadow:inset 0 3px 0 var(--accent)!important;background:var(--bg-hover)!important}
+
+/* 项目主工作流与 AI 工具箱采用同一套深色单色基线，旧页面不再混入浅色卡片。 */
 </style>

@@ -343,7 +343,7 @@ onMounted(() => load())
 }
 
 .section-label--locked {
-  color: #2563eb;
+  color: var(--text-regular);
 }
 
 .section-icon {
@@ -365,13 +365,13 @@ onMounted(() => load())
 }
 
 .locked-content {
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 10px 14px;
   font-size: 12px;
   font-family: 'Consolas', 'Monaco', monospace;
-  color: #1e40af;
+  color: var(--text-regular);
   white-space: pre-wrap;
   line-height: 1.6;
   user-select: none;

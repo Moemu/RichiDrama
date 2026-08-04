@@ -3,6 +3,7 @@ const imageClient = require('./imageClient');
 const aiClient = require('./aiClient');
 const promptI18n = require('./promptI18n');
 const { mergeCfgStyleWithDrama } = require('../utils/dramaStyleMerge');
+const assetSd2Service = require('./assetSd2Service');
 
 function applySceneStyleOverride(cfg, styleOverride) {
   const o = (styleOverride || '').toString().trim();
@@ -18,7 +19,7 @@ function applySceneStyleOverride(cfg, styleOverride) {
   };
 }
 function updateScene(db, log, sceneId, req) {
-  const row = db.prepare('SELECT id FROM scenes WHERE id = ? AND deleted_at IS NULL').get(Number(sceneId));
+  const row = db.prepare('SELECT * FROM scenes WHERE id = ? AND deleted_at IS NULL').get(Number(sceneId));
   if (!row) return { ok: false, error: 'scene not found' };
   const updates = [];
   const params = [];
@@ -32,8 +33,12 @@ function updateScene(db, log, sceneId, req) {
   if (req.extra_images !== undefined) { updates.push('extra_images = ?'); params.push(req.extra_images ?? null); }
   if (req.ref_image !== undefined) { updates.push('ref_image = ?'); params.push(req.ref_image ?? null); }
   if (updates.length === 0) return { ok: true };
+  if (req.image_url != null || req.local_path !== undefined) {
+    assetSd2Service.markResourceStale(db, 'scene', row, req);
+  }
   params.push(new Date().toISOString(), sceneId);
   db.prepare('UPDATE scenes SET ' + updates.join(', ') + ', updated_at = ? WHERE id = ?').run(...params);
+  require('./assetMappingService').syncEntities(db, log, 'scene', [sceneId]);
   log.info('Scene updated', { scene_id: sceneId });
   return { ok: true };
 }
@@ -74,7 +79,9 @@ function createScene(db, log, dramaId, req) {
       now
     );
     log.info('Scene created', { scene_id: info.lastInsertRowid, drama_id: dramaId, episode_id: episodeId });
-    return getSceneById(db, info.lastInsertRowid);
+    const scene = getSceneById(db, info.lastInsertRowid);
+    require('./assetMappingService').syncEntities(db, log, 'scene', [scene.id]);
+    return scene;
   } catch (e) {
     // 老库可能没有 episode_id 列，降级为不含 episode_id 的 INSERT
     if ((e.message || '').includes('episode_id')) {
@@ -82,7 +89,9 @@ function createScene(db, log, dramaId, req) {
         `INSERT INTO scenes (drama_id, location, time, prompt, image_url, local_path, storyboard_count, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, 1, 'pending', ?, ?)`
       ).run(Number(dramaId), req.location || '', req.time || '', req.prompt || '', req.image_url ?? null, req.local_path ?? null, now, now);
-      return getSceneById(db, info.lastInsertRowid);
+      const scene = getSceneById(db, info.lastInsertRowid);
+      require('./assetMappingService').syncEntities(db, log, 'scene', [scene.id]);
+      return scene;
     }
     throw e;
   }
@@ -121,6 +130,8 @@ function listByDramaId(db, dramaId) {
     image_url: row.image_url,
     local_path: row.local_path,
     extra_images: row.extra_images || null,
+    ref_image: row.ref_image || null,
+    seedance2_asset: assetSd2Service.parse(row.seedance2_asset),
     status: row.status,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -140,6 +151,8 @@ function getSceneById(db, id) {
     image_url: row.image_url,
     local_path: row.local_path,
     extra_images: row.extra_images || null,
+    ref_image: row.ref_image || null,
+    seedance2_asset: assetSd2Service.parse(row.seedance2_asset),
     status: row.status,
     created_at: row.created_at,
     updated_at: row.updated_at

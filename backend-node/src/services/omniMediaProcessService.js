@@ -51,4 +51,47 @@ function mixAudio(videoLocalPath, audioLocalPath, log, options = {}) {
   run(args, log, '成片混音');
   return path.relative(storageRoot(), out).replace(/\\/g, '/');
 }
-module.exports = { extractKeyframes, mixAudio };
+
+function trimVideoAsset(db, log, source, options = {}) {
+  if (!source || source.type !== 'video') throw new Error('只能裁切视频素材');
+  const input = abs(source.local_path);
+  if (!source.local_path || !fs.existsSync(input)) throw new Error('该视频不是本地素材，无法裁切');
+  const start = Math.max(0, Number(options.start_seconds) || 0);
+  const end = Number(options.end_seconds);
+  if (!Number.isFinite(end) || end <= start) throw new Error('结束时间必须大于开始时间');
+  const duration = Math.min(3600, end - start);
+  const root = storageRoot(); const dir = path.join(root, 'library', 'derived'); fs.mkdirSync(dir, { recursive: true });
+  const name = `trim_${source.id}_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`; const output = path.join(dir, name);
+  try { run(['-y', '-ss', String(start), '-i', input, '-t', String(duration), '-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-movflags', '+faststart', output], log, '裁切视频'); }
+  catch (_) { run(['-y', '-ss', String(start), '-i', input, '-t', String(duration), '-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart', output], log, '裁切视频'); }
+  if (!fs.existsSync(output)) throw new Error('裁切后的视频文件未生成');
+  const localPath = `library/derived/${name}`;
+  return assetService.create(db, log, { drama_id: source.drama_id || null, name: `${source.name || '视频'} · 裁切`, type: 'video', local_path: localPath, url: `/static/${localPath}`, mime_type: 'video/mp4', file_size: fs.statSync(output).size, duration, source_type: 'derived', parent_asset_id: source.id, processing_status: 'ready', metadata: { derived_from: 'video_trim', start_seconds: start, end_seconds: end } });
+}
+function concatVideoAssets(db, log, sources) {
+  if (!Array.isArray(sources) || sources.length < 2) throw new Error('请至少选择两段视频进行拼接');
+  if (sources.length > 20) throw new Error('一次最多拼接 20 段视频');
+  const inputs = sources.map((source) => {
+    if (!source || source.type !== 'video' || !source.local_path) throw new Error('只能拼接本地视频素材');
+    const input = abs(source.local_path);
+    if (!fs.existsSync(input)) throw new Error(`视频素材文件不存在：${source.name || source.id}`);
+    return input;
+  });
+  const root = storageRoot(); const dir = path.join(root, 'library', 'derived'); fs.mkdirSync(dir, { recursive: true });
+  const stamp = `${Date.now()}_${randomUUID().slice(0, 8)}`;
+  const list = path.join(dir, `concat_${stamp}.txt`);
+  const name = `concat_${stamp}.mp4`; const output = path.join(dir, name);
+  const lines = inputs.map((input) => `file '${input.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n');
+  fs.writeFileSync(list, lines, 'utf8');
+  try {
+    try { run(['-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', output], log, '拼接视频'); }
+    catch (_) { run(['-y', '-f', 'concat', '-safe', '0', '-i', list, '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart', output], log, '拼接视频'); }
+  } finally {
+    if (fs.existsSync(list)) fs.unlinkSync(list);
+  }
+  if (!fs.existsSync(output)) throw new Error('拼接后的视频文件未生成');
+  const localPath = `library/derived/${name}`;
+  const duration = sources.reduce((sum, source) => sum + Math.max(0, Number(source.duration) || 0), 0) || null;
+  return assetService.create(db, log, { drama_id: sources[0].drama_id || null, name: `${sources[0].name || '视频'} 等 ${sources.length} 段拼接`, type: 'video', local_path: localPath, url: `/static/${localPath}`, mime_type: 'video/mp4', file_size: fs.statSync(output).size, duration, source_type: 'derived', parent_asset_id: sources[0].id, processing_status: 'ready', metadata: { derived_from: 'video_concat', source_asset_ids: sources.map((source) => source.id) } });
+}
+module.exports = { extractKeyframes, mixAudio, trimVideoAsset, concatVideoAssets };

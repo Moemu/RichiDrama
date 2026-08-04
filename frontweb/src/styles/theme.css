@@ -1,920 +1,196 @@
-/* =====================================================
-   暗色模式（默认）— html.dark 或无类名时生效
-   ===================================================== */
+/*
+ * LocalMiniDrama design contract
+ *
+ * This is intentionally the only global visual authority.  Page components
+ * may describe layout, but must use these tokens for colour, borders and
+ * elevation.  Keeping both UI modes on the same workbench palette prevents
+ * an old persisted `light` class from producing a second, conflicting UI.
+ */
 :root,
-html.dark {
-  --bg-page:       #0f0f12;
-  --bg-card:       #18181b;
-  --bg-inner:      #1c1c1e;
-  --bg-hover:      #27272a;
-  --border-color:  #27272a;
-  --border-muted:  #3f3f46;
-  --text-primary:  #e4e4e7;
-  --text-bright:   #fafafa;
-  --text-muted:    #a1a1aa;
-  --text-subtle:   #71717a;
-  --text-faint:    #52525b;
-  --shadow:        0 2px 12px rgba(0,0,0,.4);
-  --el-color-primary: #4b91c8;
-  --el-color-primary-light-3: #78add5;
-  --el-color-primary-light-5: #9fc8e4;
-  --el-color-primary-light-7: #c9e0f0;
-  --el-color-primary-light-8: #e2eff7;
-  --el-color-primary-light-9: #f0f8fc;
-  --el-color-primary-dark-2: #3479ae;
-}
-
-/* =====================================================
-   亮色模式 — html.light 时生效
-   ===================================================== */
+html.dark,
 html.light {
-  --bg-page:       #f4f4f5;
-  --bg-card:       #ffffff;
-  --bg-inner:      #fafafa;
-  --bg-hover:      #f0f0f1;
-  --border-color:  #e4e4e7;
-  --border-muted:  #d4d4d8;
-  --text-primary:  #18181b;
-  --text-bright:   #09090b;
-  --text-muted:    #52525b;
-  --text-subtle:   #71717a;
-  --text-faint:    #a1a1aa;
-  --shadow:        0 2px 12px rgba(0,0,0,.08);
-}
-
-/* ── 通用基础 ── */
-html, body, #app, .app {
-  background: var(--bg-page) !important;
-  color: var(--text-primary) !important;
-}
-
-/* ── 各页面结构 ── */
-html.light .film-list,
-html.light .film-create,
-html.light .drama-detail,
-html.light .drama-canvas-page {
-  background: var(--bg-page);
-  color: var(--text-primary);
-}
-
-/* header */
-html.light .header {
-  background: var(--bg-card) !important;
-  border-bottom-color: var(--border-color) !important;
-}
-html.light .logo { color: var(--text-bright) !important; }
-html.light .page-title { color: var(--text-muted) !important; }
-
-/* card / section */
-html.light .card,
-html.light .section.card {
-  background: var(--bg-card) !important;
-  border-color: var(--border-color) !important;
-}
-html.light .section-title { color: var(--text-bright) !important; }
-
-/* project card (FilmList) */
-html.light .project-card {
-  background: var(--bg-inner) !important;
-  border-color: var(--border-color) !important;
-}
-html.light .project-card:hover { border-color: var(--el-color-primary) !important; }
-html.light .project-title { color: var(--text-bright) !important; }
-html.light .project-desc { color: var(--text-muted) !important; }
-html.light .project-meta { color: var(--text-faint) !important; }
-
-/* episode card */
-html.light .episode-card {
-  background: var(--bg-inner) !important;
-  border-color: var(--border-color) !important;
-}
-html.light .episode-title { color: var(--text-bright) !important; }
-html.light .episode-num,
-html.light .episode-preview { color: var(--text-muted) !important; }
-
-/* quick-nav */
-html.light .quick-nav {
-  background: var(--bg-card) !important;
-  border-color: var(--border-color) !important;
-}
-html.light .nav-item:hover { background: var(--bg-hover) !important; }
-html.light .nav-label { color: var(--text-primary) !important; }
-html.light .nav-sub-item:hover { background: var(--bg-hover) !important; }
-
-/* asset / library items */
-html.light .asset-cover {
-  background: var(--bg-inner) !important;
-  border-color: var(--border-color) !important;
-}
-html.light .library-item {
-  background: var(--bg-inner) !important;
-  border-color: var(--border-color) !important;
-}
-html.light .library-item-name { color: var(--text-bright) !important; }
-html.light .library-item-desc { color: var(--text-muted) !important; }
-html.light .library-empty { color: var(--text-subtle) !important; }
-
-/* storyboard */
-html.light .sb-card,
-html.light .storyboard-row {
-  background: var(--bg-card) !important;
-  border-color: var(--border-color) !important;
-}
-html.light .sb-panel {
-  border-color: var(--border-color) !important;
-}
-html.light .sb-panel-title { color: var(--text-bright) !important; }
-html.light .sb-video-placeholder {
-  background: var(--bg-inner) !important;
-  border-color: var(--border-color) !important;
-}
-
-/* collapse / blocks */
-html.light .resource-block,
-html.light .block-header {
-  background: var(--bg-inner) !important;
-  border-color: var(--border-color) !important;
-}
-
-/* textarea / input overrides */
-html.light .story-textarea textarea {
-  background: var(--bg-inner) !important;
-  color: var(--text-primary) !important;
-  border-color: var(--border-color) !important;
-}
-
-/* progress / pipeline */
-html.light .pipeline-panel {
-  background: var(--bg-inner) !important;
-  border-color: var(--border-color) !important;
-}
-html.light .pipeline-error-item { color: #dc2626 !important; }
-
-/* ── Element Plus 亮色覆盖 ── */
-html.light {
-  --el-bg-color: var(--bg-card);
-  --el-bg-color-page: var(--bg-page);
-  --el-bg-color-overlay: var(--bg-card);
-  --el-text-color-primary: var(--text-primary);
-  --el-text-color-regular: var(--text-primary);
-  --el-text-color-secondary: var(--text-muted);
-  --el-text-color-placeholder: var(--text-faint);
-  --el-border-color: var(--border-color);
-  --el-border-color-light: var(--border-muted);
-  --el-border-color-lighter: var(--border-muted);
-  --el-fill-color: var(--bg-inner);
-  --el-fill-color-blank: var(--bg-card);
-  --el-fill-color-light: var(--bg-hover);
-  --el-fill-color-lighter: var(--bg-hover);
-  --el-mask-color: rgba(255,255,255,.7);
-}
-
-html.light .el-card,
-html.light .el-dialog {
-  background: var(--bg-card) !important;
-  border-color: var(--border-color) !important;
-  color: var(--text-primary) !important;
-}
-html.light .el-dialog__header { border-bottom-color: var(--border-color) !important; }
-html.light .el-dialog__title { color: var(--text-bright) !important; }
-
-html.light .el-input__wrapper,
-html.light .el-textarea,
-html.light .el-textarea__wrapper {
-  background: var(--bg-inner) !important;
-  box-shadow: 0 0 0 1px var(--border-color) !important;
-}
-html.light .el-input__inner,
-html.light .el-textarea__inner {
-  background: transparent !important;
-  color: var(--text-primary) !important;
-}
-
-html.light .el-select-dropdown {
-  background: var(--bg-card) !important;
-  border-color: var(--border-color) !important;
-}
-html.light .el-select-dropdown__item { color: var(--text-primary) !important; }
-html.light .el-select-dropdown__item.hover,
-html.light .el-select-dropdown__item:hover { background: var(--bg-hover) !important; }
-
-html.light .el-collapse-item__header,
-html.light .el-collapse-item__wrap {
-  background: var(--bg-card) !important;
-  border-color: var(--border-color) !important;
-  color: var(--text-primary) !important;
-}
-
-html.light .el-table,
-html.light .el-table__header-wrapper,
-html.light .el-table tr {
-  background: var(--bg-card) !important;
-  color: var(--text-primary) !important;
-}
-html.light .el-table td,
-html.light .el-table th { border-color: var(--border-color) !important; }
-
-html.light .el-pagination { color: var(--text-primary) !important; }
-html.light .el-pager li { background: var(--bg-inner) !important; color: var(--text-primary) !important; }
-
-html.light .el-radio-button__inner {
-  background: var(--bg-inner) !important;
-  border-color: var(--border-color) !important;
-  color: var(--text-primary) !important;
-}
-html.light .el-radio-button__original-radio:checked + .el-radio-button__inner {
-  background: var(--el-color-primary) !important;
-  color: #fff !important;
-}
-
-html.light .el-message-box {
-  background: var(--bg-card) !important;
-  border-color: var(--border-color) !important;
-}
-html.light .el-message-box__title { color: var(--text-bright) !important; }
-html.light .el-message-box__content { color: var(--text-primary) !important; }
-
-/* 标签、小字 */
-html.light span, html.light label, html.light p {
-  color: inherit;
-}
-
-/* AI 配置字段帮助提示框 */
-.cfg-tip-popper.el-popper {
-  max-width: 300px;
-}
-.cfg-tip-content {
-  font-size: 12px;
-  line-height: 1.7;
-}
-
-/* =====================================================
-   亮色模式增强 — 更现代的视觉效果
-   ===================================================== */
-
-/* 工作台主色：冷蓝，避免紫色和装饰性渐变 */
-html.light {
-  --el-color-primary: #3479ae;
-  --el-color-primary-light-3: #6da8d0;
-  --el-color-primary-light-5: #9dc8e5;
-  --el-color-primary-light-7: #cfe4f2;
-  --el-color-primary-light-8: #e5f1f8;
-  --el-color-primary-light-9: #f1f8fc;
-  --el-color-primary-dark-2: #245b88;
-}
-
-/* 卡片升级 */
-html.light .card,
-html.light .el-card {
-  box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04) !important;
-  border-color: #e8e8ef !important;
-  border-radius: 14px !important;
-}
-
-/* 页面标题区美化 */
-html.light .header {
-  background: #ffffff !important;
-  border-bottom: 1px solid #e8e8ef !important;
-  box-shadow: 0 1px 8px rgba(0,0,0,.05) !important;
-}
-
-/* Logo 加紫色渐变 */
-html.light .logo {
-  background: none !important;
-  color: #3479ae !important;
-  -webkit-text-fill-color: #3479ae !important;
-}
-
-/* 项目卡片美化 */
-html.light .project-card {
-  background: #ffffff !important;
-  border: 1px solid #e8e8ef !important;
-  border-radius: 14px !important;
-  box-shadow: 0 1px 4px rgba(0,0,0,.05), 0 6px 20px rgba(0,0,0,.04) !important;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
-}
-html.light .project-card:hover {
-  transform: translateY(-2px) !important;
-  box-shadow: 0 4px 12px rgba(52,121,174,.12), 0 12px 32px rgba(52,121,174,.06) !important;
-  border-color: #9dc8e5 !important;
-}
-
-/* 操作卡片（快速开始）美化 */
-html.light .action-card {
-  background: #f1f8fc !important;
-  border: 2px dashed #9dc8e5 !important;
-}
-html.light .action-card:hover {
-  border-color: #4b91c8 !important;
-  background: #e5f1f8 !important;
-}
-html.light .action-card-title {
-  color: #3479ae !important;
-}
-
-/* Section card 美化 */
-html.light .section.card {
-  border-radius: 14px !important;
-  box-shadow: 0 1px 4px rgba(0,0,0,.05), 0 6px 20px rgba(0,0,0,.03) !important;
-}
-
-/* 资源库 library-item 美化 */
-html.light .library-item {
-  background: #fafafa !important;
-  border: 1px solid #ebebf0 !important;
-  border-radius: 10px !important;
-  transition: box-shadow 0.15s, border-color 0.15s !important;
-}
-html.light .library-item:hover {
-  box-shadow: 0 2px 8px rgba(52,121,174,.1) !important;
-  border-color: #9dc8e5 !important;
-}
-
-/* Storyboard 卡片 */
-html.light .sb-card,
-html.light .storyboard-row {
-  border-radius: 12px !important;
-  box-shadow: 0 1px 4px rgba(0,0,0,.05) !important;
-}
-
-/* 表格美化 */
-html.light .el-table {
-  border-radius: 10px !important;
-  overflow: hidden !important;
-}
-html.light .el-table th.el-table__cell {
-  background: #f1f8fc !important;
-  color: #245b88 !important;
-  font-weight: 600 !important;
-}
-html.light .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
-  background: #f9fcfe !important;
-}
-
-/* 表格内 link 按钮颜色恢复（防被 tr color !important 覆盖） */
-html.light .el-table tr .el-button.is-link,
-html.light .el-table tr .el-button.is-link span {
-  color: var(--el-color-primary) !important;
-}
-html.light .el-table tr .el-button.is-link.el-button--danger,
-html.light .el-table tr .el-button.is-link.el-button--danger span {
-  color: var(--el-color-danger) !important;
-}
-
-/* 按钮通用圆角 */
-html.light .el-button {
-  border-radius: 8px !important;
-}
-/* 勿作用于 is-plain：否则背景被强制为实色渐变而字色仍为 plain 主色，对比度丢失 */
-html.light .el-button--primary:not(.is-link):not(.is-plain) {
-  background: #3479ae !important;
-  border-color: #3479ae !important;
-  box-shadow: 0 2px 8px rgba(52,121,174,.25) !important;
-}
-html.light .el-button--primary:not(.is-link):not(.is-plain):hover {
-  background: #245b88 !important;
-  box-shadow: 0 4px 12px rgba(52,121,174,.35) !important;
-}
-html.light .el-button.is-link {
-  background: transparent !important;
-  border-color: transparent !important;
-  box-shadow: none !important;
-}
-
-/* 输入框 */
-html.light .el-input__wrapper {
-  border-radius: 8px !important;
-  box-shadow: 0 0 0 1px #cfe4f2 !important;
-  transition: box-shadow 0.2s !important;
-}
-html.light .el-input__wrapper:hover {
-  box-shadow: 0 0 0 1px #9dc8e5 !important;
-}
-html.light .el-input__wrapper.is-focus {
-  box-shadow: 0 0 0 2px #3479ae !important;
-}
-html.light .el-textarea__wrapper {
-  border-radius: 8px !important;
-  box-shadow: 0 0 0 1px #cfe4f2 !important;
-}
-html.light .el-textarea__wrapper:hover {
-  box-shadow: 0 0 0 1px #9dc8e5 !important;
-}
-
-/* 对话框 */
-html.light .el-dialog {
-  border-radius: 16px !important;
-  box-shadow: 0 8px 40px rgba(0,0,0,.12) !important;
-}
-
-/* 分集卡片 */
-html.light .episode-card {
-  border-radius: 12px !important;
-  box-shadow: 0 1px 4px rgba(0,0,0,.06) !important;
-  transition: transform 0.15s, box-shadow 0.15s !important;
-}
-html.light .episode-card:hover {
-  transform: translateY(-1px) !important;
-  box-shadow: 0 4px 16px rgba(52,121,174,.1) !important;
-  border-color: #9dc8e5 !important;
-}
-
-/* page bg 更细腻 */
-html.light {
-  --bg-page: #f4f7f8;
-}
-html.light html, html.light body, html.light #app, html.light .app {
-  background: #f4f7f8 !important;
-}
-
-/* 资产管理 header banner */
-html.light .asset-cover {
-  border-radius: 10px !important;
-  overflow: hidden !important;
-}
-
-/* el-tabs 美化 */
-html.light .el-tabs__item {
-  color: #71717a !important;
-  font-weight: 500 !important;
-}
-html.light .el-tabs__item.is-active {
-  color: #3479ae !important;
-  font-weight: 600 !important;
-}
-html.light .el-tabs__active-bar {
-  background: #3479ae !important;
-  border-radius: 2px !important;
-}
-html.light .el-tabs__nav-wrap::after {
-  background: #ebebf0 !important;
-}
-
-/* 最终主题收口：项目页共用组件一律使用蓝 / 铜语义色。
-   保留旧规则是为了兼容业务样式，但不得让紫色和渐变重新进入可见界面。 */
-html.light .header,
-html.light .logo,
-html.light .action-card,
-html.light .action-card:hover {
-  background-image: none !important;
-}
-html.light .logo,
-html.light .logo-main { color: #3479ae !important; -webkit-text-fill-color: #3479ae !important; }
-html.light .action-card { background: #f1f8fc !important; border-color: #9dc8e5 !important; }
-html.light .action-card:hover { background: #e5f1f8 !important; border-color: #6da8d0 !important; }
-html.light .action-card-title,
-html.light .el-tabs__item.is-active { color: #3479ae !important; }
-html.light .el-button--primary:not(.is-link):not(.is-plain) {
-  background: #3479ae !important;
-  border-color: #3479ae !important;
-  box-shadow: 0 2px 8px rgba(52,121,174,.22) !important;
-}
-html.light .el-button--primary:not(.is-link):not(.is-plain):hover {
-  background: #245b88 !important;
-  border-color: #245b88 !important;
-  box-shadow: 0 4px 12px rgba(52,121,174,.28) !important;
-}
-html.light .el-input__wrapper,
-html.light .el-textarea__wrapper { box-shadow: 0 0 0 1px #cfe4f2 !important; }
-html.light .el-input__wrapper:hover,
-html.light .el-textarea__wrapper:hover { box-shadow: 0 0 0 1px #6da8d0 !important; }
-html.light .el-input__wrapper.is-focus { box-shadow: 0 0 0 2px #3479ae !important; }
-html.light .project-card:hover,
-html.light .episode-card:hover,
-html.light .library-item:hover { border-color: #6da8d0 !important; box-shadow: 0 4px 16px rgba(52,121,174,.12) !important; }
-
-/* 导航 tab（按钮型）美化 */
-html.light .el-radio-button__inner {
-  border-radius: 8px !important;
-}
-
-/* 页面整体内容区最大宽度限制样式 */
-html.light .main {
-  padding-top: 28px !important;
-}
-
-/* =====================================================
-   全局 ElMessage：更大、更易读、略长停留（与 main.js message.duration 配合）
-   placement=top 时横向已为居中，此处强化宽度与正文排版
-   ===================================================== */
-.el-message {
-  min-width: min(92vw, 520px) !important;
-  max-width: min(94vw, 720px) !important;
-  padding: 14px 20px !important;
-  box-sizing: border-box !important;
-}
-.el-message .el-message__content {
-  font-size: 15px !important;
-  line-height: 1.55 !important;
-  text-align: center !important;
-  word-break: break-word;
-}
-.el-message .el-message__icon {
-  font-size: 20px !important;
-}
-.el-message .el-message__closeBtn {
-  font-size: 18px !important;
-}
-html.dark .el-message--error {
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
-}
-html.light .el-message--error {
-  box-shadow: 0 4px 20px rgba(245, 108, 108, 0.18);
-}
-
-/* =====================================================
-   LensRhyme monochrome workspace contract
-   Black/white is structural. Status colours are reserved for task state.
-   This section deliberately comes last so legacy page-local visual accents
-   cannot fragment the product experience.
-   ===================================================== */
-:root,
-html.dark {
-  --bg-page: #0a0a0a;
-  --bg-card: #111111;
-  --bg-inner: #181818;
-  --bg-hover: #222222;
-  --border-color: #303030;
-  --border-muted: #404040;
-  --text-primary: #e5e5e5;
-  --text-bright: #fafafa;
-  --text-muted: #a3a3a3;
-  --text-subtle: #737373;
-  --text-faint: #525252;
-  --el-color-primary: #f5f5f5;
-  --el-color-primary-light-3: #ffffff;
-  --el-color-primary-light-5: #e5e5e5;
-  --el-color-primary-light-7: #d4d4d4;
-  --el-color-primary-light-8: #c7c7c7;
-  --el-color-primary-light-9: #b5b5b5;
-  --el-color-primary-dark-2: #d4d4d4;
-}
-
-html.light {
-  --bg-page: #f5f5f5;
-  --bg-card: #ffffff;
-  --bg-inner: #fafafa;
-  --bg-hover: #f0f0f0;
-  --border-color: #e5e5e5;
-  --border-muted: #d4d4d4;
-  --text-primary: #262626;
-  --text-bright: #171717;
-  --text-muted: #737373;
-  --text-subtle: #a3a3a3;
-  --text-faint: #a3a3a3;
-  --el-color-primary: #171717;
-  --el-color-primary-light-3: #404040;
-  --el-color-primary-light-5: #737373;
-  --el-color-primary-light-7: #a3a3a3;
-  --el-color-primary-light-8: #d4d4d4;
-  --el-color-primary-light-9: #f5f5f5;
-  --el-color-primary-dark-2: #000000;
-}
-
-.el-button,
-.el-input__wrapper,
-.el-textarea__wrapper,
-.el-radio-button__inner,
-.el-select__wrapper,
-.el-tag,
-.el-card,
-.el-dialog,
-.el-message-box {
-  border-radius: 7px !important;
-}
-
-.el-button--primary:not(.is-link):not(.is-plain) {
-  --el-button-bg-color: #f5f5f5 !important;
-  --el-button-border-color: #f5f5f5 !important;
-  --el-button-text-color: #111111 !important;
-  --el-button-hover-bg-color: #d4d4d4 !important;
-  --el-button-hover-border-color: #d4d4d4 !important;
-  --el-button-active-bg-color: #ffffff !important;
-  --el-button-active-border-color: #ffffff !important;
-}
-html.light .el-button--primary:not(.is-link):not(.is-plain) {
-  --el-button-bg-color: #171717 !important;
-  --el-button-border-color: #171717 !important;
-  --el-button-text-color: #ffffff !important;
-  --el-button-hover-bg-color: #404040 !important;
-  --el-button-hover-border-color: #404040 !important;
-}
-
-.el-input__wrapper,
-.el-textarea__wrapper,
-.el-select__wrapper {
-  box-shadow: 0 0 0 1px var(--border-color) !important;
-}
-.el-input__wrapper.is-focus,
-.el-textarea__wrapper:focus-within,
-.el-select__wrapper.is-focused {
-  box-shadow: 0 0 0 1px var(--text-bright) !important;
-}
-
-/* Workspace pages share a plain canvas and one-panel language. */
-.tools-page,
-.tool-workbench,
-.media-tool,
-.omni-page,
-.media-library-page {
-  background: var(--bg-page) !important;
-  color: var(--text-primary) !important;
-}
-.tools-page .tools-hero,
-.tool-workbench .workbench-header,
-.media-tool .media-header,
-.omni-page .topbar,
-.media-library-page .page-header {
-  border-color: var(--border-color) !important;
-}
-.tools-page .workflow,
-.tools-page .tool-card,
-.tool-workbench .tool-form,
-.tool-workbench .run-history,
-.tool-workbench .result,
-.media-tool .input-panel,
-.media-tool .history-panel,
-.media-tool .result-panel,
-.omni-page .panel,
-.omni-page .player-tools,
-.omni-page .shot-tabs,
-.omni-page .shot-script,
-.media-library-page .filter-bar,
-.media-library-page .upload-limits {
-  background: var(--bg-card) !important;
-  border-color: var(--border-color) !important;
-  color: var(--text-primary) !important;
-  box-shadow: none !important;
-}
-.tools-page .tool-card:hover,
-.tools-page .tool-card:focus-visible,
-.tool-workbench .run-item:hover,
-.tool-workbench .run-item.active,
-.omni-page .shot-card.active,
-.omni-page .material-card.selected,
-.media-library-page .media-card.selected {
-  background: var(--bg-hover) !important;
-  border-color: var(--text-bright) !important;
-  box-shadow: inset 2px 0 0 var(--text-bright) !important;
-}
-.tools-page .tool-icon,
-.tools-page .tool-icon.copper,
-.tools-page .tool-icon.green,
-.tools-page .workflow b,
-.tool-workbench .title-mark,
-.tool-workbench .panel-kicker > span,
-.media-tool .title-icon,
-.omni-page .empty-play,
-.omni-page .render-play {
-  background: var(--bg-hover) !important;
-  color: var(--text-bright) !important;
-}
-.tools-page .eyebrow,
-.tools-page .tool-card footer,
-.tool-workbench .saving,
-.tool-workbench .empty > span,
-.media-tool .eyebrow,
-.media-tool .result-link,
-.omni-page .material-card .el-icon {
-  color: var(--text-muted) !important;
-}
-.tools-page .workflow i,
-.tools-page .tool-card dl div,
-.tool-workbench .run-item,
-.tool-workbench .status,
-.tool-workbench .result pre,
-.omni-page .time-ruler div,
-.omni-page .advanced-settings,
-.omni-page .dropzone,
-.omni-page .selected-assets article {
-  border-color: var(--border-color) !important;
-  background-color: var(--bg-inner) !important;
-}
-.omni-page .time-ruler i,
-.omni-page .render-ring {
-  background: var(--text-bright) !important;
-  border-color: var(--text-bright) !important;
-}
-.omni-page .mode-switch :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner),
-.omni-page .mode-switch .el-radio-button__original-radio:checked + .el-radio-button__inner {
-  background: var(--text-bright) !important;
-  border-color: var(--text-bright) !important;
-  color: var(--bg-page) !important;
-  box-shadow: none !important;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: .01ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-/* =====================================================
-   Global monochrome workbench refinement
-
-   Page styles in this app pre-date the design system and use scoped,
-   page-local palettes.  This final layer intentionally normalizes the
-   shared surfaces, controls and workspace primitives without touching any
-   business markup or Vue state.
-   ===================================================== */
-:root {
+  --bg-page: #10151d;
+  --bg-surface: #181f29;
+  --bg-raised: #202936;
+  --bg-elevated: #202936;
+  --bg-card: #181f29;
+  --bg-inner: #202936;
+  --bg-hover: #273342;
+  --bg-active: #303d4d;
+  --border-color: #334050;
+  --border-strong: #4b5d72;
+  --border-subtle: #293443;
+  --border-muted: #334050;
+  --text-primary: #f2f5f7;
+  --text-main: #f2f5f7;
+  --text-regular: #d7dee5;
+  --text-muted: #9da9b6;
+  --text-faint: #748190;
+  --text-bright: #f2f5f7;
+  --text-secondary: #9da9b6;
+  --text-subtle: #748190;
+  --focus-ring: #c7d2dc;
+  --accent: #f3f5f6;
+  --accent-hover: #d7dee5;
+  --accent-contrast: #10151d;
+  --shadow-sm: none;
+  --shadow-md: none;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / .04);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / .04), 0 2px 4px -2px rgb(0 0 0 / .04);
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
   --el-font-family: var(--font-sans);
-  --el-font-size-base: 14px;
+  --el-bg-color: var(--bg-surface);
+  --el-bg-color-page: var(--bg-page);
+  --el-bg-color-overlay: var(--bg-surface);
+  --el-fill-color: var(--bg-raised);
+  --el-fill-color-light: var(--bg-hover);
+  --el-fill-color-blank: var(--bg-surface);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-regular);
+  --el-text-color-secondary: var(--text-muted);
+  --el-text-color-placeholder: var(--text-faint);
+  --el-border-color: var(--border-color);
+  --el-border-color-light: var(--border-color);
+  --el-border-color-lighter: #293443;
+  --el-color-primary: #f3f5f6;
+  --el-color-primary-light-3: #fff;
+  --el-color-primary-light-5: #d7dee5;
+  --el-color-primary-light-7: #b5c0ca;
+  --el-color-primary-light-9: #334050;
+  --el-color-primary-dark-2: #d7dee5;
   --el-component-size: 36px;
-  --el-component-size-small: 32px;
+  --el-component-size-small: 30px;
   --el-border-radius-base: var(--radius-md);
   --el-border-radius-small: var(--radius-sm);
-  --el-box-shadow: var(--shadow-sm);
-  --el-box-shadow-light: var(--shadow-md);
+  --el-box-shadow: none;
+  --el-box-shadow-light: none;
 }
 
-html, body, button, input, textarea, select { font-family: var(--font-sans); }
-body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-html.light body { background: #f5f5f5; }
-html.dark body { background: #0a0a0a; }
+html, body, #app, .app { min-height: 100%; background: var(--bg-page) !important; color: var(--text-primary) !important; }
+body, button, input, textarea, select { font-family: var(--font-sans); }
+body { margin: 0; -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, h5, h6 { margin-top: 0; line-height: 1.3; font-weight: 600; }
+h1 { font-size: 24px; letter-spacing: -.02em; }
+h2 { font-size: 20px; letter-spacing: -.015em; }
+h3 { font-size: 18px; letter-spacing: -.01em; }
+p { line-height: 1.6; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible,
+.el-button:focus-visible, .el-radio-button__inner:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; }
 
-/* Element Plus: remove the blue enterprise defaults and use quiet surfaces. */
-html.light {
-  --el-bg-color: #fff;
-  --el-bg-color-page: #f5f5f5;
-  --el-bg-color-overlay: #fff;
-  --el-fill-color: #f5f5f5;
-  --el-fill-color-light: #fafafa;
-  --el-fill-color-blank: #fff;
-  --el-text-color-primary: #171717;
-  --el-text-color-regular: #404040;
-  --el-text-color-secondary: #737373;
-  --el-text-color-placeholder: #a3a3a3;
-  --el-border-color: #e5e5e5;
-  --el-border-color-light: #ededed;
-  --el-border-color-lighter: #f5f5f5;
-  --el-mask-color: rgb(0 0 0 / .42);
+/* Element Plus primitives */
+.el-button, .el-input__wrapper, .el-textarea__wrapper, .el-select__wrapper, .el-card, .el-tag { border-radius: var(--radius-sm) !important; }
+.el-button { font-weight: 500; box-shadow: none !important; }
+.el-button--primary:not(.is-link):not(.is-plain) {
+  --el-button-bg-color: #f3f5f6 !important;
+  --el-button-border-color: #f3f5f6 !important;
+  --el-button-text-color: #10151d !important;
+  --el-button-hover-bg-color: #d7dee5 !important;
+  --el-button-hover-border-color: #d7dee5 !important;
 }
-html.dark {
-  --el-bg-color: #111;
-  --el-bg-color-page: #0a0a0a;
-  --el-bg-color-overlay: #111;
-  --el-fill-color: #181818;
-  --el-fill-color-light: #222;
-  --el-fill-color-blank: #111;
-  --el-text-color-primary: #fafafa;
-  --el-text-color-regular: #e5e5e5;
-  --el-text-color-secondary: #a3a3a3;
-  --el-text-color-placeholder: #737373;
-  --el-border-color: #303030;
-  --el-border-color-light: #262626;
-  --el-border-color-lighter: #1d1d1d;
-  --el-mask-color: rgb(0 0 0 / .62);
-}
-
-.el-button { font-weight: 500; transition: color .2s ease-out, background-color .2s ease-out, border-color .2s ease-out, opacity .2s ease-out; }
-.el-button--primary:not(.is-link):not(.is-plain) { box-shadow: none !important; }
-.el-button--primary:not(.is-link):not(.is-plain):hover { opacity: .8; }
-.el-button:focus-visible, .el-input__wrapper.is-focus, .el-textarea__wrapper:focus-within, .el-select__wrapper.is-focused { outline: none; box-shadow: 0 0 0 1px var(--text-subtle) !important; }
-.el-input__wrapper, .el-textarea__wrapper, .el-select__wrapper { background: var(--bg-inner) !important; box-shadow: 0 0 0 1px var(--border-color) !important; }
-.el-input__inner, .el-textarea__inner { color: var(--text-primary) !important; }
-.el-dialog, .el-message-box, .el-popper, .el-select-dropdown, .el-picker__popper { border: 1px solid var(--border-color) !important; box-shadow: var(--shadow-md) !important; }
-.el-dialog__header, .el-dialog__footer { border-color: var(--border-color); }
-.el-card, .el-collapse, .el-collapse-item__header, .el-collapse-item__wrap, .el-table, .el-table tr, .el-table th.el-table__cell, .el-table td.el-table__cell { background: var(--bg-card) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; }
-.el-table th.el-table__cell { color: var(--text-muted) !important; font-size: 12px; font-weight: 600; }
-.el-tabs__nav-wrap::after { background: var(--border-color) !important; }
-.el-tabs__item { color: var(--text-muted) !important; font-weight: 500; }
-.el-tabs__item.is-active, .el-tabs__item:hover { color: var(--text-primary) !important; }
-.el-tabs__active-bar { background: var(--text-primary) !important; }
-.el-tag { --el-tag-bg-color: var(--bg-hover); --el-tag-border-color: var(--border-color); --el-tag-text-color: var(--text-primary); }
-
-/* Shared workspace shell and surfaces across every route.  The body selector
-   deliberately outranks legacy scoped component rules. */
-html.light body .film-list, html.light body .drama-detail, html.light body .film-create, html.light body .ai-config,
-html.light body .drama-canvas-page, html.light body .tools-page, html.light body .tool-workbench,
-html.light body .media-tool, html.light body .media-library-page, html.light body .omni-page { background: #f5f5f5 !important; color: #262626 !important; }
-html.dark body .film-list, html.dark body .drama-detail, html.dark body .film-create, html.dark body .ai-config,
-html.dark body .drama-canvas-page, html.dark body .tools-page, html.dark body .tool-workbench,
-html.dark body .media-tool, html.dark body .media-library-page, html.dark body .omni-page { background: #0a0a0a !important; color: #e5e5e5 !important; }
-
-body .header, body .page-header, body .topbar, body .workbench-header, body .media-header {
-  background: var(--bg-card) !important; border-color: var(--border-color) !important; box-shadow: none !important; backdrop-filter: none !important;
-}
-body .logo, body .logo-main, body .project-title, body .episode-title, body .section-title,
-body .workbench-title h1, body .tools-page h1, body .media-tool h1, body .media-tool h2 { color: var(--text-bright) !important; -webkit-text-fill-color: currentColor !important; background-image: none !important; }
-body .logo-sub, body .page-title, body .project-desc, body .project-meta, body .episode-preview,
-body .episode-num, body .section-count, body .breadcrumb, body .eyebrow, body .hero-copy,
-body .tool-card > p, body .tool-card footer, body .workbench-title p, body .media-header p { color: var(--text-muted) !important; }
-
-body .card, body .section.card, body .project-card, body .omni-project-card, body .action-card,
-body .episode-card, body .library-item, body .tool-card, body .tool-form, body .run-history,
-body .result, body .control-panel, body .preview-stage, body .generation-history, body .history-card,
-body .filter-bar, body .upload-limits, body .batch-bar, body .panel, body .shot-card,
-body .material-card, body .advanced-settings, body .selected-assets article {
-  background: var(--bg-card) !important; border-color: var(--border-color) !important; box-shadow: none !important; backdrop-filter: none !important; background-image: none !important;
-}
-body .project-card::before, body .episode-card::before { display: none !important; }
-body .card:hover, body .section.card:hover, body .project-card:hover, body .omni-project-card:hover,
-body .episode-card:hover, body .library-item:hover, body .tool-card:hover, body .tool-card:focus-visible,
-body .history-card:hover, body .history-card.active, body .shot-card.active, body .material-card.selected {
-  background: var(--bg-hover) !important; border-color: var(--text-primary) !important; box-shadow: inset 2px 0 0 var(--text-primary) !important; transform: none !important;
-}
-body .badge, body .badge-omni, body .badge-storyboards, body .badge-status, body .badge-ratio,
-body .badge-style, body .badge-genre, body .ep-stat--status, body .type-badge {
-  background: var(--bg-hover) !important; border: 1px solid var(--border-color) !important; color: var(--text-primary) !important;
-}
-body .quick-nav, body .canvas-sidebar, body .nav-sidebar, body .sidebar, body .player-tools,
-body .shot-tabs, body .shot-script, body .time-ruler, body .center-stage, body .video-stage,
-body .result pre, body .featured, body .empty-result { background: var(--bg-inner) !important; border-color: var(--border-color) !important; box-shadow: none !important; }
-body .nav-item:hover, body .nav-sub-item:hover, body .nav-step:hover, body .sidebar-item:hover,
-body .res-tab:hover, body .res-tab.active { background: var(--bg-hover) !important; color: var(--text-primary) !important; }
-body .res-tab--lib.active, body .res-tab--drama.active, body .res-tab--lib.active::after, body .res-tab--drama.active::after { color: var(--text-primary) !important; background: var(--text-primary) !important; }
-
-/* Motion remains purposeful and accessible: no layout lift, only subtle state feedback. */
-body .project-card, body .episode-card, body .tool-card, body .library-item, body .history-card, body .shot-card, body .material-card { transition: color .2s ease-out, background-color .2s ease-out, border-color .2s ease-out, box-shadow .2s ease-out !important; }
-
-/* Some legacy pages set Element Plus colour variables on the button root.
-   Reset those local variables at the final cascade point. */
-html.light body .el-button--primary:not(.is-link):not(.is-plain) {
-  --el-button-bg-color: #171717 !important;
-  --el-button-border-color: #171717 !important;
-  --el-button-text-color: #fff !important;
-  --el-button-hover-bg-color: #404040 !important;
-  --el-button-hover-border-color: #404040 !important;
-  --el-button-hover-text-color: #fff !important;
-}
-html.dark body .el-button--primary:not(.is-link):not(.is-plain) {
-  --el-button-bg-color: #f5f5f5 !important;
-  --el-button-border-color: #f5f5f5 !important;
-  --el-button-text-color: #111 !important;
-  --el-button-hover-bg-color: #d4d4d4 !important;
-  --el-button-hover-border-color: #d4d4d4 !important;
-  --el-button-hover-text-color: #111 !important;
-}
-
-/* AI workbench readability contract: generated content, history and controls
-   always inherit the active theme tokens rather than legacy page-local blues. */
-body .tool-workbench, body .media-tool {
-  color: var(--text-primary) !important;
-}
-body .tool-workbench .tool-form label,
-body .tool-workbench .run-item,
-body .tool-workbench .run-item b,
-body .tool-workbench .result,
-body .tool-workbench .result pre,
-body .tool-workbench .status,
-body .tool-workbench .empty b,
-body .media-tool .control-panel label,
-body .media-tool .featured footer,
-body .media-tool .featured footer b {
-  color: var(--text-primary) !important;
-}
-body .tool-workbench .workbench-title p,
-body .tool-workbench small,
-body .tool-workbench .run-item small,
-body .tool-workbench .history-empty,
-body .tool-workbench .empty,
-body .tool-workbench .status .saving,
-body .media-tool .mode-info span,
-body .media-tool .status-key,
-body .media-tool .history-card small,
-body .media-tool .history-card em,
-body .media-tool .featured footer small {
-  color: var(--text-muted) !important;
-}
-body .tool-workbench .result pre {
-  background: var(--bg-inner) !important;
-  border: 1px solid var(--border-color) !important;
-  color: var(--text-primary) !important;
-  font-family: var(--font-sans) !important;
-  font-size: 14px !important;
-  line-height: 1.8 !important;
-}
-body .tool-workbench .status,
-body .tool-workbench .run-item,
-body .media-tool .mode-info,
-body .media-tool .featured footer {
-  background: var(--bg-inner) !important;
-  border-color: var(--border-color) !important;
-}
-body .tool-workbench .dot.processing { background: #b7791f !important; }
-body .tool-workbench .dot.completed { background: #2f855a !important; }
-body .tool-workbench .dot.failed { background: #c53030 !important; }
-body .tool-workbench .dot.processing,
-body .tool-workbench .dot.completed,
-body .tool-workbench .dot.failed { box-shadow: 0 0 0 2px var(--bg-card); }
-body .header-library .el-button:not(.el-button--primary),
-body .header-actions .el-button:not(.el-button--primary) {
-  --el-button-bg-color: var(--bg-card) !important;
-  --el-button-border-color: var(--border-muted) !important;
-  --el-button-text-color: var(--text-primary) !important;
+.el-button:not(.el-button--primary):not(.is-text):not(.is-link) {
+  --el-button-bg-color: var(--bg-raised) !important;
+  --el-button-border-color: var(--border-color) !important;
+  --el-button-text-color: var(--text-regular) !important;
   --el-button-hover-bg-color: var(--bg-hover) !important;
-  --el-button-hover-border-color: var(--text-primary) !important;
+  --el-button-hover-border-color: var(--border-strong) !important;
   --el-button-hover-text-color: var(--text-primary) !important;
-  box-shadow: none !important;
 }
+/* Page-local button variables used to be the most visible source of theme drift. */
+html body #app .el-button:not(.el-button--primary):not(.is-text):not(.is-link) {
+  --el-button-bg-color: var(--bg-raised) !important;
+  --el-button-border-color: var(--border-color) !important;
+  --el-button-text-color: var(--text-regular) !important;
+  --el-button-hover-bg-color: var(--bg-hover) !important;
+  --el-button-hover-border-color: var(--border-strong) !important;
+  --el-button-hover-text-color: var(--text-primary) !important;
+  background: var(--bg-raised) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-regular) !important;
+}
+html body #app .el-button--primary:not(.is-link):not(.is-plain) {
+  --el-button-bg-color: #f3f5f6 !important;
+  --el-button-border-color: #f3f5f6 !important;
+  --el-button-text-color: #10151d !important;
+  --el-button-hover-bg-color: #d7dee5 !important;
+  --el-button-hover-border-color: #d7dee5 !important;
+  background: #f3f5f6 !important;
+  border-color: #f3f5f6 !important;
+  color: #10151d !important;
+}
+.el-button.is-text, .el-button.is-link { color: var(--text-muted) !important; }
+.el-button.is-text:hover, .el-button.is-link:hover { color: var(--text-primary) !important; background: var(--bg-hover) !important; }
+.el-input__wrapper, .el-textarea__wrapper, .el-select__wrapper { background: var(--bg-raised) !important; box-shadow: 0 0 0 1px var(--border-color) inset !important; }
+.el-input__wrapper.is-focus, .el-textarea__wrapper:focus-within, .el-select__wrapper.is-focused { box-shadow: 0 0 0 1px var(--focus-ring) inset !important; }
+.el-input__inner, .el-textarea__inner { color: var(--text-primary) !important; }
+.el-input__inner::placeholder, .el-textarea__inner::placeholder { color: var(--text-faint) !important; }
+.el-dialog { border-radius: var(--radius-xl) !important; }
+.el-dialog__header, .el-drawer__header { border-bottom: 1px solid var(--border-subtle); }
+.el-pagination { --el-pagination-bg-color: var(--bg-raised); --el-pagination-button-color: var(--text-regular); --el-pagination-hover-color: var(--text-primary); }
+.el-card, .el-dialog, .el-message-box, .el-popper, .el-select-dropdown, .el-collapse, .el-collapse-item__header, .el-collapse-item__wrap, .el-table, .el-table tr, .el-table th.el-table__cell, .el-table td.el-table__cell { background: var(--bg-surface) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; box-shadow: none !important; }
+.el-alert { background: var(--bg-raised) !important; border: 1px solid var(--border-color) !important; color: var(--text-regular) !important; }
+.el-alert__title, .el-alert__description, .el-alert__icon { color: var(--text-regular) !important; }
+.el-tabs__nav-wrap::after { background: var(--border-color) !important; }
+.el-tabs__item { color: var(--text-muted) !important; }
+.el-tabs__item:hover, .el-tabs__item.is-active { color: var(--text-primary) !important; }
+.el-tabs__active-bar { background: var(--text-primary) !important; }
+.el-radio-button__inner { background: var(--bg-raised) !important; border-color: var(--border-color) !important; color: var(--text-regular) !important; }
+.el-radio-button__original-radio:checked + .el-radio-button__inner { background: var(--text-primary) !important; border-color: var(--text-primary) !important; color: var(--bg-page) !important; box-shadow: none !important; }
+
+/* Application shell: higher specificity intentionally neutralizes legacy page-local colours. */
+html body #app .film-list, html body #app .drama-detail, html body #app .film-create, html body #app .drama-canvas-page,
+html body #app .tools-page, html body #app .tool-workbench, html body #app .media-tool, html body #app .media-library-page,
+html body #app .omni-page, html body #app .ai-config { background: var(--bg-page) !important; color: var(--text-primary) !important; }
+html body #app .header, html body #app .page-header, html body #app .topbar, html body #app .workbench-header, html body #app .media-header { background: var(--bg-surface) !important; border-color: var(--border-color) !important; box-shadow: none !important; backdrop-filter: none !important; }
+html body #app .logo, html body #app .logo-main, html body #app .page-title, html body #app .section-title, html body #app .project-title, html body #app .episode-title, html body #app h1, html body #app h2, html body #app h3 { color: var(--text-primary) !important; -webkit-text-fill-color: currentColor !important; background-image: none !important; }
+html body #app .logo-sub, html body #app .breadcrumb, html body #app .eyebrow, html body #app .hero-copy, html body #app .project-desc, html body #app .project-meta, html body #app .episode-preview, html body #app .episode-num, html body #app small { color: var(--text-muted) !important; }
+
+/* Shared cards and workbench regions */
+html body #app .card, html body #app .section.card, html body #app .project-card, html body #app .episode-card, html body #app .library-item,
+html body #app .tool-card, html body #app .tool-form, html body #app .run-history, html body #app .result, html body #app .control-panel,
+html body #app .preview-stage, html body #app .generation-history, html body #app .history-card, html body #app .filter-bar,
+html body #app .upload-limits, html body #app .panel, html body #app .shot-card, html body #app .material-card, html body #app .advanced-settings,
+html body #app .selected-assets article, html body #app .resource-center-group, html body #app .resource-media-library {
+  background: var(--bg-surface) !important; border-color: var(--border-color) !important; box-shadow: none !important; background-image: none !important;
+}
+html body #app .center-stage, html body #app .video-stage, html body #app .player-tools, html body #app .shot-tabs, html body #app .shot-script,
+html body #app .time-ruler, html body #app .result pre, html body #app .dropzone, html body #app .mode-note, html body #app .workflow,
+html body #app .run-item, html body #app .status, html body #app .resource-center-item, html body #app .resource-media-card,
+html body #app .mode-info, html body #app .featured, html body #app .empty-result { background: var(--bg-raised) !important; border-color: var(--border-color) !important; color: var(--text-regular) !important; box-shadow: none !important; }
+html body #app .featured, html body #app .empty-result { background: #0b1016 !important; color: var(--text-muted) !important; }
+html body #app .asset-lineage { border-color: var(--border-subtle) !important; }
+html body #app .asset-lineage-title { color: var(--text-main) !important; }
+html body #app .asset-lineage-list button, html body #app .asset-lineage-current { background: var(--bg-elevated) !important; border-color: var(--border-subtle) !important; color: var(--text-muted) !important; }
+html body #app .asset-lineage-current { border-color: var(--accent) !important; color: var(--text-main) !important; }
+html body #app .asset-lineage-empty, html body #app .asset-lineage-list small { color: var(--text-muted) !important; }
+html body #app .concat-bar .el-button { background: var(--bg-elevated) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; box-shadow: var(--shadow-md) !important; }
+html body #app .polish-suggestion { background: var(--bg-raised) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; }
+/* Prevent the legacy light-mode switch from reactivating page-local styles. */
+html body #app .btn-theme { display: none !important; }
+html body #app .featured footer { background: rgba(16, 21, 29, .92) !important; color: var(--text-primary) !important; }
+html body #app .project-card:hover, html body #app .episode-card:hover, html body #app .library-item:hover, html body #app .tool-card:hover,
+html body #app .tool-card:focus-visible, html body #app .history-card.active, html body #app .run-item.active, html body #app .shot-card.active,
+html body #app .material-card.selected { background: var(--bg-hover) !important; border-color: var(--text-primary) !important; box-shadow: inset 2px 0 0 var(--text-primary) !important; transform: none !important; }
+html body #app .nav-item:hover, html body #app .nav-sub-item:hover, html body #app .res-tab:hover, html body #app .res-tab.active { background: var(--bg-hover) !important; color: var(--text-primary) !important; }
+html body #app .action-card, html body #app .badge, html body #app .type-badge, html body #app .workflow b, html body #app .tool-icon, html body #app .title-mark { background: var(--bg-hover) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; }
+
+/* The project storyboard host deliberately inherits the same AI-workbench language. */
+html body #app .project-storyboard-page, html body #app .project-storyboard-page .workbench, html body #app .project-storyboard-page .panel,
+html body #app .project-storyboard-page .creation-panel, html body #app .project-storyboard-page .shot-panel { background: var(--bg-page) !important; border-color: var(--border-color) !important; }
+html body #app .project-storyboard-page .creation-panel, html body #app .project-storyboard-page .shot-panel { background: var(--bg-surface) !important; }
+
+/* Legacy configuration and project-flow shells previously carried their own light palettes. */
+html body #app .ai-config .main, html body #app .ai-config .main > * { background: var(--bg-surface) !important; color: var(--text-primary) !important; border-color: var(--border-color) !important; box-shadow: none !important; }
+html body #app .film-create .quick-nav, html body #app .film-create .nav-sidebar-header, html body #app .film-create .workflow-shell,
+html body #app .film-create .workflow-step, html body #app .film-create .workflow-step span, html body #app .film-create .workflow-episode,
+html body #app .film-create .resource-center, html body #app .film-create .resource-center-group, html body #app .film-create .resource-media-library,
+html body #app .film-create .resource-center-item, html body #app .film-create .resource-media-card, html body #app .film-create .storyboard-reference-panel {
+  background: var(--bg-surface) !important; color: var(--text-regular) !important; border-color: var(--border-color) !important; box-shadow: none !important;
+}
+html body #app .film-create .workflow-step.active { background: var(--bg-hover) !important; color: var(--text-primary) !important; border-color: var(--text-primary) !important; }
+html body #app .film-create .workflow-step.active span, html body #app .film-create .workflow-step.complete:not(.active) span { background: var(--bg-active) !important; color: var(--text-primary) !important; }
+html body #app .film-create .workflow-head p, html body #app .film-create .workflow-kicker, html body #app .film-create .resource-center-item b, html body #app .film-create .resource-media-card small { color: var(--text-muted) !important; }
+html body #app .default-tip { background: var(--bg-raised) !important; color: var(--text-regular) !important; border: 1px solid var(--border-color) !important; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }

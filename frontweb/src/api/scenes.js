@@ -39,5 +39,11 @@ export const sceneAPI = {
   },
   generateFourViewImage(sceneId, model, style) {
     return request.post(`/scenes/${sceneId}/generate-four-view-image`, { model, style })
+  },
+  certifySd2(sceneId) {
+    return request.post(`/scenes/${sceneId}/sd2-certify`, {})
+  },
+  refreshSd2(sceneId) {
+    return request.post(`/scenes/${sceneId}/sd2-certify/refresh`, {})
   }
 }

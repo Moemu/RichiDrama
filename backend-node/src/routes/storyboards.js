@@ -405,6 +405,17 @@ function routes(db, log) {
         response.internalError(res, err.message);
       }
     },
+    reorder: (req, res) => {
+      try {
+        const episodeId = Number(req.body?.episode_id);
+        if (!Number.isFinite(episodeId) || episodeId <= 0) return response.badRequest(res, '缺少有效的 episode_id');
+        const list = episodeStoryboardService.reorderStoryboards(db, log, episodeId, req.body?.ids);
+        response.success(res, { storyboards: list, total: list.length });
+      } catch (err) {
+        log.error('storyboards reorder', { error: err.message });
+        response.internalError(res, err.message);
+      }
+    },
 
     // 独立触发单条分镜的 image prompt 优化，结果保存到 storyboards.polished_prompt 并返回
     polishPrompt: async (req, res) => {

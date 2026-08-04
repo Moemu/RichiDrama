@@ -6,7 +6,7 @@ const DEFAULT_CAPABILITIES = {
   first_last_frame: true,
   video_reference: false,
   video_extend: false,
-  audio_reference: true,
+  audio_reference: false,
   audio_driven: false,
   output_audio: false,
 };
@@ -25,12 +25,32 @@ function list(db) {
       config_id: item.id,
       model: item.default_model || (Array.isArray(item.model) ? item.model[0] : item.model) || item.name || `video-${item.id}`,
       provider: item.provider || '',
-      supports: { ...DEFAULT_CAPABILITIES, ...(declared.supports || declared) },
+      supports: normalizeSupports(item, declared.supports || declared),
       limits: declared.limits || settings.video_limits || {},
       is_default: !!item.is_default,
       priority: item.priority || 0,
     };
   });
+}
+
+// A provider setting is only a declaration; native routing needs a matching
+// request adapter. Keep unsupported modes on their explicit fallback paths.
+function normalizeSupports(config, declared = {}) {
+  const supports = { ...DEFAULT_CAPABILITIES, ...declared };
+  const protocol = String(config.api_protocol || '').toLowerCase();
+  const model = String(config.default_model || config.model || '').toLowerCase();
+  const hasNativeAudioReference = protocol === 'volcengine_omni'
+    || protocol === 'kling_omni'
+    || ((!protocol || protocol === 'volcengine') && /seedance|doubao-seedance/.test(model));
+
+  supports.audio_reference = hasNativeAudioReference && declared.audio_reference !== false;
+  // No request adapter currently transmits source-video, extend, or driving-audio
+  // parameters. Reporting these as false gives users a deterministic fallback
+  // instead of silently dropping a selected asset.
+  supports.video_reference = false;
+  supports.video_extend = false;
+  supports.audio_driven = false;
+  return supports;
 }
 
 function resolve(db, requestedModel, assets) {
@@ -53,4 +73,4 @@ function supportsAssets(supports, assets = []) {
   });
 }
 
-module.exports = { DEFAULT_CAPABILITIES, list, resolve, supportsAssets };
+module.exports = { DEFAULT_CAPABILITIES, list, resolve, supportsAssets, normalizeSupports };

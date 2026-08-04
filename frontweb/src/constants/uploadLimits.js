@@ -14,7 +14,7 @@
  */
 
 /** 单张图片上限（MB）。与后端 upload.js 的 MAX_IMAGE_SIZE_MB 对齐 */
-export const MAX_IMAGE_SIZE_MB = 16
+export const MAX_IMAGE_SIZE_MB = 30
 
 /** 音频上限（MB）。与后端 upload.js 的 audioMaxSize 对齐（SD2 音色参考） */
 export const MAX_AUDIO_SIZE_MB = 10

@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 
 const assetService = require('../src/services/assetService');
-const { validateShotAssetLimits } = require('../src/services/omniVideoService');
+const { validateShotAssetLimits, validateCreationMode, safeSnapshot } = require('../src/services/omniVideoService');
+const { normalizeSupports } = require('../src/services/videoModelCapabilities');
 
 const log = { info() {}, warn() {}, error() {} };
 
@@ -12,14 +13,18 @@ function createDb() {
   db.exec(`
     CREATE TABLE assets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      drama_id INTEGER,
       name TEXT,
       type TEXT,
       url TEXT,
       local_path TEXT,
       metadata_json TEXT,
       tags_json TEXT,
+      checksum TEXT,
       seedance2_asset TEXT,
+      parent_asset_id INTEGER,
       requires_sd2_identity INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT,
       updated_at TEXT,
       deleted_at TEXT
     );
@@ -55,6 +60,27 @@ test('asset update serializes metadata and tags before binding them to SQLite', 
   assert.equal(row.tags_json, '["reference","continuity"]');
 });
 
+test('asset checksum lookup deduplicates only within the same asset scope', () => {
+  const db = createDb();
+  db.prepare('UPDATE assets SET checksum = ? WHERE id = 1').run('same-content');
+  db.prepare('INSERT INTO assets (drama_id, name, type, checksum, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(8, 'project-copy.png', 'image', 'same-content', new Date().toISOString());
+
+  assert.equal(assetService.findByChecksum(db, 'same-content', null).id, 1);
+  assert.equal(assetService.findByChecksum(db, 'same-content', 8).id, 2);
+  assert.equal(assetService.findByChecksum(db, 'unknown', null), null);
+});
+
+test('asset lineage retains ancestors and derived versions, including soft-deleted entries', () => {
+  const db = createDb();
+  db.prepare('INSERT INTO assets (name, type, parent_asset_id, updated_at) VALUES (?, ?, ?, ?)').run('trim.mp4', 'video', 1, '2026-01-01T00:00:01.000Z');
+  db.prepare('INSERT INTO assets (name, type, parent_asset_id, deleted_at, updated_at) VALUES (?, ?, ?, ?, ?)').run('keyframe.jpg', 'image', 2, '2026-01-01T00:00:02.000Z', '2026-01-01T00:00:02.000Z');
+
+  const lineage = assetService.getLineage(db, 2);
+  assert.deepEqual(lineage.ancestors.map((item) => item.name), ['portrait.png']);
+  assert.deepEqual(lineage.descendants.map((item) => item.name), ['keyframe.jpg']);
+});
+
 test('omni video rejects material counts above the per-shot media limits', () => {
   assert.doesNotThrow(() => validateShotAssetLimits([
     ...Array.from({ length: 9 }, () => ({ type: 'image' })),
@@ -68,4 +94,34 @@ test('omni video rejects material counts above the per-shot media limits', () =>
     () => validateShotAssetLimits(Array.from({ length: 4 }, () => ({ type: 'audio' }))),
     /per-shot limit of 3/
   );
+});
+
+test('first-last-frame mode accepts a first frame without an optional tail frame', () => {
+  const capability = { supports: { first_last_frame: true } };
+  assert.doesNotThrow(() => validateCreationMode('first_last_frame', [{ type: 'image', usage: 'first_frame' }], capability));
+  assert.throws(() => validateCreationMode('first_last_frame', [{ type: 'image', usage: 'first_frame' }, { type: 'video', usage: 'last_frame' }], capability), /尾帧可选/);
+});
+
+test('omni job API snapshot masks local and remote source URLs', () => {
+  const snapshot = safeSnapshot({
+    prompt: 'a tracked shot',
+    assets: [{ asset_id: 12, alias: 'lead', type: 'image', local_path: 'C:\\private\\lead.png', url: 'https://signed.example/lead?token=secret', model_url: 'asset://provider-secret', send_to_model: true, strategy: 'native' }],
+  });
+
+  assert.deepEqual(snapshot.assets, [{ asset_id: 12, alias: 'lead', type: 'image', role: null, usage: null, ordinal: null, source: 'local', derived_from_asset_id: null, send_to_model: true, strategy: 'native' }]);
+  assert.equal(JSON.stringify(snapshot).includes('private'), false);
+  assert.equal(JSON.stringify(snapshot).includes('secret'), false);
+});
+
+test('video capabilities only advertise native media modes with an adapter', () => {
+  const generic = normalizeSupports({ api_protocol: 'openai', default_model: 'generic-video' }, {
+    audio_reference: true, video_reference: true, video_extend: true, audio_driven: true,
+  });
+  assert.equal(generic.audio_reference, false);
+  assert.equal(generic.video_reference, false);
+  assert.equal(generic.video_extend, false);
+  assert.equal(generic.audio_driven, false);
+
+  const seedance = normalizeSupports({ api_protocol: 'volcengine_omni', default_model: 'seedance-2.0' }, {});
+  assert.equal(seedance.audio_reference, true);
 });

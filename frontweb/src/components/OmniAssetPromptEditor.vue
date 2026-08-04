@@ -9,6 +9,7 @@
       @input="onInput"
       @dragover.prevent="onDragOver"
       @dragleave="onDragLeave"
+      @drop.prevent.stop="onDrop"
     />
     <div v-if="dragging" class="drop-hint">松开以插入该素材 @引用</div>
     <div v-if="showPicker" class="asset-picker">
@@ -92,10 +93,10 @@ function insertAsset(asset, opts = {}) {
   if (!props.chosenIds.has(asset.id)) emit('pick', asset)
   const token = `@${asset.alias || asset.name} `
   if (opts.append) {
-    // 拖入：追加到末尾
-    text.value = (text.value.replace(/\s*$/, '') + (text.value ? ' ' : '') + token).replace(/@\S+\s*$/, (m) => m)
-    // 若末尾正好有未完成的 @xxx，替换它
-    text.value = text.value.replace(/@[^\s@]*$/, token.trim()) + ' '
+    // 拖入：若光标前已有未完成的 @，优先替换；否则追加到末尾。
+    const current = text.value.replace(/\s*$/, '')
+    const replaced = current.replace(/@[^\s@]*$/, token.trim())
+    text.value = (replaced === current ? `${current}${current ? ' ' : ''}${token.trim()}` : replaced) + ' '
   } else {
     // @ 选择器：替换未完成的 @xxx
     text.value = text.value.replace(/@[^\s@]*$/, token)
@@ -113,10 +114,10 @@ function onDragLeave(e) { /* 由 counter 控制，见 onDrop/ondragenter */ }
 function onDrop(e) {
   dragging.value = false
   dragCounter = 0
-  const raw = e.dataTransfer?.getData('text/plain') || e.dataTransfer?.getData('application/json')
+  const raw = e.dataTransfer?.getData('application/x-localminidrama-asset') || e.dataTransfer?.getData('application/json')
   let asset = null
   try { asset = raw ? JSON.parse(raw) : null } catch (_) { asset = null }
-  // 父组件可能直接传 asset 对象（通过 dataTransfer）
+  // 兼容旧版素材卡的自定义 MIME 键。
   if (!asset && e.dataTransfer) {
     const a = e.dataTransfer.getData('asset')
     if (a) { try { asset = JSON.parse(a) } catch (_) {} }
@@ -129,22 +130,23 @@ function onDrop(e) {
 .editor :deep(.el-textarea__inner) { transition: border-color 0.2s, background 0.2s; }
 .drop-hint {
   position: absolute; inset: 0; display: grid; place-items: center;
-  background: #4b91c81a; border: 2px dashed #4b91c8; border-radius: 6px;
-  color: #3479ae; font-size: 13px; font-weight: 600; pointer-events: none; z-index: 4;
+  background: color-mix(in srgb, var(--bg-hover) 82%, transparent); border: 2px dashed var(--border-strong); border-radius: var(--radius-sm);
+  color: var(--text-primary); font-size: 13px; font-weight: 600; pointer-events: none; z-index: 4;
 }
 .asset-picker {
   position: absolute; z-index: 5; left: 0; right: 0; top: 100%;
-  max-height: 200px; overflow: auto; background: #fff;
-  border: 1px solid #dce4f2; border-radius: 8px; box-shadow: 0 8px 20px #1d2b4d22; padding: 4px;
+  max-height: 200px; overflow: auto; background: var(--bg-surface);
+  border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: none; padding: 4px;
 }
 .asset-picker button {
   border: 0; background: transparent; width: 100%; text-align: left;
   padding: 7px 8px; border-radius: 5px; cursor: pointer; display: flex; align-items: center; gap: 6px;
 }
-.asset-picker button:hover { background: #f1f5ff; }
+.asset-picker button { color: var(--text-regular); }
+.asset-picker button:hover { background: var(--bg-hover); color: var(--text-primary); }
 .pa-icon { font-size: 14px; }
 .pa-name { flex: 1; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pa-chosen { font-size: 10px; color: #3479ae; background: #e8f3fa; padding: 1px 5px; border-radius: 3px; }
-.pa-empty { font-size: 12px; color: #9aa6ba; text-align: center; padding: 12px; }
+.pa-chosen { font-size: 10px; color: var(--text-primary); background: var(--bg-active); padding: 1px 5px; border-radius: 3px; }
+.pa-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 12px; }
 .hints { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
 </style>

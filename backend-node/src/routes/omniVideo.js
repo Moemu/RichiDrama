@@ -5,6 +5,21 @@ const sequenceService = require('../services/omniSequenceService');
 module.exports = function routes(db, log, cfg) { return {
   list(req, res) { try { response.success(res, omniVideoService.list(db)); } catch (err) { response.internalError(res, err.message); } },
   create(req, res) { try { response.created(res, omniVideoService.create(db, log, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
+  polishPrompt: async (req, res) => {
+    try {
+      const prompt = String(req.body?.prompt || '').trim();
+      if (!prompt) return response.badRequest(res, '请先填写提示词');
+      const assets = Array.isArray(req.body?.assets) ? req.body.assets : [];
+      const assetSummary = assets.slice(0, 12).map((asset) => `${asset.alias || asset.name || '素材'}（${asset.type || 'image'}，${asset.usage || 'reference'}）`).join('、') || '无素材';
+      const suggestion = await require('../services/aiClient').generateText(db, log, 'text', [
+        '请在不改变用户意图、不编造素材内容的前提下，给出一版更清晰、可直接用于视频生成的中文提示词。',
+        '保持人物、动作、镜头、时长、画幅和明确的 @素材引用；只输出润色后的提示词，不要解释。',
+        `用户原文：${prompt}`,
+        `已选素材：${assetSummary}`,
+      ].join('\n'), '你是视频提示词编辑。忠实保留用户意图，避免夸张、虚构和替换用户指定的素材。', { scene_key: 'omni_video_polish', max_tokens: 1200, temperature: 0.35 });
+      response.success(res, { suggestion: String(suggestion || '').trim(), original_prompt: prompt });
+    } catch (err) { response.badRequest(res, err.message || '提示词润色失败'); }
+  },
   retry(req, res) { try { response.created(res, omniVideoService.retry(db, log, req.params.id)); } catch (err) { response.badRequest(res, err.message); } },
   extractFrame(req, res) { try { response.created(res, require('../services/omniFrameService').extract(db, cfg, log, req.params.id, req.body?.position)); } catch (err) { response.badRequest(res, err.message); } },
   get(req, res) { try { const job = omniVideoService.get(db, req.params.id); if (!job) return response.notFound(res, '全能视频任务不存在'); response.success(res, job); } catch (err) { response.internalError(res, err.message); } },

@@ -176,11 +176,21 @@ function ensureAllColumns(database) {
     { name: 'audio_local_path',      type: 'TEXT' },               // 对白 TTS 本地路径
     { name: 'narration_audio_local_path', type: 'TEXT' },         // 解说旁白 TTS 本地路径
     { name: 'creation_mode',     type: 'TEXT DEFAULT \'classic\'' }, // classic | universal
+    { name: 'omni_asset_ids',    type: 'TEXT' },
+    { name: 'audio_strategy',    type: 'TEXT DEFAULT \'reference_only\'' },
+    { name: 'keep_original_audio', type: 'INTEGER DEFAULT 0' },
+    { name: 'audio_volume',      type: 'REAL DEFAULT 1' },
+    { name: 'audio_fade_seconds', type: 'REAL DEFAULT 0' },
+    { name: 'omni_creation_mode', type: 'TEXT DEFAULT \'multi_reference\'' },
+    { name: 'omni_first_frame_asset_id', type: 'INTEGER' },
+    { name: 'omni_last_frame_asset_id', type: 'INTEGER' },
+    { name: 'omni_asset_usage_json', type: 'TEXT' },
     { name: 'universal_segment_text', type: 'TEXT' },              // 全能模式片段描述（@ 引用等）
     { name: 'first_frame_image_id', type: 'INTEGER' },
     { name: 'last_frame_image_id',  type: 'INTEGER' },
     { name: 'last_frame_image_url', type: 'TEXT' },
     { name: 'last_frame_local_path', type: 'TEXT' },
+    { name: 'sort_order',        type: 'INTEGER DEFAULT 0' },          // 分镜拖拽排序（0-based；与 storyboard_number 并行，排序优先）
     { name: 'status',            type: 'TEXT DEFAULT \'draft\'' },
     { name: 'created_at',        type: 'TEXT' },
     { name: 'updated_at',        type: 'TEXT' },
@@ -226,6 +236,7 @@ function ensureAllColumns(database) {
     { name: 'polished_prompt',  type: 'TEXT' },  // 文字AI润色后的完整四视图图片提示词，生图时直接使用
     { name: 'image_url',        type: 'TEXT' },
     { name: 'local_path',       type: 'TEXT' },
+    { name: 'seedance2_asset',  type: 'TEXT' },
     { name: 'extra_images',     type: 'TEXT' },
     { name: 'ref_image',        type: 'TEXT' },  // 用户上传的参考图（本地相对路径或 URL）
     { name: 'negative_prompt',  type: 'TEXT' },
@@ -247,6 +258,7 @@ function ensureAllColumns(database) {
     { name: 'prompt',      type: 'TEXT' },
     { name: 'image_url',    type: 'TEXT' },
     { name: 'local_path',   type: 'TEXT' },
+    { name: 'seedance2_asset', type: 'TEXT' },
     { name: 'extra_images', type: 'TEXT' },
     { name: 'ref_image',    type: 'TEXT' },  // 用户上传的参考图（本地相对路径或 URL）
     { name: 'negative_prompt', type: 'TEXT' },
@@ -410,6 +422,7 @@ function ensureAllColumns(database) {
     { name: 'thumbnail_local_path', type: 'TEXT' },
     { name: 'metadata_json', type: 'TEXT' },
     { name: 'tags_json', type: 'TEXT' },
+    { name: 'is_favorite', type: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'checksum', type: 'TEXT' },
     { name: 'processing_status', type: 'TEXT DEFAULT \'ready\'' },
     { name: 'error_msg', type: 'TEXT' },

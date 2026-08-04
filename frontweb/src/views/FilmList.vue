@@ -91,6 +91,18 @@
               </div>
             </div>
           </div>
+          <nav class="project-card workspace-links" aria-label="常用工作台入口">
+            <div class="workspace-links-heading">
+              <div><p class="workspace-kicker">QUICK ACCESS</p><h3>常用入口</h3></div>
+              <span>工作台</span>
+            </div>
+            <p>素材与工具可跨项目复用；从这里继续当前的创作环节。</p>
+            <div class="workspace-link-list">
+              <el-button @click="$router.push('/free-create')"><el-icon><MagicStick /></el-icon>自由创作</el-button>
+              <el-button @click="$router.push('/media-library')"><el-icon><Files /></el-icon>媒体素材库</el-button>
+              <el-button @click="$router.push('/ai-tools')"><el-icon><MagicStick /></el-icon>AI 工具</el-button>
+            </div>
+          </nav>
           <div
             v-for="project in omniProjects"
             :key="`omni-${project.id}`"
@@ -1220,6 +1232,20 @@ html.light .btn-import {
   padding-top: 8px;
   border-top: 1px solid rgba(99, 102, 241, 0.15);
 }
+.workspace-links {
+  cursor: default;
+  display: flex;
+  min-height: 170px;
+  flex-direction: column;
+  gap: 14px;
+}
+.workspace-links-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.workspace-links-heading h3 { margin: 2px 0 0; font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.workspace-links-heading > span { color: var(--text-faint); font-size: 11px; }
+.workspace-kicker { margin: 0; color: var(--text-muted); font-size: 10px; font-weight: 600; letter-spacing: .12em; }
+.workspace-links > p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.55; }
+.workspace-link-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: auto; }
+.workspace-link-list .el-button { min-width: 0; padding-inline: 8px; }
 .example-hint {
   display: flex;
   align-items: center;
@@ -1483,5 +1509,4 @@ html.light .badge-status--draft {
   object-fit: contain;
 }
 /* LensRhyme monochrome project desk */
-.film-list{background:#f5f5f5!important;color:#262626!important}.header{background:#fff!important;border-color:#e5e5e5!important;box-shadow:none!important;backdrop-filter:none!important}.film-list .logo-main,html.light .film-list .logo-main{background:none!important;background-image:none!important;color:#171717!important;-webkit-text-fill-color:#171717!important;filter:none!important}.film-list .logo-sub,html.light .film-list .logo-sub{color:#737373!important;-webkit-text-fill-color:#737373!important}.btn-library,.btn-wechat,.btn-theme,.btn-settings,.btn-import{background:#fff!important;border-color:#d4d4d4!important;color:#262626!important;box-shadow:none!important}.btn-library:hover,.btn-wechat:hover,.btn-theme:hover,.btn-settings:hover,.btn-import:hover{background:#f5f5f5!important;border-color:#171717!important;color:#171717!important}.btn-new,.action-btn-new{--el-button-bg-color:#171717!important;--el-button-border-color:#171717!important;--el-button-text-color:#fff!important;--el-button-hover-bg-color:#404040!important;--el-button-hover-border-color:#404040!important;background:#171717!important;border-color:#171717!important;color:#fff!important;box-shadow:none!important}.project-card,.omni-project-card,.action-card{background:#fff!important;border-color:#e5e5e5!important;background-image:none!important;box-shadow:none!important;backdrop-filter:none!important}.project-card::before{display:none!important}.project-card:hover,.action-card:hover{background:#fafafa!important;border-color:#171717!important;box-shadow:inset 2px 0 0 #171717!important}.action-card{border-style:dashed!important}.action-card-title,.project-title{color:#171717!important}.project-desc,.project-meta,.example-hint-text{color:#737373!important}.badge,.badge-omni,.badge-storyboards,.badge-status,.badge-ratio,.badge-style,.badge-genre{background:#f5f5f5!important;border-color:#d4d4d4!important;color:#404040!important}.header :deep(.el-button--primary){--el-button-bg-color:#171717!important;--el-button-border-color:#171717!important;--el-button-text-color:#fff!important}
 </style>

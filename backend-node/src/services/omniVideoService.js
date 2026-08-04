@@ -23,9 +23,9 @@ function create(db, log, body) {
   const imageUrls = routed.filter((asset) => asset.send_to_model && asset.type === 'image').map((asset) => asset.model_url || asset.local_path || asset.url).filter(Boolean);
   const first = routed.find((asset) => asset.usage === 'first_frame' && asset.send_to_model);
   const last = routed.find((asset) => asset.usage === 'last_frame' && asset.send_to_model);
-  const result = db.prepare(`INSERT INTO video_generations (drama_id, provider, prompt, model, duration, aspect_ratio, resolution, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, status, task_id, created_at, updated_at)
-    VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)`)
-    .run(body.provider || 'chatfire', prompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null,
+  const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, provider, prompt, model, duration, aspect_ratio, resolution, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, status, task_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)`)
+    .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.provider || 'chatfire', prompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null,
       body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
       imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null,
       imageUrls.length ? JSON.stringify(imageUrls) : null, task.id, now, now);
@@ -52,6 +52,23 @@ function create(db, log, body) {
 }
 
 function resolveAsset(db, input, ordinal) {
+  // 外部引用条目（场景/角色/道具等非素材库图片）：提供 url 或 local_path 即可，无需 assets 行
+  const hasAssetId = input.asset_id != null && String(input.asset_id).trim() !== '';
+  if (!hasAssetId && (input.url || input.local_path)) {
+    const alias = String(input.alias || '参考图').slice(0, 80);
+    return {
+      id: null, drama_id: null, name: alias, type: String(input.type || 'image').toLowerCase(),
+      category: null, url: input.url || null, local_path: input.local_path || null,
+      file_size: null, mime_type: null, width: null, height: null, duration: null,
+      source_type: 'reference', parent_asset_id: null, thumbnail_local_path: null,
+      metadata: null, tags: null, processing_status: 'ready', error_msg: null,
+      seedance2_asset: null, requires_sd2_identity: false, image_gen_id: null, video_gen_id: null,
+      created_at: null, updated_at: null,
+      ordinal: Number(input.ordinal) || ordinal + 1,
+      alias, role: input.role || 'reference', usage: input.usage || 'reference',
+      requested_send: input.send_to_model !== false,
+    };
+  }
   const row = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(input.asset_id));
   if (!row) throw new Error(`素材 ${input.asset_id} 不存在或已删除`);
   if (row.processing_status && row.processing_status !== 'ready') throw new Error(`素材“${row.name || row.id}”尚未准备完成`);
@@ -78,7 +95,7 @@ function validateCreationMode(mode, assets, capability) {
   if (mode !== 'first_last_frame') return;
   const first = assets.filter((asset) => asset.usage === 'first_frame');
   const last = assets.filter((asset) => asset.usage === 'last_frame');
-  if (first.length !== 1 || last.length !== 1 || first[0].type !== 'image' || last[0].type !== 'image') throw new Error('首尾帧生视频必须且只能选择一张图片首帧和一张图片尾帧');
+  if (first.length !== 1 || last.length > 1 || first[0].type !== 'image' || (last.length === 1 && last[0].type !== 'image')) throw new Error('首尾帧生视频必须且只能选择一张图片首帧，尾帧可选（最多一张）');
   if (assets.some((asset) => !['first_frame', 'last_frame'].includes(asset.usage))) throw new Error('首尾帧生视频仅支持首帧、尾帧和提示词');
   if (!capability.supports?.first_last_frame) throw new Error(`模型“${capability.model}”不支持首尾帧生视频，请切换模型或创作模式`);
 }
@@ -117,20 +134,41 @@ function enforceSd2IdentityAssets(assets, capability) {
   const invalid = assets.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && asset.send_to_model && !(asset.seedance2_asset && String(asset.seedance2_asset.status || '').toLowerCase() === 'active' && String(asset.seedance2_asset.asset_url || '').startsWith('asset://')));
   if (invalid.length) throw new Error(`人物一致性素材必须先完成 SD2 认证：${invalid.map((asset) => asset.alias).join('、')}`);
 }
+// Keep retry snapshots server-side and complete, but never return raw file paths,
+// signed URLs, or provider asset URLs through the job APIs.
 function publicAsset(asset) { return { asset_id: asset.id, alias: asset.alias, type: asset.type, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, local_path: asset.local_path, url: asset.url, model_url: asset.model_url || null, seedance2_asset: asset.seedance2_asset || null, checksum: asset.checksum || null, send_to_model: !!asset.send_to_model, strategy: asset.strategy }; }
-function buildSummary(assets) { return { sent_to_model: assets.filter((a) => a.send_to_model).map(publicAsset), post_process_or_preprocess: assets.filter((a) => !a.send_to_model).map(publicAsset) }; }
+function safeAssetSummary(asset) {
+  if (!asset) return null;
+  return {
+    asset_id: asset.asset_id ?? asset.id ?? null,
+    alias: asset.alias || null,
+    type: asset.type || null,
+    role: asset.role || null,
+    usage: asset.usage || null,
+    ordinal: asset.ordinal ?? null,
+    source: asset.local_path ? 'local' : (asset.url ? 'remote' : 'asset_library'),
+    derived_from_asset_id: asset.derived_from_asset_id || null,
+    send_to_model: !!asset.send_to_model,
+    strategy: asset.strategy || null,
+  };
+}
+function safeSnapshot(snapshot) {
+  if (!snapshot) return null;
+  return { ...snapshot, assets: Array.isArray(snapshot.assets) ? snapshot.assets.map(safeAssetSummary) : [] };
+}
+function buildSummary(assets) { return { sent_to_model: assets.filter((a) => a.send_to_model).map(safeAssetSummary), post_process_or_preprocess: assets.filter((a) => !a.send_to_model).map(safeAssetSummary) }; }
 
 function get(db, id) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
   if (!job) return null;
   const generation = db.prepare('SELECT * FROM video_generations WHERE id = ?').get(job.video_generation_id);
   const assets = db.prepare('SELECT * FROM omni_video_job_assets WHERE omni_job_id = ? ORDER BY ordinal').all(job.id);
-  return { ...job, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: parse(job.request_snapshot_json), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: parse(asset.snapshot_json) })), generation };
+  return { ...job, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), generation };
 }
 function list(db) {
   return db.prepare(`SELECT j.*, v.status, v.video_url, v.local_path, v.error_msg
     FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id
-    ORDER BY j.id DESC LIMIT 100`).all().map((item) => ({ ...item, request_snapshot: parse(item.request_snapshot_json) }));
+    ORDER BY j.id DESC LIMIT 100`).all().map((item) => ({ ...item, request_snapshot: safeSnapshot(parse(item.request_snapshot_json)) }));
 }
 function retry(db, log, id) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
@@ -144,9 +182,13 @@ function retry(db, log, id) {
     aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
     creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
     audio_volume: snapshot.post_process?.audio_volume, audio_fade_seconds: snapshot.post_process?.audio_fade_seconds,
-    assets: snapshot.assets.map((asset) => ({ asset_id: asset.asset_id, alias: asset.alias, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, send_to_model: asset.send_to_model })),
+    assets: snapshot.assets.map((asset) => ({
+      asset_id: asset.asset_id, alias: asset.alias, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, send_to_model: asset.send_to_model,
+      // 外部引用条目（场景/角色/道具等非素材库图片）依赖 url / local_path / type 重建
+      url: asset.url || null, local_path: asset.local_path || null, type: asset.type || 'image',
+    })),
   });
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry, validateShotAssetLimits, validateCreationMode, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, retry, validateShotAssetLimits, validateCreationMode, safeAssetSummary, safeSnapshot, SHOT_ASSET_LIMITS };

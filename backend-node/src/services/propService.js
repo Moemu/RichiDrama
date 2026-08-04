@@ -1,6 +1,7 @@
 const aiClient = require('./aiClient');
 const promptI18n = require('./promptI18n');
 const { mergeCfgStyleWithDrama } = require('../utils/dramaStyleMerge');
+const assetSd2Service = require('./assetSd2Service');
 
 function listByDramaId(db, dramaId) {
   const rows = db.prepare(
@@ -18,6 +19,7 @@ function listByDramaId(db, dramaId) {
     local_path: r.local_path,
     extra_images: r.extra_images || null,
     ref_image: r.ref_image || null,
+    seedance2_asset: assetSd2Service.parse(r.seedance2_asset),
     created_at: r.created_at,
     updated_at: r.updated_at,
   }));
@@ -43,7 +45,9 @@ function create(db, log, req) {
     now
   );
   log.info('Prop created', { prop_id: info.lastInsertRowid });
-  return getById(db, info.lastInsertRowid);
+  const prop = getById(db, info.lastInsertRowid);
+  require('./assetMappingService').syncEntities(db, log, 'prop', [prop.id]);
+  return prop;
 }
 
 function getById(db, id) {
@@ -61,6 +65,7 @@ function getById(db, id) {
     local_path: r.local_path,
     extra_images: r.extra_images || null,
     ref_image: r.ref_image || null,
+    seedance2_asset: assetSd2Service.parse(r.seedance2_asset),
     created_at: r.created_at,
     updated_at: r.updated_at,
   };
@@ -81,8 +86,12 @@ function update(db, log, id, updates) {
   if (updates.extra_images !== undefined) { set.push('extra_images = ?'); params.push(updates.extra_images ?? null); }
   if (updates.ref_image !== undefined) { set.push('ref_image = ?'); params.push(updates.ref_image ?? null); }
   if (set.length === 0) return existing;
+  if (updates.image_url != null || updates.local_path !== undefined) {
+    assetSd2Service.markResourceStale(db, 'prop', existing, updates);
+  }
   params.push(new Date().toISOString(), id);
   db.prepare('UPDATE props SET ' + set.join(', ') + ', updated_at = ? WHERE id = ?').run(...params);
+  require('./assetMappingService').syncEntities(db, log, 'prop', [id]);
   log.info('Prop updated', { prop_id: id });
   return getById(db, id);
 }
