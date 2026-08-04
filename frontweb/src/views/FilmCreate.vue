@@ -1,5 +1,5 @@
 <template>
-  <div class="film-create" :class="{ 'sidebar-collapsed': navCollapsed }">
+  <div class="film-create" :class="{ 'sidebar-collapsed': navCollapsed, 'storyboard-stage-active': workflowStage === 'storyboard' }">
     <!-- 全能素材上传：上传素材 / 首尾帧参考图（共享隐藏 input） -->
     <input ref="sbOmniFileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="onSbOmniFileInputChange" />
     <input ref="sbOmniFrameFileInput" hidden type="file" accept="image/*" @change="onSbOmniFrameFileInputChange" />
@@ -9744,6 +9744,17 @@ html.light .nav-sub-item.sb-nav-over { background: rgba(99,102,241,0.10); }
   padding: 24px 32px 48px;
   transition: margin-left 0.25s cubic-bezier(.4,0,.2,1);
 }
+.storyboard-stage-active{height:100dvh;overflow:hidden}
+.storyboard-stage-active .main{height:calc(100dvh - 58px);box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;padding:10px 32px}
+.storyboard-stage-active .workflow-shell{flex:none;margin:0 0 8px;padding:8px 14px}
+.storyboard-stage-active .workflow-head{display:none}
+.storyboard-stage-active .workflow-steps{margin-top:0}
+.storyboard-stage-active .storyboard-workbench-toolbar{flex:none;margin:0 0 8px;padding:10px 14px}
+.storyboard-stage-active .storyboard-workbench-toolbar .section-desc{display:none}
+.storyboard-stage-active .omni-page.embedded.project-storyboard-page{position:static!important;top:auto;height:auto!important;min-height:0!important;overflow:hidden!important;flex:1;z-index:auto}
+.storyboard-stage-active .omni-page.embedded.project-storyboard-page .workbench{height:100%!important;min-height:0!important}
+.storyboard-stage-active .workflow-next-action{flex:none;margin:8px 0 0;padding:8px 12px}
+@media(max-width:960px){.storyboard-stage-active{height:auto;overflow:visible}.storyboard-stage-active .main{height:auto;overflow:visible;display:block;padding:16px 12px}.storyboard-stage-active .workflow-head{display:flex}.storyboard-stage-active .omni-page.embedded.project-storyboard-page{overflow:visible!important}}
 .sidebar-collapsed .main {
   margin-left: 48px;
 }
