@@ -101,6 +101,8 @@ html body #app .el-button--primary:not(.is-link):not(.is-plain) {
 .el-input__wrapper.is-focus, .el-textarea__wrapper:focus-within, .el-select__wrapper.is-focused { box-shadow: 0 0 0 1px var(--focus-ring) inset !important; }
 .el-input__inner, .el-textarea__inner { color: var(--text-primary) !important; }
 .el-card, .el-dialog, .el-message-box, .el-popper, .el-select-dropdown, .el-collapse, .el-collapse-item__header, .el-collapse-item__wrap, .el-table, .el-table tr, .el-table th.el-table__cell, .el-table td.el-table__cell { background: var(--bg-surface) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; box-shadow: none !important; }
+.el-alert { background: var(--bg-raised) !important; border: 1px solid var(--border-color) !important; color: var(--text-regular) !important; }
+.el-alert__title, .el-alert__description, .el-alert__icon { color: var(--text-regular) !important; }
 .el-tabs__nav-wrap::after { background: var(--border-color) !important; }
 .el-tabs__item { color: var(--text-muted) !important; }
 .el-tabs__item:hover, .el-tabs__item.is-active { color: var(--text-primary) !important; }
@@ -140,5 +142,18 @@ html body #app .action-card, html body #app .badge, html body #app .type-badge, 
 html body #app .project-storyboard-page, html body #app .project-storyboard-page .workbench, html body #app .project-storyboard-page .panel,
 html body #app .project-storyboard-page .creation-panel, html body #app .project-storyboard-page .shot-panel { background: var(--bg-page) !important; border-color: var(--border-color) !important; }
 html body #app .project-storyboard-page .creation-panel, html body #app .project-storyboard-page .shot-panel { background: var(--bg-surface) !important; }
+
+/* Legacy configuration and project-flow shells previously carried their own light palettes. */
+html body #app .ai-config .main, html body #app .ai-config .main > * { background: var(--bg-surface) !important; color: var(--text-primary) !important; border-color: var(--border-color) !important; box-shadow: none !important; }
+html body #app .film-create .quick-nav, html body #app .film-create .nav-sidebar-header, html body #app .film-create .workflow-shell,
+html body #app .film-create .workflow-step, html body #app .film-create .workflow-step span, html body #app .film-create .workflow-episode,
+html body #app .film-create .resource-center, html body #app .film-create .resource-center-group, html body #app .film-create .resource-media-library,
+html body #app .film-create .resource-center-item, html body #app .film-create .resource-media-card, html body #app .film-create .storyboard-reference-panel {
+  background: var(--bg-surface) !important; color: var(--text-regular) !important; border-color: var(--border-color) !important; box-shadow: none !important;
+}
+html body #app .film-create .workflow-step.active { background: var(--bg-hover) !important; color: var(--text-primary) !important; border-color: var(--text-primary) !important; }
+html body #app .film-create .workflow-step.active span, html body #app .film-create .workflow-step.complete:not(.active) span { background: var(--bg-active) !important; color: var(--text-primary) !important; }
+html body #app .film-create .workflow-head p, html body #app .film-create .workflow-kicker, html body #app .film-create .resource-center-item b, html body #app .film-create .resource-media-card small { color: var(--text-muted) !important; }
+html body #app .default-tip { background: var(--bg-raised) !important; color: var(--text-regular) !important; border: 1px solid var(--border-color) !important; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
