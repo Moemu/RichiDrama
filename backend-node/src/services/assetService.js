@@ -10,8 +10,9 @@ function list(db, query) {
     params.push(query.type);
   }
   if (query.keyword) {
-    sql += ' AND name LIKE ?';
-    params.push(`%${String(query.keyword).trim()}%`);
+    sql += ' AND (name LIKE ? OR tags_json LIKE ?)';
+    const keyword = `%${String(query.keyword).trim()}%`;
+    params.push(keyword, keyword);
   }
   if (String(query.favorite || '') === '1' || String(query.favorite || '').toLowerCase() === 'true') {
     sql += ' AND is_favorite = 1';

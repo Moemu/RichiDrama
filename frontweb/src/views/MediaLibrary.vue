@@ -85,6 +85,7 @@
         <div class="media-info">
           <span class="media-name" :title="item.name" @dblclick.stop="renameItem(item)">{{ item.name || '未命名' }}</span>
           <div class="media-meta-row"><span class="media-meta">{{ formatSize(item.size) }}</span><span v-if="item.type === 'image' && item.requires_sd2_identity" class="identity-state" :class="sd2Status(item)">真人 · {{ sd2Label(item) }}</span></div>
+          <div v-if="item.tags?.length" class="media-tags"><el-tag v-for="tag in item.tags.slice(0, 3)" :key="tag" size="small" effect="plain">{{ tag }}</el-tag></div>
         </div>
       </div>
 
@@ -130,6 +131,7 @@
         <div class="meta-row"><span>名称：</span>{{ previewItem?.name || '未命名' }}</div>
         <div class="meta-row"><span>大小：</span>{{ formatSize(previewItem?.size) }}</div>
         <div class="meta-row"><span>创建时间：</span>{{ previewItem?.created_at }}</div>
+        <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔，例如：人物, 夜景" @change="saveTags" /></div>
         <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人／需要身份一致性</el-checkbox><el-button v-if="previewItem?.requires_sd2_identity" text size="small" :loading="certifyingId === previewItem?.id" @click="certify(previewItem)">{{ sd2Status(previewItem) === 'active' ? '认证可用' : '认证 / 刷新' }}</el-button></div>
       </div>
     </el-dialog>
@@ -161,6 +163,7 @@ const selectedIds = reactive(new Set())
 const showPreview = ref(false)
 const previewItem = ref(null)
 const certifyingId = ref(null)
+const editableTags = ref('')
 const uploadInput = ref(null)
 const router = useRouter()
 let keywordTimer = null
@@ -256,7 +259,23 @@ function createWithSelected() {
 
 function openPreview(item) {
   previewItem.value = item
+  editableTags.value = Array.isArray(item.tags) ? item.tags.join(', ') : ''
   showPreview.value = true
+}
+
+async function saveTags() {
+  if (!previewItem.value) return
+  const tags = [...new Set(editableTags.value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean))].slice(0, 12)
+  try {
+    const updated = await omniVideoAPI.updateAsset(previewItem.value.id, { tags })
+    Object.assign(previewItem.value, updated)
+    const index = mediaItems.value.findIndex((item) => item.id === updated.id)
+    if (index >= 0) Object.assign(mediaItems.value[index], updated)
+    editableTags.value = tags.join(', ')
+    ElMessage.success('素材标签已更新')
+  } catch (error) {
+    ElMessage.error(error.message || '素材标签更新失败')
+  }
 }
 
 async function toggleFavorite(item) {
