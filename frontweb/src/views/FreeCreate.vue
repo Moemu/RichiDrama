@@ -38,6 +38,7 @@
         <div class="panel-title"><b>视频生成方式</b><el-tag size="small" type="info">{{ creationMode === 'first_last_frame' ? '首尾帧生视频' : '多参考生视频' }}</el-tag></div>
         <el-radio-group v-model="creationMode" size="small" class="mode-switch"><el-radio-button label="multi_reference">多参考生视频</el-radio-button><el-radio-button label="first_last_frame">首尾帧生视频</el-radio-button></el-radio-group>
         <small class="mode-note">{{ creationMode === 'first_last_frame' ? '必须设置一张首帧（必填），尾帧可选；模型不支持时不可提交。' : '图片、视频、音频可按用途自由编排，按模型能力自动路由。' }}</small>
+        <el-alert v-if="!currentCapability" class="model-config-alert" type="warning" :closable="false" title="尚未配置可用的视频模型" description="请先在 AI 配置中启用并保存一个已验证的视频模型；配置后本工作台会自动读取它的素材能力与限制。"><template #default><el-button text size="small" @click="$router.push('/ai-config')">前往 AI 配置</el-button></template></el-alert>
         <div v-if="creationMode === 'first_last_frame'" class="frame-slots">
           <div class="frame-slot" :class="{ filled: !!firstFrameAsset, required: true }" @click="openFramePicker('first_frame')">
             <img v-if="firstFrameAsset" :src="assetUrl(firstFrameAsset)" />
@@ -142,7 +143,7 @@ const firstFrameAsset = computed(() => chosenAssets.value.find((asset) => asset.
 const lastFrameAsset = computed(() => chosenAssets.value.find((asset) => asset.usage === 'last_frame') || null)
 const pickerImageAssets = computed(() => assets.value.filter((asset) => asset.type === 'image'))
 const framePicker = ref({ open: false, target: 'first_frame' })
-const canCreate = computed(() => prompt.value.trim() && (creationMode.value !== 'first_last_frame' || (firstFrameCount.value === 1 && lastFrameCount.value <= 1 && currentCapability.value?.supports?.first_last_frame)))
+const canCreate = computed(() => !!currentCapability.value && prompt.value.trim() && (creationMode.value !== 'first_last_frame' || (firstFrameCount.value === 1 && lastFrameCount.value <= 1 && currentCapability.value.supports?.first_last_frame)))
 const nativeImageLimit = computed(() => Math.min(shotLimits.value.image, Number(currentCapability.value?.supports?.image_reference?.max || 0)))
 const limitSummary = computed(() => `单文件：图片 ${uploadLimits.value?.files?.image?.max_mb || 30}MB、视频 ${uploadLimits.value?.files?.video?.max_mb || 50}MB、音频 ${uploadLimits.value?.files?.audio?.max_mb || 15}MB；单镜头最多 ${shotLimits.value.total} 个素材。`)
 const selectionSummary = computed(() => `已选 ${chosenAssets.value.length}/${shotLimits.value.total}；图片 ${selectionCounts.value.image}/${shotLimits.value.image}，视频 ${selectionCounts.value.video}/${shotLimits.value.video}，音频 ${selectionCounts.value.audio}/${shotLimits.value.audio}${currentCapability.value ? `；当前模型原生图片参考 ${selectionCounts.value.image}/${nativeImageLimit.value}` : ''}`)
