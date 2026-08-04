@@ -3659,7 +3659,13 @@ function closeImagePreview() {
 function assetVideoUrl(item) {
   if (!item) return ''
   const localPath = item.local_path && String(item.local_path).trim()
-  if (localPath) return '/static/' + localPath.replace(/^\//, '')
+  if (localPath) {
+    // 本地视频曾经可能被浏览器缓存为无 CORS/Range 响应；用记录更新时间
+    // 让重新部署后的播放器强制重新请求文件，同时不改变数据库中的真实路径。
+    const src = '/static/' + localPath.replace(/^\//, '')
+    const version = item.updated_at || item.completed_at || item.created_at
+    return version ? `${src}?v=${encodeURIComponent(version)}` : src
+  }
   if (item.video_url) return imageUrl(item.video_url)
   return ''
 }
