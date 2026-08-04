@@ -126,7 +126,10 @@ html body #app .selected-assets article, html body #app .resource-center-group, 
 }
 html body #app .center-stage, html body #app .video-stage, html body #app .player-tools, html body #app .shot-tabs, html body #app .shot-script,
 html body #app .time-ruler, html body #app .result pre, html body #app .dropzone, html body #app .mode-note, html body #app .workflow,
-html body #app .run-item, html body #app .status, html body #app .resource-center-item, html body #app .resource-media-card { background: var(--bg-raised) !important; border-color: var(--border-color) !important; color: var(--text-regular) !important; box-shadow: none !important; }
+html body #app .run-item, html body #app .status, html body #app .resource-center-item, html body #app .resource-media-card,
+html body #app .mode-info, html body #app .featured, html body #app .empty-result { background: var(--bg-raised) !important; border-color: var(--border-color) !important; color: var(--text-regular) !important; box-shadow: none !important; }
+html body #app .featured, html body #app .empty-result { background: #0b1016 !important; color: var(--text-muted) !important; }
+html body #app .featured footer { background: rgba(16, 21, 29, .92) !important; color: var(--text-primary) !important; }
 html body #app .project-card:hover, html body #app .episode-card:hover, html body #app .library-item:hover, html body #app .tool-card:hover,
 html body #app .tool-card:focus-visible, html body #app .history-card.active, html body #app .run-item.active, html body #app .shot-card.active,
 html body #app .material-card.selected { background: var(--bg-hover) !important; border-color: var(--text-primary) !important; box-shadow: inset 2px 0 0 var(--text-primary) !important; transform: none !important; }
