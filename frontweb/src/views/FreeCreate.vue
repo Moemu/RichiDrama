@@ -14,7 +14,7 @@
         <div class="shot-actions"><el-button size="small" type="primary" plain @click="addShot(false)">+ 尾部添加</el-button><el-button size="small" @click="addShot(true)">当前镜头后添加</el-button></div>
         <div class="shot-list">
           <article v-for="(shot, index) in shots" :key="shot.id" class="shot-card" :class="{ active: shot.id === activeShotId, dragging: draggedShotId === shot.id }" draggable="true" @dragstart="draggedShotId = shot.id" @dragend="draggedShotId = null" @dragover.prevent @drop="dropShot(shot.id)" @click="selectShot(shot)">
-            <div class="shot-title"><span class="drag-handle">⠿</span><span class="shot-number">{{ index + 1 }}</span><b>{{ shot.title || '未命名镜头' }}</b><el-button text size="small" :disabled="index === 0" @click.stop="moveShot(index, -1)">↑</el-button><el-button text size="small" :disabled="index === shots.length - 1" @click.stop="moveShot(index, 1)">↓</el-button><el-button text size="small" aria-label="重命名镜头" @click.stop="renameShot(shot)"><el-icon><Edit /></el-icon></el-button><el-button class="shot-delete" text type="danger" size="small" aria-label="删除镜头" @click.stop="removeShot(shot)">删除</el-button></div>
+            <div class="shot-title"><span class="drag-handle">⠿</span><span class="shot-number">{{ index + 1 }}</span><b>{{ shot.title || '未命名镜头' }}</b><span class="shot-controls"><el-button text size="small" :disabled="index === 0" aria-label="上移镜头" @click.stop="moveShot(index, -1)">↑</el-button><el-button text size="small" :disabled="index === shots.length - 1" aria-label="下移镜头" @click.stop="moveShot(index, 1)">↓</el-button><el-button text size="small" aria-label="重命名镜头" @click.stop="renameShot(shot)"><el-icon><Edit /></el-icon></el-button></span><el-button class="shot-delete" type="danger" plain size="small" aria-label="删除镜头" @click.stop="removeShot(shot)"><el-icon><Delete /></el-icon><span>删除</span></el-button></div>
             <div class="shot-preview"><video v-if="shot.video_url" :src="shot.video_url" muted preload="metadata" /><img v-else-if="shotCover(shot)" :src="shotCover(shot)" /><div v-else class="shot-empty"><el-icon><VideoCamera /></el-icon></div><span>{{ shot.settings?.duration || 5 }}s</span></div>
             <div class="shot-state" :class="shot.status"><i></i>{{ shotState(shot) }}</div>
           </article>
@@ -410,7 +410,12 @@ onMounted(() => {
 /* 左侧分镜管理：统一纵向流自适应宽度，卡片宽度跟随面板，不出横向滚动条。 */
 .shot-list{display:flex!important;flex-direction:column;gap:9px;overflow-y:auto;overflow-x:hidden}
 .shot-card{width:100%;min-width:0!important;box-sizing:border-box}
-.shot-card .shot-title{flex-wrap:wrap;row-gap:4px}
+.shot-card .shot-title{height:auto;min-height:28px;flex-wrap:nowrap;gap:3px}
+.shot-card .shot-title>b{min-width:0}
+.shot-controls{display:flex;align-items:center;flex:none;gap:0}
+.shot-controls .el-button{margin:0;padding:3px 4px}
+.shot-delete{flex:none;min-width:50px;margin-left:3px!important;padding:4px 6px!important;border-color:#b95d5d!important;background:#3a2022!important;color:#ffd1d1!important}
+.shot-delete:hover,.shot-delete:focus-visible{border-color:#f09b9b!important;background:#592b2f!important;color:#fff1f1!important}
 .asset-name{display:grid;min-width:0;gap:2px}.asset-name b{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.asset-route-hint{font-size:10px;line-height:1.3;color:var(--text-muted,#aab4c0);white-space:normal}
 @media(max-width:760px){.shot-list{display:flex!important;flex-direction:column;overflow-y:auto;overflow-x:hidden}.shot-card{min-width:0!important;width:100%}}
 /* 首尾帧强制占位框：高亮、必填强调、filled 态展示缩略图。 */
