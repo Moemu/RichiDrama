@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 
 const assetService = require('../src/services/assetService');
-const { validateShotAssetLimits } = require('../src/services/omniVideoService');
+const { validateShotAssetLimits, safeSnapshot } = require('../src/services/omniVideoService');
+const { normalizeSupports } = require('../src/services/videoModelCapabilities');
 
 const log = { info() {}, warn() {}, error() {} };
 
@@ -81,4 +82,28 @@ test('omni video rejects material counts above the per-shot media limits', () =>
     () => validateShotAssetLimits(Array.from({ length: 4 }, () => ({ type: 'audio' }))),
     /per-shot limit of 3/
   );
+});
+
+test('omni job API snapshot masks local and remote source URLs', () => {
+  const snapshot = safeSnapshot({
+    prompt: 'a tracked shot',
+    assets: [{ asset_id: 12, alias: 'lead', type: 'image', local_path: 'C:\\private\\lead.png', url: 'https://signed.example/lead?token=secret', model_url: 'asset://provider-secret', send_to_model: true, strategy: 'native' }],
+  });
+
+  assert.deepEqual(snapshot.assets, [{ asset_id: 12, alias: 'lead', type: 'image', role: null, usage: null, ordinal: null, source: 'local', derived_from_asset_id: null, send_to_model: true, strategy: 'native' }]);
+  assert.equal(JSON.stringify(snapshot).includes('private'), false);
+  assert.equal(JSON.stringify(snapshot).includes('secret'), false);
+});
+
+test('video capabilities only advertise native media modes with an adapter', () => {
+  const generic = normalizeSupports({ api_protocol: 'openai', default_model: 'generic-video' }, {
+    audio_reference: true, video_reference: true, video_extend: true, audio_driven: true,
+  });
+  assert.equal(generic.audio_reference, false);
+  assert.equal(generic.video_reference, false);
+  assert.equal(generic.video_extend, false);
+  assert.equal(generic.audio_driven, false);
+
+  const seedance = normalizeSupports({ api_protocol: 'volcengine_omni', default_model: 'seedance-2.0' }, {});
+  assert.equal(seedance.audio_reference, true);
 });

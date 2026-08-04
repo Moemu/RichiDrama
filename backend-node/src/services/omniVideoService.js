@@ -134,20 +134,41 @@ function enforceSd2IdentityAssets(assets, capability) {
   const invalid = assets.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && asset.send_to_model && !(asset.seedance2_asset && String(asset.seedance2_asset.status || '').toLowerCase() === 'active' && String(asset.seedance2_asset.asset_url || '').startsWith('asset://')));
   if (invalid.length) throw new Error(`人物一致性素材必须先完成 SD2 认证：${invalid.map((asset) => asset.alias).join('、')}`);
 }
+// Keep retry snapshots server-side and complete, but never return raw file paths,
+// signed URLs, or provider asset URLs through the job APIs.
 function publicAsset(asset) { return { asset_id: asset.id, alias: asset.alias, type: asset.type, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, local_path: asset.local_path, url: asset.url, model_url: asset.model_url || null, seedance2_asset: asset.seedance2_asset || null, checksum: asset.checksum || null, send_to_model: !!asset.send_to_model, strategy: asset.strategy }; }
-function buildSummary(assets) { return { sent_to_model: assets.filter((a) => a.send_to_model).map(publicAsset), post_process_or_preprocess: assets.filter((a) => !a.send_to_model).map(publicAsset) }; }
+function safeAssetSummary(asset) {
+  if (!asset) return null;
+  return {
+    asset_id: asset.asset_id ?? asset.id ?? null,
+    alias: asset.alias || null,
+    type: asset.type || null,
+    role: asset.role || null,
+    usage: asset.usage || null,
+    ordinal: asset.ordinal ?? null,
+    source: asset.local_path ? 'local' : (asset.url ? 'remote' : 'asset_library'),
+    derived_from_asset_id: asset.derived_from_asset_id || null,
+    send_to_model: !!asset.send_to_model,
+    strategy: asset.strategy || null,
+  };
+}
+function safeSnapshot(snapshot) {
+  if (!snapshot) return null;
+  return { ...snapshot, assets: Array.isArray(snapshot.assets) ? snapshot.assets.map(safeAssetSummary) : [] };
+}
+function buildSummary(assets) { return { sent_to_model: assets.filter((a) => a.send_to_model).map(safeAssetSummary), post_process_or_preprocess: assets.filter((a) => !a.send_to_model).map(safeAssetSummary) }; }
 
 function get(db, id) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
   if (!job) return null;
   const generation = db.prepare('SELECT * FROM video_generations WHERE id = ?').get(job.video_generation_id);
   const assets = db.prepare('SELECT * FROM omni_video_job_assets WHERE omni_job_id = ? ORDER BY ordinal').all(job.id);
-  return { ...job, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: parse(job.request_snapshot_json), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: parse(asset.snapshot_json) })), generation };
+  return { ...job, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), generation };
 }
 function list(db) {
   return db.prepare(`SELECT j.*, v.status, v.video_url, v.local_path, v.error_msg
     FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id
-    ORDER BY j.id DESC LIMIT 100`).all().map((item) => ({ ...item, request_snapshot: parse(item.request_snapshot_json) }));
+    ORDER BY j.id DESC LIMIT 100`).all().map((item) => ({ ...item, request_snapshot: safeSnapshot(parse(item.request_snapshot_json)) }));
 }
 function retry(db, log, id) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
@@ -170,4 +191,4 @@ function retry(db, log, id) {
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry, validateShotAssetLimits, validateCreationMode, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, retry, validateShotAssetLimits, validateCreationMode, safeAssetSummary, safeSnapshot, SHOT_ASSET_LIMITS };
