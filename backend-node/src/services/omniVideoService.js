@@ -110,7 +110,7 @@ function bindPromptReferences(prompt, promptDocument, routedAssets) {
   const images = routedAssets.filter((asset) => asset.type === 'image' && asset.send_to_model);
   const bindings = references.flatMap((ref) => {
     const index = images.findIndex((asset) => (ref.asset_id && Number(asset.id) === ref.asset_id) || asset.alias === ref.alias);
-    return index >= 0 ? [{ ...ref, slot: index + 1 }] : [];
+    return index >= 0 ? [{ ...ref, slot: index + 1, usage: images[index].usage || 'reference' }] : [];
   });
   if (!bindings.length) return prompt;
   const slotByAlias = new Map(bindings.map((binding) => [binding.alias, binding.slot]));
@@ -118,8 +118,16 @@ function bindPromptReferences(prompt, promptDocument, routedAssets) {
     const slot = slotByAlias.get(alias);
     return slot ? `@图片${slot}` : token;
   });
-  const legend = bindings.map((binding) => `@图片${binding.slot}=${binding.alias}`).join('；');
-  return `${rewritten}\n\n参考图绑定（按上传顺序，必须严格使用）：${legend}。提示词中的 @图片N 只对应第 N 张参考图，请依据该图保持人物、场景或道具一致性。`;
+  const rules = bindings.map((binding, index) => `${index + 1}. @图片${binding.slot}（${binding.alias}）：${referenceRenderRule(binding.usage)}`).join('\n');
+  return `${rewritten}\n\n【@引用素材硬约束】\n${rules}\n以上 @图片N 按上传顺序一一对应。不得忽略、替换或弱化被 @ 引用素材的主体内容。`;
+}
+
+function referenceRenderRule(usage) {
+  if (usage === 'identity' || usage === 'primary') return '人物必须以该参考图的身份、外形与服装出镜，保持身份一致，不得替换为其他人物。';
+  if (usage === 'environment') return '场景必须采用该图中的空间、陈设和光线特征，不得用泛化场景替代。';
+  if (usage === 'style') return '画面必须继承该图的视觉风格与质感。';
+  if (usage === 'prop') return '该道具必须在画面中清晰、可辨认地出现，并保留参考图中的关键文字、图案或外观特征。';
+  return '该参考图的主体内容必须在画面中清晰、可辨认地出现；若是人物、场景或道具，分别保持其身份、空间或外观，不得以泛化内容替代。';
 }
 
 function routeAssets(assets, supports, audioStrategy) {
