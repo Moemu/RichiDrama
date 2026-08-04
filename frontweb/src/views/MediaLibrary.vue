@@ -36,6 +36,7 @@
       >
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
+      <el-checkbox v-model="favoriteOnly" class="favorite-filter" @change="loadMedia">只看收藏</el-checkbox>
     </div>
 
     <!-- 上传进度 -->
@@ -69,6 +70,7 @@
               >
                 <el-icon><ZoomIn /></el-icon>
               </el-button>
+              <el-button size="small" plain :type="item.is_favorite ? 'warning' : 'info'" :title="item.is_favorite ? '取消收藏' : '收藏素材'" @click.stop="toggleFavorite(item)"><el-icon><StarFilled v-if="item.is_favorite" /><Star v-else /></el-icon></el-button>
               <el-button
                 size="small"
                 type="danger"
@@ -139,7 +141,7 @@ import { ref, onMounted, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, Upload, Search, Loading, CircleCheck,
-  ZoomIn, Delete, Files
+  ZoomIn, Delete, Files, Star, StarFilled
 } from '@element-plus/icons-vue'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { useRouter } from 'vue-router'
@@ -150,6 +152,7 @@ const uploading = ref(false)
 const uploadProgress = ref({ current: 0, total: 0 })
 const mediaItems = ref([])
 const mediaType = ref('all')
+const favoriteOnly = ref(false)
 const keyword = ref('')
 const page = ref(1)
 const pageSize = ref(30)
@@ -199,6 +202,7 @@ async function loadMedia() {
     }
     if (mediaType.value !== 'all') params.type = mediaType.value
     if (keyword.value) params.keyword = keyword.value
+    if (favoriteOnly.value) params.favorite = 1
     const res = await request.get('/assets', { params })
     mediaItems.value = (res?.items || []).map(normalizeItem)
     total.value = res?.total || 0
@@ -253,6 +257,16 @@ function createWithSelected() {
 function openPreview(item) {
   previewItem.value = item
   showPreview.value = true
+}
+
+async function toggleFavorite(item) {
+  try {
+    const updated = await omniVideoAPI.updateAsset(item.id, { is_favorite: !item.is_favorite })
+    Object.assign(item, updated)
+    ElMessage.success(item.is_favorite ? '已收藏素材' : '已取消收藏')
+  } catch (error) {
+    ElMessage.error(error.message || '收藏状态更新失败')
+  }
 }
 
 async function deleteItem(item) {

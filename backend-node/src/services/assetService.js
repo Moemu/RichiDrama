@@ -13,6 +13,9 @@ function list(db, query) {
     sql += ' AND name LIKE ?';
     params.push(`%${String(query.keyword).trim()}%`);
   }
+  if (String(query.favorite || '') === '1' || String(query.favorite || '').toLowerCase() === 'true') {
+    sql += ' AND is_favorite = 1';
+  }
   const countRow = db.prepare('SELECT COUNT(*) as total ' + sql).get(...params);
   const total = countRow.total || 0;
   const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -41,6 +44,7 @@ function rowToItem(r) {
     thumbnail_local_path: r.thumbnail_local_path,
     metadata: safeParse(r.metadata_json),
     tags: safeParse(r.tags_json),
+    is_favorite: !!r.is_favorite,
     processing_status: r.processing_status || 'ready',
     error_msg: r.error_msg,
     seedance2_asset: safeParse(r.seedance2_asset),

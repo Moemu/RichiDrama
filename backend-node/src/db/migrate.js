@@ -422,6 +422,7 @@ function ensureAllColumns(database) {
     { name: 'thumbnail_local_path', type: 'TEXT' },
     { name: 'metadata_json', type: 'TEXT' },
     { name: 'tags_json', type: 'TEXT' },
+    { name: 'is_favorite', type: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'checksum', type: 'TEXT' },
     { name: 'processing_status', type: 'TEXT DEFAULT \'ready\'' },
     { name: 'error_msg', type: 'TEXT' },
