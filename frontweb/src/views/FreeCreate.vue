@@ -67,7 +67,7 @@
           <OmniAssetPromptEditor v-model="prompt" :assets="assets" :chosen-ids="selected" @pick="onPickFromEditor" @references="setPromptReferences" />
         </template>
         <div class="selected-assets">
-          <article v-for="(asset, index) in chosenAssets" :key="asset.id" draggable="true" @dragstart="draggedAssetId = asset.id" @dragover.prevent @drop="dropSelectedAsset(asset.id)"><span class="drag-handle">⠿</span><b>@{{ asset.alias || asset.name }}</b><el-select v-model="asset.usage" size="small" @change="onUsageChange(asset)"><el-option v-for="usage in usages(asset.type)" :key="usage.value" :label="usage.label" :value="usage.value"/></el-select><el-button text size="small" @click="remove(asset.id)">移除</el-button></article>
+          <article v-for="asset in chosenAssets" :key="asset.id" draggable="true" @dragstart="draggedAssetId = asset.id" @dragover.prevent @drop="dropSelectedAsset(asset.id)"><span class="drag-handle">⠿</span><span class="asset-name"><b>@{{ asset.alias || asset.name }}</b><small class="asset-route-hint">{{ assetRouteHint(asset) }}</small></span><el-select v-model="asset.usage" size="small" @change="onUsageChange(asset)"><el-option v-for="usage in usages(asset.type)" :key="usage.value" :label="usage.label" :value="usage.value"/></el-select><el-button text size="small" @click="remove(asset.id)">移除</el-button></article>
         </div>
         <small class="selection-limit-note">{{ selectionSummary }}</small><small v-if="creationMode === 'first_last_frame'" class="selection-limit-note">首帧 {{ firstFrameCount }}/1，尾帧 {{ lastFrameCount }}/1</small>
         <div v-if="chosenImageAssets.length" class="identity-options">
@@ -145,6 +145,17 @@ const stageTagType = computed(() => ({ completed: 'success', failed: 'danger', r
 function assetUrl(asset) { return asset?.local_path ? `/static/${asset.local_path}` : asset?.url || '' }
 function typeName(type) { return ({ image: '图片', video: '视频', audio: '音频' })[type] || '素材' }
 function usages(type) { return type === 'image' ? [{label:'主视觉',value:'primary'},{label:'人物一致性',value:'identity'},{label:'场景/风格',value:'environment'},{label:'普通参考',value:'reference'},{label:'首帧',value:'first_frame'},{label:'尾帧',value:'last_frame'}] : type === 'video' ? [{label:'动作/镜头参考',value:'motion'},{label:'关键帧提取',value:'keyframes'},{label:'仅后期',value:'post_process'}] : [{label:'音色/氛围参考',value:'ambience'},{label:'成片混音',value:'post_mix'}] }
+function assetRouteHint(asset) {
+  const supports = currentCapability.value?.supports
+  if (!supports) return '等待模型能力加载'
+  if (asset.type === 'image') {
+    const ordinal = chosenAssets.value.filter((item) => item.type === 'image').findIndex((item) => item.id === asset.id)
+    return ordinal >= 0 && ordinal < nativeImageLimit.value ? '发送给模型：图片参考' : '不会发送：超出图片参考上限'
+  }
+  if (asset.type === 'video') return supports.video_reference ? '发送给模型：原生视频参考' : '生成前处理：提取关键帧参考'
+  if (asset.type === 'audio') return supports.audio_reference && audioStrategy.value !== 'post_mix' ? '发送给模型：音频参考' : '生成后处理：成片混音'
+  return '按当前模型能力处理'
+}
 function shotState(shot) { return ({ completed:'已完成',processing:'生成中',failed:'失败',retryable:'可重试',invalid:'无效',draft:'草稿' })[shot.status] || '草稿' }
 function shotCover(shot) { const first = (shot.assets || []).find((item) => item.type === 'image'); const asset = first && assets.value.find((item) => item.id === Number(first.asset_id)); return assetUrl(asset) }
 function sd2Status(asset) { return String(asset?.seedance2_asset?.status || 'none').toLowerCase() }
@@ -376,6 +387,7 @@ onMounted(() => {
 .shot-list{display:flex!important;flex-direction:column;gap:9px;overflow-y:auto;overflow-x:hidden}
 .shot-card{width:100%;min-width:0!important;box-sizing:border-box}
 .shot-card .shot-title{flex-wrap:wrap;row-gap:4px}
+.asset-name{display:grid;min-width:0;gap:2px}.asset-name b{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.asset-route-hint{font-size:10px;line-height:1.3;color:var(--text-muted,#aab4c0);white-space:normal}
 @media(max-width:760px){.shot-list{display:flex!important;flex-direction:column;overflow-y:auto;overflow-x:hidden}.shot-card{min-width:0!important;width:100%}}
 /* 首尾帧强制占位框：高亮、必填强调、filled 态展示缩略图。 */
 .frame-slots{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 4px}
