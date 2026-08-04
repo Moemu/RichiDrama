@@ -1,5 +1,5 @@
 <template>
-  <section class="omni-page" :class="{ 'project-storyboard-page': isProjectMode, embedded: embedded }">
+  <section class="omni-page" :class="{ 'project-storyboard-page': isProjectMode, embedded: embedded }" @wheel.capture="containEmbeddedScroll">
     <header v-if="!embedded" class="topbar">
       <div class="topbar-left">
         <el-button text @click="backToProject"><el-icon><ArrowLeft /></el-icon>返回项目</el-button>
@@ -178,6 +178,14 @@ function assetRouteHint(asset) {
   return '按当前模型能力处理'
 }
 function shotState(shot) { return ({ completed:'已完成',processing:'生成中',failed:'失败',retryable:'可重试',invalid:'无效',draft:'草稿' })[shot.status] || '草稿' }
+function containEmbeddedScroll(event) {
+  if (!embedded.value || !event.deltaY || !(event.target instanceof Element)) return
+  const panel = event.target.closest('.shot-list, .creation-panel, .material-pool, .selected-assets, .frame-picker-grid')
+  if (!panel || panel.scrollHeight <= panel.clientHeight) return
+  const atTop = panel.scrollTop <= 0
+  const atBottom = panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 1
+  if ((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) event.preventDefault()
+}
 function shotCover(shot) { const first = (shot.assets || []).find((item) => item.type === 'image'); const asset = first && assets.value.find((item) => item.id === Number(first.asset_id)); return assetUrl(asset) }
 function sd2Status(asset) { return String(asset?.seedance2_asset?.status || 'none').toLowerCase() }
 function sd2StatusLabel(asset) { return ({ none: '未认证', processing: '认证中', active: '可用', invalid: '已失效', failed: '认证失败' })[sd2Status(asset)] || '认证状态未知' }
