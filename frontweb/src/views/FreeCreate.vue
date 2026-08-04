@@ -107,6 +107,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, CircleCheckFilled, Delete, Edit, Picture, Upload, VideoCamera, WarningFilled } from '@element-plus/icons-vue'
 import { omniVideoAPI } from '@/api/omniVideo'
+import { videosAPI } from '@/api/videos'
 import { dramaAPI } from '@/api/drama'
 import { storyboardsAPI } from '@/api/storyboards'
 import OmniAssetPromptEditor from '@/components/OmniAssetPromptEditor.vue'
@@ -179,8 +180,14 @@ function shotState(shot) { return ({ completed:'已完成',processing:'生成中
 function shotCover(shot) { const first = (shot.assets || []).find((item) => item.type === 'image'); const asset = first && assets.value.find((item) => item.id === Number(first.asset_id)); return assetUrl(asset) }
 function sd2Status(asset) { return String(asset?.seedance2_asset?.status || 'none').toLowerCase() }
 function sd2StatusLabel(asset) { return ({ none: '未认证', processing: '认证中', active: '可用', invalid: '已失效', failed: '认证失败' })[sd2Status(asset)] || '认证状态未知' }
-function normalizeJob(data) { const generation = data.generation || {}; return { ...data, status: generation.status || data.status || 'processing', error_msg: generation.error_msg || data.error_msg, videoUrl: generation.local_path ? `/static/${generation.local_path}` : generation.video_url || data.video_url } }
-function projectShot(storyboard) {
+function localVideoUrl(video) {
+  const localPath = String(video?.local_path || '').replace(/^\/+/, '')
+  if (!localPath) return video?.video_url || ''
+  const version = video.updated_at || video.completed_at || video.id || ''
+  return `/static/${localPath}${version ? `?v=${encodeURIComponent(version)}` : ''}`
+}
+function normalizeJob(data) { const generation = data.generation || {}; return { ...data, status: generation.status || data.status || 'processing', error_msg: generation.error_msg || data.error_msg, videoUrl: localVideoUrl(generation) || data.video_url } }
+function projectShot(storyboard, video = null) {
   const { omni_asset_ids, omni_asset_usage, ...rest } = storyboard
   const ids = Array.isArray(omni_asset_ids) ? omni_asset_ids.map(Number).filter(Number.isFinite) : []
   const usage = omni_asset_usage || {}
@@ -191,6 +198,7 @@ function projectShot(storyboard) {
   if (lastFrameId && !assetIds.includes(lastFrameId)) assetIds.push(lastFrameId)
   return {
     ...rest,
+    video_url: video ? localVideoUrl(video) : storyboard.video_url,
     prompt: storyboard.universal_segment_text || storyboard.video_prompt || '',
     prompt_document: { text: storyboard.universal_segment_text || storyboard.video_prompt || '', refs: [] },
     assets: assetIds.map((asset_id) => ({ asset_id, usage: asset_id === firstFrameId ? 'first_frame' : asset_id === lastFrameId ? 'last_frame' : usage[asset_id] || 'reference' })),
@@ -206,9 +214,25 @@ function backToProject() {
   if (isProjectMode.value && projectDramaId.value) router.push({ path: `/film/${projectDramaId.value}`, query: projectEpisodeId.value ? { episode_id: projectEpisodeId.value } : {} })
   else router.push('/')
 }
+async function loadProjectVideos(storyboards) {
+  const groups = await Promise.all((storyboards || []).map(async (storyboard) => {
+    const result = await videosAPI.list({ storyboard_id: storyboard.id, page_size: 20 })
+    return [Number(storyboard.id), (result?.items || []).find((item) => item.status === 'completed' && (item.local_path || item.video_url)) || null]
+  }))
+  return new Map(groups)
+}
+function applyProjectVideoSources(storyboards, videos) {
+  shots.value = storyboards.map((storyboard) => projectShot(storyboard, videos.get(Number(storyboard.id))))
+  jobs.value = jobs.value.map((job) => {
+    const shot = shots.value.find((item) => Number(item.omni_job_id) === Number(job.id))
+    const video = videos.get(Number(shot?.id))
+    return video ? { ...job, videoUrl: localVideoUrl(video), generation: { ...(job.generation || {}), ...video } } : job
+  })
+}
 async function refreshProjectShots(preferredId = activeShotId.value) {
   const result = await dramaAPI.getStoryboards(projectEpisodeId.value)
-  shots.value = (result?.storyboards || []).map(projectShot)
+  const storyboards = result?.storyboards || []
+  applyProjectVideoSources(storyboards, await loadProjectVideos(storyboards))
   const target = shots.value.find((shot) => Number(shot.id) === Number(preferredId)) || shots.value[0] || null
   if (target) loadShot(target)
   else activeShotId.value = null
@@ -363,7 +387,8 @@ onMounted(async () => {
       assets.value = allAssets.map((item) => ({ ...item, alias: item.name, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' }))
       capabilities.value = caps || []; uploadLimits.value = limits || null; jobs.value = (history || []).map(normalizeJob)
       sequence.value = { id: projectEpisodeId.value, name: `项目剧集 ${projectEpisodeId.value}` }
-      shots.value = (boards?.storyboards || []).map(projectShot)
+      const projectStoryboards = boards?.storyboards || []
+      applyProjectVideoSources(projectStoryboards, await loadProjectVideos(projectStoryboards))
       if (shots.value[0]) loadShot(shots.value[0])
       return
     }
