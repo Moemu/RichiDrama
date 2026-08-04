@@ -196,6 +196,15 @@ function localVideoUrl(video) {
   return `/static/${localPath}${version ? `?v=${encodeURIComponent(version)}` : ''}`
 }
 function normalizeJob(data) { const generation = data.generation || {}; return { ...data, status: generation.status || data.status || 'processing', error_msg: generation.error_msg || data.error_msg, videoUrl: localVideoUrl(generation) || data.video_url } }
+function promptDocumentFor(text) {
+  const value = String(text || '')
+  const aliases = [...new Set([...value.matchAll(/@([^\s@]+)/g)].map((match) => match[1]))]
+  const refs = aliases.flatMap((alias) => {
+    const asset = assets.value.find((item) => (item.alias || item.name) === alias)
+    return asset ? [{ asset_id: asset.id, alias }] : []
+  })
+  return { text: value, refs }
+}
 function projectShot(storyboard, video = null) {
   const { omni_asset_ids, omni_asset_usage, ...rest } = storyboard
   const ids = Array.isArray(omni_asset_ids) ? omni_asset_ids.map(Number).filter(Number.isFinite) : []
@@ -209,7 +218,7 @@ function projectShot(storyboard, video = null) {
     ...rest,
     video_url: video ? localVideoUrl(video) : storyboard.video_url,
     prompt: storyboard.universal_segment_text || storyboard.video_prompt || '',
-    prompt_document: { text: storyboard.universal_segment_text || storyboard.video_prompt || '', refs: [] },
+    prompt_document: promptDocumentFor(storyboard.universal_segment_text || storyboard.video_prompt || ''),
     assets: assetIds.map((asset_id) => ({ asset_id, usage: asset_id === firstFrameId ? 'first_frame' : asset_id === lastFrameId ? 'last_frame' : usage[asset_id] || 'reference' })),
     settings: {
       model: storyboard.video_model || 'auto', creation_mode: storyboard.omni_creation_mode || 'multi_reference',
@@ -288,7 +297,7 @@ async function loadAllAssets(params = {}) {
   return { items }
 }
 
-function loadShot(shot) { loadingShot.value = true; activeShotId.value = shot.id; prompt.value = shot.prompt || ''; promptDocument.value = shot.prompt_document || { text: prompt.value, refs: [] }; const settings = shot.settings || {}; model.value = settings.model || 'auto'; creationMode.value = settings.creation_mode || 'multi_reference'; aspectRatio.value = settings.aspect_ratio || '16:9'; duration.value = Math.min(15, Number(settings.duration) || 5); resolution.value = settings.resolution || '720p'; audioStrategy.value = settings.audio_strategy || 'reference_only'; keepOriginalAudio.value = !!settings.keep_original_audio; audioVolume.value = settings.audio_volume ?? 1; audioFadeSeconds.value = settings.audio_fade_seconds ?? 0; const ids = (shot.assets || []).map((item) => Number(item.asset_id)).filter((id) => assets.value.some((asset) => asset.id === id)); const firstFrameId = Number(shot.omni_first_frame_asset_id) || null; const lastFrameId = Number(shot.omni_last_frame_asset_id) || null; selected.value = new Set(ids); selectedOrder.value = ids; (shot.assets || []).forEach((saved) => { const asset = assets.value.find((item) => item.id === Number(saved.asset_id)); if (asset) { asset.usage = Number(saved.asset_id) === firstFrameId ? 'first_frame' : Number(saved.asset_id) === lastFrameId ? 'last_frame' : saved.usage || asset.usage; asset.alias = saved.alias || asset.alias } }); queueMicrotask(() => { loadingShot.value = false }) }
+function loadShot(shot) { loadingShot.value = true; activeShotId.value = shot.id; prompt.value = shot.prompt || ''; promptDocument.value = promptDocumentFor(prompt.value); const settings = shot.settings || {}; model.value = settings.model || 'auto'; creationMode.value = settings.creation_mode || 'multi_reference'; aspectRatio.value = settings.aspect_ratio || '16:9'; duration.value = Math.min(15, Number(settings.duration) || 5); resolution.value = settings.resolution || '720p'; audioStrategy.value = settings.audio_strategy || 'reference_only'; keepOriginalAudio.value = !!settings.keep_original_audio; audioVolume.value = settings.audio_volume ?? 1; audioFadeSeconds.value = settings.audio_fade_seconds ?? 0; const ids = (shot.assets || []).map((item) => Number(item.asset_id)).filter((id) => assets.value.some((asset) => asset.id === id)); const firstFrameId = Number(shot.omni_first_frame_asset_id) || null; const lastFrameId = Number(shot.omni_last_frame_asset_id) || null; selected.value = new Set(ids); selectedOrder.value = ids; (shot.assets || []).forEach((saved) => { const asset = assets.value.find((item) => item.id === Number(saved.asset_id)); if (asset) { asset.usage = Number(saved.asset_id) === firstFrameId ? 'first_frame' : Number(saved.asset_id) === lastFrameId ? 'last_frame' : saved.usage || asset.usage; asset.alias = saved.alias || asset.alias } }); promptDocument.value = promptDocumentFor(prompt.value); queueMicrotask(() => { loadingShot.value = false }) }
 async function selectShot(shot) { if (shot.id === activeShotId.value) return; await saveCurrentShot(false); loadShot(shot) }
 async function saveCurrentShot(showMessage = true) {
   if (!sequence.value || !currentShot.value || loadingShot.value) return
