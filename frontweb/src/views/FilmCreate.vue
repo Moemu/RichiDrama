@@ -826,12 +826,13 @@
             <el-button
               class="sb-ctrl-delete"
               type="danger"
-              text
+              plain
               size="small"
+              aria-label="删除当前分镜"
               :title="`删除分镜${i + 1}`"
-              @click="onDeleteSingleStoryboard(sb.id)"
+              @click.stop="onDeleteSingleStoryboard(sb.id)"
             >
-              <el-icon><Delete /></el-icon>
+              <el-icon><Delete /></el-icon><span>删除</span>
             </el-button>
           </div>
           <div class="sb-inline-generation-settings">
@@ -10580,13 +10581,12 @@ html.light .sb-ctrl-config-btn.el-button:hover {
 }
 .sb-ctrl-delete {
   margin-left: auto;
-  opacity: 0.4;
-  transition: opacity 0.2s;
   height: 22px;
-  padding: 0 4px;
-}
-.sb-ctrl-bar:hover .sb-ctrl-delete {
-  opacity: 1;
+  min-width: 52px;
+  padding: 0 7px;
+  color: #f09b9b !important;
+  border-color: rgba(214,107,107,.5) !important;
+  background: rgba(214,107,107,.08) !important;
 }
 .sb-panel {
   flex: 1;

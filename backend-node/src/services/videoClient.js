@@ -305,10 +305,14 @@ function resolveImageInputForOmniLocalBase64(rawUrl, files_base_url, storage_loc
   const raw = (rawUrl || '').trim();
   if (!raw) return null;
   if (raw.startsWith('data:')) return raw;
-  if (/localhost|127\.0\.0\.1/i.test(raw) && storage_local_path) {
+  if (storage_local_path) {
     const baseUrl = (files_base_url || '').replace(/\/$/, '');
-    const afterStatic = raw.split('/static/')[1] || (baseUrl ? raw.replace(baseUrl + '/', '').replace(baseUrl, '') : null);
-    let relPath = afterStatic ? afterStatic.replace(/^\//, '') : null;
+    const isLocalUrl = /localhost|127\.0\.0\.1/i.test(raw);
+    const isHttpUrl = /^https?:\/\//i.test(raw);
+    const afterStatic = isLocalUrl
+      ? (raw.split('/static/')[1] || (baseUrl ? raw.replace(baseUrl + '/', '').replace(baseUrl, '') : null))
+      : (!isHttpUrl ? raw : null);
+    let relPath = afterStatic ? afterStatic.replace(/^\//, '').split(/[?#]/)[0] : null;
     // URL 中文可能百分号编码，需 decode 才能与磁盘路径匹配
     if (relPath) { try { relPath = decodeURIComponent(relPath); } catch (_) {} }
     if (relPath) {
@@ -376,7 +380,9 @@ async function resolveVolcOmniImageAsync(rawUrl, files_base_url, storage_local_p
   const isPublicHttp = /^https?:\/\//i.test(raw) && !/localhost|127\.0\.0\.1/i.test(raw);
   if (isPublicHttp) return raw;
 
-  if (storage_local_path && !useImageProxyForVideo()) {
+  // A library asset uses a relative local_path and cannot be fetched by a provider.
+  // Use the readable local file first so an optional proxy failure never leaks it.
+  if (storage_local_path) {
     const b64 = resolveVolcClassicImage(raw, files_base_url, storage_local_path, log, video_gen_id, `ref_${index}`);
     if (b64 && String(b64).startsWith('data:')) {
       log.info('[VolcOmni] 本地参考图 → base64（image_proxy.use_for_video 未启用）', { video_gen_id, index });
