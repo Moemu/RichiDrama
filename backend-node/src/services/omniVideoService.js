@@ -10,7 +10,7 @@ function create(db, log, body) {
   if (!prompt) throw new Error('提示词不能为空');
   const input = Array.isArray(body.assets) ? body.assets : [];
   if (input.length > 12) throw new Error('一次创作最多使用 12 个素材');
-  const assets = input.map((entry, ordinal) => resolveAsset(db, entry, ordinal));
+  const assets = prioritizePromptReferenceAssets(input.map((entry, ordinal) => resolveAsset(db, entry, ordinal)), body.prompt_document, prompt);
   validateShotAssetLimits(assets);
   const capability = capabilityService.resolve(db, body.model, assets);
   if (!capability.model) throw new Error('请先在 AI 配置中启用视频模型');
@@ -18,6 +18,7 @@ function create(db, log, body) {
   validateCreationMode(creationMode, assets, capability);
   const routed = routeAssets(expandVideoReferences(db, log, assets, capability.supports), capability.supports, body.audio_strategy);
   enforceSd2IdentityAssets(routed, capability);
+  const modelPrompt = bindPromptReferences(prompt, body.prompt_document, routed);
   const now = new Date().toISOString();
   const task = taskService.createTask(db, log, 'video_generation', '');
   const imageUrls = routed.filter((asset) => asset.send_to_model && asset.type === 'image').map((asset) => asset.model_url || asset.local_path || asset.url).filter(Boolean);
@@ -25,16 +26,16 @@ function create(db, log, body) {
   const last = routed.find((asset) => asset.usage === 'last_frame' && asset.send_to_model);
   const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, provider, prompt, model, duration, aspect_ratio, resolution, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, status, task_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)`)
-    .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.provider || 'chatfire', prompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null,
+    .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null,
       body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
       imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null,
       imageUrls.length ? JSON.stringify(imageUrls) : null, task.id, now, now);
   const videoGenerationId = Number(result.lastInsertRowid);
   const postProcess = { keep_original_audio: !!body.keep_original_audio, audio_volume: clamp(body.audio_volume, 0, 2, 1), audio_fade_seconds: clamp(body.audio_fade_seconds, 0, 10, 0) };
-  const requestSnapshot = { prompt, prompt_document: body.prompt_document || null, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
+  const requestSnapshot = { prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
   const job = db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(videoGenerationId, prompt, body.negative_prompt || null, body.model || 'auto', capability.model,
+    .run(videoGenerationId, modelPrompt, body.negative_prompt || null, body.model || 'auto', capability.model,
       JSON.stringify({ supports: capability.supports, limits: capability.limits, reason: capability.reason }), JSON.stringify(requestSnapshot),
       JSON.stringify(routed.filter((asset) => asset.strategy !== 'native').map(publicAsset)), JSON.stringify(buildSummary(routed)), body.audio_strategy || 'reference_only',
       body.sequence_id ? Number(body.sequence_id) : null, body.shot_id ? Number(body.shot_id) : null, now, now);
@@ -45,7 +46,7 @@ function create(db, log, body) {
   if (body.shot_id && body.sequence_id) {
     const shot = db.prepare('SELECT id FROM omni_video_sequence_shots WHERE id = ? AND sequence_id = ? AND deleted_at IS NULL').get(Number(body.shot_id), Number(body.sequence_id));
     if (shot) db.prepare('UPDATE omni_video_sequence_shots SET omni_job_id = ?, prompt = ?, prompt_document_json = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?').run(
-      jobId, prompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model || 'auto', creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: Math.min(15, Number(body.duration) || 5), resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
+      jobId, modelPrompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model || 'auto', creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: Math.min(15, Number(body.duration) || 5), resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
   }
   setImmediate(() => videoService.processVideoGeneration(db, log, videoGenerationId));
   return { omni_job_id: jobId, video_generation_id: videoGenerationId, task_id: task.id, status: 'processing', resolved_model: capability.model, routing_summary: buildSummary(routed) };
@@ -74,6 +75,51 @@ function resolveAsset(db, input, ordinal) {
   if (row.processing_status && row.processing_status !== 'ready') throw new Error(`素材“${row.name || row.id}”尚未准备完成`);
   let seedance2_asset = null; try { seedance2_asset = row.seedance2_asset ? JSON.parse(row.seedance2_asset) : null; } catch (_) {}
   return { ...row, seedance2_asset, id: row.id, type: row.type, ordinal: Number(input.ordinal) || ordinal + 1, alias: String(input.alias || row.name || `素材${row.id}`).slice(0, 80), role: input.role || 'reference', usage: input.usage || 'reference', requested_send: input.send_to_model !== false };
+}
+
+function promptReferenceEntries(promptDocument, prompt) {
+  const explicit = Array.isArray(promptDocument?.refs) ? promptDocument.refs : [];
+  const aliases = [...new Set([...String(prompt || '').matchAll(/@([^\s@]+)/g)].map((match) => match[1]))];
+  const byAlias = new Map();
+  explicit.forEach((ref) => {
+    const alias = String(ref?.alias || '').trim();
+    if (alias) byAlias.set(alias, { asset_id: Number(ref.asset_id) || null, alias });
+  });
+  aliases.forEach((alias) => {
+    if (!/^图片\d+$/u.test(alias) && !byAlias.has(alias)) byAlias.set(alias, { asset_id: null, alias });
+  });
+  return [...byAlias.values()];
+}
+
+/** Keep explicitly referenced assets at the front, so model image slots cannot be occupied by unrelated selections. */
+function prioritizePromptReferenceAssets(assets, promptDocument, prompt) {
+  const refs = promptReferenceEntries(promptDocument, prompt);
+  const ordered = [];
+  const used = new Set();
+  refs.forEach((ref) => {
+    const asset = assets.find((item) => !used.has(item.id) && ((ref.asset_id && Number(item.id) === ref.asset_id) || item.alias === ref.alias));
+    if (asset) { ordered.push(asset); used.add(asset.id); }
+  });
+  assets.forEach((asset) => { if (!used.has(asset.id)) ordered.push(asset); });
+  return ordered.map((asset, index) => ({ ...asset, ordinal: index + 1 }));
+}
+
+/** Provider APIs receive ordered images rather than aliases, so bind known @aliases to @图片N explicitly. */
+function bindPromptReferences(prompt, promptDocument, routedAssets) {
+  const references = promptReferenceEntries(promptDocument, prompt);
+  const images = routedAssets.filter((asset) => asset.type === 'image' && asset.send_to_model);
+  const bindings = references.flatMap((ref) => {
+    const index = images.findIndex((asset) => (ref.asset_id && Number(asset.id) === ref.asset_id) || asset.alias === ref.alias);
+    return index >= 0 ? [{ ...ref, slot: index + 1 }] : [];
+  });
+  if (!bindings.length) return prompt;
+  const slotByAlias = new Map(bindings.map((binding) => [binding.alias, binding.slot]));
+  const rewritten = String(prompt || '').replace(/@([^\s@]+)/g, (token, alias) => {
+    const slot = slotByAlias.get(alias);
+    return slot ? `@图片${slot}` : token;
+  });
+  const legend = bindings.map((binding) => `@图片${binding.slot}=${binding.alias}`).join('；');
+  return `${rewritten}\n\n参考图绑定（按上传顺序，必须严格使用）：${legend}。提示词中的 @图片N 只对应第 N 张参考图，请依据该图保持人物、场景或道具一致性。`;
 }
 
 function routeAssets(assets, supports, audioStrategy) {
@@ -191,4 +237,4 @@ function retry(db, log, id) {
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry, validateShotAssetLimits, validateCreationMode, safeAssetSummary, safeSnapshot, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, retry, validateShotAssetLimits, validateCreationMode, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };
