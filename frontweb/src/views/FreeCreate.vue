@@ -319,7 +319,28 @@ onMounted(async () => {
     capabilities.value = caps || []; uploadLimits.value = limits || null; jobs.value = (history || []).map(normalizeJob); sequence.value = seq; shots.value = seq.shots || []; if (shots.value[0]) loadShot(shots.value[0])
   } catch (error) { ElMessage.error(error.message || '全能创作工作台加载失败') }
 })
-onMounted(() => { const importedAssetId = Number(route.query.asset_id); if (!Number.isInteger(importedAssetId) || importedAssetId <= 0) return; const stop = watch(assets, (items) => { const importedAsset = items.find((item) => item.id === importedAssetId); if (!importedAsset || selected.value.has(importedAssetId)) return; toggle(importedAsset); ElMessage.success(`已将「${importedAsset.alias || importedAsset.name}」带入当前镜头`); stop() }, { deep: true }) })
+onMounted(() => {
+  // 媒体库的“用选中素材创作”会传递 assets=1,2,3；旧实现只识别单个
+  // asset_id，导致批量带入这一条 P0 主链路表面可见但实际失效。
+  const importedIds = [...new Set([
+    Number(route.query.asset_id),
+    ...String(route.query.assets || '').split(',').map((id) => Number(id)),
+  ].filter((id) => Number.isInteger(id) && id > 0))]
+  if (!importedIds.length) return
+  const stop = watch(assets, (items) => {
+    const imported = importedIds.map((id) => items.find((item) => Number(item.id) === id)).filter(Boolean)
+    if (!imported.length) return
+    let added = 0
+    for (const asset of imported) {
+      if (selected.value.has(asset.id)) continue
+      const before = selected.value.size
+      toggle(asset)
+      if (selected.value.size > before) added++
+    }
+    if (added) ElMessage.success(`已将 ${added} 个素材带入当前镜头`)
+    stop()
+  }, { deep: true })
+})
 </script>
 
 <style scoped>
