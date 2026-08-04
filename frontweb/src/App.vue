@@ -17,6 +17,5 @@ html, body, #app, .app {
   min-height: 100vh;
   background: var(--bg-page);
   color: var(--text-primary);
-  transition: background 0.25s, color 0.25s;
 }
 </style>
