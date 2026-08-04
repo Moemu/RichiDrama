@@ -62,6 +62,15 @@ function getById(db, id) {
   return r ? rowToItem(r) : null;
 }
 
+function findByChecksum(db, checksum, dramaId = null) {
+  if (!checksum) return null;
+  const row = db.prepare(`SELECT * FROM assets
+    WHERE deleted_at IS NULL AND checksum = ?
+      AND ((drama_id IS NULL AND ? IS NULL) OR drama_id = ?)
+    ORDER BY id DESC LIMIT 1`).get(checksum, dramaId, dramaId);
+  return row ? rowToItem(row) : null;
+}
+
 function create(db, log, req) {
   const now = new Date().toISOString();
   const info = db.prepare(
@@ -148,6 +157,7 @@ function importFromVideo(db, log, videoGenId) {
 module.exports = {
   list,
   getById,
+  findByChecksum,
   create,
   update,
   deleteById,

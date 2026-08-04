@@ -179,8 +179,9 @@ async function onUpload(e) {
   uploadProgress.value = { current: 0, total: files.length }
   for (const file of files) {
     try {
-      await omniVideoAPI.upload(file)
+      const item = await omniVideoAPI.upload(file)
       uploadProgress.value.current++
+      if (item?.deduplicated) ElMessage.info(`${file.name} 已存在，已复用素材记录`)
     } catch (err) {
       ElMessage.warning(`${file.name} 上传失败: ${err.message}`)
     }
