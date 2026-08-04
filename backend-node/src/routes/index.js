@@ -307,6 +307,7 @@ function setupRouter(cfg, db, log) {
   r.post('/assets', assets.create);
   r.post('/assets/import/image/:image_gen_id', assets.importImage);
   r.post('/assets/import/video/:video_gen_id', assets.importVideo);
+  r.post('/assets/:id/trim', assets.trim);
   r.post('/assets/:id/sd2-certify', assets.sd2Certify);
   r.post('/assets/:id/sd2-certify/refresh', assets.sd2CertifyRefresh);
   r.get('/assets/:id', assets.get);

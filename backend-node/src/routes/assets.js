@@ -72,6 +72,17 @@ function routes(db, log, cfg) {
         response.internalError(res, err.message);
       }
     },
+    trim: (req, res) => {
+      try {
+        const source = assetService.getById(db, req.params.id);
+        if (!source) return response.notFound(res, '资源不存在');
+        const item = require('../services/omniMediaProcessService').trimVideoAsset(db, log, source, req.body || {});
+        response.created(res, item);
+      } catch (err) {
+        log.error('assets trim', { error: err.message });
+        response.badRequest(res, err.message);
+      }
+    },
     sd2Certify: async (req, res) => {
       try { const out = await require('../services/assetSd2Service').certify(db, log, cfg, req.params.id); if (!out.ok) return response.badRequest(res, out.error); response.success(res, out); }
       catch (err) { log.error('assets sd2-certify', { error: err.message }); response.internalError(res, err.message); }

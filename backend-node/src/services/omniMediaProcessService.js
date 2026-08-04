@@ -51,4 +51,21 @@ function mixAudio(videoLocalPath, audioLocalPath, log, options = {}) {
   run(args, log, '成片混音');
   return path.relative(storageRoot(), out).replace(/\\/g, '/');
 }
-module.exports = { extractKeyframes, mixAudio };
+
+function trimVideoAsset(db, log, source, options = {}) {
+  if (!source || source.type !== 'video') throw new Error('只能裁切视频素材');
+  const input = abs(source.local_path);
+  if (!source.local_path || !fs.existsSync(input)) throw new Error('该视频不是本地素材，无法裁切');
+  const start = Math.max(0, Number(options.start_seconds) || 0);
+  const end = Number(options.end_seconds);
+  if (!Number.isFinite(end) || end <= start) throw new Error('结束时间必须大于开始时间');
+  const duration = Math.min(3600, end - start);
+  const root = storageRoot(); const dir = path.join(root, 'library', 'derived'); fs.mkdirSync(dir, { recursive: true });
+  const name = `trim_${source.id}_${Date.now()}_${randomUUID().slice(0, 8)}.mp4`; const output = path.join(dir, name);
+  try { run(['-y', '-ss', String(start), '-i', input, '-t', String(duration), '-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-movflags', '+faststart', output], log, '裁切视频'); }
+  catch (_) { run(['-y', '-ss', String(start), '-i', input, '-t', String(duration), '-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart', output], log, '裁切视频'); }
+  if (!fs.existsSync(output)) throw new Error('裁切后的视频文件未生成');
+  const localPath = `library/derived/${name}`;
+  return assetService.create(db, log, { drama_id: source.drama_id || null, name: `${source.name || '视频'} · 裁切`, type: 'video', local_path: localPath, url: `/static/${localPath}`, mime_type: 'video/mp4', file_size: fs.statSync(output).size, duration, source_type: 'derived', parent_asset_id: source.id, processing_status: 'ready', metadata: { derived_from: 'video_trim', start_seconds: start, end_seconds: end } });
+}
+module.exports = { extractKeyframes, mixAudio, trimVideoAsset };

@@ -124,6 +124,7 @@
           class="preview-video"
           autoplay
         />
+        <div v-if="previewItem?.type === 'video'" class="trim-controls"><el-input-number v-model="trimStart" :min="0" :max="Math.max(0, trimEnd - .1)" :step=".1" size="small"/><span>至</span><el-input-number v-model="trimEnd" :min="trimStart + .1" :max="Number(previewItem.duration) || 3600" :step=".1" size="small"/><el-button size="small" :loading="trimming" @click="trimVideo">裁切为新素材</el-button></div>
         <audio v-else-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" controls />
         <AudioWaveform v-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" />
         <img v-else-if="previewItem" :src="itemUrl(previewItem)" class="preview-image" />
@@ -166,6 +167,7 @@ const showPreview = ref(false)
 const previewItem = ref(null)
 const certifyingId = ref(null)
 const editableTags = ref('')
+const trimStart = ref(0), trimEnd = ref(5), trimming = ref(false)
 const uploadInput = ref(null)
 const router = useRouter()
 let keywordTimer = null
@@ -263,7 +265,18 @@ function createWithSelected() {
 function openPreview(item) {
   previewItem.value = item
   editableTags.value = Array.isArray(item.tags) ? item.tags.join(', ') : ''
+  trimStart.value = 0; trimEnd.value = Number(item.duration) || 5
   showPreview.value = true
+}
+
+async function trimVideo() {
+  if (!previewItem.value || trimming.value) return
+  trimming.value = true
+  try {
+    const item = await omniVideoAPI.trimAsset(previewItem.value.id, { start_seconds: trimStart.value, end_seconds: trimEnd.value })
+    mediaItems.value.unshift(normalizeItem(item)); total.value++
+    ElMessage.success('已裁切为新的派生素材，原视频未修改')
+  } catch (error) { ElMessage.error(error.message || '裁切视频失败') } finally { trimming.value = false }
 }
 
 async function saveTags() {
@@ -486,6 +499,7 @@ onMounted(loadMedia)
 .identity-state.active { background: #e6f4eb; color: #28734b; }
 .identity-state.processing { background: #fff5dc; color: #966916; }
 .identity-state.stale,.identity-state.failed { background: #fce9e9; color: #ad4949; }
+.trim-controls { display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap; }
 .sd2-preview-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
 
 .empty-media {

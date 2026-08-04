@@ -19,6 +19,7 @@ export const omniVideoAPI = {
   /** 创建素材记录（如把场景/角色/道具图导入素材池统一管理） */
   createAsset(body) { return request.post('/assets', body || {}) },
   updateAsset(id, body) { return request.put(`/assets/${id}`, body) },
+  trimAsset(id, body) { return request.post(`/assets/${id}/trim`, body) },
   uploadLimits() { return request.get('/upload-limits') },
   certifyAsset(id) { return request.post(`/assets/${id}/sd2-certify`) },
   refreshAssetCertification(id) { return request.post(`/assets/${id}/sd2-certify/refresh`) },
