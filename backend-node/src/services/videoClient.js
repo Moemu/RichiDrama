@@ -4233,4 +4233,5 @@ module.exports = {
   isSeedance2FamilyModel,
   normalizeVolcengineDuration,
   buildSd2ActiveAssetUrlLookup,
+  callVolcengineOmniVideoApi,
 };
