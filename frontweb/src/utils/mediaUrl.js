@@ -3,7 +3,13 @@ export function assetImageUrl(item) {
   if (!item) return ''
   const lp = item.local_path && String(item.local_path).trim()
   if (lp) return '/static/' + lp.replace(/^\//, '')
-  return item.image_url || ''
+  const imageUrl = item.image_url && String(item.image_url).trim()
+  if (imageUrl) return imageUrl
+
+  const refImage = item.ref_image && String(item.ref_image).trim()
+  if (!refImage) return ''
+  if (/^(https?:|data:|\/static\/)/i.test(refImage)) return refImage
+  return '/static/' + refImage.replace(/^\//, '')
 }
 
 export function storyboardImageUrl(sb) {

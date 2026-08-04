@@ -39,7 +39,7 @@ function routes(db, log, cfg) {
     lineage: (req, res) => {
       try {
         const lineage = assetService.getLineage(db, req.params.id);
-        if (!lineage) return response.notFound(res, '璧勬簮涓嶅瓨鍦?);
+        if (!lineage) return response.notFound(res, '资源不存在');
         response.success(res, lineage);
       } catch (err) {
         log.error('assets lineage', { error: err.message });

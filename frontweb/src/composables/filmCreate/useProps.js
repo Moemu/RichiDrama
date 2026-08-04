@@ -192,7 +192,12 @@ export function useProps(deps) {
       const file = dataUrlToFile(refImg.dataUrl, refImg.filename || 'reference.png')
       const uploadRes = await uploadAPI.uploadImage(file, { dramaId: dramaId.value })
       const refPath = uploadRes.local_path || uploadRes.url || ''
-      await propAPI.putRefImage(propId, refPath)
+      if (!refPath) throw new Error('上传未返回图片地址')
+      await propAPI.update(propId, {
+        ref_image: refPath,
+        local_path: uploadRes.local_path || null,
+        image_url: uploadRes.url || refPath,
+      })
     } catch (e) {
       console.warn('[savePropRefImage] 保存参考图失败:', e.message)
     }

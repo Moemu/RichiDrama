@@ -509,7 +509,7 @@
           <article class="resource-center-group">
             <header><b>道具</b><span>{{ props.length }}</span></header>
             <div class="resource-center-actions"><el-button size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button><el-button size="small" @click="showAddProp = true">添加道具</el-button></div>
-            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item"><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><el-button size="small" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid)">生成图</el-button></div></div>
+            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item"><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="openPropAssetPicker(prop)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `prop-${prop.id}`" @click="onUploadResourceClick('prop', prop.id)">上传图</el-button><el-button size="small" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid)">生成图</el-button></div></div></div>
             <p v-else class="resource-center-empty">从当前剧本提取道具。</p>
           </article>
         </div>
@@ -519,6 +519,16 @@
           <p v-else class="resource-center-empty">还没有上传媒体素材。</p>
         </div>
       </section>
+
+      <el-dialog v-model="showPropAssetPicker" :title="`为「${propAssetPickerTarget?.name || '道具'}」选择图片素材`" width="720px">
+        <div v-if="propAssetPickerImages.length" class="resource-media-grid prop-asset-picker-grid">
+          <button v-for="asset in propAssetPickerImages" :key="asset.id" type="button" class="resource-media-card prop-asset-picker-card" @click="bindAssetToProp(asset)">
+            <img :src="sbOmniAssetUrl(asset)" :alt="asset.name || '图片素材'" />
+            <small>{{ asset.name || `素材 ${asset.id}` }}</small>
+          </button>
+        </div>
+        <p v-else class="resource-center-empty">媒体素材库中还没有图片，请先上传图片素材。</p>
+      </el-dialog>
 
       <div v-show="workflowStage === 'resources'" class="workflow-next-action">
         <span>资源会在分镜中按需选择、拖入提示词并形成 @ 引用。</span>
@@ -3308,6 +3318,9 @@ const resourceImageFileInput = ref(null)
 const resourceUploadType = ref(null) // 'character' | 'prop' | 'scene'
 const resourceUploadId = ref(null)
 const uploadingResourceId = ref(null) // 'char-1' | 'prop-2' | 'scene-3'
+const showPropAssetPicker = ref(false)
+const propAssetPickerTarget = ref(null)
+const propAssetPickerImages = computed(() => universalLibraryAssets.value.filter((asset) => asset.type === 'image' && asset.local_path))
 const dragOverResourceKey = ref(null) // 'char-1' | 'prop-2' | 'scene-3'
 const dragOverSbId = ref(null)
 // 公共库弹窗状态已移至各 composable
@@ -3622,11 +3635,16 @@ function assetImageUrl(item) {
     return '/static/' + p
   }
   if (item.image_url) return imageUrl(item.image_url)
+  const refImage = item.ref_image && String(item.ref_image).trim()
+  if (refImage) {
+    if (/^(https?:|data:|\/static\/)/i.test(refImage)) return refImage
+    return '/static/' + refImage.replace(/^\//, '')
+  }
   return ''
 }
 function hasAssetImage(item) {
   if (!item) return false
-  return !!(item.image_url || item.local_path)
+  return !!(item.image_url || item.local_path || item.ref_image)
 }
 function getSelectedStyle() {
   return getSelectedStylePrompt()
@@ -5387,6 +5405,28 @@ function onUploadResourceClick(type, id) {
   resourceUploadType.value = type
   resourceUploadId.value = id
   resourceImageFileInput.value?.click()
+}
+
+function openPropAssetPicker(prop) {
+  propAssetPickerTarget.value = prop
+  showPropAssetPicker.value = true
+}
+
+async function bindAssetToProp(asset) {
+  const prop = propAssetPickerTarget.value
+  if (!prop?.id || !asset?.local_path) return
+  try {
+    await propAPI.update(prop.id, {
+      local_path: asset.local_path,
+      image_url: asset.url || `/static/${String(asset.local_path).replace(/^\//, '')}`,
+    })
+    showPropAssetPicker.value = false
+    propAssetPickerTarget.value = null
+    await loadDrama()
+    ElMessage.success('图片已绑定到道具')
+  } catch (e) {
+    ElMessage.error(e.message || '绑定图片失败')
+  }
 }
 
 // 解析 extra_images JSON，返回 local_path 数组
@@ -11664,6 +11704,7 @@ html.light .frame-layout-anchor {
 .resource-center-placeholder,.resource-media-card img,.resource-media-card>span{background:var(--bg-hover);color:var(--text-muted)}
 .resource-center-item b{color:var(--text-regular)}
 .resource-center-item small,.resource-media-card small{color:var(--text-muted)}
+.resource-center-item-actions{display:flex;align-items:center;gap:2px;white-space:nowrap}.resource-center-item-actions .el-button{margin:0}.prop-asset-picker-grid{max-height:440px;overflow:auto;padding:2px}.prop-asset-picker-card{padding:0;cursor:pointer;text-align:left;font:inherit}.prop-asset-picker-card:hover{border-color:var(--el-color-primary)}
 .workflow-next-action{border-color:var(--border-color);background:var(--bg-raised);color:var(--text-regular)}
 .merge-readiness,.merge-readiness.ready{border-color:var(--border-color);background:var(--bg-hover);color:var(--text-regular)}
 .sb-ctrl-bar--dragover{box-shadow:inset 0 3px 0 var(--accent)!important;background:var(--bg-hover)!important}
