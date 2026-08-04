@@ -11,6 +11,7 @@ export const omniVideoAPI = {
   },
   capabilities() { return request.get('/video-model-capabilities') },
   create(body) { return request.post('/omni-video-jobs', body) },
+  polishPrompt(body) { return request.post('/omni-video-jobs/polish-prompt', body) },
   retry(id) { return request.post(`/omni-video-jobs/${id}/retry`) },
   extractFrame(id, position) { return request.post(`/omni-video-jobs/${id}/extract-frame`, { position }) },
   list() { return request.get('/omni-video-jobs') },

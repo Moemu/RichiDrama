@@ -137,6 +137,7 @@ html body #app .asset-lineage-list button, html body #app .asset-lineage-current
 html body #app .asset-lineage-current { border-color: var(--accent) !important; color: var(--text-main) !important; }
 html body #app .asset-lineage-empty, html body #app .asset-lineage-list small { color: var(--text-muted) !important; }
 html body #app .concat-bar .el-button { background: var(--bg-elevated) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; box-shadow: var(--shadow-md) !important; }
+html body #app .polish-suggestion { background: var(--bg-raised) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; }
 html body #app .featured footer { background: rgba(16, 21, 29, .92) !important; color: var(--text-primary) !important; }
 html body #app .project-card:hover, html body #app .episode-card:hover, html body #app .library-item:hover, html body #app .tool-card:hover,
 html body #app .tool-card:focus-visible, html body #app .history-card.active, html body #app .run-item.active, html body #app .shot-card.active,

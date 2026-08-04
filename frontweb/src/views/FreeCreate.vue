@@ -94,6 +94,8 @@
     <el-dialog v-model="requestPreviewOpen" title="本次生成请求预览" width="620px" append-to-body>
       <p class="request-preview-note">此处仅展示将要提交的内容，不会润色或改写你的原始提示词。</p>
       <pre class="request-preview">{{ JSON.stringify(requestPreview, null, 2) }}</pre>
+      <div class="request-preview-actions"><el-button :loading="polishingPrompt" @click="suggestPolish">AI 润色建议</el-button><el-button v-if="polishSuggestion" type="primary" plain @click="applyPolishSuggestion">应用建议</el-button></div>
+      <div v-if="polishSuggestion" class="polish-suggestion"><b>润色建议（尚未应用）</b><pre>{{ polishSuggestion }}</pre></div>
     </el-dialog>
   </section>
 </template>
@@ -120,7 +122,7 @@ const projectDramaId = computed(() => Number(componentProps.projectDramaId || ro
 const isProjectMode = computed(() => Number.isInteger(projectEpisodeId.value) && projectEpisodeId.value > 0)
 const selected = ref(new Set()), selectedOrder = ref([]), assetScope = ref('all'), prompt = ref(''), model = ref('auto'), aspectRatio = ref('16:9'), duration = ref(5), resolution = ref('720p'), audioStrategy = ref('reference_only'), creationMode = ref('multi_reference')
 const promptDocument = ref({ text: '', refs: [] })
-const keepOriginalAudio = ref(false), audioVolume = ref(1), audioFadeSeconds = ref(0), creating = ref(false), certifyingId = ref(null), extractingPosition = ref(''), savedResultJobId = ref(null), requestPreviewOpen = ref(false), stagePhase = ref(''), fileInput = ref(null), uploadLimits = ref(null)
+const keepOriginalAudio = ref(false), audioVolume = ref(1), audioFadeSeconds = ref(0), creating = ref(false), certifyingId = ref(null), extractingPosition = ref(''), savedResultJobId = ref(null), requestPreviewOpen = ref(false), polishingPrompt = ref(false), polishSuggestion = ref(''), stagePhase = ref(''), fileInput = ref(null), uploadLimits = ref(null)
 const draggedShotId = ref(null), draggedAssetId = ref(null), loadingShot = ref(false)
 let saveTimer = null
 
@@ -148,6 +150,16 @@ const stageLabel = computed(() => ({ completed: '成片完成', processing: '生
 const stageTagType = computed(() => ({ completed: 'success', failed: 'danger', retryable: 'warning', invalid: 'info' })[activeJob.value?.status] || 'info')
 const requestPreview = computed(() => ({ prompt: prompt.value, creation_mode: creationMode.value, model: currentCapability.value?.model || model.value, aspect_ratio: aspectRatio.value, duration_seconds: Math.min(15, Number(duration.value) || 5), resolution: resolution.value, audio_strategy: audioStrategy.value, assets: chosenAssets.value.map((asset, index) => ({ ordinal: index + 1, name: asset.alias || asset.name, type: asset.type, usage: asset.usage, routing: assetRouteHint(asset) })) }))
 
+async function suggestPolish() {
+  if (!prompt.value.trim() || polishingPrompt.value) return
+  polishingPrompt.value = true
+  try {
+    const out = await omniVideoAPI.polishPrompt({ prompt: prompt.value, assets: chosenAssets.value.map((asset) => ({ name: asset.name, alias: asset.alias, type: asset.type, usage: asset.usage })) })
+    polishSuggestion.value = String(out?.suggestion || '').trim()
+    if (!polishSuggestion.value) ElMessage.warning('未得到可用的润色建议，请检查文本模型配置')
+  } catch (error) { ElMessage.error(error.message || '提示词润色失败') } finally { polishingPrompt.value = false }
+}
+function applyPolishSuggestion() { if (!polishSuggestion.value) return; prompt.value = polishSuggestion.value; promptDocument.value = { text: prompt.value, refs: promptDocument.value.refs || [] }; polishSuggestion.value = ''; ElMessage.success('已应用润色建议') }
 function assetUrl(asset) { return asset?.local_path ? `/static/${asset.local_path}` : asset?.url || '' }
 function typeName(type) { return ({ image: '图片', video: '视频', audio: '音频' })[type] || '素材' }
 function usages(type) { return type === 'image' ? [{label:'主视觉',value:'primary'},{label:'人物一致性',value:'identity'},{label:'场景/风格',value:'environment'},{label:'普通参考',value:'reference'},{label:'首帧',value:'first_frame'},{label:'尾帧',value:'last_frame'}] : type === 'video' ? [{label:'动作/镜头参考',value:'motion'},{label:'关键帧提取',value:'keyframes'},{label:'仅后期',value:'post_process'}] : [{label:'音色/氛围参考',value:'ambience'},{label:'成片混音',value:'post_mix'}] }
@@ -387,7 +399,7 @@ onMounted(() => {
 .generate-button.el-button--primary{background:#4b91c8!important;border-color:#4b91c8!important;color:#fff!important;box-shadow:0 2px 8px #0006}
 .generate-button.el-button--primary:hover{background:#5ba1d6!important;border-color:#5ba1d6!important;color:#fff!important}
 .generate-button.el-button--primary.is-disabled{background:#3d5262!important;border-color:#3d5262!important;color:#b8c1c7!important;box-shadow:none}
-.generation-actions{display:grid;grid-template-columns:1fr 1.6fr;gap:7px;margin-top:14px}.generation-actions .generate-button{margin-top:0}.request-preview-note{margin:0 0 10px;color:#9ca7bc;font-size:13px}.request-preview{max-height:440px;margin:0;overflow:auto;padding:12px;border:1px solid #39435a;border-radius:7px;background:#111621;color:#dce6ff;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.55}
+.generation-actions{display:grid;grid-template-columns:1fr 1.6fr;gap:7px;margin-top:14px}.generation-actions .generate-button{margin-top:0}.request-preview-note{margin:0 0 10px;color:#9ca7bc;font-size:13px}.request-preview{max-height:440px;margin:0;overflow:auto;padding:12px;border:1px solid #39435a;border-radius:7px;background:#111621;color:#dce6ff;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.55}.request-preview-actions{display:flex;gap:8px;margin-top:10px}.polish-suggestion{margin-top:12px;padding:10px;border:1px solid #39435a;border-radius:7px;background:#151b24;color:#dce6ff;font-size:12px}.polish-suggestion b{display:block;margin-bottom:6px}.polish-suggestion pre{margin:0;white-space:pre-wrap;word-break:break-word}
 .asset-scope{width:92px;margin-right:4px}.material-card .asset-scope-label{position:absolute;left:3px;top:3px;padding:1px 3px;border-radius:3px;background:#111c;color:#dbe7f2;font-size:9px;font-style:normal;line-height:1.2}
 /* 缩放与窄屏：三栏按可用宽度收缩，避免中间预览被固定最小宽度挤出视口。 */
 .omni-page{min-width:0;min-height:100dvh}.topbar{min-width:0;gap:8px}.topbar-left,.topbar-actions{min-width:0}.topbar-left{overflow:hidden}.topbar-left>span{white-space:nowrap}.sequence-name{width:clamp(104px,14vw,180px);min-width:0}.workbench{width:100%;min-width:0;grid-template-columns:minmax(196px,260px) minmax(0,1fr) minmax(270px,320px)}.center-stage,.panel,.player-tools,.shot-tabs,.shot-script{min-width:0}.player-tools,.shot-tabs{overflow:hidden}.shot-tabs{gap:clamp(10px,2vw,26px);white-space:nowrap}.selected-assets article{grid-template-columns:auto minmax(0,1fr) minmax(92px,120px) auto}.selected-assets b{min-width:0}.material-pool{grid-template-columns:repeat(auto-fit,minmax(58px,1fr))}
