@@ -9,6 +9,15 @@ function resolveRemoteVideoUrl(videoUrl, fallbackError) {
   return { ok: false, error: (fallbackError || '超时或失败').slice(0, 500) };
 }
 
+// 本地视频是持久化结果，优先于厂商返回的带过期时间签名 URL。
+function publicVideoUrl(videoUrl, localPath) {
+  const local = localPath && String(localPath).trim();
+  if (local && /\.(?:mp4|webm|mov|m4v|avi|mkv)(?:[?#].*)?$/i.test(local)) {
+    return `/static/${local.replace(/^\/+/, '')}`;
+  }
+  return videoUrl || null;
+}
+
 /** 将 video_generations 标为失败；若无 error_msg 列则只更新 status/updated_at */
 function setVideoGenFailed(db, videoGenId, errorMsg, now) {
   try {
@@ -60,7 +69,7 @@ function rowToItem(r) {
     model: r.model,
     image_gen_id: r.image_gen_id,
     image_url: r.image_url,
-    video_url: r.video_url,
+    video_url: publicVideoUrl(r.video_url, r.local_path),
     local_path: r.local_path,
     status: r.status,
     task_id: r.task_id,

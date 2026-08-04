@@ -219,7 +219,9 @@ function getStoryboardById(db, id) {
     image_url: r.image_url ?? null,
     local_path: r.local_path ?? null,
     main_panel_idx: r.main_panel_idx != null ? Number(r.main_panel_idx) : null,
-    video_url: r.video_url,
+    video_url: (r.local_path && /\.(?:mp4|webm|mov|m4v|avi|mkv)(?:[?#].*)?$/i.test(String(r.local_path).trim()))
+      ? `/static/${String(r.local_path).trim().replace(/^\/+/, '')}`
+      : (r.video_url || null),
     audio_local_path: r.audio_local_path ?? null,
     narration_audio_local_path: r.narration_audio_local_path ?? null,
     status: r.status || 'pending',

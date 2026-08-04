@@ -327,7 +327,9 @@ function rowToEpisode(r) {
     description: r.description,
     duration: r.duration ?? 0,
     status: r.status || 'draft',
-    video_url: r.video_url,
+    video_url: (r.local_path && /\.(?:mp4|webm|mov|m4v|avi|mkv)(?:[?#].*)?$/i.test(String(r.local_path).trim()))
+      ? `/static/${String(r.local_path).trim().replace(/^\/+/, '')}`
+      : (r.video_url || null),
     thumbnail: r.thumbnail,
     created_at: r.created_at,
     updated_at: r.updated_at,
