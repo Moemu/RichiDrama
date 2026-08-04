@@ -54,12 +54,12 @@
         </div>
         <details class="advanced-settings"><summary>镜头与模型设置 <span>模型、比例、时长、分辨率、音频</span></summary><GenerationSettings v-model="generationSettings" :max-duration="15" /><div class="parameters"><label>音频<el-select v-model="audioStrategy" size="small"><el-option label="音频参考" value="reference_only"/><el-option label="成片混音" value="post_mix"/></el-select></label></div></details>
 
-        <div class="materials-title"><b>当前镜头素材</b><div><el-button text size="small" @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
+        <div class="materials-title"><b>当前镜头素材</b><div><el-select v-if="isProjectMode" v-model="assetScope" size="small" class="asset-scope"><el-option label="全部素材" value="all"/><el-option label="本项目素材" value="project"/><el-option label="全局素材" value="global"/></el-select><el-button text size="small" @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
         <input ref="fileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="uploadFiles" />
         <div class="dropzone" @click="pickFiles" @dragover.prevent @drop.prevent="dropFiles"><el-icon><Upload /></el-icon>拖入图片、视频或音频</div>
         <small class="upload-limit-note">{{ limitSummary }}</small>
         <div class="material-pool">
-          <article v-for="asset in assets" :key="asset.id" class="material-card" :class="{ selected: selected.has(asset.id) }" draggable="true" @dragstart="onAssetDragStart($event, asset)" @click="toggle(asset)"><img v-if="asset.type === 'image'" :src="assetUrl(asset)"/><video v-else-if="asset.type === 'video'" :src="assetUrl(asset)" muted/><span v-else>🎵</span><small>{{ asset.alias || asset.name }}</small><el-icon v-if="selected.has(asset.id)"><CircleCheckFilled /></el-icon></article>
+          <article v-for="asset in visibleAssets" :key="asset.id" class="material-card" :class="{ selected: selected.has(asset.id) }" draggable="true" @dragstart="onAssetDragStart($event, asset)" @click="toggle(asset)"><img v-if="asset.type === 'image'" :src="assetUrl(asset)"/><video v-else-if="asset.type === 'video'" :src="assetUrl(asset)" muted/><span v-else>🎵</span><small>{{ asset.alias || asset.name }}</small><em v-if="isProjectMode" class="asset-scope-label">{{ Number(asset.drama_id) === projectDramaId ? '项目' : '全局' }}</em><el-icon v-if="selected.has(asset.id)"><CircleCheckFilled /></el-icon></article>
         </div>
 
         <template v-if="!isProjectMode">
@@ -118,7 +118,7 @@ const embedded = computed(() => componentProps.embedded)
 const projectEpisodeId = computed(() => Number(componentProps.projectEpisodeId || route.query.episode_id || 0))
 const projectDramaId = computed(() => Number(componentProps.projectDramaId || route.query.drama_id || 0))
 const isProjectMode = computed(() => Number.isInteger(projectEpisodeId.value) && projectEpisodeId.value > 0)
-const selected = ref(new Set()), selectedOrder = ref([]), prompt = ref(''), model = ref('auto'), aspectRatio = ref('16:9'), duration = ref(5), resolution = ref('720p'), audioStrategy = ref('reference_only'), creationMode = ref('multi_reference')
+const selected = ref(new Set()), selectedOrder = ref([]), assetScope = ref('all'), prompt = ref(''), model = ref('auto'), aspectRatio = ref('16:9'), duration = ref(5), resolution = ref('720p'), audioStrategy = ref('reference_only'), creationMode = ref('multi_reference')
 const promptDocument = ref({ text: '', refs: [] })
 const keepOriginalAudio = ref(false), audioVolume = ref(1), audioFadeSeconds = ref(0), creating = ref(false), certifyingId = ref(null), extractingPosition = ref(''), savedResultJobId = ref(null), requestPreviewOpen = ref(false), stagePhase = ref(''), fileInput = ref(null), uploadLimits = ref(null)
 const draggedShotId = ref(null), draggedAssetId = ref(null), loadingShot = ref(false)
@@ -128,6 +128,7 @@ const currentShot = computed(() => shots.value.find((shot) => shot.id === active
 const activeShotIndex = computed(() => Math.max(0, shots.value.findIndex((shot) => shot.id === activeShotId.value)))
 const chosenAssets = computed(() => selectedOrder.value.map((id) => assets.value.find((asset) => asset.id === id)).filter(Boolean))
 const chosenImageAssets = computed(() => chosenAssets.value.filter((asset) => asset.type === 'image'))
+const visibleAssets = computed(() => assets.value.filter((asset) => assetScope.value === 'all' || (assetScope.value === 'project' ? Number(asset.drama_id) === projectDramaId.value : !asset.drama_id)))
 const activeJob = computed(() => jobs.value.find((job) => job.id === currentShot.value?.omni_job_id) || null)
 const shotLimits = computed(() => uploadLimits.value?.shot || { total: 12, image: 9, video: 3, audio: 3 })
 const currentCapability = computed(() => capabilities.value.find((item) => item.model === model.value) || capabilities.value.find((item) => item.is_default) || capabilities.value[0] || null)
@@ -387,6 +388,7 @@ onMounted(() => {
 .generate-button.el-button--primary:hover{background:#5ba1d6!important;border-color:#5ba1d6!important;color:#fff!important}
 .generate-button.el-button--primary.is-disabled{background:#3d5262!important;border-color:#3d5262!important;color:#b8c1c7!important;box-shadow:none}
 .generation-actions{display:grid;grid-template-columns:1fr 1.6fr;gap:7px;margin-top:14px}.generation-actions .generate-button{margin-top:0}.request-preview-note{margin:0 0 10px;color:#9ca7bc;font-size:13px}.request-preview{max-height:440px;margin:0;overflow:auto;padding:12px;border:1px solid #39435a;border-radius:7px;background:#111621;color:#dce6ff;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.55}
+.asset-scope{width:92px;margin-right:4px}.material-card .asset-scope-label{position:absolute;left:3px;top:3px;padding:1px 3px;border-radius:3px;background:#111c;color:#dbe7f2;font-size:9px;font-style:normal;line-height:1.2}
 /* 缩放与窄屏：三栏按可用宽度收缩，避免中间预览被固定最小宽度挤出视口。 */
 .omni-page{min-width:0;min-height:100dvh}.topbar{min-width:0;gap:8px}.topbar-left,.topbar-actions{min-width:0}.topbar-left{overflow:hidden}.topbar-left>span{white-space:nowrap}.sequence-name{width:clamp(104px,14vw,180px);min-width:0}.workbench{width:100%;min-width:0;grid-template-columns:minmax(196px,260px) minmax(0,1fr) minmax(270px,320px)}.center-stage,.panel,.player-tools,.shot-tabs,.shot-script{min-width:0}.player-tools,.shot-tabs{overflow:hidden}.shot-tabs{gap:clamp(10px,2vw,26px);white-space:nowrap}.selected-assets article{grid-template-columns:auto minmax(0,1fr) minmax(92px,120px) auto}.selected-assets b{min-width:0}.material-pool{grid-template-columns:repeat(auto-fit,minmax(58px,1fr))}
 @media(max-width:1180px){.workbench{grid-template-columns:minmax(184px,22vw) minmax(0,1fr) minmax(244px,27vw)}.panel{padding:10px}.selected-assets article{grid-template-columns:auto minmax(0,1fr) 92px auto}.player-tools{padding:0 10px}.time-ruler{padding:0 10px}}
