@@ -12,12 +12,14 @@ function createDb() {
   db.exec(`
     CREATE TABLE assets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      drama_id INTEGER,
       name TEXT,
       type TEXT,
       url TEXT,
       local_path TEXT,
       metadata_json TEXT,
       tags_json TEXT,
+      checksum TEXT,
       seedance2_asset TEXT,
       requires_sd2_identity INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT,
@@ -53,6 +55,17 @@ test('asset update serializes metadata and tags before binding them to SQLite', 
   const row = db.prepare('SELECT metadata_json, tags_json FROM assets WHERE id = 1').get();
   assert.equal(row.metadata_json, '{"source":"frame-extraction","position":"first"}');
   assert.equal(row.tags_json, '["reference","continuity"]');
+});
+
+test('asset checksum lookup deduplicates only within the same asset scope', () => {
+  const db = createDb();
+  db.prepare('UPDATE assets SET checksum = ? WHERE id = 1').run('same-content');
+  db.prepare('INSERT INTO assets (drama_id, name, type, checksum, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(8, 'project-copy.png', 'image', 'same-content', new Date().toISOString());
+
+  assert.equal(assetService.findByChecksum(db, 'same-content', null).id, 1);
+  assert.equal(assetService.findByChecksum(db, 'same-content', 8).id, 2);
+  assert.equal(assetService.findByChecksum(db, 'unknown', null), null);
 });
 
 test('omni video rejects material counts above the per-shot media limits', () => {
