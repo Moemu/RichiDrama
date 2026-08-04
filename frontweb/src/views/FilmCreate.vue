@@ -4708,7 +4708,13 @@ async function loadDrama() {
     const list = d.episodes || []
     // 优先保持当前选中的集（按 id 在最新列表中查找），避免 AI 生成角色等操作后误切到其他集
     const currentId = selectedEpisodeId.value
-    let ep = currentId != null ? list.find((e) => Number(e.id) === Number(currentId)) : null
+    // 兼容分享链接中的 episode=集数（例如 episode=4）和旧链接中的 episode_id。
+    // 之前只按数据库 id 匹配，集数 4 的真实 id 不等于 4 时会静默回退到第 1 集，
+    // 造成用户误以为第 4 集的分镜视频没有渲染。
+    let ep = currentId != null
+      ? (list.find((e) => Number(e.id) === Number(currentId))
+        || list.find((e) => Number(e.episode_number) === Number(currentId)))
+      : null
     if (!ep) {
       const wantNum = savedCurrentEpisodeNumber.value
       ep = list.find((e) => Number(e.episode_number) === Number(wantNum)) || list[0] || null
