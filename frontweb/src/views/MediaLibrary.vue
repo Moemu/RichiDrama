@@ -125,6 +125,7 @@
           autoplay
         />
         <audio v-else-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" controls />
+        <AudioWaveform v-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" />
         <img v-else-if="previewItem" :src="itemUrl(previewItem)" class="preview-image" />
       </div>
       <div class="preview-meta">
@@ -148,6 +149,7 @@ import {
 import { omniVideoAPI } from '@/api/omniVideo'
 import { useRouter } from 'vue-router'
 import request from '@/utils/request'
+import AudioWaveform from '@/components/AudioWaveform.vue'
 
 const loading = ref(false)
 const uploading = ref(false)
