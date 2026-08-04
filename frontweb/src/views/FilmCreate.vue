@@ -11630,5 +11630,27 @@ html.light .frame-layout-anchor {
 .workflow-next-action{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:12px 0 22px;padding:14px 16px;border:1px solid #ded8ce;border-radius:10px;background:#f9f5ee;color:#665b4e;font-size:13px}.merge-readiness{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 14px;padding:11px 13px;border:1px solid #ead6b1;border-radius:8px;background:#fff7e8;color:#89622c;font-size:13px}.merge-readiness.ready{border-color:#c9dfca;background:#f0f8ef;color:#426c46}.merge-readiness b{color:inherit}@media(max-width:680px){.workflow-next-action{align-items:stretch;flex-direction:column}.workflow-next-action .el-button{width:100%}}
 .storyboard-workspace{display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr);align-items:start;gap:16px}.storyboard-workspace .storyboard-reference-panel{position:sticky;top:16px;margin:0;max-height:calc(100dvh - 32px);overflow:auto}.storyboard-workspace .storyboard-editor-panel{margin:0;min-width:0}.sb-ctrl-bar{cursor:grab}.sb-ctrl-bar:active{cursor:grabbing}.sb-ctrl-bar--dragging{opacity:.45}.sb-ctrl-bar--dragover{box-shadow:inset 0 3px 0 #7c6248!important;background:#f4eee4!important}@media(max-width:1100px){.storyboard-workspace{grid-template-columns:230px minmax(0,1fr)}}@media(max-width:820px){.storyboard-workspace{display:flex;flex-direction:column}.storyboard-workspace .storyboard-reference-panel{position:static;width:100%;max-height:none}.storyboard-workspace .storyboard-editor-panel{width:100%}}
 
+/* Workflow and resource-center are used inside the primary storyboard flow.
+   They must inherit the global workbench palette instead of their old warm light skin. */
+.workflow-shell,.resource-center,.storyboard-reference-panel{background:var(--bg-surface)!important;border-color:var(--border-color)!important;box-shadow:var(--shadow-sm)}
+.workflow-head h2,.resource-center-group>header b,.resource-media-library b{color:var(--text-primary)}
+.workflow-head p,.resource-center-empty,.resource-media-library header small{color:var(--text-muted)}
+.workflow-kicker{color:var(--text-faint)}
+.workflow-episode,.resource-center-group>header span,.resource-media-library>header>span{background:var(--bg-hover);color:var(--text-regular)}
+.workflow-step{border-color:var(--border-color);background:var(--bg-raised);color:var(--text-muted)}
+.workflow-step span{background:var(--bg-hover);color:var(--text-regular)}
+.workflow-step:hover{border-color:var(--border-strong);color:var(--text-primary)}
+.workflow-step.active{border-color:var(--accent);background:var(--accent);color:var(--accent-contrast)}
+.workflow-step.active span{background:var(--bg-surface);color:var(--text-primary)}
+.workflow-step.complete:not(.active) span{background:var(--bg-active);color:var(--text-primary)}
+.resource-center-group,.resource-media-library{border-color:var(--border-subtle);background:var(--bg-raised)}
+.resource-center-item,.resource-media-card{background:var(--bg-surface);border-color:var(--border-subtle)}
+.resource-center-placeholder,.resource-media-card img,.resource-media-card>span{background:var(--bg-hover);color:var(--text-muted)}
+.resource-center-item b{color:var(--text-regular)}
+.resource-center-item small,.resource-media-card small{color:var(--text-muted)}
+.workflow-next-action{border-color:var(--border-color);background:var(--bg-raised);color:var(--text-regular)}
+.merge-readiness,.merge-readiness.ready{border-color:var(--border-color);background:var(--bg-hover);color:var(--text-regular)}
+.sb-ctrl-bar--dragover{box-shadow:inset 0 3px 0 var(--accent)!important;background:var(--bg-hover)!important}
+
 /* 项目主工作流与 AI 工具箱采用同一套深色单色基线，旧页面不再混入浅色卡片。 */
 </style>

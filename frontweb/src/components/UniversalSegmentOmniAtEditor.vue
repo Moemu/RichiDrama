@@ -753,4 +753,15 @@ html.light .omni-at-menu-at {
 html.light .omni-at-menu-at-sub {
   color: #64748b;
 }
+
+/* This overlay is teleported outside the page shell, so make its palette
+   explicit rather than relying on a page-local light/dark branch. */
+.omni-at-menu { background: var(--bg-elevated); border-color: var(--border-color); box-shadow: var(--shadow-md); }
+.omni-at-menu-empty,.omni-at-menu-thumb-ph,.omni-at-menu-at-sub { color: var(--text-muted); }
+.omni-at-menu-item { color: var(--text-primary); }
+.omni-at-menu-item:hover { background: var(--bg-hover); }
+.omni-at-menu-thumb-wrap { background: var(--bg-raised); border-color: var(--border-subtle); }
+.omni-at-menu-tag,.omni-at-menu-tag--scene,.omni-at-menu-tag--character,.omni-at-menu-tag--prop,.omni-at-menu-tag--asset { background: var(--bg-hover); color: var(--text-regular); }
+.omni-at-menu-name { color: var(--text-regular); }
+.omni-at-menu-at { color: var(--text-primary); }
 </style>

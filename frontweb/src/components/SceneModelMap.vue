@@ -407,12 +407,12 @@ onMounted(() => {
 }
 
 .scene-key {
-  background: #f5f7fa;
+  background: var(--bg-raised);
   padding: 2px 8px;
   border-radius: 4px;
   font-family: 'Courier New', monospace;
   font-size: 13px;
-  color: #409eff;
+  color: var(--text-primary);
   width: fit-content;
 }
 
@@ -422,12 +422,12 @@ onMounted(() => {
 }
 
 .model-override {
-  background: #e6f7ff;
+  background: var(--bg-hover);
   padding: 2px 8px;
   border-radius: 4px;
   font-family: 'Courier New', monospace;
   font-size: 13px;
-  color: #096dd9;
+  color: var(--text-regular);
 }
 
 .text-muted {
