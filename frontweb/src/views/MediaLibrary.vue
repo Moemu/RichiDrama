@@ -135,6 +135,16 @@
         <div class="meta-row"><span>创建时间：</span>{{ previewItem?.created_at }}</div>
         <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔，例如：人物, 夜景" @change="saveTags" /></div>
         <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人／需要身份一致性</el-checkbox><el-button v-if="previewItem?.requires_sd2_identity" text size="small" :loading="certifyingId === previewItem?.id" @click="certify(previewItem)">{{ sd2Status(previewItem) === 'active' ? '认证可用' : '认证 / 刷新' }}</el-button></div>
+        <section v-if="previewItem" class="asset-lineage">
+          <div class="asset-lineage-title"><span>版本与来源</span><el-button text size="small" :loading="lineageLoading" @click="loadLineage(previewItem.id)">刷新</el-button></div>
+          <div v-if="lineageLoading" class="asset-lineage-empty">正在加载素材谱系…</div>
+          <template v-else>
+            <div v-if="lineage?.ancestors?.length" class="asset-lineage-list"><button v-for="item in lineage.ancestors" :key="`parent-${item.id}`" type="button" @click="openLineageItem(item)">上游 · {{ item.name || `#${item.id}` }}<small v-if="item.deleted_at"> 已删除</small></button></div>
+            <div class="asset-lineage-current">当前 · {{ lineage?.current?.name || previewItem.name }}</div>
+            <div v-if="lineage?.descendants?.length" class="asset-lineage-list"><button v-for="item in lineage.descendants" :key="`child-${item.id}`" type="button" @click="openLineageItem(item)">派生 · {{ item.name || `#${item.id}` }}<small v-if="item.deleted_at"> 已删除</small></button></div>
+            <div v-if="!lineage?.ancestors?.length && !lineage?.descendants?.length" class="asset-lineage-empty">这是根素材，还没有裁切或关键帧等派生版本。</div>
+          </template>
+        </section>
       </div>
     </el-dialog>
   </div>
@@ -168,6 +178,7 @@ const previewItem = ref(null)
 const certifyingId = ref(null)
 const editableTags = ref('')
 const trimStart = ref(0), trimEnd = ref(5), trimming = ref(false)
+const lineage = ref(null), lineageLoading = ref(false)
 const uploadInput = ref(null)
 const router = useRouter()
 let keywordTimer = null
@@ -262,11 +273,28 @@ function createWithSelected() {
   router.push({ path: '/free-create', query: ids.length ? { assets: ids.join(',') } : {} })
 }
 
-function openPreview(item) {
+async function openPreview(item) {
   previewItem.value = item
   editableTags.value = Array.isArray(item.tags) ? item.tags.join(', ') : ''
   trimStart.value = 0; trimEnd.value = Number(item.duration) || 5
   showPreview.value = true
+  await loadLineage(item.id)
+}
+
+async function loadLineage(id) {
+  if (!id) return
+  lineageLoading.value = true
+  try { lineage.value = await omniVideoAPI.assetLineage(id) } catch (_) { lineage.value = null } finally { lineageLoading.value = false }
+}
+
+function openLineageItem(item) {
+  if (!item || item.deleted_at) return
+  const visible = mediaItems.value.find((entry) => entry.id === item.id)
+  if (visible) return openPreview(visible)
+  previewItem.value = normalizeItem(item)
+  editableTags.value = Array.isArray(item.tags) ? item.tags.join(', ') : ''
+  trimStart.value = 0; trimEnd.value = Number(item.duration) || 5
+  loadLineage(item.id)
 }
 
 async function trimVideo() {
@@ -574,5 +602,11 @@ onMounted(loadMedia)
   font-weight: 500;
   color: #374151;
 }
+.asset-lineage { margin-top:14px; padding-top:12px; border-top:1px solid #e5e7eb; }
+.asset-lineage-title { display:flex; align-items:center; justify-content:space-between; font-size:13px; font-weight:600; color:#374151; }
+.asset-lineage-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+.asset-lineage-list button,.asset-lineage-current { border:1px solid #d1d5db; border-radius:5px; padding:4px 7px; background:#f9fafb; color:#4b5563; font-size:12px; }
+.asset-lineage-list button { cursor:pointer; }.asset-lineage-list button:hover { border-color:#409eff; color:#2563eb; }
+.asset-lineage-list small { color:#9ca3af; }.asset-lineage-current { margin-top:7px; border-color:#93c5fd; background:#eff6ff; color:#1d4ed8; }.asset-lineage-empty { margin-top:7px; color:#9ca3af; font-size:12px; }
 .media-library-page{background:#f5f5f5!important;color:#262626!important}.page-header,.filter-bar,.media-card,.upload-limits,.batch-bar{background:#fff!important;border-color:#e5e5e5!important;box-shadow:none!important}.media-card:hover,.media-card.selected{background:#fafafa!important;border-color:#171717!important;box-shadow:inset 2px 0 0 #171717!important}.media-library-page :deep(.el-button--primary){--el-button-bg-color:#171717!important;--el-button-border-color:#171717!important;--el-button-text-color:#fff!important;--el-button-hover-bg-color:#404040!important;--el-button-hover-border-color:#404040!important}.type-filter :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner){background:#171717!important;border-color:#171717!important;color:#fff!important;box-shadow:none!important}
 </style>

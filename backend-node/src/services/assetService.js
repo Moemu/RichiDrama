@@ -54,12 +54,43 @@ function rowToItem(r) {
     video_gen_id: r.video_gen_id,
     created_at: r.created_at,
     updated_at: r.updated_at,
+    deleted_at: r.deleted_at || null,
   };
 }
 
 function getById(db, id) {
   const r = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   return r ? rowToItem(r) : null;
+}
+
+function getLineage(db, id) {
+  const current = db.prepare('SELECT * FROM assets WHERE id = ?').get(Number(id));
+  if (!current) return null;
+  const visited = new Set([Number(current.id)]);
+  const ancestors = [];
+  let parentId = current.parent_asset_id;
+  while (parentId && !visited.has(Number(parentId)) && ancestors.length < 20) {
+    const parent = db.prepare('SELECT * FROM assets WHERE id = ?').get(Number(parentId));
+    if (!parent) break;
+    visited.add(Number(parent.id));
+    ancestors.unshift(rowToItem(parent));
+    parentId = parent.parent_asset_id;
+  }
+
+  const descendants = [];
+  const queue = [Number(current.id)];
+  while (queue.length && descendants.length < 100) {
+    const sourceId = queue.shift();
+    const children = db.prepare('SELECT * FROM assets WHERE parent_asset_id = ? ORDER BY created_at ASC, id ASC').all(sourceId);
+    for (const child of children) {
+      if (visited.has(Number(child.id))) continue;
+      visited.add(Number(child.id));
+      descendants.push(rowToItem(child));
+      queue.push(Number(child.id));
+      if (descendants.length >= 100) break;
+    }
+  }
+  return { current: rowToItem(current), ancestors, descendants };
 }
 
 function findByChecksum(db, checksum, dramaId = null) {
@@ -157,6 +188,7 @@ function importFromVideo(db, log, videoGenId) {
 module.exports = {
   list,
   getById,
+  getLineage,
   findByChecksum,
   create,
   update,

@@ -22,7 +22,9 @@ function createDb() {
       tags_json TEXT,
       checksum TEXT,
       seedance2_asset TEXT,
+      parent_asset_id INTEGER,
       requires_sd2_identity INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT,
       updated_at TEXT,
       deleted_at TEXT
     );
@@ -67,6 +69,16 @@ test('asset checksum lookup deduplicates only within the same asset scope', () =
   assert.equal(assetService.findByChecksum(db, 'same-content', null).id, 1);
   assert.equal(assetService.findByChecksum(db, 'same-content', 8).id, 2);
   assert.equal(assetService.findByChecksum(db, 'unknown', null), null);
+});
+
+test('asset lineage retains ancestors and derived versions, including soft-deleted entries', () => {
+  const db = createDb();
+  db.prepare('INSERT INTO assets (name, type, parent_asset_id, updated_at) VALUES (?, ?, ?, ?)').run('trim.mp4', 'video', 1, '2026-01-01T00:00:01.000Z');
+  db.prepare('INSERT INTO assets (name, type, parent_asset_id, deleted_at, updated_at) VALUES (?, ?, ?, ?, ?)').run('keyframe.jpg', 'image', 2, '2026-01-01T00:00:02.000Z', '2026-01-01T00:00:02.000Z');
+
+  const lineage = assetService.getLineage(db, 2);
+  assert.deepEqual(lineage.ancestors.map((item) => item.name), ['portrait.png']);
+  assert.deepEqual(lineage.descendants.map((item) => item.name), ['keyframe.jpg']);
 });
 
 test('omni video rejects material counts above the per-shot media limits', () => {

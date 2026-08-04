@@ -310,6 +310,7 @@ function setupRouter(cfg, db, log) {
   r.post('/assets/:id/trim', assets.trim);
   r.post('/assets/:id/sd2-certify', assets.sd2Certify);
   r.post('/assets/:id/sd2-certify/refresh', assets.sd2CertifyRefresh);
+  r.get('/assets/:id/lineage', assets.lineage);
   r.get('/assets/:id', assets.get);
   r.put('/assets/:id', assets.update);
   r.delete('/assets/:id', assets.delete);

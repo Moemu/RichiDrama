@@ -32,6 +32,16 @@ function routes(db, log, cfg) {
         response.internalError(res, err.message);
       }
     },
+    lineage: (req, res) => {
+      try {
+        const lineage = assetService.getLineage(db, req.params.id);
+        if (!lineage) return response.notFound(res, '璧勬簮涓嶅瓨鍦?);
+        response.success(res, lineage);
+      } catch (err) {
+        log.error('assets lineage', { error: err.message });
+        response.internalError(res, err.message);
+      }
+    },
     update: (req, res) => {
       try {
         const item = assetService.update(db, log, req.params.id, req.body || {});
