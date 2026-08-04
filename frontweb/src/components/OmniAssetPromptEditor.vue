@@ -9,6 +9,7 @@
       @input="onInput"
       @dragover.prevent="onDragOver"
       @dragleave="onDragLeave"
+      @drop.prevent.stop="onDrop"
     />
     <div v-if="dragging" class="drop-hint">松开以插入该素材 @引用</div>
     <div v-if="showPicker" class="asset-picker">
