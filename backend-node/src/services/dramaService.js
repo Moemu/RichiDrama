@@ -644,6 +644,7 @@ function saveCharacters(db, log, dramaId, req) {
     const ins = db.prepare('INSERT OR IGNORE INTO episode_characters (episode_id, character_id) VALUES (?, ?)');
     for (const cid of characterIds) ins.run(req.episode_id, cid);
   }
+  require('./assetMappingService').syncEntities(db, log, 'character', characterIds);
   db.prepare('UPDATE dramas SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), did);
   log.info('Characters saved', { drama_id: dramaId, count: chars.length });
   return true;

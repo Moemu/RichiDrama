@@ -45,7 +45,9 @@ function create(db, log, req) {
     now
   );
   log.info('Prop created', { prop_id: info.lastInsertRowid });
-  return getById(db, info.lastInsertRowid);
+  const prop = getById(db, info.lastInsertRowid);
+  require('./assetMappingService').syncEntities(db, log, 'prop', [prop.id]);
+  return prop;
 }
 
 function getById(db, id) {
@@ -89,6 +91,7 @@ function update(db, log, id, updates) {
   }
   params.push(new Date().toISOString(), id);
   db.prepare('UPDATE props SET ' + set.join(', ') + ', updated_at = ? WHERE id = ?').run(...params);
+  require('./assetMappingService').syncEntities(db, log, 'prop', [id]);
   log.info('Prop updated', { prop_id: id });
   return getById(db, id);
 }

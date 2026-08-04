@@ -8,7 +8,7 @@ const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'imag
 // 单张图片上限。修改时请同步：
 //   - 前端 frontweb/src/constants/uploadLimits.js (MAX_IMAGE_SIZE_MB)
 //   - nginx deploy/nginx-drama-richbest.conf (client_max_body_size，需 ≥ 此值 + multipart 开销)
-const MAX_IMAGE_SIZE_MB = 16;
+const MAX_IMAGE_SIZE_MB = 30;
 const maxSize = MAX_IMAGE_SIZE_MB * 1024 * 1024;
 // 兼容旧导出名（routes/index.js 等可能引用 MAX_IMAGE_SIZE_MB）
 const MAX_SIZE_MB = MAX_IMAGE_SIZE_MB;

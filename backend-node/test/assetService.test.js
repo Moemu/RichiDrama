@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 
 const assetService = require('../src/services/assetService');
-const { validateShotAssetLimits, safeSnapshot } = require('../src/services/omniVideoService');
+const { validateShotAssetLimits, validateCreationMode, safeSnapshot } = require('../src/services/omniVideoService');
 const { normalizeSupports } = require('../src/services/videoModelCapabilities');
 
 const log = { info() {}, warn() {}, error() {} };
@@ -94,6 +94,12 @@ test('omni video rejects material counts above the per-shot media limits', () =>
     () => validateShotAssetLimits(Array.from({ length: 4 }, () => ({ type: 'audio' }))),
     /per-shot limit of 3/
   );
+});
+
+test('first-last-frame mode accepts a first frame without an optional tail frame', () => {
+  const capability = { supports: { first_last_frame: true } };
+  assert.doesNotThrow(() => validateCreationMode('first_last_frame', [{ type: 'image', usage: 'first_frame' }], capability));
+  assert.throws(() => validateCreationMode('first_last_frame', [{ type: 'image', usage: 'first_frame' }, { type: 'video', usage: 'last_frame' }], capability), /尾帧可选/);
 });
 
 test('omni job API snapshot masks local and remote source URLs', () => {

@@ -6,6 +6,10 @@ function routes(db, log, cfg) {
     list: (req, res) => {
       try {
         const query = { ...req.query };
+        // Backfill legacy projects on their first material-pool read. New
+        // entity writes are synchronized in their services, so this only
+        // migrates existing character/scene/prop images once.
+        if (query.drama_id) require('../services/assetMappingService').syncDramaAssets(db, log, query.drama_id);
         const { items, total, page, pageSize } = assetService.list(db, query);
         response.successWithPagination(res, items, total, page, pageSize);
       } catch (err) {

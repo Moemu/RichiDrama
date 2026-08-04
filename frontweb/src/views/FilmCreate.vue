@@ -6304,7 +6304,7 @@ async function loadUniversalLibraryAssets() {
   // 与媒体素材库页 /media-library、全能创作台 /free-create 的加载口径保持一致。
   try {
     const [result, limits] = await Promise.all([
-      omniVideoAPI.assets({ page_size: 200 }),
+      loadAllUniversalLibraryAssets(),
       omniVideoAPI.uploadLimits().catch(() => null),
     ])
     universalLibraryAssets.value = (result?.items || []).filter((asset) => ['image', 'video', 'audio'].includes(asset.type) && asset.processing_status !== 'processing')
@@ -6312,6 +6312,21 @@ async function loadUniversalLibraryAssets() {
   } catch (_) {
     universalLibraryAssets.value = []
   }
+}
+
+async function loadAllUniversalLibraryAssets() {
+  const items = []
+  let page = 1
+  let total = Infinity
+  while (items.length < total) {
+    const result = await omniVideoAPI.assets({ page, page_size: 100 })
+    const batch = result?.items || []
+    items.push(...batch)
+    total = Number(result?.pagination?.total ?? items.length)
+    if (!batch.length || page >= Number(result?.pagination?.total_pages || 1)) break
+    page += 1
+  }
+  return { items }
 }
 
 async function setSbOmniFrameAsset(sb, position, assetId) {
@@ -10588,6 +10603,7 @@ html.light .sb-ctrl-config-btn.el-button:hover {
   border-color: rgba(214,107,107,.5) !important;
   background: rgba(214,107,107,.08) !important;
 }
+
 .sb-panel {
   flex: 1;
   min-width: 0;

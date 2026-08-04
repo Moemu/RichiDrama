@@ -11,7 +11,7 @@ const LIMITS = { image: 30, video: 50, audio: 15 };
 const EXTENSIONS = {
   image: ['.jpg', '.jpeg', '.png', '.gif', '.webp'],
   video: ['.mp4', '.webm', '.mov', '.m4v'],
-  audio: ['.mp3', '.wav', '.m4a', '.ogg', '.webm'],
+  audio: ['.mp3', '.wav', '.m4a', '.ogg'],
 };
 
 function readableUploadName(value) {
@@ -34,7 +34,7 @@ function detectType(file) {
   const mime = String(file.mimetype || '').toLowerCase();
   const ext = path.extname(file.originalname || '').toLowerCase();
   if (mime.startsWith('image/') || EXTENSIONS.image.includes(ext)) return 'image';
-  if (mime.startsWith('video/') || EXTENSIONS.video.includes(ext) && ext !== '.webm') return 'video';
+  if (mime.startsWith('video/') || EXTENSIONS.video.includes(ext)) return 'video';
   if (mime.startsWith('audio/') || EXTENSIONS.audio.includes(ext)) return 'audio';
   return null;
 }

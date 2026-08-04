@@ -95,7 +95,7 @@ function validateCreationMode(mode, assets, capability) {
   if (mode !== 'first_last_frame') return;
   const first = assets.filter((asset) => asset.usage === 'first_frame');
   const last = assets.filter((asset) => asset.usage === 'last_frame');
-  if (first.length !== 1 || last.length !== 1 || first[0].type !== 'image' || last[0].type !== 'image') throw new Error('首尾帧生视频必须且只能选择一张图片首帧和一张图片尾帧');
+  if (first.length !== 1 || last.length > 1 || first[0].type !== 'image' || (last.length === 1 && last[0].type !== 'image')) throw new Error('首尾帧生视频必须且只能选择一张图片首帧，尾帧可选（最多一张）');
   if (assets.some((asset) => !['first_frame', 'last_frame'].includes(asset.usage))) throw new Error('首尾帧生视频仅支持首帧、尾帧和提示词');
   if (!capability.supports?.first_last_frame) throw new Error(`模型“${capability.model}”不支持首尾帧生视频，请切换模型或创作模式`);
 }
