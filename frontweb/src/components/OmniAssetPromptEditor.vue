@@ -92,10 +92,10 @@ function insertAsset(asset, opts = {}) {
   if (!props.chosenIds.has(asset.id)) emit('pick', asset)
   const token = `@${asset.alias || asset.name} `
   if (opts.append) {
-    // 拖入：追加到末尾
-    text.value = (text.value.replace(/\s*$/, '') + (text.value ? ' ' : '') + token).replace(/@\S+\s*$/, (m) => m)
-    // 若末尾正好有未完成的 @xxx，替换它
-    text.value = text.value.replace(/@[^\s@]*$/, token.trim()) + ' '
+    // 拖入：若光标前已有未完成的 @，优先替换；否则追加到末尾。
+    const current = text.value.replace(/\s*$/, '')
+    const replaced = current.replace(/@[^\s@]*$/, token.trim())
+    text.value = (replaced === current ? `${current}${current ? ' ' : ''}${token.trim()}` : replaced) + ' '
   } else {
     // @ 选择器：替换未完成的 @xxx
     text.value = text.value.replace(/@[^\s@]*$/, token)
@@ -113,10 +113,10 @@ function onDragLeave(e) { /* 由 counter 控制，见 onDrop/ondragenter */ }
 function onDrop(e) {
   dragging.value = false
   dragCounter = 0
-  const raw = e.dataTransfer?.getData('text/plain') || e.dataTransfer?.getData('application/json')
+  const raw = e.dataTransfer?.getData('application/x-localminidrama-asset') || e.dataTransfer?.getData('application/json')
   let asset = null
   try { asset = raw ? JSON.parse(raw) : null } catch (_) { asset = null }
-  // 父组件可能直接传 asset 对象（通过 dataTransfer）
+  // 兼容旧版素材卡的自定义 MIME 键。
   if (!asset && e.dataTransfer) {
     const a = e.dataTransfer.getData('asset')
     if (a) { try { asset = JSON.parse(a) } catch (_) {} }
