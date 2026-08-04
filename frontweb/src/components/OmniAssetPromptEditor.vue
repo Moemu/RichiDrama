@@ -27,7 +27,7 @@
   </div>
 </template>
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 const props = defineProps({
   modelValue: { type: String, default: '' },
   /** 全部可选素材（不限于已选）；插入未选中的时会 emit pick 自动加入创作 */
@@ -43,6 +43,8 @@ const dragging = ref(false)
 let dragCounter = 0
 
 watch(() => props.modelValue, (value) => { if (value !== text.value) text.value = value; syncReferences(value || '') })
+watch(() => props.assets, () => syncReferences(text.value), { deep: false })
+onMounted(() => syncReferences(text.value))
 
 // @ 选择器：显示全部素材，已选的标记 _chosen
 const pickerAssets = computed(() =>
@@ -93,9 +95,12 @@ function insertAsset(asset, opts = {}) {
   if (!props.chosenIds.has(asset.id)) emit('pick', asset)
   const token = `@${asset.alias || asset.name} `
   if (opts.append) {
-    // 拖入：若光标前已有未完成的 @，优先替换；否则追加到末尾。
+    // 拖入：只替换未完成的 @；完整的 @素材名 必须保留并继续追加。
     const current = text.value.replace(/\s*$/, '')
-    const replaced = current.replace(/@[^\s@]*$/, token.trim())
+    const tail = current.match(/@([^\s@]*)$/)
+    const tailAlias = tail?.[1] || ''
+    const isCompleteReference = !!tailAlias && (props.assets || []).some((item) => (item.alias || item.name) === tailAlias)
+    const replaced = tail && !isCompleteReference ? current.slice(0, -tail[0].length) + token.trim() : current
     text.value = (replaced === current ? `${current}${current ? ' ' : ''}${token.trim()}` : replaced) + ' '
   } else {
     // @ 选择器：替换未完成的 @xxx
