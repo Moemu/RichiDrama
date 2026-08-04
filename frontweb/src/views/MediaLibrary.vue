@@ -92,7 +92,8 @@
 
       <div v-if="!loading && mediaItems.length === 0" class="empty-media">
         <el-icon class="empty-icon"><Files /></el-icon>
-        <p>暂无素材，点击上传按钮添加</p>
+        <div><b>素材库还是空的</b><p>上传图片、视频或音频后，可在自由创作和项目分镜中直接复用。</p></div>
+        <div class="empty-media-actions"><el-button type="primary" @click="triggerUpload"><el-icon><Upload /></el-icon>上传首个素材</el-button><el-button @click="$router.push('/free-create')">先去自由创作</el-button></div>
       </div>
     </div>
 
@@ -553,10 +554,18 @@ onMounted(loadMedia)
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 300px;
-  color: #9ca3af;
-  gap: 12px;
+  min-height: 300px;
+  padding: 28px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  gap: 14px;
+  text-align: center;
 }
+.empty-media b { color: var(--text-primary); font-size: 15px; }
+.empty-media p { margin: 7px 0 0; font-size: 13px; line-height: 1.6; }
+.empty-media-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
 .empty-icon {
   font-size: 48px;
