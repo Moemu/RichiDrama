@@ -1,5 +1,6 @@
 <template>
   <div class="media-library-page">
+    <div v-if="canConcatSelected" class="concat-bar"><el-button @click="concatSelectedVideos">拼接选中的视频</el-button></div>
     <div class="page-header">
       <div class="header-left">
         <el-button text @click="$router.push('/')">
@@ -151,7 +152,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, Upload, Search, Loading, CircleCheck,
@@ -173,6 +174,8 @@ const page = ref(1)
 const pageSize = ref(30)
 const total = ref(0)
 const selectedIds = reactive(new Set())
+const selectedMedia = computed(() => mediaItems.value.filter((item) => selectedIds.has(item.id)))
+const canConcatSelected = computed(() => selectedMedia.value.length >= 2 && selectedMedia.value.every((item) => item.type === 'video'))
 const showPreview = ref(false)
 const previewItem = ref(null)
 const certifyingId = ref(null)
@@ -307,6 +310,19 @@ async function trimVideo() {
   } catch (error) { ElMessage.error(error.message || '裁切视频失败') } finally { trimming.value = false }
 }
 
+async function concatSelectedVideos() {
+  if (!canConcatSelected.value) return
+  try {
+    await ElMessageBox.confirm(`将按当前素材排序拼接 ${selectedMedia.value.length} 段视频，并保留原素材。`, '拼接视频', { type: 'info' })
+    const item = await omniVideoAPI.concatAssets(selectedMedia.value.map((entry) => entry.id))
+    mediaItems.value.unshift(normalizeItem(item)); total.value++
+    selectedIds.clear()
+    ElMessage.success('已拼接为新的派生视频素材')
+  } catch (error) {
+    if (error !== 'cancel' && error?.message !== 'cancel') ElMessage.error(error.message || '拼接视频失败')
+  }
+}
+
 async function saveTags() {
   if (!previewItem.value) return
   const tags = [...new Set(editableTags.value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean))].slice(0, 12)
@@ -416,6 +432,7 @@ onMounted(loadMedia)
   flex-wrap: wrap;
 }
 .upload-limits { margin: -8px 0 14px; color: #6b7280; font-size: 12px; }
+.concat-bar { position:fixed; right:24px; bottom:24px; z-index:20; }
 
 .search-input {
   width: 240px;

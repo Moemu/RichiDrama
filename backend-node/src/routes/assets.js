@@ -93,6 +93,19 @@ function routes(db, log, cfg) {
         response.badRequest(res, err.message);
       }
     },
+    concat: (req, res) => {
+      try {
+        const ids = Array.isArray(req.body?.asset_ids) ? req.body.asset_ids.map(Number).filter((id) => id > 0) : [];
+        if (ids.length < 2) return response.badRequest(res, '请至少选择两段视频进行拼接');
+        const sources = ids.map((id) => assetService.getById(db, id));
+        if (sources.some((item) => !item)) return response.badRequest(res, '所选素材中包含不存在或已删除的项目');
+        const item = require('../services/omniMediaProcessService').concatVideoAssets(db, log, sources);
+        response.created(res, item);
+      } catch (err) {
+        log.error('assets concat', { error: err.message });
+        response.badRequest(res, err.message);
+      }
+    },
     sd2Certify: async (req, res) => {
       try { const out = await require('../services/assetSd2Service').certify(db, log, cfg, req.params.id); if (!out.ok) return response.badRequest(res, out.error); response.success(res, out); }
       catch (err) { log.error('assets sd2-certify', { error: err.message }); response.internalError(res, err.message); }

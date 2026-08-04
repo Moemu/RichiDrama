@@ -21,6 +21,7 @@ export const omniVideoAPI = {
   updateAsset(id, body) { return request.put(`/assets/${id}`, body) },
   assetLineage(id) { return request.get(`/assets/${id}/lineage`) },
   trimAsset(id, body) { return request.post(`/assets/${id}/trim`, body) },
+  concatAssets(assetIds) { return request.post('/assets/concat', { asset_ids: assetIds }) },
   uploadLimits() { return request.get('/upload-limits') },
   certifyAsset(id) { return request.post(`/assets/${id}/sd2-certify`) },
   refreshAssetCertification(id) { return request.post(`/assets/${id}/sd2-certify/refresh`) },
