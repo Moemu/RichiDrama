@@ -34,4 +34,33 @@ function extract(db, cfg, log, jobId, position) {
   return asset;
 }
 
-module.exports = { extract };
+function extractVideoGeneration(db, cfg, log, videoGenerationId, position) {
+  if (!['first', 'last'].includes(position)) throw new Error('position must be first or last');
+  const row = db.prepare('SELECT id, local_path, duration, status FROM video_generations WHERE id = ?').get(Number(videoGenerationId));
+  if (!row?.local_path || row.status !== 'completed') throw new Error('Only completed videos saved locally can have frames extracted');
+  const root = storageRoot(cfg);
+  const input = path.join(root, row.local_path.replace(/\//g, path.sep));
+  if (!fs.existsSync(input)) throw new Error('The completed video file no longer exists locally');
+  const dir = path.join(root, 'frames');
+  fs.mkdirSync(dir, { recursive: true });
+  const name = `video_${row.id}_${position}_${randomUUID()}.jpg`;
+  const output = path.join(dir, name);
+  let seconds = 0;
+  if (position === 'last') {
+    const probe = spawnSync(getFfprobePath(), ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nokey=1:noprint_wrappers=1', input], { encoding: 'utf8' });
+    seconds = Math.max(0, (Number(probe.stdout) || Number(row.duration) || 0) - 0.08);
+  }
+  const args = ['-y'];
+  if (seconds > 0) args.push('-ss', String(seconds));
+  args.push('-i', input, '-frames:v', '1', '-q:v', '2', output);
+  const result = spawnSync(getFfmpegPath(), args, { encoding: 'utf8', maxBuffer: 1024 * 1024 });
+  if (result.status !== 0 || !fs.existsSync(output)) throw new Error('Failed to extract video frame');
+  const localPath = `frames/${name}`;
+  return assetService.create(db, log, {
+    name: `video ${row.id} ${position === 'first' ? 'first frame' : 'last frame'}`,
+    type: 'image', url: `/static/${localPath}`, local_path: localPath, source_type: 'video_frame', mime_type: 'image/jpeg', file_size: fs.statSync(output).size,
+    metadata: { source_video_generation_id: row.id, frame_position: position, timestamp_seconds: seconds },
+  });
+}
+
+module.exports = { extract, extractVideoGeneration };

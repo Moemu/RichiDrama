@@ -22,6 +22,7 @@ module.exports = function routes(db, log, cfg) { return {
   },
   retry(req, res) { try { response.created(res, omniVideoService.retry(db, log, req.params.id)); } catch (err) { response.badRequest(res, err.message); } },
   extractFrame(req, res) { try { response.created(res, require('../services/omniFrameService').extract(db, cfg, log, req.params.id, req.body?.position)); } catch (err) { response.badRequest(res, err.message); } },
+  extractVideoFrame(req, res) { try { response.created(res, require('../services/omniFrameService').extractVideoGeneration(db, cfg, log, req.params.id, req.body?.position)); } catch (err) { response.badRequest(res, err.message); } },
   get(req, res) { try { const job = omniVideoService.get(db, req.params.id); if (!job) return response.notFound(res, '全能视频任务不存在'); response.success(res, job); } catch (err) { response.internalError(res, err.message); } },
   capabilities(req, res) { response.success(res, capabilityService.list(db)); },
   listSequences(req, res) { try { response.success(res, sequenceService.list(db)); } catch (err) { response.internalError(res, err.message); } },

@@ -246,6 +246,7 @@ function setupRouter(cfg, db, log) {
   r.post('/omni-video-jobs/polish-prompt', omniVideo.polishPrompt);
   r.post('/omni-video-jobs/:id/retry', omniVideo.retry);
   r.post('/omni-video-jobs/:id/extract-frame', omniVideo.extractFrame);
+  r.post('/video-generations/:id/extract-frame', omniVideo.extractVideoFrame);
   r.get('/omni-video-jobs/:id', omniVideo.get);
 
   // ---------- episodes ----------
