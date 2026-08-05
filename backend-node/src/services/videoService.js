@@ -38,7 +38,16 @@ function list(db, query) {
     sql += ' AND drama_id = ?';
     params.push(query.drama_id);
   }
-  if (query.storyboard_id) {
+  // Re-generating an episode soft-deletes its former storyboard rows and
+  // creates replacements with new IDs. Match the previous rows by episode +
+  // storyboard number as well, so their completed videos remain visible in
+  // the replacement shot's history.
+  if (query.episode_id && query.storyboard_number != null) {
+    sql += ` AND storyboard_id IN (
+      SELECT id FROM storyboards WHERE episode_id = ? AND storyboard_number = ?
+    )`;
+    params.push(query.episode_id, query.storyboard_number);
+  } else if (query.storyboard_id) {
     sql += ' AND storyboard_id = ?';
     params.push(query.storyboard_id);
   }

@@ -33,12 +33,12 @@ function create(db, log, body) {
   const videoGenerationId = Number(result.lastInsertRowid);
   const postProcess = { keep_original_audio: !!body.keep_original_audio, audio_volume: clamp(body.audio_volume, 0, 2, 1), audio_fade_seconds: clamp(body.audio_fade_seconds, 0, 10, 0) };
   const requestSnapshot = { prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
-  const job = db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+  const job = db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, storyboard_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(videoGenerationId, modelPrompt, body.negative_prompt || null, body.model || 'auto', capability.model,
       JSON.stringify({ supports: capability.supports, limits: capability.limits, reason: capability.reason }), JSON.stringify(requestSnapshot),
       JSON.stringify(routed.filter((asset) => asset.strategy !== 'native').map(publicAsset)), JSON.stringify(buildSummary(routed)), body.audio_strategy || 'reference_only',
-      body.sequence_id ? Number(body.sequence_id) : null, body.shot_id ? Number(body.shot_id) : null, now, now);
+      body.sequence_id ? Number(body.sequence_id) : null, body.shot_id ? Number(body.shot_id) : null, body.storyboard_id ? Number(body.storyboard_id) : null, now, now);
   const jobId = Number(job.lastInsertRowid);
   const insertAsset = db.prepare(`INSERT INTO omni_video_job_assets (omni_job_id, asset_id, ordinal, alias, media_type, role, usage, send_to_model, derived_asset_id, snapshot_json, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -219,15 +219,28 @@ function get(db, id) {
   const assets = db.prepare('SELECT * FROM omni_video_job_assets WHERE omni_job_id = ? ORDER BY ordinal').all(job.id);
   return { ...job, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), generation };
 }
-function list(db) {
-  return db.prepare(`SELECT j.*, v.status, v.video_url, v.local_path, v.error_msg
-    FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id
-    ORDER BY j.id DESC LIMIT 100`).all().map((item) => ({ ...item, request_snapshot: safeSnapshot(parse(item.request_snapshot_json)) }));
+function list(db, query = {}) {
+  const storyboardId = Number(query.storyboard_id);
+  const shotId = Number(query.shot_id);
+  let sql = `SELECT j.*, v.status, v.video_url, v.local_path, v.error_msg
+    FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id`;
+  const params = [];
+  if (Number.isInteger(storyboardId) && storyboardId > 0) {
+    // Older jobs predate omni_video_jobs.storyboard_id; recover them through
+    // their video generation so existing project history remains visible.
+    sql += ' WHERE j.storyboard_id = ? OR (j.storyboard_id IS NULL AND v.storyboard_id = ?)';
+    params.push(storyboardId, storyboardId);
+  } else if (Number.isInteger(shotId) && shotId > 0) {
+    sql += ' WHERE j.shot_id = ?';
+    params.push(shotId);
+  }
+  sql += ' ORDER BY j.id DESC LIMIT 100';
+  return db.prepare(sql).all(...params).map((item) => ({ ...item, request_snapshot: safeSnapshot(parse(item.request_snapshot_json)) }));
 }
 function retry(db, log, id) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
   if (!job) throw new Error('全能视频任务不存在');
-  const generation = db.prepare('SELECT status FROM video_generations WHERE id = ?').get(job.video_generation_id);
+  const generation = db.prepare('SELECT status, drama_id, storyboard_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
   if (!generation || generation.status !== 'retryable') throw new Error('只有重启中断且可重试的任务可以重试');
   const snapshot = parse(job.request_snapshot_json);
   if (!snapshot?.prompt || !Array.isArray(snapshot.assets) || !snapshot.assets.length) throw new Error('该任务没有可重试的完整请求快照');
@@ -236,6 +249,8 @@ function retry(db, log, id) {
     aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
     creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
     audio_volume: snapshot.post_process?.audio_volume, audio_fade_seconds: snapshot.post_process?.audio_fade_seconds,
+    drama_id: generation.drama_id || undefined,
+    sequence_id: job.sequence_id || undefined, shot_id: job.shot_id || undefined, storyboard_id: job.storyboard_id || generation.storyboard_id || undefined,
     assets: snapshot.assets.map((asset) => ({
       asset_id: asset.asset_id, alias: asset.alias, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, send_to_model: asset.send_to_model,
       // 外部引用条目（场景/角色/道具等非素材库图片）依赖 url / local_path / type 重建

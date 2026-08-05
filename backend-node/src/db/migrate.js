@@ -448,6 +448,13 @@ function ensureAllColumns(database) {
       send_to_model INTEGER NOT NULL DEFAULT 0, derived_asset_id INTEGER, provider_asset_ref TEXT,
       snapshot_json TEXT, created_at TEXT NOT NULL
     )`);
+    // Project storyboards are not sequence shots. Keep their job association so
+    // generation history survives a page refresh and can be queried per shot.
+    ensureColumns(database, 'omni_video_jobs', [
+      { name: 'sequence_id', type: 'INTEGER' },
+      { name: 'shot_id', type: 'INTEGER' },
+      { name: 'storyboard_id', type: 'INTEGER' },
+    ]);
   } catch (_) {}
 
   // --- character_libraries ---
