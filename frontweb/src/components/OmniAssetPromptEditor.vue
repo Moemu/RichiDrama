@@ -7,6 +7,9 @@
       :rows="7"
       placeholder="描述你要生成的视频；输入 @ 引用素材，或直接把左侧素材拖入此处"
       @input="onInput"
+      @keyup="onCursorChange"
+      @click="onCursorChange"
+      @focus="onCursorChange"
       @dragover.prevent="onDragOver"
       @dragleave="onDragLeave"
       @drop.prevent.stop="onDrop"
@@ -47,8 +50,10 @@ watch(() => props.assets, () => syncReferences(text.value), { deep: false })
 onMounted(() => syncReferences(text.value))
 
 // @ 选择器：显示全部素材，已选的标记 _chosen
+const pickerQuery = computed(() => (activeMentionRange()?.query || '').toLocaleLowerCase())
 const pickerAssets = computed(() =>
   (props.assets || [])
+    .filter((a) => !pickerQuery.value || String(a.alias || a.name || '').toLocaleLowerCase().includes(pickerQuery.value))
     .map((a) => ({ ...a, _chosen: props.chosenIds.has(a.id) }))
     .slice(0, 30)
 )
@@ -67,8 +72,26 @@ const unresolved = computed(() => referencesFromText(text.value).flatMap((alias)
 function onInput(value) {
   emit('update:modelValue', value)
   syncReferences(value)
-  showPicker.value = /@[^\s@]*$/.test(value)
+  nextTick(onCursorChange)
 }
+
+/**
+ * `@` may be inserted anywhere in a sentence. Element Plus keeps the native
+ * textarea under its component instance, so use its selection range instead
+ * of treating only a trailing @ as an active mention.
+ */
+function activeMentionRange(value = text.value) {
+  const textarea = inputRef.value?.textarea
+  const cursor = Number.isInteger(textarea?.selectionStart) ? textarea.selectionStart : String(value || '').length
+  const source = String(value || '')
+  const before = source.slice(0, cursor)
+  const at = before.lastIndexOf('@')
+  if (at < 0 || /\s/.test(before.slice(at + 1))) return null
+  // Only replace what was typed before the caret. Text on the right may be
+  // ordinary sentence content, not part of the asset alias.
+  return { start: at, end: cursor, query: source.slice(at + 1, cursor) }
+}
+function onCursorChange() { showPicker.value = !!activeMentionRange() }
 
 function referencesFromText(value) {
   return [...new Set([...String(value || '').matchAll(/@([^\s@]+)/g)].map((match) => match[1]))]
@@ -93,19 +116,18 @@ function removeReference(asset) {
 function insertAsset(asset, opts = {}) {
   // 未选中的先加入创作
   if (!props.chosenIds.has(asset.id)) emit('pick', asset)
-  const token = `@${asset.alias || asset.name} `
-  if (opts.append) {
-    // 拖入：只替换未完成的 @；完整的 @素材名 必须保留并继续追加。
-    const current = text.value.replace(/\s*$/, '')
-    const tail = current.match(/@([^\s@]*)$/)
-    const tailAlias = tail?.[1] || ''
-    const isCompleteReference = !!tailAlias && (props.assets || []).some((item) => (item.alias || item.name) === tailAlias)
-    const replaced = tail && !isCompleteReference ? current.slice(0, -tail[0].length) + token.trim() : current
-    text.value = (replaced === current ? `${current}${current ? ' ' : ''}${token.trim()}` : replaced) + ' '
-  } else {
-    // @ 选择器：替换未完成的 @xxx
-    text.value = text.value.replace(/@[^\s@]*$/, token)
-  }
+  const token = `@${asset.alias || asset.name}`
+  const mention = activeMentionRange()
+  if (mention) {
+    // Replace exactly the @ token around the caret, including one in the
+    // middle of a sentence, then leave the cursor immediately after it.
+    const suffix = text.value.slice(mention.end)
+    const separator = suffix && !/^\s/.test(suffix) ? ' ' : ''
+    text.value = `${text.value.slice(0, mention.start)}${token}${separator}${suffix}`
+    nextTick(() => inputRef.value?.textarea?.setSelectionRange(mention.start + token.length + separator.length, mention.start + token.length + separator.length))
+  } else if (opts.append) {
+    text.value = `${text.value}${text.value && !/\s$/.test(text.value) ? ' ' : ''}${token} `
+  } else return
   emit('update:modelValue', text.value)
   syncReferences(text.value)
   showPicker.value = false
@@ -139,9 +161,11 @@ function onDrop(e) {
   color: var(--text-primary); font-size: 13px; font-weight: 600; pointer-events: none; z-index: 4;
 }
 .asset-picker {
-  position: absolute; z-index: 5; left: 0; right: 0; top: 100%;
-  max-height: 200px; overflow: auto; background: var(--bg-surface);
-  border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: none; padding: 4px;
+  /* The editor sits in a scrollable side panel. Keeping the picker in normal
+     flow prevents overflow:auto from clipping the @ menu at the panel edge. */
+  position: relative; z-index: 30; margin-top: 5px;
+  max-height: 200px; overflow: auto; background: var(--bg-surface, #202020);
+  border: 1px solid var(--border-color, #555); border-radius: var(--radius-md, 6px); box-shadow: 0 8px 20px #0005; padding: 4px;
 }
 .asset-picker button {
   border: 0; background: transparent; width: 100%; text-align: left;

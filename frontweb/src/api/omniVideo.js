@@ -14,7 +14,7 @@ export const omniVideoAPI = {
   polishPrompt(body) { return request.post('/omni-video-jobs/polish-prompt', body) },
   retry(id) { return request.post(`/omni-video-jobs/${id}/retry`) },
   extractFrame(id, position) { return request.post(`/omni-video-jobs/${id}/extract-frame`, { position }) },
-  list() { return request.get('/omni-video-jobs') },
+  list(params) { return request.get('/omni-video-jobs', { params: params || {} }) },
   get(id) { return request.get(`/omni-video-jobs/${id}`) },
   assets(params) { return request.get('/assets', { params: params || {} }) },
   /** 创建素材记录（如把场景/角色/道具图导入素材池统一管理） */

@@ -3,7 +3,7 @@ const omniVideoService = require('../services/omniVideoService');
 const capabilityService = require('../services/videoModelCapabilities');
 const sequenceService = require('../services/omniSequenceService');
 module.exports = function routes(db, log, cfg) { return {
-  list(req, res) { try { response.success(res, omniVideoService.list(db)); } catch (err) { response.internalError(res, err.message); } },
+  list(req, res) { try { response.success(res, omniVideoService.list(db, req.query || {})); } catch (err) { response.internalError(res, err.message); } },
   create(req, res) { try { response.created(res, omniVideoService.create(db, log, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
   polishPrompt: async (req, res) => {
     try {
