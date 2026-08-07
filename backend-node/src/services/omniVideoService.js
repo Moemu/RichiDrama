@@ -17,7 +17,7 @@ function create(db, log, body) {
   const creationMode = body.creation_mode || body.settings?.creation_mode || 'multi_reference';
   validateCreationMode(creationMode, assets, capability);
   const routed = routeAssets(expandVideoReferences(db, log, assets, capability.supports), capability.supports, body.audio_strategy);
-  enforceSd2IdentityAssets(routed, capability);
+  enforceSd2IdentityAssets(routed, capability, log);
   const modelPrompt = bindPromptReferences(prompt, body.prompt_document, routed);
   const now = new Date().toISOString();
   const task = taskService.createTask(db, log, 'video_generation', '');
@@ -139,7 +139,12 @@ function routeAssets(assets, supports, audioStrategy) {
     if (asset.type === 'image') { send = send && imageCount < maxImages; if (send) imageCount++; if (!send) strategy = 'not_supported'; }
     if (asset.type === 'audio') { send = send && !!supports.audio_reference && audioStrategy !== 'post_mix'; strategy = send ? 'native' : 'post_mix'; }
     if (asset.type === 'video') { send = send && !!supports.video_reference; strategy = send ? 'native' : 'keyframe_or_post'; }
-    const certified = asset.seedance2_asset && String(asset.seedance2_asset.status || '').toLowerCase() === 'active' && String(asset.seedance2_asset.asset_url || '').startsWith('asset://');
+    const certified = asset.type === 'image'
+      && asset.requires_sd2_identity
+      && asset.usage === 'identity'
+      && asset.seedance2_asset
+      && String(asset.seedance2_asset.status || '').toLowerCase() === 'active'
+      && String(asset.seedance2_asset.asset_url || '').startsWith('asset://');
     return { ...asset, model_url: certified ? asset.seedance2_asset.asset_url : (asset.local_path || asset.url), send_to_model: send, strategy };
   });
 }
@@ -181,12 +186,19 @@ function expandVideoReferences(db, log, assets, supports) {
 }
 
 function isSeedanceCapability(capability) { return /seedance|doubao-seedance/i.test(String(capability?.model || '')) && /volc|volces/i.test(String(capability?.provider || '')); }
-function enforceSd2IdentityAssets(assets, capability) {
+function enforceSd2IdentityAssets(assets, capability, log) {
   if (!isSeedanceCapability(capability)) return;
   const undeclared = assets.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && asset.send_to_model && !asset.requires_sd2_identity);
   if (undeclared.length) throw new Error(`人物一致性素材请先勾选“含真人／需要身份一致性”：${undeclared.map((asset) => asset.alias).join('、')}`);
-  const invalid = assets.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && asset.send_to_model && !(asset.seedance2_asset && String(asset.seedance2_asset.status || '').toLowerCase() === 'active' && String(asset.seedance2_asset.asset_url || '').startsWith('asset://')));
-  if (invalid.length) throw new Error(`人物一致性素材必须先完成 SD2 认证：${invalid.map((asset) => asset.alias).join('、')}`);
+  // identity 素材若 asset 失效（如更换 ARK/项目/组后旧 asset 在火山侧已不存在），
+  // 不再硬阻断生成，而是降级为原始图片 URL，避免 400 “asset not found”。
+  // routeAssets 已对 requires_sd2_identity/usage 做收紧，这里清掉失效认证让其回退原图。
+  const invalid = assets.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && asset.send_to_model && asset.requires_sd2_identity && !(asset.seedance2_asset && String(asset.seedance2_asset.status || '').toLowerCase() === 'active' && String(asset.seedance2_asset.asset_url || '').startsWith('asset://')));
+  if (invalid.length) {
+    invalid.forEach((asset) => { asset.seedance2_asset = null; });
+    const names = invalid.map((asset) => asset.alias).join('、');
+    if (log && typeof log.warn === 'function') log.warn('[SD2] 以下真人素材认证已失效，本次回退原始图（建议在素材库重新认证）：' + names);
+  }
 }
 // Keep retry snapshots server-side and complete, but never return raw file paths,
 // signed URLs, or provider asset URLs through the job APIs.
