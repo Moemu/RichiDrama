@@ -141,7 +141,6 @@ function routeAssets(assets, supports, audioStrategy) {
     if (asset.type === 'video') { send = send && !!supports.video_reference; strategy = send ? 'native' : 'keyframe_or_post'; }
     const certified = asset.type === 'image'
       && asset.requires_sd2_identity
-      && asset.usage === 'identity'
       && asset.seedance2_asset
       && String(asset.seedance2_asset.status || '').toLowerCase() === 'active'
       && String(asset.seedance2_asset.asset_url || '').startsWith('asset://');
@@ -190,10 +189,10 @@ function enforceSd2IdentityAssets(assets, capability, log) {
   if (!isSeedanceCapability(capability)) return;
   const undeclared = assets.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && asset.send_to_model && !asset.requires_sd2_identity);
   if (undeclared.length) throw new Error(`人物一致性素材请先勾选“含真人／需要身份一致性”：${undeclared.map((asset) => asset.alias).join('、')}`);
-  // identity 素材若 asset 失效（如更换 ARK/项目/组后旧 asset 在火山侧已不存在），
+  // 勾选了真人身份一致性的图片若 asset 失效（如更换 ARK/项目/组后旧 asset 在火山侧已不存在），
   // 不再硬阻断生成，而是降级为原始图片 URL，避免 400 “asset not found”。
-  // routeAssets 已对 requires_sd2_identity/usage 做收紧，这里清掉失效认证让其回退原图。
-  const invalid = assets.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && asset.send_to_model && asset.requires_sd2_identity && !(asset.seedance2_asset && String(asset.seedance2_asset.status || '').toLowerCase() === 'active' && String(asset.seedance2_asset.asset_url || '').startsWith('asset://')));
+  // 注意：requires_sd2_identity 与 usage 独立判断（真人图可能被编排为 reference/primary 等任意用途）。
+  const invalid = assets.filter((asset) => asset.type === 'image' && asset.send_to_model && asset.requires_sd2_identity && !(asset.seedance2_asset && String(asset.seedance2_asset.status || '').toLowerCase() === 'active' && String(asset.seedance2_asset.asset_url || '').startsWith('asset://')));
   if (invalid.length) {
     invalid.forEach((asset) => { asset.seedance2_asset = null; });
     const names = invalid.map((asset) => asset.alias).join('、');
