@@ -82,11 +82,26 @@ function ensureBootstrapAdmin(db, log) {
   return user;
 }
 
-function sessionCookieOptions() {
+function requestUsesHttps(req) {
+  if (req?.secure || req?.protocol === 'https') return true;
+  const forwarded = String(req?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  return forwarded === 'https';
+}
+
+function sessionCookieOptions(req) {
   const sameSite = String(process.env.AUTH_COOKIE_SAME_SITE || 'lax').toLowerCase();
   const normalizedSameSite = ['lax', 'strict', 'none'].includes(sameSite) ? sameSite : 'lax';
-  // Modern browsers reject SameSite=None cookies unless they are Secure.
-  const secure = process.env.AUTH_COOKIE_SECURE === 'true' || isProduction || normalizedSameSite === 'none';
+  // Browser media tags cannot attach the SPA's Authorization header. They use
+  // this HttpOnly cookie instead, so a direct HTTP deployment must not receive
+  // a Secure-only cookie that the browser will silently discard.
+  const configuredSecure = process.env.AUTH_COOKIE_SECURE;
+  const secure = normalizedSameSite === 'none'
+    ? true
+    : configuredSecure === 'true'
+      ? true
+      : configuredSecure === 'false'
+        ? false
+        : requestUsesHttps(req);
   return {
     httpOnly: true,
     secure,
