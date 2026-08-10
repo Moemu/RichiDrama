@@ -7,6 +7,12 @@ const request = axios.create({
   headers: { 'Content-Type': 'application/json' }
 })
 
+request.interceptors.request.use((config) => {
+  const token = localStorage.getItem('lmd_auth_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
 const ERROR_MESSAGES = {
   401: '登录已过期，请重新登录', 403: '没有权限执行此操作', 404: '请求的资源不存在',
   413: '上传文件过大，请压缩后重试', 429: '请求过于频繁，请稍后再试',
@@ -28,6 +34,11 @@ request.interceptors.response.use(
   (error) => {
     // 提取后端实际错误信息（优先 API 返回的 message，而非 axios 通用 "status code 500"）
     const status = error.response?.status
+    if (status === 401 && !error.config?.url?.includes('/auth/login')) {
+      localStorage.removeItem('lmd_auth_token')
+      localStorage.removeItem('lmd_auth_user')
+      if (window.location.pathname !== '/login') window.location.assign('/login')
+    }
     // 413 通常由 nginx 反代层返回（HTML 响应体，非 JSON），需单独给出可读提示
     const backendMsg = error.response?.data?.error?.message
     const msg = status >= 500 ? (ERROR_MESSAGES[status] || ERROR_MESSAGES[500]) : (backendMsg || ERROR_MESSAGES[status] || error.message || '网络错误')

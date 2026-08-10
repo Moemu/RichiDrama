@@ -16,6 +16,9 @@ function parseEnvValue(v) {
   if (v === 'true') return true;
   if (v === 'false') return false;
   if (/^-?\d+$/.test(v)) return Number(v);
+  if ((v.startsWith('[') && v.endsWith(']')) || (v.startsWith('{') && v.endsWith('}'))) {
+    try { return JSON.parse(v); } catch (_) { /* keep the original string */ }
+  }
   return v;
 }
 

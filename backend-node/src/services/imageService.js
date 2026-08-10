@@ -3,6 +3,10 @@ const assetSd2Service = require('./assetSd2Service');
 function list(db, query) {
   let sql = 'FROM image_generations WHERE deleted_at IS NULL';
   const params = [];
+  if (query.owner_user_id) {
+    sql += ' AND owner_user_id = ?';
+    params.push(Number(query.owner_user_id));
+  }
   if (query.drama_id) {
     sql += ' AND drama_id = ?';
     params.push(query.drama_id);
@@ -533,7 +537,7 @@ function mergePromptWithStyle(prompt, style) {
 
 function create(db, log, req) {
   const now = new Date().toISOString();
-  const task = taskService.createTask(db, log, 'image_generation', String(req.drama_id || ''));
+  const task = taskService.createTask(db, log, 'image_generation', String(req.drama_id || ''), req.owner_user_id || null);
   const taskId = task.id;
   const frameType = req.frame_type ?? null;
   const sceneId = req.scene_id != null ? Number(req.scene_id) : null;
@@ -556,12 +560,14 @@ function create(db, log, req) {
   }
   const useFirstFrameLayoutLock = resolveUseFirstFrameLayoutLock(req, frameType);
   const info = db.prepare(
-    `INSERT INTO image_generations (storyboard_id, drama_id, scene_id, provider, prompt, negative_prompt, model, frame_type, reference_images, use_first_frame_layout_lock, size, status, task_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+    `INSERT INTO image_generations (storyboard_id, drama_id, scene_id, owner_user_id, billing_authorization_id, provider, prompt, negative_prompt, model, frame_type, reference_images, use_first_frame_layout_lock, size, status, task_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
   ).run(
     req.storyboard_id ?? null,
     Number(req.drama_id) || 0,
     sceneId,
+    req.owner_user_id || null,
+    req.billing_authorization_id || null,
     req.provider || 'openai',
     mergedPrompt,
     req.negative_prompt ?? null,
@@ -580,6 +586,21 @@ function create(db, log, req) {
     processImageGeneration(db, log, imageGenId);
   });
   return { id: imageGenId, task_id: taskId, status: 'pending', ...getById(db, imageGenId) };
+}
+
+function settleImageBilling(db, log, row) {
+  if (!row?.billing_authorization_id || !row.owner_user_id) return;
+  try {
+    require('./billingService').settleAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, {
+      usage: { image: 1 }, provider_request_id: `image-generation:${row.id}`,
+    });
+  } catch (err) { log.error('[billing] image settlement failed', { image_gen_id: row.id, error: err.message }); }
+}
+
+function voidImageBilling(db, log, row, reason) {
+  if (!row?.billing_authorization_id || !row.owner_user_id) return;
+  try { require('./billingService').voidAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, reason); }
+  catch (err) { log.error('[billing] image authorization release failed', { image_gen_id: row.id, error: err.message }); }
 }
 
 /**
@@ -1396,6 +1417,7 @@ async function processImageGeneration(db, log, imageGenId) {
       if (row.storyboard_id != null) {
         try { db.prepare('UPDATE storyboards SET error_msg = ?, updated_at = ? WHERE id = ?').run(result.error, now2, row.storyboard_id); } catch (_) {}
       }
+      voidImageBilling(db, log, row, result.error);
       return;
     }
 
@@ -1448,6 +1470,7 @@ async function processImageGeneration(db, log, imageGenId) {
     db.prepare(
       'UPDATE image_generations SET status = ?, image_url = ?, local_path = ?, completed_at = ?, updated_at = ? WHERE id = ?'
     ).run('completed', persistedImageUrl, localPath, now2, now2, imageGenId);
+    settleImageBilling(db, log, row);
     if (row.task_id) {
       taskService.updateTaskResult(db, row.task_id, {
         image_generation_id: imageGenId,
@@ -1554,6 +1577,7 @@ async function processImageGeneration(db, log, imageGenId) {
     if (row.storyboard_id != null) {
       try { db.prepare('UPDATE storyboards SET error_msg = ?, updated_at = ? WHERE id = ?').run(err.message, now2, row.storyboard_id); } catch (_) {}
     }
+    voidImageBilling(db, log, row, err.message);
   }
 }
 

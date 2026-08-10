@@ -42,8 +42,8 @@ function createDrama(db, log, req) {
   }
   const metadataStr = Object.keys(meta).length ? JSON.stringify(meta) : null;
   const stmt = db.prepare(`
-    INSERT INTO dramas (title, description, genre, style, metadata, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)
+    INSERT INTO dramas (title, description, genre, style, metadata, status, owner_user_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)
   `);
   const info = stmt.run(
     req.title || '',
@@ -51,6 +51,7 @@ function createDrama(db, log, req) {
     req.genre || null,
     req.style || 'realistic',
     metadataStr,
+    req.owner_user_id || null,
     now,
     now
   );
@@ -167,6 +168,10 @@ function getDrama(db, dramaId, baseUrl) {
 function listDramas(db, query) {
   let sql = 'FROM dramas WHERE deleted_at IS NULL';
   const params = [];
+  if (query.owner_user_id) {
+    sql += ' AND owner_user_id = ?';
+    params.push(Number(query.owner_user_id));
+  }
   if (query.status) {
     sql += ' AND status = ?';
     params.push(query.status);

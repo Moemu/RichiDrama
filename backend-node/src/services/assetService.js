@@ -1,6 +1,10 @@
 function list(db, query) {
   let sql = 'FROM assets WHERE deleted_at IS NULL';
   const params = [];
+  if (query.owner_user_id) {
+    sql += ' AND (owner_user_id = ? OR drama_id IN (SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL))';
+    params.push(Number(query.owner_user_id), Number(query.owner_user_id));
+  }
   if (query.drama_id) {
     sql += ' AND drama_id = ?';
     params.push(query.drama_id);
@@ -105,10 +109,11 @@ function findByChecksum(db, checksum, dramaId = null) {
 function create(db, log, req) {
   const now = new Date().toISOString();
   const info = db.prepare(
-    `INSERT INTO assets (drama_id, name, type, category, url, local_path, file_size, mime_type, width, height, duration, image_gen_id, video_gen_id, source_type, parent_asset_id, thumbnail_local_path, metadata_json, tags_json, checksum, processing_status, error_msg, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO assets (drama_id, owner_user_id, name, type, category, url, local_path, file_size, mime_type, width, height, duration, image_gen_id, video_gen_id, source_type, parent_asset_id, thumbnail_local_path, metadata_json, tags_json, checksum, processing_status, error_msg, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     req.drama_id ?? null,
+    req.owner_user_id ?? null,
     req.name || '未命名',
     req.type || 'image',
     req.category ?? null,
@@ -164,6 +169,7 @@ function importFromImage(db, log, imageGenId) {
   if (!img) return null;
   return create(db, log, {
     drama_id: img.drama_id,
+    owner_user_id: img.owner_user_id,
     name: `图片 ${imageGenId}`,
     type: 'image',
     url: img.image_url || '',
@@ -177,6 +183,7 @@ function importFromVideo(db, log, videoGenId) {
   if (!vid) return null;
   return create(db, log, {
     drama_id: vid.drama_id,
+    owner_user_id: vid.owner_user_id,
     name: `视频 ${videoGenId}`,
     type: 'video',
     url: vid.video_url || '',

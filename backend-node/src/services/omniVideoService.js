@@ -5,12 +5,12 @@ const SHOT_ASSET_LIMITS = { total: 12, image: 9, video: 3, audio: 3 };
 
 const IMAGE_USAGES = new Set(['primary', 'identity', 'environment', 'style', 'prop', 'first_frame', 'last_frame', 'reference']);
 
-function create(db, log, body) {
+function create(db, log, body, billingUser) {
   const prompt = String(body.prompt || '').trim();
   if (!prompt) throw new Error('提示词不能为空');
   const input = Array.isArray(body.assets) ? body.assets : [];
   if (input.length > 12) throw new Error('一次创作最多使用 12 个素材');
-  const assets = prioritizePromptReferenceAssets(input.map((entry, ordinal) => resolveAsset(db, entry, ordinal)), body.prompt_document, prompt);
+  const assets = prioritizePromptReferenceAssets(input.map((entry, ordinal) => resolveAsset(db, entry, ordinal, body.owner_user_id)), body.prompt_document, prompt);
   validateShotAssetLimits(assets);
   const capability = capabilityService.resolve(db, body.model, assets);
   if (!capability.model) throw new Error('请先在 AI 配置中启用视频模型');
@@ -20,22 +20,44 @@ function create(db, log, body) {
   enforceSd2IdentityAssets(routed, capability, log);
   const modelPrompt = bindPromptReferences(prompt, body.prompt_document, routed);
   const now = new Date().toISOString();
-  const task = taskService.createTask(db, log, 'video_generation', '');
+  const billing = require('./billingService');
+  const payer = billingUser || { id: body.owner_user_id, role: 'admin' };
+  if (!payer?.id) throw new Error('缺少生成任务所属账号');
+  const aiConfigs = require('./aiConfigService');
+  const billingTarget = aiConfigs.resolveBillingTarget(db, 'video', capability.model, capability.config_id);
+  const config = aiConfigs.getConfig(db, capability.config_id);
+  let billingSettings = {}; try { billingSettings = JSON.parse(config?.settings || '{}'); } catch (_) {}
+  const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key);
+  const usage = {};
+  if (meters.includes('second')) usage.second = Number(body.duration) || 5;
+  if (meters.includes('request')) usage.request = 1;
+  if (meters.includes('input_token')) {
+    const cap = Number(billingSettings.billing_reserve_input_tokens);
+    if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('视频模型按 token 计费，需在 AI 配置 settings 中设置 billing_reserve_input_tokens 作为单次预授权上限');
+    usage.input_token = cap;
+  }
+  if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
+  const authorization = billing.createAuthorization(db, payer, {
+    idempotency_key: body.idempotency_key || `omni-video:${payer.id}:${Date.now()}:${Math.random()}`,
+    service_type: 'video', model: billingTarget.billing_key, usage,
+    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || null,
+  });
+  const task = taskService.createTask(db, log, 'video_generation', '', body.owner_user_id || payer.id);
   const imageUrls = routed.filter((asset) => asset.send_to_model && asset.type === 'image').map((asset) => asset.model_url || asset.local_path || asset.url).filter(Boolean);
   const first = routed.find((asset) => asset.usage === 'first_frame' && asset.send_to_model);
   const last = routed.find((asset) => asset.usage === 'last_frame' && asset.send_to_model);
-  const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, provider, prompt, model, duration, aspect_ratio, resolution, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, status, task_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)`)
-    .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null,
+  const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, status, task_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)`)
+    .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.owner_user_id || payer.id, authorization.authorization_id, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null,
       body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
       imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null,
       imageUrls.length ? JSON.stringify(imageUrls) : null, task.id, now, now);
   const videoGenerationId = Number(result.lastInsertRowid);
   const postProcess = { keep_original_audio: !!body.keep_original_audio, audio_volume: clamp(body.audio_volume, 0, 2, 1), audio_fade_seconds: clamp(body.audio_fade_seconds, 0, 10, 0) };
   const requestSnapshot = { prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
-  const job = db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, storyboard_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(videoGenerationId, modelPrompt, body.negative_prompt || null, body.model || 'auto', capability.model,
+  const job = db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, owner_user_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, storyboard_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(videoGenerationId, body.owner_user_id || payer.id, modelPrompt, body.negative_prompt || null, body.model || 'auto', capability.model,
       JSON.stringify({ supports: capability.supports, limits: capability.limits, reason: capability.reason }), JSON.stringify(requestSnapshot),
       JSON.stringify(routed.filter((asset) => asset.strategy !== 'native').map(publicAsset)), JSON.stringify(buildSummary(routed)), body.audio_strategy || 'reference_only',
       body.sequence_id ? Number(body.sequence_id) : null, body.shot_id ? Number(body.shot_id) : null, body.storyboard_id ? Number(body.storyboard_id) : null, now, now);
@@ -52,7 +74,7 @@ function create(db, log, body) {
   return { omni_job_id: jobId, video_generation_id: videoGenerationId, task_id: task.id, status: 'processing', resolved_model: capability.model, routing_summary: buildSummary(routed) };
 }
 
-function resolveAsset(db, input, ordinal) {
+function resolveAsset(db, input, ordinal, ownerUserId) {
   // 外部引用条目（场景/角色/道具等非素材库图片）：提供 url 或 local_path 即可，无需 assets 行
   const hasAssetId = input.asset_id != null && String(input.asset_id).trim() !== '';
   if (!hasAssetId && (input.url || input.local_path)) {
@@ -72,6 +94,10 @@ function resolveAsset(db, input, ordinal) {
   }
   const row = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(input.asset_id));
   if (!row) throw new Error(`素材 ${input.asset_id} 不存在或已删除`);
+  if (ownerUserId) {
+    const owner = db.prepare('SELECT COALESCE(a.owner_user_id, d.owner_user_id) owner_user_id FROM assets a LEFT JOIN dramas d ON d.id = a.drama_id WHERE a.id = ?').get(Number(input.asset_id));
+    if (!owner || Number(owner.owner_user_id) !== Number(ownerUserId)) throw new Error(`素材 ${input.asset_id} 不存在或无权访问`);
+  }
   if (row.processing_status && row.processing_status !== 'ready') throw new Error(`素材“${row.name || row.id}”尚未准备完成`);
   let seedance2_asset = null; try { seedance2_asset = row.seedance2_asset ? JSON.parse(row.seedance2_asset) : null; } catch (_) {}
   return { ...row, seedance2_asset, id: row.id, type: row.type, ordinal: Number(input.ordinal) || ordinal + 1, alias: String(input.alias || row.name || `素材${row.id}`).slice(0, 80), role: input.role || 'reference', usage: input.usage || 'reference', requested_send: input.send_to_model !== false };
@@ -236,19 +262,22 @@ function list(db, query = {}) {
   let sql = `SELECT j.*, v.status, v.video_url, v.local_path, v.error_msg
     FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id`;
   const params = [];
+  const filters = [];
+  if (query.owner_user_id) { filters.push('j.owner_user_id = ?'); params.push(Number(query.owner_user_id)); }
   if (Number.isInteger(storyboardId) && storyboardId > 0) {
     // Older jobs predate omni_video_jobs.storyboard_id; recover them through
     // their video generation so existing project history remains visible.
-    sql += ' WHERE j.storyboard_id = ? OR (j.storyboard_id IS NULL AND v.storyboard_id = ?)';
+    filters.push('(j.storyboard_id = ? OR (j.storyboard_id IS NULL AND v.storyboard_id = ?))');
     params.push(storyboardId, storyboardId);
   } else if (Number.isInteger(shotId) && shotId > 0) {
-    sql += ' WHERE j.shot_id = ?';
+    filters.push('j.shot_id = ?');
     params.push(shotId);
   }
+  if (filters.length) sql += ' WHERE ' + filters.join(' AND ');
   sql += ' ORDER BY j.id DESC LIMIT 100';
   return db.prepare(sql).all(...params).map((item) => ({ ...item, request_snapshot: safeSnapshot(parse(item.request_snapshot_json)) }));
 }
-function retry(db, log, id) {
+function retry(db, log, id, billingUser) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
   if (!job) throw new Error('全能视频任务不存在');
   const generation = db.prepare('SELECT status, drama_id, storyboard_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
@@ -267,7 +296,8 @@ function retry(db, log, id) {
       // 外部引用条目（场景/角色/道具等非素材库图片）依赖 url / local_path / type 重建
       url: asset.url || null, local_path: asset.local_path || null, type: asset.type || 'image',
     })),
-  });
+    owner_user_id: job.owner_user_id,
+  }, billingUser);
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }

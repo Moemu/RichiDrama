@@ -2,12 +2,20 @@
 
 function parse(raw, fallback) { try { return raw ? JSON.parse(raw) : fallback; } catch (_) { return fallback; } }
 function now() { return new Date().toISOString(); }
+// Some unit tests and pre-migration local databases use the original sequence
+// table. Production always has this column after migration 34.
+function hasOwnerColumn(db) {
+  return db.prepare("SELECT 1 FROM pragma_table_info('omni_video_sequences') WHERE name = 'owner_user_id'").get() != null;
+}
 
-function ensureDefault(db) {
-  let sequence = db.prepare("SELECT * FROM omni_video_sequences WHERE is_default = 1 AND deleted_at IS NULL ORDER BY id LIMIT 1").get();
+function ensureDefault(db, ownerUserId) {
+  const scoped = hasOwnerColumn(db);
+  let sequence = db.prepare(`SELECT * FROM omni_video_sequences WHERE is_default = 1${scoped ? ' AND owner_user_id = ?' : ''} AND deleted_at IS NULL ORDER BY id LIMIT 1`).get(...(scoped ? [ownerUserId] : []));
   if (!sequence) {
     const stamp = now();
-    const out = db.prepare("INSERT INTO omni_video_sequences (name, is_default, created_at, updated_at) VALUES ('自由创作', 1, ?, ?)").run(stamp, stamp);
+    const out = scoped
+      ? db.prepare("INSERT INTO omni_video_sequences (name, is_default, owner_user_id, created_at, updated_at) VALUES ('自由创作', 1, ?, ?, ?)").run(ownerUserId, stamp, stamp)
+      : db.prepare("INSERT INTO omni_video_sequences (name, is_default, created_at, updated_at) VALUES ('自由创作', 1, ?, ?)").run(stamp, stamp);
     sequence = db.prepare('SELECT * FROM omni_video_sequences WHERE id = ?').get(out.lastInsertRowid);
   }
   let count = db.prepare('SELECT COUNT(*) total FROM omni_video_sequence_shots WHERE sequence_id = ? AND deleted_at IS NULL').get(sequence.id).total;
@@ -37,15 +45,16 @@ function get(db, id) {
 
 function list(db, options = {}) {
   const deleted = options.deleted ? 'IS NOT NULL' : 'IS NULL';
+  const scoped = hasOwnerColumn(db) && options.owner_user_id;
   return db.prepare(`SELECT q.*, COUNT(s.id) shot_count,
       SUM(CASE WHEN v.status = 'completed' THEN 1 ELSE 0 END) completed_count
     FROM omni_video_sequences q
     LEFT JOIN omni_video_sequence_shots s ON s.sequence_id = q.id AND s.deleted_at IS NULL
     LEFT JOIN omni_video_jobs j ON j.id = s.omni_job_id
     LEFT JOIN video_generations v ON v.id = j.video_generation_id
-    WHERE q.deleted_at ${deleted}
+    WHERE q.deleted_at ${deleted}${scoped ? ' AND q.owner_user_id = ?' : ''}
     GROUP BY q.id
-    ORDER BY q.updated_at DESC, q.id DESC`).all().map((row) => ({
+    ORDER BY q.updated_at DESC, q.id DESC`).all(...(scoped ? [Number(options.owner_user_id)] : [])).map((row) => ({
       ...row,
       shot_count: Number(row.shot_count || 0),
       completed_count: Number(row.completed_count || 0),
@@ -55,7 +64,9 @@ function list(db, options = {}) {
 function createSequence(db, body = {}) {
   const stamp = now();
   const name = String(body.name || '').trim().slice(0, 100) || '未命名全能项目';
-  const out = db.prepare('INSERT INTO omni_video_sequences (name, is_default, created_at, updated_at) VALUES (?, 0, ?, ?)').run(name, stamp, stamp);
+  const out = hasOwnerColumn(db)
+    ? db.prepare('INSERT INTO omni_video_sequences (name, is_default, owner_user_id, created_at, updated_at) VALUES (?, 0, ?, ?, ?)').run(name, body.owner_user_id || null, stamp, stamp)
+    : db.prepare('INSERT INTO omni_video_sequences (name, is_default, created_at, updated_at) VALUES (?, 0, ?, ?)').run(name, stamp, stamp);
   createShot(db, out.lastInsertRowid, {});
   return get(db, out.lastInsertRowid);
 }

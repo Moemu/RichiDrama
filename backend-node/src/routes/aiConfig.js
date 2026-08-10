@@ -3,7 +3,9 @@ const response = require('../response');
 
 function list(db) {
   return (req, res) => {
-    const list = aiConfigService.listConfigs(db, req.query.service_type);
+    const list = req.auth?.role === 'admin'
+      ? aiConfigService.listConfigs(db, req.query.service_type)
+      : aiConfigService.listPublicConfigs(db, req.query.service_type);
     response.success(res, list);
   };
 }

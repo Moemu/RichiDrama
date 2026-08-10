@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Apply the persisted theme before Vite loads any module or route chunk.
+      // This prevents the browser's white canvas from showing during navigation.
+      (function () {
+        var theme = localStorage.getItem('lmd-theme') === 'light' ? 'light' : 'dark'
+        document.documentElement.classList.add(theme)
+        document.documentElement.style.backgroundColor = theme === 'light' ? '#f5f7fb' : '#10151d'
+      })()
+    </script>
     <title>本地短剧助手 - AI 短剧生成工具</title>
   </head>
   <body>

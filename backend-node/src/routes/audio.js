@@ -40,6 +40,8 @@ function routes(db, log, cfg) {
           text: ttsText,
           storyboard_id: storyboard_id || null,
           storage_base: getStoragePath(),
+          billing_actor: req.auth,
+          billing_reference: { type: 'storyboard_tts', id: storyboard_id || null },
         });
         if (storyboard_id && result.local_path) {
           const now = new Date().toISOString();
@@ -82,6 +84,8 @@ function routes(db, log, cfg) {
             text: row.dialogue,
             storyboard_id: row.id,
             storage_base: storagePath,
+            billing_actor: req.auth,
+            billing_reference: { type: 'storyboard_tts', id: row.id },
           });
           if (result.local_path) {
             const now = new Date().toISOString();

@@ -80,6 +80,7 @@
                 {{ row.default_model || (Array.isArray(row.model) && row.model[0]) || '—' }}
               </template>
             </el-table-column>
+            <el-table-column prop="billing_key" label="计费键" min-width="130" show-overflow-tooltip />
             <el-table-column prop="service_type" label="类型" width="148">
               <template #default="{ row }">
                 <span :class="['type-badge', 'type-' + row.service_type]">
@@ -854,6 +855,11 @@ input_reference = (图片文件，可选)</pre>
           </el-select>
           <p class="field-tip">该配置被选为「默认」时，生成故事/图片/视频将使用此处指定的模型。</p>
         </el-form-item>
+        <el-form-item>
+          <template #label><span class="form-label-tip">计费键</span></template>
+          <el-input v-model="form.billing_key" placeholder="可选；自定义 API 建议填写独立 SKU，如 custom-video-pro" />
+          <p class="field-tip">仅用于匹配价目表，不会发送给供应商。留空时沿用模型名；同名模型走不同渠道时必须填写不同计费键。</p>
+        </el-form-item>
         <el-form-item v-if="form.service_type === 'video'">
           <template #label><span class="form-label-tip">全能能力</span></template>
           <el-input v-model="form.video_capabilities" type="textarea" :rows="5" placeholder='可选 JSON，例如：{"supports":{"image_reference":{"max":9},"audio_reference":true,"video_reference":false},"limits":{"duration_seconds":{"min":4,"max":15}}}' />
@@ -1250,6 +1256,7 @@ const form = ref({
   query_endpoint: '',
   modelText: '',
   default_model: '',
+  billing_key: '',
   deepseek_thinking: 'disabled',
   deepseek_reasoning_effort: 'high',
   priority: 0,
@@ -1819,6 +1826,7 @@ function resetForm() {
     query_endpoint: '',
     modelText: '',
     default_model: '',
+    billing_key: '',
     deepseek_thinking: 'disabled',
     deepseek_reasoning_effort: 'high',
     priority: 0,
@@ -1886,6 +1894,7 @@ function openEdit(row) {
     query_endpoint: row.query_endpoint || '',
     modelText: modelList.join('\n'),
     default_model: defaultInList ? row.default_model : (modelList[0] || ''),
+    billing_key: row.billing_key || '',
     deepseek_thinking: deepseekSettings.thinking,
     deepseek_reasoning_effort: deepseekSettings.effort,
     priority: row.priority ?? 0,
@@ -1976,6 +1985,7 @@ async function submit() {
       query_endpoint: form.value.query_endpoint || '',
       model: modelList,
       default_model: defaultModel,
+      billing_key: form.value.billing_key || null,
       priority: form.value.priority,
       is_default: form.value.is_default,
       ...(settings !== undefined ? { settings } : {}),

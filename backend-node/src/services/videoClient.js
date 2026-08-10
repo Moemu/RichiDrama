@@ -5,6 +5,7 @@ const aiConfigService = require('./aiConfigService');
 let sharp; try { sharp = require('sharp'); } catch (_) { sharp = null; }
 const { uploadLocalImageToProxy, uploadToImageProxy } = require('./uploadService');
 const imageClient = require('./imageClient');
+const { postJSONWithTimeout } = require('./aiClient');
 const {
   clampToGeminiImageAspectRatio,
   clampToViduAspectRatio,
@@ -924,6 +925,35 @@ function getDefaultVideoConfig(db, preferredModel) {
 // ?????? API ????? /contents/generations/tasks?base ???????????????
 const VOLC_VIDEO_CREATE_PATH = '/contents/generations/tasks';
 const VOLC_VIDEO_QUERY_PATH = '/contents/generations/tasks';
+
+// Providers and gateways wrap completion usage differently.  Keep the raw
+// object intact for the billing normalizer, but record which documented or
+// observed envelope supplied it.  Never infer token counts from duration.
+function extractVideoProviderUsage(data) {
+  const candidates = [
+    ['usage', data?.usage],
+    ['data.usage', data?.data?.usage],
+    ['output.usage', data?.output?.usage],
+    ['data.output.usage', data?.data?.output?.usage],
+    ['result.usage', data?.result?.usage],
+    ['data.result.usage', data?.data?.result?.usage],
+    ['response.usage', data?.response?.usage],
+  ];
+  for (const [path, usage] of candidates) {
+    if (usage && typeof usage === 'object' && !Array.isArray(usage)) return { usage, path };
+  }
+  return { usage: null, path: null };
+}
+
+function sanitizeVideoProviderResponse(value, key = '') {
+  // This function intentionally keeps only billing-relevant response shape.
+  const normalizedKey = String(key).toLowerCase();
+  if (/(^|_)(authorization|api[_-]?key|access[_-]?token|bearer[_-]?token|secret|signature|credential)(_|$)/.test(normalizedKey)) return '[redacted]';
+  if (/prompt|text|video_url|image_url|url|uri|path/.test(normalizedKey)) return '[redacted]';
+  if (Array.isArray(value)) return value.map((item) => sanitizeVideoProviderResponse(item));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [childKey, sanitizeVideoProviderResponse(childValue, childKey)]));
+  return value;
+}
 
 function getVolcVideoBase(config) {
   let base = (config.base_url || '').replace(/\/$/, '');
@@ -3831,19 +3861,27 @@ async function callVideoApi(db, log, opts) {
     has_last_frame: !!lastForApi,
     frame_count: (firstForApi ? 1 : 0) + (lastForApi ? 1 : 0),
   });
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  // Keep video creation on the same native HTTP transport as the project text
+  // and image adapters. Besides avoiding an SDK, this avoids undici's opaque
+  // "fetch failed" errors on long-running provider connections.
+  let response;
+  try {
+    response = await postJSONWithTimeout(url, {
       Authorization: 'Bearer ' + (config.api_key || ''),
-    },
-    body: JSON.stringify(body),
-  });
-  const raw = await res.text();
-  log.info('Video API raw response', { video_gen_id, status: res.status, raw: raw.slice(0, 1000) });
-  if (!res.ok) {
-    log.error('Video API failed', { status: res.status, body: raw.slice(0, 500) });
-    let errMsg = '????????: ' + res.status;
+    }, body, 600000);
+  } catch (error) {
+    const detail = [error?.code, error?.message, error?.cause?.code, error?.cause?.message]
+      .filter(Boolean)
+      .join(': ') || String(error || 'unknown transport error');
+    log.error('Video API transport failed', { video_gen_id, error: detail });
+    return { error: `Video provider transport failed: ${detail}` };
+  }
+  const statusCode = response.statusCode;
+  const raw = response.raw;
+  log.info('Video API raw response', { video_gen_id, status: statusCode, raw: raw.slice(0, 1000) });
+  if (statusCode < 200 || statusCode >= 300) {
+    log.error('Video API failed', { status: statusCode, body: raw.slice(0, 500) });
+    let errMsg = '????????: ' + statusCode;
     try {
       const errJson = JSON.parse(raw);
       const msg = errJson.error?.message || errJson.message || errJson.error;
@@ -4212,7 +4250,22 @@ async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 
         log.warn('[poll] 任务失败', { video_gen_id: videoGenId, round: pollRound, status, msg });
         return { error: String(msg).slice(0, 500) };
       }
-      if (videoUrl && isPlausibleHttpVideoUrl(videoUrl)) return { video_url: videoUrl };
+      if (videoUrl && isPlausibleHttpVideoUrl(videoUrl)) {
+        const providerUsage = extractVideoProviderUsage(data);
+        if (isVolcPoll) {
+          log.info('[poll] 方舟/火山完成用量解析', {
+            video_gen_id: videoGenId,
+            usage_path: providerUsage.path,
+            usage_keys: providerUsage.usage ? Object.keys(providerUsage.usage) : [],
+          });
+        }
+        return {
+          video_url: videoUrl,
+          usage: providerUsage.usage,
+          provider_request_id: data.request_id || data.id || data.data?.request_id || taskId,
+          provider_response_snapshot: sanitizeVideoProviderResponse(data),
+        };
+      }
       if (failMsg) {
         log.warn('[poll] 上游返回失败文案', { video_gen_id: videoGenId, round: pollRound, msg: failMsg.slice(0, 200) });
         return { error: failMsg.slice(0, 500) };
@@ -4236,6 +4289,8 @@ module.exports = {
   getAgnesApiRoot,
   buildAgnesVideoImagePayload,
   formatVideoPostBodyForLog,
+  extractVideoProviderUsage,
+  sanitizeVideoProviderResponse,
   isSeedance2FamilyModel,
   normalizeVolcengineDuration,
   buildSd2ActiveAssetUrlLookup,

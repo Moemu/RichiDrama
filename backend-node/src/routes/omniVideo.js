@@ -3,8 +3,13 @@ const omniVideoService = require('../services/omniVideoService');
 const capabilityService = require('../services/videoModelCapabilities');
 const sequenceService = require('../services/omniSequenceService');
 module.exports = function routes(db, log, cfg) { return {
-  list(req, res) { try { response.success(res, omniVideoService.list(db, req.query || {})); } catch (err) { response.internalError(res, err.message); } },
-  create(req, res) { try { response.created(res, omniVideoService.create(db, log, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
+  list(req, res) { try { response.success(res, omniVideoService.list(db, { ...(req.query || {}), owner_user_id: req.auth.role === 'admin' ? undefined : req.auth.id })); } catch (err) { response.internalError(res, err.message); } },
+  create(req, res) { try {
+    const body = req.body || {};
+    if (req.auth.role !== 'admin' && body.drama_id && !db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id)) return response.notFound(res, '项目不存在');
+    if (req.auth.role !== 'admin' && body.sequence_id && !db.prepare('SELECT 1 FROM omni_video_sequences WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.sequence_id), req.auth.id)) return response.notFound(res, '全能创作项目不存在');
+    response.created(res, omniVideoService.create(db, log, { ...body, owner_user_id: req.auth.id }, req.auth));
+  } catch (err) { response.badRequest(res, err.message); } },
   polishPrompt: async (req, res) => {
     try {
       const prompt = String(req.body?.prompt || '').trim();
@@ -20,16 +25,16 @@ module.exports = function routes(db, log, cfg) { return {
       response.success(res, { suggestion: String(suggestion || '').trim(), original_prompt: prompt });
     } catch (err) { response.badRequest(res, err.message || '提示词润色失败'); }
   },
-  retry(req, res) { try { response.created(res, omniVideoService.retry(db, log, req.params.id)); } catch (err) { response.badRequest(res, err.message); } },
+  retry(req, res) { try { response.created(res, omniVideoService.retry(db, log, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
   extractFrame(req, res) { try { response.created(res, require('../services/omniFrameService').extract(db, cfg, log, req.params.id, req.body?.position)); } catch (err) { response.badRequest(res, err.message); } },
   extractVideoFrame(req, res) { try { response.created(res, require('../services/omniFrameService').extractVideoGeneration(db, cfg, log, req.params.id, req.body?.position)); } catch (err) { response.badRequest(res, err.message); } },
   get(req, res) { try { const job = omniVideoService.get(db, req.params.id); if (!job) return response.notFound(res, '全能视频任务不存在'); response.success(res, job); } catch (err) { response.internalError(res, err.message); } },
   capabilities(req, res) { response.success(res, capabilityService.list(db)); },
-  listSequences(req, res) { try { response.success(res, sequenceService.list(db)); } catch (err) { response.internalError(res, err.message); } },
-  listDeletedSequences(req, res) { try { response.success(res, sequenceService.list(db, { deleted: true })); } catch (err) { response.internalError(res, err.message); } },
-  defaultSequence(req, res) { try { response.success(res, sequenceService.ensureDefault(db)); } catch (err) { response.internalError(res, err.message); } },
+  listSequences(req, res) { try { response.success(res, sequenceService.list(db, { owner_user_id: req.auth.role === 'admin' ? undefined : req.auth.id })); } catch (err) { response.internalError(res, err.message); } },
+  listDeletedSequences(req, res) { try { response.success(res, sequenceService.list(db, { deleted: true, owner_user_id: req.auth.role === 'admin' ? undefined : req.auth.id })); } catch (err) { response.internalError(res, err.message); } },
+  defaultSequence(req, res) { try { response.success(res, sequenceService.ensureDefault(db, req.auth.id)); } catch (err) { response.internalError(res, err.message); } },
   getSequence(req, res) { try { const sequence = sequenceService.get(db, req.params.id); if (!sequence) return response.notFound(res, '全能创作项目不存在'); response.success(res, sequence); } catch (err) { response.internalError(res, err.message); } },
-  createSequence(req, res) { try { response.created(res, sequenceService.createSequence(db, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
+  createSequence(req, res) { try { response.created(res, sequenceService.createSequence(db, { ...(req.body || {}), owner_user_id: req.auth.id })); } catch (err) { response.badRequest(res, err.message); } },
   updateSequence(req, res) { try { response.success(res, sequenceService.updateSequence(db, req.params.id, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
   deleteSequence(req, res) { try { sequenceService.deleteSequence(db, req.params.id); response.success(res, { ok: true }); } catch (err) { response.badRequest(res, err.message); } },
   restoreSequence(req, res) { try { response.success(res, sequenceService.restoreSequence(db, req.params.id)); } catch (err) { response.badRequest(res, err.message); } },
