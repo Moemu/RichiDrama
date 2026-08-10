@@ -6,13 +6,13 @@ module.exports = function authRoutes(db) {
     login: (req, res) => {
       const session = authService.login(db, req.body?.username, req.body?.password);
       if (!session) return response.error(res, 401, 'INVALID_CREDENTIALS', '用户名或密码错误');
-      res.cookie('lmd_session', session.token, authService.sessionCookieOptions());
+      res.cookie('lmd_session', session.token, authService.sessionCookieOptions(req));
       response.success(res, session);
     },
     register: (req, res) => {
       try {
         const session = authService.register(db, req.body || {});
-        res.cookie('lmd_session', session.token, authService.sessionCookieOptions());
+        res.cookie('lmd_session', session.token, authService.sessionCookieOptions(req));
         response.created(res, session);
       } catch (err) { response.badRequest(res, err.message); }
     },
