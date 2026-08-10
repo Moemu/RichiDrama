@@ -123,7 +123,7 @@ function saveExtraImages(storagePath, projectDir, category, files, zipPaths, pre
  * @param {Buffer} zipBuffer
  * @returns {{ drama_id: number, title: string }}
  */
-function importDrama(db, cfg, log, zipBuffer) {
+function importDrama(db, cfg, log, zipBuffer, options = {}) {
   const storagePath = getStoragePath(cfg);
   const { data, files } = parseZip(zipBuffer);
 
@@ -145,18 +145,18 @@ function importDrama(db, cfg, log, zipBuffer) {
   // 用事务包裹全部写入：任何步骤失败时整体回滚，避免部分导入
   let result;
   const runImport = db.transaction(() => {
-    result = _doImport(db, storagePath, files, data, d, title, metaStr, now, log);
+    result = _doImport(db, storagePath, files, data, d, title, metaStr, now, log, options.owner_user_id || null);
   });
   runImport();
   return result;
 }
 
-function _doImport(db, storagePath, files, data, d, title, metaStr, now, log) {
+function _doImport(db, storagePath, files, data, d, title, metaStr, now, log, ownerUserId) {
 
   // ---- 创建 drama ----
   const dramaInfo = db.prepare(
-    `INSERT INTO dramas (title, description, genre, style, status, tags, metadata, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO dramas (title, description, genre, style, status, tags, metadata, owner_user_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     title,
     d.description || null,
@@ -165,6 +165,7 @@ function _doImport(db, storagePath, files, data, d, title, metaStr, now, log) {
     d.status || 'draft',
     d.tags || null,
     metaStr,
+    ownerUserId,
     now,
     now
   );
@@ -368,8 +369,8 @@ function _doImport(db, storagePath, files, data, d, title, metaStr, now, log) {
           const genLocalPath = saveMediaFile(storagePath, projectDir, 'images', files, gen.zip_file || gen.file, 'sb_imp_gen');
           if (genLocalPath) {
             const genInfo = db.prepare(
-              `INSERT INTO image_generations (drama_id, storyboard_id, provider, prompt, negative_prompt, model, frame_type, size, quality, status, error_msg, local_path, created_at, updated_at, completed_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO image_generations (drama_id, storyboard_id, provider, prompt, negative_prompt, model, frame_type, size, quality, status, error_msg, local_path, owner_user_id, created_at, updated_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             ).run(
               dramaId,
               sbId,
@@ -383,6 +384,7 @@ function _doImport(db, storagePath, files, data, d, title, metaStr, now, log) {
               gen.status || 'completed',
               gen.error_msg || null,
               genLocalPath,
+              ownerUserId,
               gen.created_at || now,
               now,
               gen.completed_at || now
@@ -398,9 +400,9 @@ function _doImport(db, storagePath, files, data, d, title, metaStr, now, log) {
         const sbImagePath = saveMediaFile(storagePath, projectDir, 'images', files, sb.image_file, 'sb_imp');
         if (sbImagePath) {
           db.prepare(
-            `INSERT INTO image_generations (drama_id, storyboard_id, provider, prompt, status, local_path, created_at, updated_at)
-             VALUES (?, ?, 'imported', ?, 'completed', ?, ?, ?)`
-          ).run(dramaId, sbId, sb.image_prompt || '', sbImagePath, now, now);
+            `INSERT INTO image_generations (drama_id, storyboard_id, provider, prompt, status, local_path, owner_user_id, created_at, updated_at)
+             VALUES (?, ?, 'imported', ?, 'completed', ?, ?, ?, ?)`
+          ).run(dramaId, sbId, sb.image_prompt || '', sbImagePath, ownerUserId, now, now);
         }
       }
 
@@ -409,9 +411,9 @@ function _doImport(db, storagePath, files, data, d, title, metaStr, now, log) {
         const videoLocalPath = saveMediaFile(storagePath, projectDir, 'videos', files, sb.video_file, 'vid_imp');
         if (videoLocalPath) {
           db.prepare(
-            `INSERT INTO video_generations (drama_id, storyboard_id, provider, prompt, status, local_path, created_at, updated_at)
-             VALUES (?, ?, 'imported', ?, 'completed', ?, ?, ?)`
-          ).run(dramaId, sbId, sb.video_prompt || '', videoLocalPath, now, now);
+            `INSERT INTO video_generations (drama_id, storyboard_id, provider, prompt, status, local_path, owner_user_id, created_at, updated_at)
+             VALUES (?, ?, 'imported', ?, 'completed', ?, ?, ?, ?)`
+          ).run(dramaId, sbId, sb.video_prompt || '', videoLocalPath, ownerUserId, now, now);
         }
       }
 

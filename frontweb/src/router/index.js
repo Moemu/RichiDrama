@@ -3,6 +3,9 @@ import { createRouter, createWebHistory } from 'vue-router'
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    { path: '/login', name: 'login', component: () => import('@/views/Login.vue'), meta: { public: true, title: '登录' } },
+    { path: '/account', name: 'account', component: () => import('@/views/AccountCenter.vue'), meta: { title: '账户中心' } },
+    { path: '/admin', name: 'admin', component: () => import('@/views/AdminConsole.vue'), meta: { title: '后台管理', admin: true } },
     {
       path: '/',
       name: 'list',
@@ -79,6 +82,10 @@ router.beforeEach((to) => {
   if (to.meta.title) {
     document.title = `${to.meta.title} - LocalMiniDrama`
   }
+  const user = JSON.parse(localStorage.getItem('lmd_auth_user') || 'null')
+  if (!to.meta.public && !localStorage.getItem('lmd_auth_token')) return { path: '/login', query: { redirect: to.fullPath } }
+  if (to.meta.admin && user?.role !== 'admin') return '/'
+  if (to.path === '/login' && localStorage.getItem('lmd_auth_token')) return '/'
   return true
 })
 

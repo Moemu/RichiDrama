@@ -1,12 +1,12 @@
 const { v4: uuidv4 } = require('uuid');
 
-function createTask(db, log, taskType, resourceId) {
+function createTask(db, log, taskType, resourceId, ownerUserId = null) {
   const id = uuidv4();
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT INTO async_tasks (id, type, status, progress, message, resource_id, created_at, updated_at)
-     VALUES (?, ?, 'pending', 0, '', ?, ?, ?)`
-  ).run(id, taskType, resourceId || '', now, now);
+    `INSERT INTO async_tasks (id, type, status, progress, message, resource_id, owner_user_id, created_at, updated_at)
+     VALUES (?, ?, 'pending', 0, '', ?, ?, ?, ?)`
+  ).run(id, taskType, resourceId || '', ownerUserId, now, now);
   log.info('Task created', { task_id: id, type: taskType, resource_id: resourceId });
   const task = getTask(db, id);
   return task || { id, type: taskType, status: 'pending', progress: 0, message: '', resource_id: resourceId || '', created_at: now, updated_at: now, completed_at: null };
@@ -18,10 +18,11 @@ function getTask(db, taskId) {
   return rowToTask(row);
 }
 
-function getTasksByResource(db, resourceId) {
+function getTasksByResource(db, resourceId, ownerUserId) {
+  const ownerSql = ownerUserId ? ' AND owner_user_id = ?' : '';
   const rows = db.prepare(
-    'SELECT * FROM async_tasks WHERE resource_id = ? AND deleted_at IS NULL ORDER BY created_at DESC'
-  ).all(resourceId);
+    'SELECT * FROM async_tasks WHERE resource_id = ? AND deleted_at IS NULL' + ownerSql + ' ORDER BY created_at DESC'
+  ).all(...(ownerUserId ? [resourceId, ownerUserId] : [resourceId]));
   return rows.map(rowToTask);
 }
 

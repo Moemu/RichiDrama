@@ -55,6 +55,33 @@ function listConfigs(db, serviceType) {
   return rows.map(rowToConfig);
 }
 
+// Creators only need model choices. Provider credentials and transport
+// configuration must stay inside the backend.
+function publicConfig(config) {
+  return {
+    id: config.id,
+    service_type: config.service_type,
+    provider: config.provider,
+    name: config.name,
+    model: config.model,
+    default_model: config.default_model,
+    priority: config.priority,
+    is_default: config.is_default,
+    is_active: config.is_active,
+  };
+}
+
+function listPublicConfigs(db, serviceType) {
+  return listConfigs(db, serviceType).map(publicConfig);
+}
+
+function resolveBillingTarget(db, serviceType, model, configId) {
+  const providerModel = String(model || '').trim();
+  const configs = listConfigs(db, serviceType).filter((config) => config.is_active);
+  const config = configs.find((item) => Number(item.id) === Number(configId)) || configs.find((item) => item.model.includes(providerModel)) || configs[0] || null;
+  return { config_id: config?.id || null, provider: config?.provider || null, provider_model: providerModel, billing_key: String(config?.billing_key || providerModel).trim() };
+}
+
 function clearOtherDefault(db, serviceType, exceptId) {
   const stmt = db.prepare(
     'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND service_type = ? AND id != ?'
@@ -113,8 +140,8 @@ function createConfig(db, log, req) {
   }
   const defaultModel = req.default_model != null ? String(req.default_model).trim() || null : null;
   const info = db.prepare(
-    `INSERT INTO ai_service_configs (service_type, provider, api_protocol, name, base_url, api_key, model, default_model, endpoint, query_endpoint, priority, is_default, is_active, settings, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
+    `INSERT INTO ai_service_configs (service_type, provider, api_protocol, name, base_url, api_key, model, default_model, billing_key, endpoint, query_endpoint, priority, is_default, is_active, settings, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
   ).run(
     req.service_type || 'text',
     req.provider || '',
@@ -124,6 +151,7 @@ function createConfig(db, log, req) {
     normalizeApiKeyForService(req.service_type, req.api_key || ''),
     model,
     defaultModel,
+    req.billing_key != null ? String(req.billing_key).trim() || null : null,
     endpoint,
     queryEndpoint,
     req.priority ?? 0,
@@ -171,6 +199,10 @@ function updateConfig(db, log, id, req) {
   if (req.default_model !== undefined) {
     updates.push('default_model = ?');
     params.push(req.default_model != null ? String(req.default_model).trim() || null : null);
+  }
+  if (req.billing_key !== undefined) {
+    updates.push('billing_key = ?');
+    params.push(req.billing_key != null ? String(req.billing_key).trim() || null : null);
   }
   if (req.priority != null) {
     updates.push('priority = ?');
@@ -223,6 +255,7 @@ function rowToConfig(r) {
     api_key: r.api_key,
     model: modelFromDb(r.model),
     default_model: r.default_model ? String(r.default_model).trim() : null,
+    billing_key: r.billing_key ? String(r.billing_key).trim() : null,
     endpoint: r.endpoint,
     query_endpoint: r.query_endpoint,
     priority: r.priority ?? 0,
@@ -571,6 +604,8 @@ function bulkUpdateApiKey(db, log, newKey) {
 
 module.exports = {
   listConfigs,
+  listPublicConfigs,
+  resolveBillingTarget,
   getConfig,
   createConfig,
   updateConfig,

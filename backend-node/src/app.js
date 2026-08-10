@@ -12,6 +12,29 @@ function createApp() {
   const db = getDb(config.database);
   const { runMigrationsAndEnsure } = require('./db/migrate.js');
   runMigrationsAndEnsure(db);
+  const { ensureBootstrapAdmin, validateRuntimeSecurity } = require('./services/authService');
+  validateRuntimeSecurity(db);
+  ensureBootstrapAdmin(db, logger);
+  // A successful call without verifiable usage remains frozen for reconciliation.
+  // This sweep makes the timeout release deterministic even if no request follows it.
+  const billingService = require('./services/billingService');
+  try {
+    const result = billingService.recoverCompletedVideoReconciliations(db);
+    if (result.recovered) logger.warn('recovered completed video billing reconciliations', result);
+  } catch (error) { logger.warn('completed video billing recovery failed', { error: error.message }); }
+  try {
+    const result = billingService.recoverInterruptedTextReconciliations(db);
+    if (result.recovered) logger.warn('recovered interrupted text billing reconciliations', result);
+  } catch (error) { logger.warn('interrupted text billing recovery failed', { error: error.message }); }
+  const reconcileExpired = () => {
+    try {
+      const result = billingService.expireReconciliationCases(db);
+      if (result.expired) logger.warn('billing reconciliation cases expired', result);
+    } catch (error) { logger.warn('billing reconciliation sweep failed', { error: error.message }); }
+  };
+  reconcileExpired();
+  const reconciliationTimer = setInterval(reconcileExpired, 60 * 1000);
+  if (typeof reconciliationTimer.unref === 'function') reconciliationTimer.unref();
 
   // 厂商锁定模式：在迁移完成后同步 vendor_lock 配置
   const { applyVendorLock } = require('./services/aiConfigService');
@@ -27,13 +50,16 @@ function createApp() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
 
-  app.use(
-    cors({
-      origin: config.server.cors_origins && config.server.cors_origins.length
-        ? config.server.cors_origins
-        : '*',
-    })
-  );
+  const allowedOrigins = Array.isArray(config.server.cors_origins) ? config.server.cors_origins.filter(Boolean) : [];
+  app.use(cors({
+    origin(origin, callback) {
+      // Same-origin production traffic has no Origin header. Cross-origin traffic
+      // must be explicitly allow-listed so HttpOnly media-session cookies are safe.
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(null, process.env.NODE_ENV !== 'production' && allowedOrigins.length === 0);
+    },
+    credentials: true,
+  }));
 
   app.use((req, res, next) => {
     log.info(req.method, req.path);
@@ -48,7 +74,13 @@ function createApp() {
     : path.join(process.cwd(), 'data', 'storage');
   try {
     if (!fs.existsSync(storageRoot)) fs.mkdirSync(storageRoot, { recursive: true });
-    app.use('/static', express.static(storageRoot));
+    const protectStatic = config.security?.protect_static ?? process.env.NODE_ENV === 'production';
+    if (protectStatic) {
+      const { requireAuth } = require('./middleware/auth');
+      app.use('/static', requireAuth(db), express.static(storageRoot));
+    } else {
+      app.use('/static', express.static(storageRoot));
+    }
   } catch (e) {
     console.warn('Static storage mount skipped:', e.message);
   }

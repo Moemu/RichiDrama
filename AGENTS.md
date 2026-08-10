@@ -43,6 +43,15 @@ cd frontweb && npm run build
 - AI content generation requires external API keys (configured via the app's "AI 配置" page), but the app fully functions without them for development/testing purposes.
 - The backend also serves the built frontend from `frontweb/dist/` at port 5679 when the dist folder exists; during development, use the Vite dev server at port 3013 instead.
 
+### AI 调用与计费边界（强制规则）
+
+所有面向用户的 AI 生成、验收和真实调用，**必须通过本项目的 HTTP API 路由进入**（`/api/v1/...`），使用项目登录态和业务请求 ID；不得在脚本、REPL、测试工具或前端中直接调用供应商 API，也不得直接调用 `aiClient`、`imageClient`、`videoService` 等内部服务来替代业务接口。
+
+- 供应商调用只能由后端适配层在完成“鉴权 → 模型权限 → 价目校验 → 预授权 → 调用 → 结算/待对账/释放”后发起。
+- 禁止使用供应商官方 SDK 或在项目外发起真实供应商调用；统一使用项目后端的原生 HTTP 适配器，确保能记录供应商请求 ID、真实 usage、计费快照和账本流水。
+- 需要验证真实模型时，先选择对应的项目 API；若当前没有可承载该能力的 API，应先补齐带鉴权和计费的路由及自动化测试，再进行真实调用。
+- 单元测试可以直接测试服务层的纯业务逻辑；但涉及真实供应商调用、计费闭环或验收时，必须以 HTTP API 集成测试作为依据。
+
 ### Local Debugging Startup (重要)
 
 **本地调试后端必须带环境变量启动，否则视频生成会卡死：**

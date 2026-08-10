@@ -29,11 +29,21 @@ function setVideoGenFailed(db, videoGenId, errorMsg, now) {
       db.prepare('UPDATE video_generations SET status = ?, updated_at = ? WHERE id = ?').run('failed', now, videoGenId);
     } else throw e;
   }
+  try {
+    const row = db.prepare('SELECT owner_user_id, billing_authorization_id FROM video_generations WHERE id = ?').get(videoGenId);
+    if (row?.owner_user_id && row?.billing_authorization_id) {
+      require('./billingService').voidAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, errorMsg || '视频生成失败');
+    }
+  } catch (_) {}
 }
 
 function list(db, query) {
   let sql = 'FROM video_generations WHERE deleted_at IS NULL';
   const params = [];
+  if (query.owner_user_id) {
+    sql += ' AND owner_user_id = ?';
+    params.push(Number(query.owner_user_id));
+  }
   if (query.drama_id) {
     sql += ' AND drama_id = ?';
     params.push(query.drama_id);
@@ -230,7 +240,7 @@ function resolveStoragePath(cfg) {
     : path.join(process.cwd(), cfg.storage?.local_path || './data/storage');
 }
 
-async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, videoUrl, logLabel) {
+async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, videoUrl, logLabel, providerUsage = null, providerRequestId = null, providerResponseSnapshot = null) {
   const now = new Date().toISOString();
   let localPath = null;
   try {
@@ -267,6 +277,43 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
         'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, updated_at = ? WHERE id = ?'
       ).run('completed', videoUrl, localPath, now, videoGenId);
     } else throw e;
+  }
+  if (providerResponseSnapshot) {
+    try { db.prepare('UPDATE video_generations SET provider_response_snapshot_json = ? WHERE id = ?').run(JSON.stringify(providerResponseSnapshot), videoGenId); }
+    catch (error) { log.warn('[billing] could not persist sanitized provider completion response', { video_gen_id: videoGenId, error: error.message }); }
+  }
+  try {
+    if (row?.owner_user_id && row?.billing_authorization_id) {
+      const billing = require('./billingService');
+      const auth = billing.getAuthorization(db, row.billing_authorization_id);
+      const usage = require('./billingUsageService').textUsage(providerUsage);
+      if (require('./billingUsageService').hasTokenMeter(auth?.snapshot) && !usage) {
+        billing.markPendingReconciliation(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, {
+          provider_request_id: providerRequestId || `video-generation:${videoGenId}`,
+          reason: '视频供应商成功响应但未返回实际 token 用量',
+        });
+      } else {
+        billing.settleAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, {
+          usage: usage || auth?.snapshot?.usage, provider_request_id: providerRequestId || `video-generation:${videoGenId}`,
+        });
+      }
+    }
+  } catch (err) {
+    log.error('[billing] video settlement failed', { video_gen_id: videoGenId, error: err.message });
+    // Preserve observed provider usage for an administrator when a historical
+    // price snapshot cannot settle it (for example, a meter migration).
+    try {
+      if (row?.owner_user_id && row?.billing_authorization_id) {
+        const observedUsage = require('./billingUsageService').textUsage(providerUsage);
+        require('./billingService').markPendingReconciliation(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, {
+          provider_request_id: providerRequestId || `video-generation:${videoGenId}`,
+          observed_usage: observedUsage || undefined,
+          reason: `视频结算失败，等待管理员核对供应商用量：${String(err.message || 'unknown error').slice(0, 180)}`,
+        });
+      }
+    } catch (reconciliationError) {
+      log.error('[billing] video settlement reconciliation failed', { video_gen_id: videoGenId, error: reconciliationError.message });
+    }
   }
   if (row.storyboard_id) {
     try {
@@ -314,7 +361,7 @@ async function pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspec
   const now = new Date().toISOString();
   const polledVideo = resolveRemoteVideoUrl(pollResult.video_url, pollResult.error);
   if (polledVideo.ok) {
-    await finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, polledVideo.video_url, 'after poll');
+    await finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, polledVideo.video_url, 'after poll', pollResult.usage, pollResult.provider_request_id || providerTaskId, pollResult.provider_response_snapshot);
   } else {
     setVideoGenFailed(db, videoGenId, polledVideo.error, now);
     if (row.task_id) taskService.updateTaskError(db, row.task_id, polledVideo.error);
@@ -526,7 +573,7 @@ async function processVideoGeneration(db, log, videoGenId) {
     }
     const directVideo = resolveRemoteVideoUrl(result.video_url, result.error);
     if (directVideo.ok) {
-      await finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, directVideo.video_url, '');
+      await finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, directVideo.video_url, '', result.usage, result.provider_request_id || result.task_id, result.provider_response_snapshot);
       return;
     }
     if (result.video_url) {

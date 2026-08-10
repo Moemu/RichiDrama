@@ -37,6 +37,9 @@
           <el-button class="btn-settings" @click="showAiConfigDialog = true">
             <el-icon><Setting /></el-icon>AI配置
           </el-button>
+          <el-button class="btn-library" @click="$router.push('/account')">账户</el-button>
+          <el-button v-if="isAdmin" class="btn-settings" @click="$router.push('/admin')">后台</el-button>
+          <el-button class="btn-library" @click="logout">退出</el-button>
           <el-button class="btn-import" :loading="importing" @click="triggerImport">
             <el-icon><Upload /></el-icon>导入项目
           </el-button>
@@ -402,6 +405,13 @@ import { omniVideoAPI } from '@/api/omniVideo'
 const router = useRouter()
 const { isDark, toggle: toggleTheme } = useTheme()
 
+async function logout () {
+  try { await fetch('/api/v1/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('lmd_auth_token') || ''}` } }) } catch (_) {}
+  localStorage.removeItem('lmd_auth_token')
+  localStorage.removeItem('lmd_auth_user')
+  router.replace('/login')
+}
+
 // 库编辑图片 – 文件输入 refs
 const charLibFileRef  = ref(null)
 const sceneLibFileRef = ref(null)
@@ -625,6 +635,7 @@ const showNewDialog = ref(false)
 const newForm = ref({ title: '', description: '', aspect_ratio: '16:9' })
 const newSaving = ref(false)
 const exportingId = ref(null)
+const isAdmin = JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').role === 'admin'
 const importing = ref(false)
 const importFileInput = ref(null)
 
@@ -822,18 +833,22 @@ async function manageDeletedOmniProjects() {
   } catch (error) { if (error !== 'cancel') ElMessage.error(error.message || '操作失败') }
 }
 
-function onExport(d) {
+async function onExport(d) {
   if (exportingId.value) return
   exportingId.value = d.id
   try {
-    // 大 ZIP 用浏览器原生下载，避免 axios blob 经 dev proxy 整包缓冲导致 ERR_FAILED
+    const token = localStorage.getItem('lmd_auth_token')
+    const res = await fetch(`/api/v1/dramas/${d.id}/export`, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) throw new Error('导出失败')
+    const blob = await res.blob()
     const a = document.createElement('a')
-    a.href = `/api/v1/dramas/${d.id}/export`
+    a.href = URL.createObjectURL(blob)
     a.download = `${d.title || 'drama'}.zip`
     a.rel = 'noopener'
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
+    URL.revokeObjectURL(a.href)
     ElMessage.success('开始下载')
   } catch (e) {
     ElMessage.error(e.message || '导出失败')

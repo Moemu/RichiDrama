@@ -21,9 +21,28 @@ const assetRoutes = require('./assets');
 const audioRoutes = require('./audio');
 const promptOverridesRoutes = require('./promptOverrides');
 const sceneModelMapRoutes = require('./sceneModelMap');
+const authRoutes = require('./auth');
+const billingRoutes = require('./billing');
+const adminRoutes = require('./admin');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { ownershipGuard } = require('../middleware/ownership');
 
 function setupRouter(cfg, db, log) {
   const r = express.Router();
+  const auth = authRoutes(db);
+  const billing = billingRoutes(db);
+  const admin = adminRoutes(db);
+  // Public signup/login endpoints; all workspace data derives identity from JWT.
+  r.post('/auth/login', auth.login);
+  r.post('/auth/register', auth.register);
+  r.use(requireAuth(db));
+  // Preserve the authenticated payer through nested and asynchronous service
+  // calls, so every text-model invocation can participate in billing.
+  r.use((req, res, next) => require('../services/billingRequestContext').run({ actor: req.auth, db, log }, next));
+  r.get('/auth/me', auth.me);
+  r.post('/auth/logout', auth.logout);
+  r.post('/auth/change-password', auth.changePassword);
+  r.use(ownershipGuard(db));
   const drama = dramaRoutes(db, cfg, log);
   const task = taskRoutes(db, log);
   const settings = settingsRoutes(db, cfg, log);
@@ -49,6 +68,43 @@ function setupRouter(cfg, db, log) {
   const audio = audioRoutes(db, log, cfg);
   const promptOverrides = promptOverridesRoutes.routes(db, log);
   const tools = require('./tools')(db, log);
+
+  // ---------- billing (self-service) ----------
+  r.get('/billing/me', billing.me);
+  r.get('/billing/usage', billing.usage);
+  r.get('/billing/transactions', billing.transactions);
+  r.post('/billing/quotes', billing.quote);
+  // Authorization lifecycle is service-owned. Clients may quote a price, but
+  // cannot settle or release a provider call themselves.
+  r.get('/models/available', (req, res) => {
+    const configs = require('../services/aiConfigService').listConfigs(db);
+    const billingService = require('../services/billingService');
+    const out = [];
+    for (const config of configs) {
+      for (const model of config.model || []) {
+        out.push({ service_type: config.service_type, model, provider: config.provider, config_id: config.id });
+      }
+    }
+    response.success(res, out);
+  });
+
+  // ---------- administration ----------
+  const adminRouter = express.Router();
+  adminRouter.use(requireAdmin);
+  adminRouter.get('/users', admin.users);
+  adminRouter.post('/users', admin.createUser);
+  adminRouter.patch('/users/:id', admin.updateUser);
+  adminRouter.post('/users/:id/balance-adjustments', admin.adjust);
+  adminRouter.get('/price-books', admin.priceBooks);
+  adminRouter.post('/price-books', admin.createPriceBook);
+  adminRouter.patch('/price-books/:id', admin.updatePriceBook);
+  adminRouter.get('/transactions', admin.transactions);
+  adminRouter.get('/usage', admin.usage);
+  adminRouter.get('/billing-reconciliations', admin.reconciliationCases);
+  adminRouter.post('/billing-reconciliations/:id/settle', admin.settleReconciliationCase);
+  adminRouter.post('/billing-reconciliations/:id/waive', admin.waiveReconciliationCase);
+  adminRouter.get('/audit-logs', admin.audit);
+  r.use('/admin', adminRouter);
 
   // ---------- dramas ----------
   r.get('/dramas', drama.listDramas);
@@ -93,12 +149,15 @@ function setupRouter(cfg, db, log) {
   r.delete('/dramas/:id', drama.deleteDrama);
 
   // ---------- ai-configs ----------
+  // Creators may read a credential-free model list. All configuration changes
+  // and credentials remain admin-only.
   r.get('/ai-configs', aiConfig.list);
+  r.get('/ai-configs/vendor-lock', aiConfig.vendorLock);
+  r.use('/ai-configs', requireAdmin);
   r.post('/ai-configs', aiConfig.create);
   r.post('/ai-configs/test', aiConfig.testConnection);
   r.post('/ai-configs/jimeng2-list-assets', aiConfig.listJimeng2MaterialAssets);
   r.post('/ai-configs/model-ark-asset', aiConfig.modelArkAsset);
-  r.get('/ai-configs/vendor-lock', aiConfig.vendorLock);  // 必须在 /:id 之前
   r.put('/ai-configs/bulk-update-key', aiConfig.bulkUpdateKey);  // 必须在 /:id 之前
   r.get('/ai-configs/:id', aiConfig.get);
   r.put('/ai-configs/:id', aiConfig.update);
@@ -231,8 +290,8 @@ function setupRouter(cfg, db, log) {
 
   // ---------- AI 工具箱（独立运行历史） ----------
   r.get('/tool-templates', tools.templates);
-  r.post('/tool-templates', tools.createTemplate);
-  r.put('/tool-templates/:id', tools.updateTemplate);
+  r.post('/tool-templates', requireAdmin, tools.createTemplate);
+  r.put('/tool-templates/:id', requireAdmin, tools.updateTemplate);
   r.get('/tool-runs', tools.list);
   r.get('/tool-runs/:id', tools.get);
   r.delete('/tool-runs/:id', tools.remove);
@@ -240,7 +299,7 @@ function setupRouter(cfg, db, log) {
   r.post('/tool-runs/:id/retry', tools.retry);
   r.post('/tool-runs/:id/import-drama', tools.importDrama);
   r.get('/tool-runs/:id/stream', tools.stream);
-  r.post('/tools/:type/runs', tools.execute);
+  r.post('/tools/:type/runs', (req, res, next) => { require('../services/billingRequestContext').disableAutoBilling(); next(); }, tools.execute);
   r.get('/omni-video-jobs', omniVideo.list);
   r.post('/omni-video-jobs', omniVideo.create);
   r.post('/omni-video-jobs/polish-prompt', omniVideo.polishPrompt);

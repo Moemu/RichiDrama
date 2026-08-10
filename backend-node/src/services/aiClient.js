@@ -3,6 +3,72 @@ const aiConfigService = require('./aiConfigService');
 const { applyDeepSeekChatOptions } = require('./deepseekConfig');
 const https = require('https');
 const http = require('http');
+const net = require('net');
+const tls = require('tls');
+
+let cachedProxyAgent = null;
+let cachedProxyAgentKey = null;
+
+function outboundProxyUrl() {
+  try {
+    const cfg = require('../config').loadConfig();
+    const raw = cfg?.server?.egress_proxy || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '';
+    return String(raw || '').trim();
+  } catch (_) {
+    return String(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '').trim();
+  }
+}
+
+/**
+ * Node does not inherit the Windows system proxy automatically.  Provider
+ * traffic must therefore explicitly tunnel through the configured HTTP proxy
+ * when a desktop/local environment requires one.  The same agent is used by
+ * text streaming, image creation and video creation, so their billing paths
+ * cannot diverge because of a transport difference.
+ */
+function outboundAgentFor(target) {
+  if (target.protocol !== 'https:') return undefined;
+  const raw = outboundProxyUrl();
+  if (!raw) return undefined;
+  const proxy = new URL(raw);
+  if (proxy.protocol !== 'http:') throw new Error('server.egress_proxy currently supports http:// proxies only');
+  const key = proxy.toString();
+  if (cachedProxyAgent && cachedProxyAgentKey === key) return cachedProxyAgent;
+
+  cachedProxyAgentKey = key;
+  cachedProxyAgent = new https.Agent({ keepAlive: true });
+  cachedProxyAgent.createConnection = function createConnection(options, callback) {
+      const proxySocket = net.connect({ host: proxy.hostname, port: Number(proxy.port || 80) });
+      let header = Buffer.alloc(0);
+      const targetHost = options.host || options.hostname;
+      const targetPort = options.port || 443;
+      const auth = proxy.username || proxy.password
+        ? `Proxy-Authorization: Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString('base64')}\r\n`
+        : '';
+
+      const fail = (error) => callback(error);
+      proxySocket.once('error', fail);
+      proxySocket.once('connect', () => {
+        proxySocket.write(`CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\nHost: ${targetHost}:${targetPort}\r\n${auth}Connection: keep-alive\r\n\r\n`);
+      });
+      proxySocket.on('data', function onConnectData(chunk) {
+        header = Buffer.concat([header, chunk]);
+        const end = header.indexOf('\r\n\r\n');
+        if (end < 0) return;
+        proxySocket.removeListener('data', onConnectData);
+        const statusLine = header.subarray(0, end).toString('ascii').split('\r\n')[0] || '';
+        if (!/^HTTP\/1\.[01] 200\b/.test(statusLine)) {
+          proxySocket.destroy();
+          return fail(new Error(`HTTP proxy CONNECT failed: ${statusLine}`));
+        }
+        const secureSocket = tls.connect({ socket: proxySocket, servername: options.servername || targetHost });
+        secureSocket.once('secureConnect', () => callback(null, secureSocket));
+        secureSocket.once('error', fail);
+      });
+      return undefined;
+    };
+  return cachedProxyAgent;
+}
 
 /**
  * 非流式 POST，发送 JSON body，等待完整 HTTP 响应后返回。
@@ -24,6 +90,7 @@ function postJSONNonStream(url, headers, body, timeoutMs = 120000) {
       path: parsed.pathname + parsed.search,
       method: 'POST',
       headers: reqHeaders,
+      agent: outboundAgentFor(parsed),
     };
 
     const req = mod.request(options, (res) => {
@@ -40,9 +107,9 @@ function postJSONNonStream(url, headers, body, timeoutMs = 120000) {
           const content = json.choices?.[0]?.message?.content
             || json.choices?.[0]?.message?.reasoning_content
             || null;
-          resolve({ status: res.statusCode, body: content, raw });
+          resolve({ status: res.statusCode, body: content, raw, usage: json.usage || null, provider_request_id: json.id || json.request_id || res.headers['x-request-id'] || null });
         } catch (_) {
-          resolve({ status: res.statusCode, body: null, raw });
+          resolve({ status: res.statusCode, body: null, raw, usage: null, provider_request_id: res.headers['x-request-id'] || null });
         }
       });
       res.on('error', reject);
@@ -77,6 +144,7 @@ function postJSONWithTimeout(url, headers, body, timeoutMs = 600000) {
       path: parsed.pathname + parsed.search,
       method: 'POST',
       headers: reqHeaders,
+      agent: outboundAgentFor(parsed),
     };
 
     const req = mod.request(options, (res) => {
@@ -130,6 +198,7 @@ function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress
       path: parsed.pathname + parsed.search,
       method: 'POST',
       headers: reqHeaders,
+      agent: outboundAgentFor(parsed),
     };
 
     let silenceTimer = null;
@@ -156,6 +225,8 @@ function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress
 
       let accumulated = '';
       let sseBuffer = '';
+      let providerUsage = null;
+      let providerRequestId = res.headers['x-request-id'] || res.headers['request-id'] || null;
       let firstToken = true;
       resetSilenceTimer();
 
@@ -172,6 +243,8 @@ function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress
           if (data === '[DONE]') continue;
           try {
             const evt = JSON.parse(data);
+            if (evt.usage && typeof evt.usage === 'object') providerUsage = evt.usage;
+            providerRequestId = evt.id || evt.request_id || providerRequestId;
             const delta = evt.choices?.[0]?.delta?.content;
             if (delta) {
               if (firstToken) {
@@ -187,7 +260,7 @@ function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress
 
       res.on('end', () => {
         clearTimeout(silenceTimer);
-        resolve({ status: statusCode, body: accumulated });
+        resolve({ status: statusCode, body: accumulated, usage: providerUsage, provider_request_id: providerRequestId });
       });
       res.on('error', (e) => { clearTimeout(silenceTimer); reject(e); });
     });
@@ -230,6 +303,46 @@ function getModelFromConfig(config, preferredModel) {
   if (preferredModel && models.includes(preferredModel)) return preferredModel;
   if (config.default_model && models.includes(config.default_model)) return config.default_model;
   return models[0] || 'gpt-3.5-turbo';
+}
+
+function createAutomaticTextAuthorization(db, config, model, userPrompt, systemPrompt, maxOutputTokens, billingServiceType = 'text') {
+  const context = require('./billingRequestContext').current();
+  if (!context?.actor?.id || context.auto_billing_disabled) return null;
+  const billing = require('./billingService');
+  const target = aiConfigService.resolveBillingTarget(db, billingServiceType, model, config.id);
+  const meters = billing.activeMeters(db, context.actor, billingServiceType, target.billing_key);
+  const reserve = require('./billingUsageService').textReservation(`${systemPrompt || ''}\n${userPrompt || ''}`, maxOutputTokens);
+  const usage = {};
+  if (meters.includes('request')) usage.request = 1;
+  if (meters.includes('input_token')) usage.input_token = reserve.input_token;
+  if (meters.includes('output_token')) usage.output_token = reserve.output_token;
+  if (!Object.keys(usage).length) throw new Error(`文本模型 ${target.billing_key} 未配置可用计费项，已拒绝调用`);
+  const authorization = billing.createAuthorization(db, context.actor, {
+    idempotency_key: `text:${context.actor.id}:${require('crypto').randomUUID()}`,
+    service_type: billingServiceType, model: target.billing_key, usage, reference_type: 'text_generation',
+  });
+  return { db, billing, actor: context.actor, authorization };
+}
+
+function settleAutomaticTextAuthorization(ticket, providerUsage, providerRequestId) {
+  if (!ticket) return;
+  const usage = require('./billingUsageService').textUsage(providerUsage);
+  const snapshot = ticket.authorization.snapshot;
+  if (require('./billingUsageService').hasTokenMeter(snapshot) && !usage) {
+    ticket.billing.markPendingReconciliation(ticket.db, ticket.actor, ticket.authorization.authorization_id, {
+      provider_request_id: providerRequestId,
+      reason: '文本供应商成功响应但未返回实际 token 用量',
+    });
+    return;
+  }
+  ticket.billing.settleAuthorization(ticket.db, ticket.actor, ticket.authorization.authorization_id, {
+    usage: usage || snapshot.usage, provider_request_id: providerRequestId || null,
+  });
+}
+
+function voidAutomaticTextAuthorization(ticket, reason) {
+  if (!ticket) return;
+  try { ticket.billing.voidAuthorization(ticket.db, ticket.actor, ticket.authorization.authorization_id, reason || '文本模型调用失败'); } catch (_) {}
 }
 
 /**
@@ -336,10 +449,17 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
     ...(finalMaxTokens != null ? { max_tokens: finalMaxTokens } : {}),
     ...(json_mode ? { response_format: { type: 'json_object' } } : {}),
   };
+  // OpenAI-compatible providers (including Ark) append exact token usage in
+  // the final SSE event when this option is enabled.  A provider that does not
+  // return it remains usable, but its authorization is released by the caller
+  // instead of charging an estimate.
+  if (options.include_usage !== false) body.stream_options = { include_usage: true };
   body = applyDeepSeekChatOptions(config, body);
+  const billingTicket = createAutomaticTextAuthorization(db, config, model, userPrompt, systemPrompt, finalMaxTokens, serviceType);
   const startMs = Date.now();
   log.info('AI generateText request', { url: url.slice(0, 60), model, max_tokens: finalMaxTokens ?? '(model default)', json_mode, stream: true });
-  const res = await postJSONStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 60000, (receivedLen, event, accumulated) => {
+  let res;
+  try { res = await postJSONStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 60000, (receivedLen, event, accumulated) => {
     if (event === 'first_token') {
       log.info('AI stream first token', { model, ttft_ms: Date.now() - startMs });
     } else if (receivedLen > 0 && receivedLen % 500 < 20) {
@@ -355,8 +475,17 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
   if (!content) {
     throw new Error('AI 返回内容为空');
   }
+  // Token-priced interactive calls must have a finite provider output bound;
+  // otherwise no reservation can safely cover an unbounded completion.
+  if (finalMaxTokens == null && require('./billingRequestContext').current()?.actor?.id) finalMaxTokens = 8192;
   log.info('AI raw response received', { model, text_length: content.length, elapsed_ms: elapsedMs, text_preview: content.slice(0, 200) });
+  settleAutomaticTextAuthorization(billingTicket, res.usage, res.provider_request_id);
+  if (typeof options.usage_callback === 'function') options.usage_callback(res.usage, res.provider_request_id);
   return content;
+  } catch (error) {
+    voidAutomaticTextAuthorization(billingTicket, error.message);
+    throw error;
+  }
 }
 
 /**
@@ -435,7 +564,9 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
     ...(finalMaxTokens != null ? { max_tokens: finalMaxTokens } : {}),
     ...(json_mode ? { response_format: { type: 'json_object' } } : {}),
   };
+  if (options.include_usage !== false) body.stream_options = { include_usage: true };
   body = applyDeepSeekChatOptions(config, body);
+  const billingTicket = createAutomaticTextAuthorization(db, config, model, userPrompt, systemPrompt, finalMaxTokens, serviceType);
   const silenceMs = options.silence_timeout_ms != null ? Number(options.silence_timeout_ms) : 120000;
   const startMs = Date.now();
   log.info('AI streamGenerateText request', {
@@ -446,7 +577,8 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
     stream: true,
   });
   let lastLen = 0;
-  const res = await postJSONStream(
+  let res;
+  try { res = await postJSONStream(
     url,
     { Authorization: 'Bearer ' + (config.api_key || '') },
     body,
@@ -465,8 +597,15 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
   if (!content) {
     throw new Error('AI 返回内容为空');
   }
+  if (finalMaxTokens == null && require('./billingRequestContext').current()?.actor?.id) finalMaxTokens = 8192;
   log.info('AI streamGenerateText done', { model, text_length: content.length, elapsed_ms: Date.now() - startMs });
+  settleAutomaticTextAuthorization(billingTicket, res.usage, res.provider_request_id);
+  if (typeof options.usage_callback === 'function') options.usage_callback(res.usage, res.provider_request_id);
   return content;
+  } catch (error) {
+    voidAutomaticTextAuthorization(billingTicket, error.message);
+    throw error;
+  }
 }
 
 /**
@@ -607,17 +746,21 @@ async function generateTextWithVision(db, log, serviceType, userPrompt, systemPr
     ...(isReasoningModel ? {} : { temperature: Number(temperature) }),
   };
 
+  const billingTicket = createAutomaticTextAuthorization(db, config, model, mergedUserText, systemPrompt, maxTok, serviceType);
+
   const startMs = Date.now();
   let res;
   try {
     // 使用非流式请求：视觉分析响应短，且流式对推理模型（o1/o3/o4）和部分代理兼容性差
     res = await postJSONNonStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 120000);
   } catch (httpErr) {
+    voidAutomaticTextAuthorization(billingTicket, httpErr.message);
     log.error('[Vision] HTTP 请求失败', { model, url: url.slice(0, 80), error: httpErr.message });
     throw httpErr;
   }
   const content = res.body;
   if (!content) {
+    voidAutomaticTextAuthorization(billingTicket, '视觉模型返回内容为空');
     log.error('[Vision] 返回内容为空', {
       model,
       status: res.status,
@@ -626,6 +769,7 @@ async function generateTextWithVision(db, log, serviceType, userPrompt, systemPr
     throw new Error(`AI vision 返回内容为空（HTTP ${res.status}），原始响应：${(res.raw || '').slice(0, 200)}`);
   }
   log.info('[Vision] 请求成功', { model, elapsed_ms: Date.now() - startMs, result_len: content.length, result_preview: content.slice(0, 100) });
+  settleAutomaticTextAuthorization(billingTicket, res.usage, res.provider_request_id);
   return content.trim();
 }
 

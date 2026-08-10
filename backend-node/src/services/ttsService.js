@@ -213,7 +213,7 @@ function synthesizeWithDoubao(text, opts) {
  * 合成 TTS 并保存到本地文件
  * @returns {{ local_path: string, audio_url: string }}
  */
-async function synthesize(db, log, { text, storyboard_id, config, storage_base, voice_id, speed }) {
+async function synthesize(db, log, { text, storyboard_id, config, storage_base, voice_id, speed, billing_actor, billing_reference }) {
   if (!text || !text.trim()) throw new Error('text 不能为空');
   const aiConfigService = require('./aiConfigService');
   const ttsConfig = config || (() => {
@@ -231,8 +231,29 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
   const groupId = ttsConfig.group_id || ttsSettings.group_id || '';
   const ttsModel = ttsConfig.default_model || (Array.isArray(ttsConfig.model) ? ttsConfig.model[0] : ttsConfig.model) || '';
   const finalSpeed = speed || ttsSettings.speed || 1.0;
+  // TTS providers bill text characters, which are known exactly before the
+  // request.  Reserve and settle the same Unicode character count; on every
+  // provider or persistence failure the reservation is released.
+  let billingAuthorization = null;
+  let billingActor = billing_actor || null;
+  if (!billingActor && storyboard_id) {
+    const owner = db.prepare('SELECT d.owner_user_id FROM storyboards s JOIN dramas d ON d.id=s.drama_id WHERE s.id=?').get(Number(storyboard_id));
+    if (owner?.owner_user_id) billingActor = { id: owner.owner_user_id, role: 'user' };
+  }
+  const billingTarget = aiConfigService.resolveBillingTarget(db, 'tts', ttsModel, ttsConfig.id);
+  const billing = require('./billingService');
+  if (!billingActor?.id) throw new Error('无法确定 TTS 计费账号');
+  const meters = billing.activeMeters(db, billingActor, 'tts', billingTarget.billing_key);
+  if (!meters.includes('character')) throw new Error(`TTS 模型 ${billingTarget.billing_key} 未配置按字符价格，已拒绝调用`);
+  const characters = require('./billingUsageService').unicodeCharacterCount(text);
+  billingAuthorization = billing.createAuthorization(db, billingActor, {
+    idempotency_key: `tts:${billingActor.id}:${randomUUID()}`,
+    service_type: 'tts', model: billingTarget.billing_key, usage: { character: characters },
+    reference_type: billing_reference?.type || 'tts', reference_id: billing_reference?.id || storyboard_id || null,
+  });
   let audioBuffer;
 
+  try {
   if (provider === 'minimax') {
     audioBuffer = await synthesizeWithMinimax(
       text,
@@ -262,6 +283,10 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
     throw new Error(`不支持的 TTS provider: ${provider}，目前支持 openai、minimax、doubao(豆包语音)`);
   }
 
+  billing.settleAuthorization(db, billingActor, billingAuthorization.authorization_id, {
+    usage: { character: characters }, provider_request_id: `tts:${billingAuthorization.authorization_id}`,
+  });
+
   // 保存到本地
   const audioDir = path.join(storage_base, 'audio');
   if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
@@ -271,7 +296,13 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
   const localPath = `audio/${filename}`;
   log.info('[TTS] 合成完成', { storyboard_id, local_path: localPath, provider });
   try { const cs = require('./cloudService'); cs.reportUsage('tts', ttsModel || '', '', 0); } catch (_) {}
-  return { local_path: localPath };
+  return { local_path: localPath, billed_characters: characters };
+  } catch (error) {
+    if (billingAuthorization) {
+      try { billing.voidAuthorization(db, billingActor, billingAuthorization.authorization_id, error.message); } catch (_) {}
+    }
+    throw error;
+  }
 }
 
 module.exports = { synthesize };

@@ -15,6 +15,7 @@ html, body, #app, .app {
   margin: 0;
   padding: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg-page);
   color: var(--text-primary);
 }
