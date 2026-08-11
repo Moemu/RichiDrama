@@ -109,7 +109,7 @@ function resolveAsset(db, input, ordinal, ownerUserId) {
   const row = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(input.asset_id));
   if (!row) throw new Error(`素材 ${input.asset_id} 不存在或已删除`);
   if (ownerUserId) {
-    const owner = db.prepare('SELECT COALESCE(a.owner_user_id, d.owner_user_id) owner_user_id FROM assets a LEFT JOIN dramas d ON d.id = a.drama_id WHERE a.id = ?').get(Number(input.asset_id));
+    const owner = db.prepare('SELECT COALESCE(d.owner_user_id, a.owner_user_id) owner_user_id FROM assets a LEFT JOIN dramas d ON d.id = a.drama_id WHERE a.id = ?').get(Number(input.asset_id));
     if (!owner || Number(owner.owner_user_id) !== Number(ownerUserId)) throw new Error(`素材 ${input.asset_id} 不存在或无权访问`);
   }
   if (row.processing_status && row.processing_status !== 'ready') throw new Error(`素材“${row.name || row.id}”尚未准备完成`);

@@ -11,7 +11,10 @@ const SQL_BY_KIND = {
   videos: 'SELECT owner_user_id FROM video_generations WHERE id = ? AND deleted_at IS NULL',
   'video-generations': 'SELECT owner_user_id FROM video_generations WHERE id = ? AND deleted_at IS NULL',
   tasks: 'SELECT owner_user_id FROM async_tasks WHERE id = ? AND deleted_at IS NULL',
-  assets: 'SELECT COALESCE(a.owner_user_id, d.owner_user_id) AS owner_user_id FROM assets a LEFT JOIN dramas d ON d.id = a.drama_id WHERE a.id = ? AND a.deleted_at IS NULL',
+  // Assets inside a project belong to that project's owner. Legacy rows can
+  // retain a stale direct owner_user_id, which must not override the project
+  // relationship and make a visible material impossible to edit or delete.
+  assets: 'SELECT COALESCE(d.owner_user_id, a.owner_user_id) AS owner_user_id FROM assets a LEFT JOIN dramas d ON d.id = a.drama_id WHERE a.id = ? AND a.deleted_at IS NULL',
   'omni-video-sequences': 'SELECT owner_user_id FROM omni_video_sequences WHERE id = ?',
   'omni-video-jobs': 'SELECT owner_user_id FROM omni_video_jobs WHERE id = ?',
   'tool-runs': 'SELECT owner_user_id FROM tool_runs WHERE id = ?',
