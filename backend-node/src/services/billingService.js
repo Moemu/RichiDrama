@@ -3,13 +3,20 @@ const { v4: uuid } = require('uuid');
 function now() { return new Date().toISOString(); }
 function json(v) { return JSON.stringify(v == null ? {} : v); }
 function parse(v, fallback = {}) { try { return v ? JSON.parse(v) : fallback; } catch (_) { return fallback; } }
-// Stored amounts are whole points: 100 points = CNY 1.  Never store fractional
-// points; all prorating is performed with integer arithmetic below.
-function microToCredits(v) { return Number(v || 0); }
+// 100 points = CNY 1. Store integer micro-points so small real usage is not
+// rounded down to zero points.
+const POINT_SCALE = 10000;
+function microToCredits(v) { return Number(v || 0) / POINT_SCALE; }
 function creditsToMicro(v) {
-  const n = Number(v);
-  if (!Number.isSafeInteger(n)) throw new Error('积分必须是安全整数');
-  return n;
+  const raw = String(v ?? '').trim();
+  if (!/^-?\d+(?:\.\d{1,4})?$/.test(raw)) throw new Error('积分最多支持四位小数');
+  const negative = raw.startsWith('-');
+  const [wholeText, fractionText = ''] = (negative ? raw.slice(1) : raw).split('.');
+  const whole = BigInt(wholeText) * BigInt(POINT_SCALE);
+  const fraction = BigInt((fractionText + '0000').slice(0, 4));
+  const result = negative ? -(whole + fraction) : whole + fraction;
+  if (result > BigInt(Number.MAX_SAFE_INTEGER) || result < BigInt(Number.MIN_SAFE_INTEGER)) throw new Error('积分超出安全范围');
+  return Number(result);
 }
 
 function account(db, userId) {
@@ -61,18 +68,41 @@ function normalizeUsage(usage) {
 }
 
 function parseConditions(value) { return parse(value, {}); }
-function rateFor(row, context = {}) {
+
+// usage_tiers is internal price-book metadata. It only reads canonical meters
+// already returned by providers (input_token / output_token); it never adds a
+// field to a provider request or fabricates provider usage.
+function tierFor(conditions, usage) {
+  const tiers = Array.isArray(conditions.usage_tiers) ? conditions.usage_tiers : [];
+  if (!tiers.length) return null;
+  for (const tier of tiers) {
+    const meter = String(tier.selector_meter || '').trim();
+    const quantity = usage?.[meter];
+    if (!['input_token', 'output_token'].includes(meter) || !Number.isSafeInteger(quantity) || quantity < 0) continue;
+    const min = tier.min_inclusive == null ? 0 : Number(tier.min_inclusive);
+    const max = tier.max_inclusive == null ? Number.MAX_SAFE_INTEGER : Number(tier.max_inclusive);
+    if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min < 0 || max < min) continue;
+    if (quantity >= min && quantity <= max) return tier;
+  }
+  const selectors = [...new Set(tiers.map((tier) => String(tier.selector_meter || '').trim()).filter(Boolean))];
+  throw new Error(`价目未覆盖实际 ${selectors.join('/') || 'token'} 用量，已拒绝调用`);
+}
+
+function rateFor(row, context = {}, usage = {}) {
   const conditions = parseConditions(row.conditions_json);
   const rates = Array.isArray(conditions.rates) ? conditions.rates : [];
   const selected = rates.find((rate) => Object.entries(rate.when || {}).every(([k, v]) => context[k] === v))
     || rates.find((rate) => rate.id === conditions.default_rate_id)
     || null;
-  const unitPrice = Number(selected?.unit_price_points ?? row.unit_price_micro);
-  const unitSize = Number(selected?.unit_size ?? conditions.unit_size ?? 1);
+  const tier = tierFor(conditions, usage);
+  const unitPrice = tier
+    ? creditsToMicro(tier.unit_price_points)
+    : selected ? creditsToMicro(selected.unit_price_points) : Number(row.unit_price_micro);
+  const unitSize = Number(tier?.unit_size ?? selected?.unit_size ?? conditions.unit_size ?? 1);
   if (!Number.isSafeInteger(unitPrice) || unitPrice < 0 || !Number.isSafeInteger(unitSize) || unitSize <= 0) {
     throw new Error(`模型 ${row.model} 的价格配置无效`);
   }
-  return { unit_price_micro: unitPrice, unit_size: unitSize, rate_id: selected?.id || null, conditions };
+  return { unit_price_micro: unitPrice, unit_size: unitSize, rate_id: tier?.id || selected?.id || null, conditions };
 }
 function proratedPoints(quantity, unitPrice, unitSize) {
   const q = BigInt(quantity), price = BigInt(unitPrice), size = BigInt(unitSize);
@@ -92,11 +122,11 @@ function quote(db, user, input) {
   for (const [meter, qty] of Object.entries(usage)) {
     const price = byMeter.get(meter);
     if (!price) throw new Error(`模型 ${model} 的 ${meter} 未定价，已拒绝调用`);
-    const rate = rateFor(price, input.pricing_context || {});
+    const rate = rateFor(price, input.pricing_context || {}, usage);
     const subtotal = price.is_free ? 0 : proratedPoints(qty, rate.unit_price_micro, rate.unit_size);
     amountMicro += subtotal;
     if (!Number.isSafeInteger(amountMicro)) throw new Error('计费金额超出安全范围');
-    rates.push({ meter, quantity: qty, unit_price_micro: rate.unit_price_micro, unit_size: rate.unit_size, rate_id: rate.rate_id, is_free: !!price.is_free, subtotal_micro: subtotal, price_book_id: price.price_book_id, price_book_name: price.price_book_name });
+    rates.push({ meter, quantity: qty, unit_price_micro: rate.unit_price_micro, unit_size: rate.unit_size, rate_id: rate.rate_id, conditions: rate.conditions, is_free: !!price.is_free, subtotal_micro: subtotal, price_book_id: price.price_book_id, price_book_name: price.price_book_name });
   }
   return { user_id: user.id, service_type: serviceType, model, usage, pricing_context: input.pricing_context || {}, amount_micro: amountMicro, amount: microToCredits(amountMicro), rates, quoted_at: now() };
 }
@@ -131,7 +161,10 @@ function calculateFromSnapshot(snapshot, actualUsage) {
   for (const [meter, qty] of Object.entries(usage)) {
     const rate = (snapshot.rates || []).find((r) => r.meter === meter);
     if (!rate) throw new Error(`预授权快照中没有 ${meter} 价格`);
-    amount += rate.is_free ? 0 : proratedPoints(qty, rate.unit_price_micro, rate.unit_size || 1);
+    const tier = tierFor(rate.conditions || {}, usage);
+    const unitPrice = tier ? creditsToMicro(tier.unit_price_points) : rate.unit_price_micro;
+    const unitSize = Number(tier?.unit_size ?? rate.unit_size ?? 1);
+    amount += rate.is_free ? 0 : proratedPoints(qty, unitPrice, unitSize);
   }
   return { usage, amount_micro: amount };
 }
@@ -397,13 +430,42 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
     const key = `${serviceType}\u0000${model}\u0000${meter}`;
     if (seen.has(key)) throw new Error(`同一价目表内不能重复配置 ${serviceType}/${model}/${meter}`);
     seen.add(key);
-    const unitPrice = Number(item.unit_price ?? microToCredits(item.unit_price_micro || 0));
-    if (!Number.isSafeInteger(unitPrice) || unitPrice < 0) throw new Error('单价必须是非负整数积分');
+    let unitPrice;
+    try { unitPrice = creditsToMicro(item.unit_price ?? microToCredits(item.unit_price_micro || 0)); } catch (_) { throw new Error('单价必须是非负积分，且最多四位小数'); }
+    if (unitPrice < 0) throw new Error('单价必须是非负积分，且最多四位小数');
     if (status === 'published' && !item.is_free && unitPrice <= 0) throw new Error(`${serviceType}/${model}/${meter} 的免费价目必须显式勾选免费`);
     const conditions = item.conditions_json || {};
     const rates = Array.isArray(conditions.rates) ? conditions.rates : [];
     for (const rate of rates) {
-      if (!Number.isSafeInteger(Number(rate.unit_price_points)) || Number(rate.unit_price_points) < 0 || !Number.isSafeInteger(Number(rate.unit_size || conditions.unit_size || 1)) || Number(rate.unit_size || conditions.unit_size || 1) <= 0) throw new Error('条件价格必须使用正整数积分和整数计量单位');
+      let ratePrice;
+      try { ratePrice = creditsToMicro(rate.unit_price_points); } catch (_) { throw new Error('条件价格必须使用非负积分（最多四位小数）和整数计量单位'); }
+      if (ratePrice < 0 || !Number.isSafeInteger(Number(rate.unit_size || conditions.unit_size || 1)) || Number(rate.unit_size || conditions.unit_size || 1) <= 0) throw new Error('条件价格必须使用非负积分（最多四位小数）和整数计量单位');
+      const keys = Object.keys(rate.when || {});
+      if (keys.some((key) => !['has_video_input', 'resolution', 'has_audio'].includes(key))) throw new Error('条件价格只能使用已由视频请求明确传入的 has_video_input、resolution、has_audio 字段');
+    }
+    const tiers = Array.isArray(conditions.usage_tiers) ? conditions.usage_tiers : [];
+    const seenTiers = new Set();
+    for (const tier of tiers) {
+      const selector = String(tier.selector_meter || '').trim();
+      const min = tier.min_inclusive == null ? 0 : Number(tier.min_inclusive);
+      const max = tier.max_inclusive == null ? Number.MAX_SAFE_INTEGER : Number(tier.max_inclusive);
+      const key = `${selector}\u0000${min}\u0000${max}`;
+      let tierPrice;
+      try { tierPrice = creditsToMicro(tier.unit_price_points); } catch (_) { tierPrice = -1; }
+      if (!['input_token', 'output_token'].includes(selector) || !Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min < 0 || max < min || tierPrice < 0 || !Number.isSafeInteger(Number(tier.unit_size || conditions.unit_size || 1)) || Number(tier.unit_size || conditions.unit_size || 1) <= 0 || seenTiers.has(key)) {
+        throw new Error('token 分档必须使用已知计量器、有效的整数边界和正整数计量单位');
+      }
+      seenTiers.add(key);
+    }
+    for (const selector of ['input_token', 'output_token']) {
+      const ordered = tiers.filter((tier) => tier.selector_meter === selector)
+        .slice().sort((a, b) => Number(a.min_inclusive || 0) - Number(b.min_inclusive || 0));
+      for (let index = 1; index < ordered.length; index += 1) {
+        const previous = ordered[index - 1]; const current = ordered[index];
+        if (Number(current.min_inclusive || 0) <= Number(previous.max_inclusive ?? Number.MAX_SAFE_INTEGER) || creditsToMicro(current.unit_price_points) < creditsToMicro(previous.unit_price_points)) {
+          throw new Error('token 分档不能重叠，且更高用量档位不能低于前一档价格');
+        }
+      }
     }
     if (status !== 'published') continue;
     const conflict = db.prepare(`SELECT pb.name FROM billing_price_book_items pbi

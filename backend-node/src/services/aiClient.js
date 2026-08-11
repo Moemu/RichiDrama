@@ -335,9 +335,20 @@ function settleAutomaticTextAuthorization(ticket, providerUsage, providerRequest
     });
     return;
   }
-  ticket.billing.settleAuthorization(ticket.db, ticket.actor, ticket.authorization.authorization_id, {
-    usage: usage || snapshot.usage, provider_request_id: providerRequestId || null,
-  });
+  try {
+    ticket.billing.settleAuthorization(ticket.db, ticket.actor, ticket.authorization.authorization_id, {
+      usage: usage || snapshot.usage, provider_request_id: providerRequestId || null,
+    });
+  } catch (error) {
+    // A partial usage envelope cannot prove a tiered token price. Keep the
+    // authorization auditable instead of releasing it as if the provider had
+    // failed after successfully generating content.
+    ticket.billing.markPendingReconciliation(ticket.db, ticket.actor, ticket.authorization.authorization_id, {
+      provider_request_id: providerRequestId || null,
+      observed_usage: usage || undefined,
+      reason: `文本结算无法匹配已冻结价目，等待核对供应商用量：${String(error.message || 'unknown error').slice(0, 180)}`,
+    });
+  }
 }
 
 function voidAutomaticTextAuthorization(ticket, reason) {
@@ -438,6 +449,13 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
       finalMaxTokens = minVal;
     }
   }
+  // The reservation and provider request must share one finite bound. Setting
+  // this after a response arrives would cap user settlement but not upstream
+  // cost, so authenticated calls get the default before the request is built.
+  if (finalMaxTokens == null && require('./billingRequestContext').current()?.actor?.id) finalMaxTokens = 8192;
+  if (finalMaxTokens != null && (!Number.isSafeInteger(finalMaxTokens) || finalMaxTokens <= 0)) {
+    throw new Error('max_tokens 必须是正整数');
+  }
 
   let body = {
     model,
@@ -475,9 +493,6 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
   if (!content) {
     throw new Error('AI 返回内容为空');
   }
-  // Token-priced interactive calls must have a finite provider output bound;
-  // otherwise no reservation can safely cover an unbounded completion.
-  if (finalMaxTokens == null && require('./billingRequestContext').current()?.actor?.id) finalMaxTokens = 8192;
   log.info('AI raw response received', { model, text_length: content.length, elapsed_ms: elapsedMs, text_preview: content.slice(0, 200) });
   settleAutomaticTextAuthorization(billingTicket, res.usage, res.provider_request_id);
   if (typeof options.usage_callback === 'function') options.usage_callback(res.usage, res.provider_request_id);
@@ -553,6 +568,10 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
       finalMaxTokens = minVal;
     }
   }
+  if (finalMaxTokens == null && require('./billingRequestContext').current()?.actor?.id) finalMaxTokens = 8192;
+  if (finalMaxTokens != null && (!Number.isSafeInteger(finalMaxTokens) || finalMaxTokens <= 0)) {
+    throw new Error('max_tokens 必须是正整数');
+  }
 
   let body = {
     model,
@@ -597,7 +616,6 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
   if (!content) {
     throw new Error('AI 返回内容为空');
   }
-  if (finalMaxTokens == null && require('./billingRequestContext').current()?.actor?.id) finalMaxTokens = 8192;
   log.info('AI streamGenerateText done', { model, text_length: content.length, elapsed_ms: Date.now() - startMs });
   settleAutomaticTextAuthorization(billingTicket, res.usage, res.provider_request_id);
   if (typeof options.usage_callback === 'function') options.usage_callback(res.usage, res.provider_request_id);

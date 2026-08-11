@@ -62,12 +62,30 @@ function settleBilling(db, run, actualUsage, providerRequestId) {
       return;
     }
     billing.settleAuthorization(db, { id: run.owner_user_id, role: 'admin' }, run.billing_authorization_id, {
-      usage: usage || auth.snapshot.usage, provider_request_id: providerRequestId || `tool-run:${run.id}`,
+      usage: usage || auth.snapshot.usage, provider_request_id: providerRequestId || `tool-run:${run.id}:${run.continuation_count}`,
     });
-  } catch (_) {}
+  } catch (error) {
+    try {
+      require('./billingService').markPendingReconciliation(db, { id: run.owner_user_id, role: 'admin' }, run.billing_authorization_id, {
+        provider_request_id: providerRequestId || `tool-run:${run.id}:${run.continuation_count}`,
+        observed_usage: require('./billingUsageService').textUsage(actualUsage) || undefined,
+        reason: `工具文本结算无法匹配已冻结价目，等待核对供应商用量：${String(error.message || 'unknown error').slice(0, 180)}`,
+      });
+    } catch (_) {}
+  }
 }
 function voidBilling(db, run, reason) { if (!run?.owner_user_id || !run?.billing_authorization_id) return; try { require('./billingService').voidAuthorization(db, { id: run.owner_user_id, role: 'admin' }, run.billing_authorization_id, reason); } catch (_) {} }
 function set(db, id, values) { const old = get(db, id, true); if (!old) throw new Error('工具运行不存在'); const now = stamp(); db.prepare('UPDATE tool_runs SET status=?, output_json=?, streamed_text=?, error_msg=?, continuation_count=?, updated_at=?, completed_at=? WHERE id=?').run(values.status ?? old.status, values.output !== undefined ? JSON.stringify(values.output) : JSON.stringify(old.output), values.streamed_text ?? old.streamed_text, values.error_msg ?? null, values.continuation_count ?? old.continuation_count, now, values.status === 'completed' ? now : old.completed_at, old.id); const updated = get(db, id, true); if (values.status === 'completed') settleBilling(db, updated, values.billing_usage, values.provider_request_id); if (values.status === 'failed') voidBilling(db, updated, values.error_msg); return updated; }
+function retryWithAuthorization(db, id, authorizationId) {
+  const old = get(db, id, true);
+  if (!old) throw new Error('工具运行不存在');
+  const now = stamp();
+  db.prepare(`UPDATE tool_runs
+    SET status='pending', output_json=NULL, streamed_text='', error_msg=NULL,
+        billing_authorization_id=?, continuation_count=?, updated_at=?, completed_at=NULL
+    WHERE id=?`).run(authorizationId, old.continuation_count + 1, now, old.id);
+  return get(db, old.id, true);
+}
 function softDelete(db, id) { db.prepare('UPDATE tool_runs SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL').run(stamp(), stamp(), Number(id)); }
 function restore(db, id) { db.prepare('UPDATE tool_runs SET deleted_at=NULL, updated_at=? WHERE id=?').run(stamp(), Number(id)); return get(db,id); }
 function analysisPrompt(input) { return `${input.template || BUILTINS[0].content}\n语言：${input.language || '中文'}\n项目资料：${input.project_info || ''}\n剧本资料：${input.script || ''}\n返回字段：overview, episodes, characters, scenes, props, shots。`; }
@@ -78,4 +96,4 @@ async function executeReverse(db, log, id) { const run=get(db,id,true); const as
     else if(asset.type==='video') { if(!abs) throw new Error('视频反推需要本地视频素材'); const fs=require('fs'); const {spawnSync}=require('child_process'); const {getFfmpegPath}=require('../utils/ffmpegPath'); const dir=path.join(root,'tool-reverse'); fs.mkdirSync(dir,{recursive:true}); const frames=['first','middle','last'].map((name,index)=>{const target=path.join(dir,`run-${id}-${name}.jpg`); const seek=index===0?'0':index===1?'50%':'99%'; const args=seek.endsWith('%')?['-y','-i',abs,'-vf',`select=eq(n\\,trunc(n*${index===1?0.5:0.99}))`,'-frames:v','1',target]:['-y','-ss',seek,'-i',abs,'-frames:v','1',target]; const made=spawnSync(getFfmpegPath(),args,{encoding:'utf8'}); if(made.status!==0||!fs.existsSync(target)) throw new Error('无法提取视频代表帧'); return target;}); const analyses=[]; for(const frame of frames) analyses.push(await aiClient.generateTextWithVision(db,log,'vision','描述该视频代表帧的画面、构图、镜头与风格。','你是视觉分析师。',{localAbsPath:frame},{model:run.model||undefined,max_tokens:500})); result=await aiClient.generateText(db,log,'text',`综合首、中、尾帧分析，重点说明运动、运镜、转场与完整提示词。\n${analyses.join('\n---\n')}`,'你是视频提示词分析师。',{model:run.model||undefined,temperature:.3,max_tokens:1400}); }
     else throw new Error('仅支持图片或视频素材反推'); return set(db,id,{status:'completed',output:{prompt:result}}); } catch(error){ set(db,id,{status:'failed',error_msg:error.message}); throw error; } }
 function importDrama(db, log, id, body={}) { const run=get(db,id); if(!run) throw new Error('工具运行不存在'); const output=run.output || {}; const title=body.title || run.title || output.overview?.title || 'AI 导入项目'; const drama=dramaService.createDrama(db,log,{title,description:output.overview?.summary || '',owner_user_id:run.owner_user_id || null}); if(Array.isArray(output.episodes)) dramaService.saveEpisodes(db,log,drama.id,{episodes:output.episodes.map((ep,i)=>({episode_number:ep.episode_number || ep.episode || i+1,title:ep.title || `第${i+1}集`,script_content:ep.content || ep.script || ''}))}); return drama; }
-module.exports={templates,createTemplate,updateTemplate,create,get,list,set,softDelete,restore,executeAnalysis,executeStory,executeReverse,importDrama,linkAssets};
+module.exports={templates,createTemplate,updateTemplate,create,get,list,set,retryWithAuthorization,softDelete,restore,executeAnalysis,executeStory,executeReverse,importDrama,linkAssets};
