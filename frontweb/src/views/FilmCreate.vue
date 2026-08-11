@@ -604,13 +604,16 @@
                     </el-select>
                     <el-button text size="small" class="sb-universal-library-move" :disabled="index <= 0" @click="moveSbOmniAsset(activeSb, asset.id, -1)">↑</el-button>
                     <el-button text size="small" class="sb-universal-library-move" :disabled="index >= (sbOmniAssetIds[activeSb.id] || []).length - 1" @click="moveSbOmniAsset(activeSb, asset.id, 1)">↓</el-button>
+                    <el-button v-if="asset.type === 'image'" text size="small" class="sb-universal-library-sd2" :loading="sbOmniCertifyingIds.has(asset.id)" @click.stop="onSbOmniAssetCertify(activeSb, asset)">{{ sbOmniSd2ShortLabel(asset) }}</el-button>
                     <el-button text size="small" type="danger" @click="removeSbOmniAsset(activeSb, asset.id)">移除</el-button>
                   </div>
                 </div>
               </template>
               <div v-for="asset in sbOmniIdentityAssets(activeSb)" :key="`human-${asset.id}`" class="sb-universal-identity-row">
                 <el-checkbox :model-value="!!asset.requires_sd2_identity" @change="(value) => onSbOmniAssetRealPersonToggle(activeSb, asset, value)">含真人</el-checkbox>
-                <span class="sb-universal-identity-status">未勾选即为不含真人</span>
+                <span class="sb-universal-identity-status" :class="`is-${sbOmniSd2Status(asset)}`">SD2 认证：{{ sbOmniSd2StatusLabel(asset) }}
+                  <el-button text size="small" :loading="sbOmniCertifyingIds.has(asset.id)" @click="onSbOmniAssetCertify(activeSb, asset)">{{ sbOmniSd2Status(asset) === 'active' ? '重新认证' : (sbOmniSd2Status(asset) === 'processing' ? '刷新状态' : '认证') }}</el-button>
+                </span>
               </div>
               <div v-if="(sbOmniCreationMode[activeSb.id] || 'multi_reference') === 'first_last_frame'" class="sb-universal-frame-actions">
                 <el-button v-for="asset in sbOmniFrameCandidates(activeSb)" :key="`f-${asset.id}`" size="small" plain @click="setSbOmniFrameAsset(activeSb, 'first', asset.id)">设为首帧：{{ asset.name || `素材${asset.id}` }}</el-button>
@@ -6304,7 +6307,8 @@ async function onSbOmniAssetRealPersonToggle(sb, asset, value) {
   try {
     const updated = await omniVideoAPI.updateAsset(asset.id, { requires_sd2_identity: !!value })
     Object.assign(asset, updated || {})
-    void sb
+    if (value && sbOmniSd2Status(asset) !== 'active') await onSbOmniAssetCertify(sb, asset)
+    else if (!value && sbOmniAssetUsage.value[sb?.id]?.[asset.id] === 'identity') await onSbOmniAssetUsageChange(sb, asset, 'reference')
   } catch (err) {
     asset.requires_sd2_identity = prev
     ElMessage.error(err?.message || '真人声明保存失败')
