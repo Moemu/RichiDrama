@@ -861,6 +861,11 @@ input_reference = (图片文件，可选)</pre>
           <p class="field-tip">仅用于匹配价目表，不会发送给供应商。留空时沿用模型名；同名模型走不同渠道时必须填写不同计费键。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video'">
+          <template #label><span class="form-label-tip">视频单次冻结上限（token）</span></template>
+          <el-input-number v-model="form.billing_reserve_output_tokens" :min="1" :step="1000" :precision="0" controls-position="right" style="width: 240px" placeholder="例如 216216" />
+          <p class="field-tip">仅用于本系统生成前冻结积分，不会发送给供应商；完成后仍以供应商返回的实际 token 结算。Fast 在“无视频输入”场景若最多冻结 800 积分，填 216216。</p>
+        </el-form-item>
+        <el-form-item v-if="form.service_type === 'video'">
           <template #label><span class="form-label-tip">全能能力</span></template>
           <el-input v-model="form.video_capabilities" type="textarea" :rows="5" placeholder='可选 JSON，例如：{"supports":{"image_reference":{"max":9},"audio_reference":true,"video_reference":false},"limits":{"duration_seconds":{"min":4,"max":15}}}' />
           <p class="field-tip">留空使用系统默认能力。此配置由全能视频的前后端共同读取，用于展示兼容性、自动匹配和提交校验。</p>
@@ -1265,6 +1270,7 @@ const form = ref({
   kling_access_key: '',
   kling_secret_key: '',
   kling_secret_key_base64: false,
+  billing_reserve_output_tokens: null,
   video_capabilities: '',
   // TTS 专属字段
   voice_id: '',
@@ -1858,6 +1864,7 @@ function resetForm() {
     deepseek_reasoning_effort: 'high',
     priority: 0,
     is_default: true,  // 新增时默认勾选「设为默认」，便于理解当前会使用哪条配置
+    billing_reserve_output_tokens: null,
     voice_id: '',
     group_id: '',
     doubao_appid: '',
@@ -1890,6 +1897,7 @@ function openEdit(row) {
   let kling_access_key = ''
   let kling_secret_key = ''
   let kling_secret_key_base64 = false
+  let billing_reserve_output_tokens = null
   let video_capabilities = ''
   const deepseekSettings = resolveDeepSeekFormSettings(row)
   if (row.settings) {
@@ -1907,6 +1915,7 @@ function openEdit(row) {
         kling_secret_key = s.kling_secret_key || ''
         kling_secret_key_base64 = !!s.kling_secret_key_base64
       }
+      if (row.service_type === 'video' && Number.isSafeInteger(Number(s.billing_reserve_output_tokens)) && Number(s.billing_reserve_output_tokens) > 0) billing_reserve_output_tokens = Number(s.billing_reserve_output_tokens)
       if (row.service_type === 'video' && s.video_capabilities) video_capabilities = JSON.stringify(s.video_capabilities, null, 2)
     } catch (_) {}
   }
@@ -1934,6 +1943,7 @@ function openEdit(row) {
     kling_access_key,
     kling_secret_key,
     kling_secret_key_base64,
+    billing_reserve_output_tokens,
     video_capabilities,
   }
   dialogVisible.value = true
@@ -1994,6 +2004,11 @@ async function submit() {
     if (form.value.service_type === 'video') {
       const previous = editingId.value ? list.value.find((r) => r.id === editingId.value) : null
       const videoSettings = parseSettings(settings || previous?.settings)
+      const reserve = form.value.billing_reserve_output_tokens
+      if (reserve != null && reserve !== '') {
+        if (!Number.isSafeInteger(Number(reserve)) || Number(reserve) <= 0) throw new Error('视频单次冻结上限必须是正整数 token')
+        videoSettings.billing_reserve_output_tokens = Number(reserve)
+      } else delete videoSettings.billing_reserve_output_tokens
       const raw = String(form.value.video_capabilities || '').trim()
       if (raw) {
         try { videoSettings.video_capabilities = JSON.parse(raw) }
