@@ -39,6 +39,10 @@
         <el-radio-group v-model="creationMode" size="small" class="mode-switch"><el-radio-button label="multi_reference">多参考生视频</el-radio-button><el-radio-button label="first_last_frame">首尾帧生视频</el-radio-button></el-radio-group>
         <small class="mode-note">{{ creationMode === 'first_last_frame' ? '必须设置一张首帧（必填），尾帧可选；模型不支持时不可提交。' : '图片、视频、音频可按用途自由编排，按模型能力自动路由。' }}</small>
         <el-alert v-if="!currentCapability" class="model-config-alert" type="warning" :closable="false" title="尚未配置可用的视频模型" description="请先在 AI 配置中启用并保存一个已验证的视频模型；配置后本工作台会自动读取它的素材能力与限制。"><template #default><el-button text size="small" @click="$router.push('/ai-config')">前往 AI 配置</el-button></template></el-alert>
+        <div class="creation-generate-dock" aria-label="当前镜头生成操作">
+          <div class="creation-generate-summary"><b>生成镜头 {{ activeShotIndex + 1 }}</b><small>{{ chosenAssets.length }} 个已选素材 · {{ duration }} 秒</small></div>
+          <div class="creation-generate-actions"><el-button size="small" @click="requestPreviewOpen = true">预览请求</el-button><el-button class="generate-button" type="primary" :loading="creating" :disabled="!canCreate" @click="create">{{ creating ? '生成中…' : '生成当前镜头' }}</el-button></div>
+        </div>
         <div v-if="creationMode === 'first_last_frame'" class="frame-slots">
           <div class="frame-slot" :class="{ filled: !!firstFrameAsset, required: true }" @click="openFramePicker('first_frame')">
             <img v-if="firstFrameAsset" :src="assetUrl(firstFrameAsset)" />
@@ -80,7 +84,6 @@
         </div>
         <div v-if="audioStrategy === 'post_mix'" class="audio-options"><el-checkbox v-model="keepOriginalAudio">保留原声</el-checkbox><el-slider v-model="audioVolume" :min="0" :max="2" :step="0.1"/><el-input-number v-model="audioFadeSeconds" :min="0" :max="10" size="small"/></div>
         <div v-if="expiredIdentityAssets.length" class="identity-expired-warn"><el-icon><WarningFilled /></el-icon><span>以下真人素材认证已失效，本次将回退原始图生成，建议重新认证：{{ expiredIdentityAssets.map((a) => a.alias || a.name).join('、') }}</span></div>
-        <div class="generation-actions"><el-button size="large" @click="requestPreviewOpen = true">预览本次请求</el-button><el-button class="generate-button" type="primary" size="large" :loading="creating" :disabled="!canCreate" @click="create">{{ creating ? '准备并生成中…' : '生成当前镜头' }}</el-button></div>
         <section class="generation-history">
           <div class="generation-history-head"><b>本镜生成记录</b><small>{{ shotHistory.length }} 个版本</small></div>
           <div class="generation-history-grid">
@@ -565,5 +568,6 @@ onMounted(() => {
 .omni-page.embedded.project-storyboard-page .material-pool,
 .omni-page.embedded.project-storyboard-page .selected-assets,
 .omni-page.embedded.project-storyboard-page .frame-picker-grid{overscroll-behavior-y:contain;scrollbar-gutter:stable}
+.creation-generate-dock{position:sticky;top:0;z-index:12;display:grid;gap:8px;margin:12px -2px 14px;padding:10px;border:1px solid #69655e;border-radius:8px;background:#181818f2;box-shadow:0 6px 18px #0006;backdrop-filter:blur(8px)}.creation-generate-summary{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.creation-generate-summary b{color:#f5f3ee;font-size:13px}.creation-generate-summary small{color:#c4c1ba;font-size:11px;white-space:nowrap}.creation-generate-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:7px}.creation-generate-actions .generate-button{margin:0!important;min-width:0}.project-storyboard-page .creation-generate-dock{top:-1px;background:#181f29f5;border-color:#3c4958}.project-storyboard-page .creation-generate-summary b{color:#f2f0ea}.project-storyboard-page .creation-generate-summary small{color:#aab4c0}@media(max-width:720px){.creation-generate-dock{position:sticky;top:0;margin-left:0;margin-right:0}.creation-generate-summary{align-items:flex-start;flex-direction:column;gap:3px}.creation-generate-summary small{white-space:normal}}
 @media(max-width:960px){.omni-page.embedded.project-storyboard-page{position:static!important;height:auto!important;min-height:0!important;overflow:visible!important}.omni-page.embedded.project-storyboard-page .workbench{height:auto!important;min-height:520px}}
 </style>
