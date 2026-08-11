@@ -2768,10 +2768,14 @@ const videoWatermark = ref(false)
 const videoWatermarkText = ref('')
 
 const dramaId = computed(() => store.dramaId)
-const characters = computed(() => store.characters)
-const scenes = computed(() => store.scenes)
-const props = computed(() => store.props)
-const storyboards = computed(() => store.storyboards)
+// Historical projects may contain null placeholders after a resource or a
+// storyboard was removed. Never let one stale row break the whole editor (or
+// prevent an otherwise valid resource from being submitted for video).
+const validRows = (value) => Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') : []
+const characters = computed(() => validRows(store.characters))
+const scenes = computed(() => validRows(store.scenes))
+const props = computed(() => validRows(store.props))
+const storyboards = computed(() => validRows(store.storyboards))
 const workflowStage = ref('script')
 const showLegacyPipeline = ref(false)
 const resourceMediaFileInput = ref(null)
@@ -4555,7 +4559,7 @@ function onSbImageFileChange(ev) {
 }
 
 function syncStoryboardStateFromEpisode(ep) {
-  const boards = ep?.storyboards || []
+  const boards = validRows(ep?.storyboards)
   const nextCharIds = {}
   const nextPropIds = {}
   const nextScene = {}
@@ -6073,7 +6077,7 @@ async function onSbOmniAssetUsageChange(sb, asset, usage) {
 /** 本镜已选素材：严格按用户勾选顺序返回（@图片N 与提交顺序一致） */
 function getSelectedUniversalLibraryAssets(sb) {
   const ids = (sbOmniAssetIds.value[sb?.id] || []).map(Number)
-  const byId = new Map(universalLibraryAssets.value.map((asset) => [Number(asset.id), asset]))
+  const byId = new Map(validRows(universalLibraryAssets.value).map((asset) => [Number(asset.id), asset]))
   return ids.map((id) => byId.get(id)).filter(Boolean)
 }
 
@@ -6424,9 +6428,9 @@ async function loadUniversalLibraryAssets() {
 // retain all valid selections, rather than allowing generation to fail later
 // with an opaque "resource not found" response.
 async function reconcileUnavailableStoryboardAssets() {
-  const available = new Set(universalLibraryAssets.value.map((asset) => Number(asset.id)))
+  const available = new Set(validRows(universalLibraryAssets.value).map((asset) => Number(asset.id)))
   let repaired = 0
-  for (const sb of storyboards.value || []) {
+  for (const sb of validRows(storyboards.value)) {
     const current = (sbOmniAssetIds.value[sb.id] || []).map(Number)
     const ids = current.filter((id) => available.has(id))
     const first = sbOmniFirstFrameAssetId.value[sb.id]
@@ -6945,7 +6949,7 @@ function sbOmniEntryIndexByAssetId(sb) {
  * 一个分镜只用一个资源库自由勾选，实体图勾选时自动导入素材库（assets）。
  */
 function sbOmniPoolItems(sb) {
-  const pool = universalLibraryAssets.value.map((a) => ({ ...a, poolKey: `asset-${a.id}`, poolType: 'asset' }))
+  const pool = validRows(universalLibraryAssets.value).map((a) => ({ ...a, poolKey: `asset-${a.id}`, poolType: 'asset' }))
   if (!sb?.id) return pool
   const existingPaths = new Set(pool.map((a) => String(a.local_path || '').trim()).filter(Boolean))
   const pushEntity = (kind, entity) => {
