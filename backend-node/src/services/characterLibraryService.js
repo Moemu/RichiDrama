@@ -879,8 +879,8 @@ async function registerCharacterViaJimengHub(db, log, cfg, characterId, hubCtx, 
     }
     return { ok: false, error: errMsg };
   }
-  const created = createRes.data;
-  const assetId = created.id;
+  const created = createRes?.data;
+  const assetId = created?.id;
   if (!assetId) return { ok: false, error: '素材库返回缺少素材 id' };
 
   const basePayload = buildSeedance2BasePayload(charRow, assetId, created, registerImageUrl, 'hub');
@@ -952,8 +952,8 @@ async function registerCharacterViaModelArk(db, log, cfg, characterId, arkCtx, p
       error: `ModelArk 创建资产失败：${String(createRes.error || '').slice(0, 1500)}`,
     };
   }
-  const created = createRes.data;
-  const assetId = created.id;
+  const created = createRes?.data;
+  const assetId = created?.id;
   if (!assetId) return { ok: false, error: 'ModelArk 返回缺少资产 Id' };
 
   const basePayload = buildSeedance2BasePayload(charRow, assetId, created, registerImageUrl, 'model_ark');

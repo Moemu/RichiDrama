@@ -35,6 +35,15 @@ function payload(asset, created, sourceUrl, provider) {
     updated_at: new Date().toISOString(),
   };
 }
+
+function createdAssetFromResult(result, provider) {
+  if (!result?.ok) return { ok: false, error: result?.error || 'SD2 认证服务请求失败' };
+  const asset = result.data;
+  if (!asset || !asset.id) {
+    return { ok: false, error: `${provider === 'model_ark' ? 'ModelArk' : 'SD2 素材库'} 未返回有效资产 ID，请稍后重试或检查认证服务配置` };
+  }
+  return { ok: true, asset };
+}
 function chooseProvider(db, cfg, log) {
   const ark = modelArk.buildModelArkContext(db, log);
   if (ark.ready) return { provider: 'model_ark', ctx: ark };
@@ -68,13 +77,15 @@ async function certifyResource(db, log, cfg, kind, id) {
   const source = await publicImageUrl(row, cfg, log); if (!source.ok) return source;
   const name = row.name || row.location || `${kind}-${row.id}`;
   const create = route.provider === 'model_ark' ? await modelArk.createImageAsset(route.ctx, { name, url: source.url }, log) : await materialHub.createImageAsset(route.ctx, { name, url: source.url }, log);
-  if (!create.ok) return { ok: false, error: create.error };
-  let out = payload(row, create.data, source.url, route.provider);
+  const createdResult = createdAssetFromResult(create, route.provider);
+  if (!createdResult.ok) return createdResult;
+  const created = createdResult.asset;
+  let out = payload(row, created, source.url, route.provider);
   db.prepare(`UPDATE ${table} SET seedance2_asset = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(out), out.updated_at, row.id);
-  const settled = route.provider === 'model_ark' ? await modelArk.pollAssetUntilSettled(route.ctx, create.data.id, { log }) : await materialHub.pollAssetUntilSettled(route.ctx, create.data.id, { log });
+  const settled = route.provider === 'model_ark' ? await modelArk.pollAssetUntilSettled(route.ctx, created.id, { log }) : await materialHub.pollAssetUntilSettled(route.ctx, created.id, { log });
   if (!settled.ok) return { ok: false, error: settled.error };
-  const data = settled.asset || create.data;
-  out = { ...out, asset_url: data.asset_url || out.asset_url || modelArk.assetUrlForVideo(data), status: data.status || out.status, poll_timed_out: !!settled.timedOut, updated_at: new Date().toISOString() };
+  const data = settled.asset || created;
+  out = { ...out, asset_url: data?.asset_url || out.asset_url || modelArk.assetUrlForVideo(data), status: data?.status || out.status, poll_timed_out: !!settled.timedOut, updated_at: new Date().toISOString() };
   db.prepare(`UPDATE ${table} SET seedance2_asset = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(out), out.updated_at, row.id);
   return { ok: true, seedance2_asset: out };
 }
@@ -140,4 +151,4 @@ async function refresh(db, log, cfg, id) {
 }
 function markStale(db, previous, next) { return markResourceStale(db, 'asset', previous, next); }
 
-module.exports = { certify, refresh, markStale, certifyResource, refreshResource, markResourceStale, parse, sourceFingerprint };
+module.exports = { certify, refresh, markStale, certifyResource, refreshResource, markResourceStale, parse, sourceFingerprint, createdAssetFromResult };
