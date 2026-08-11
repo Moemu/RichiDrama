@@ -6408,7 +6408,7 @@ async function loadUniversalLibraryAssets() {
       loadAllUniversalLibraryAssets(),
       omniVideoAPI.uploadLimits().catch(() => null),
     ])
-    universalLibraryAssets.value = (result?.items || []).filter((asset) => ['image', 'video', 'audio'].includes(asset.type) && asset.processing_status !== 'processing')
+    universalLibraryAssets.value = (result?.items || []).filter((asset) => asset && Number.isFinite(Number(asset.id)) && ['image', 'video', 'audio'].includes(asset.type) && asset.processing_status !== 'processing')
     sbUniversalUploadLimits.value = limits || null
     await reconcileUnavailableStoryboardAssets()
   } catch (_) {
@@ -6451,7 +6451,7 @@ async function loadAllUniversalLibraryAssets() {
   let total = Infinity
   while (items.length < total) {
     const result = await omniVideoAPI.assets({ page, page_size: 100 })
-    const batch = result?.items || []
+    const batch = (result?.items || []).filter((asset) => asset && Number.isFinite(Number(asset.id)))
     items.push(...batch)
     total = Number(result?.pagination?.total ?? items.length)
     if (!batch.length || page >= Number(result?.pagination?.total_pages || 1)) break
