@@ -19,7 +19,9 @@ const SQL_BY_KIND = {
 
 function ownershipGuard(db) {
   return (req, res, next) => {
-    if (req.auth?.role === 'admin') return next();
+    // 管理员只拥有后台管理权限，不自动获得其他用户创作资源的使用权。
+    // 这样既保证项目隔离，也避免管理员能够提交一个子账号资源导致
+    // 生成任务归属、扣费账号与素材归属不一致。
     // Collection routes carry a parent reference in the body/query. Check it before
     // handlers can create, generate, or enumerate data under another user's project.
     const refs = { ...(req.query || {}), ...(req.body || {}) };

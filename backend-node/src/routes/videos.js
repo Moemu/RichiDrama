@@ -7,7 +7,7 @@ function routes(db, log) {
   return {
     list: (req, res) => {
       try {
-        const query = { ...req.query, owner_user_id: req.auth.role === 'admin' ? undefined : req.auth.id };
+        const query = { ...req.query, owner_user_id: req.auth.id };
         const { items, total, page, pageSize } = videoService.list(db, query);
         response.successWithPagination(res, items, total, page, pageSize);
       } catch (err) {
@@ -18,7 +18,7 @@ function routes(db, log) {
     create: (req, res) => {
       try {
         const body = req.body || {};
-        if (req.auth.role !== 'admin' && body.drama_id) {
+        if (body.drama_id) {
           const own = db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id);
           if (!own) return response.notFound(res, '项目不存在');
         }
@@ -31,7 +31,7 @@ function routes(db, log) {
         let settings = {}; try { settings = JSON.parse(configForBilling?.settings || '{}'); } catch (_) {}
         const meters = billing.activeMeters(db, req.auth, body.service_type || 'video', billingTarget.billing_key);
         const usage = {};
-        if (meters.includes('second')) usage.second = Number(body.duration || 5) || 5;
+        if (meters.includes('second')) usage.second = Number(body.duration || 15) || 15;
         if (meters.includes('request')) usage.request = 1;
         if (meters.includes('input_token')) {
           const cap = Number(settings.billing_reserve_input_tokens);
@@ -64,7 +64,7 @@ function routes(db, log) {
           }
         }
         const model = modelForBilling;
-        const duration = body.duration ?? null;
+        const duration = body.duration ?? 15;
         // 画幅：请求体归一化（全角冒号等）后写入 DB；未传则从 drama.metadata 读取并同样归一化
         let aspectRatio = null;
         if (body.aspect_ratio != null && String(body.aspect_ratio).trim() !== '') {

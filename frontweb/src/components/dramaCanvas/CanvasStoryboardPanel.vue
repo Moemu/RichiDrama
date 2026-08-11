@@ -209,7 +209,7 @@ const form = reactive({
   video_prompt: '',
   universal_segment_text: '',
   shot_type: '',
-  duration: 5,
+  duration: 15,
 })
 
 const sbNodeId = computed(() => props.nodeId || (props.storyboard?.id ? `sb:${props.storyboard.id}` : ''))

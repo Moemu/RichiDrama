@@ -7,7 +7,7 @@ function routes(db, cfg, log) {
   return {
     list: (req, res) => {
       try {
-        const query = { ...req.query, owner_user_id: req.auth.role === 'admin' ? undefined : req.auth.id };
+        const query = { ...req.query, owner_user_id: req.auth.id };
         const { items, total, page, pageSize } = imageService.list(db, query);
         response.successWithPagination(res, items, total, page, pageSize);
       } catch (err) {
@@ -18,7 +18,7 @@ function routes(db, cfg, log) {
     create: (req, res) => {
       try {
         const body = req.body || {};
-        if (req.auth.role !== 'admin' && body.drama_id) {
+        if (body.drama_id) {
           const own = db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id);
           if (!own) return response.notFound(res, '项目不存在');
         }

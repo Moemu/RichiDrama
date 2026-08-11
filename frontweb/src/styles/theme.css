@@ -39,7 +39,7 @@ html.dark {
   --radius-lg: 12px;
   --radius-xl: 16px;
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
-  --app-font-size: 16px;
+  --app-font-size: 17px;
   --el-font-family: var(--font-sans);
   --el-bg-color: var(--bg-surface);
   --el-bg-color-page: var(--bg-page);
@@ -60,8 +60,8 @@ html.dark {
   --el-color-primary-light-7: #b5c0ca;
   --el-color-primary-light-9: #334050;
   --el-color-primary-dark-2: #d7dee5;
-  --el-font-size-base: 16px;
-  --el-font-size-small: 14px;
+  --el-font-size-base: 17px;
+  --el-font-size-small: 15px;
   --el-component-size: 40px;
   --el-component-size-small: 34px;
   --el-border-radius-base: var(--radius-md);

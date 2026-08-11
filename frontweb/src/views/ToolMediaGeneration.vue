@@ -54,7 +54,7 @@ import { videosAPI } from '@/api/videos'
 import ToolAssetSelector from '@/components/ToolAssetSelector.vue'
 import GenerationSettings from '@/components/GenerationSettings.vue'
 const props = defineProps({ media: { type: String, required: true } })
-const router = useRouter(), prompt = ref(''), model = ref(''), reference = ref(''), selectedAssetId = ref(null), firstFrameAssetId = ref(null), lastFrameAssetId = ref(null), firstFrameAssetUrl = ref(''), lastFrameAssetUrl = ref(''), videoSettings = ref({ video_model: 'auto', duration: 5, resolution: '720p', aspect_ratio: '16:9' }), running = ref(false), importing = ref(false), items = ref([]), mode = ref('text'), featured = ref(null)
+const router = useRouter(), prompt = ref(''), model = ref(''), reference = ref(''), selectedAssetId = ref(null), firstFrameAssetId = ref(null), lastFrameAssetId = ref(null), firstFrameAssetUrl = ref(''), lastFrameAssetUrl = ref(''), videoSettings = ref({ video_model: 'auto', duration: 15, resolution: '720p', aspect_ratio: '16:9' }), running = ref(false), importing = ref(false), items = ref([]), mode = ref('text'), featured = ref(null)
 const modes = computed(() => props.media === 'image' ? [
   { label:'文生图', value:'text', hint:'从文字开始构图', rule:'不需要参考素材' }, { label:'单图生图', value:'image', hint:'基于一张图再创作', rule:'填写一张参考素材 URL' }, { label:'多参考生图', value:'multi', hint:'融合多个参考元素', rule:'用英文逗号分隔多个 URL' }, { label:'组生组图', value:'batch', hint:'共享风格批量出图', rule:'用提示词逐项创建' },
 ] : [

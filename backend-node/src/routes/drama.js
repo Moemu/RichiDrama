@@ -42,7 +42,7 @@ function listDramas(db, log) {
         status,
         genre,
         keyword,
-        owner_user_id: req.auth.role === 'admin' ? undefined : req.auth.id,
+        owner_user_id: req.auth.id,
       });
       response.successWithPagination(res, dramas, total, p, ps);
     } catch (err) {

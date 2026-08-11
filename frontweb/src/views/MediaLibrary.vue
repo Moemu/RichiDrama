@@ -85,7 +85,7 @@
         </div>
         <div class="media-info">
           <span class="media-name" :title="item.name" @dblclick.stop="renameItem(item)">{{ item.name || '未命名' }}</span>
-          <div class="media-meta-row"><span class="media-meta">{{ formatSize(item.size) }}</span><span v-if="item.type === 'image' && item.requires_sd2_identity" class="identity-state" :class="sd2Status(item)">真人 · {{ sd2Label(item) }}</span></div>
+          <div class="media-meta-row"><span class="media-meta">{{ formatSize(item.size) }}</span><span v-if="item.type === 'image' && item.requires_sd2_identity" class="identity-state">含真人</span></div>
           <div v-if="item.tags?.length" class="media-tags"><el-tag v-for="tag in item.tags.slice(0, 3)" :key="tag" size="small" effect="plain">{{ tag }}</el-tag></div>
         </div>
       </div>
@@ -136,7 +136,7 @@
         <div class="meta-row"><span>大小：</span>{{ formatSize(previewItem?.size) }}</div>
         <div class="meta-row"><span>创建时间：</span>{{ previewItem?.created_at }}</div>
         <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔，例如：人物, 夜景" @change="saveTags" /></div>
-        <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人／需要身份一致性</el-checkbox><el-button v-if="previewItem?.requires_sd2_identity" text size="small" :loading="certifyingId === previewItem?.id" @click="certify(previewItem)">{{ sd2Status(previewItem) === 'active' ? '认证可用' : '认证 / 刷新' }}</el-button></div>
+        <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人</el-checkbox><span>未勾选即为不含真人</span></div>
         <section v-if="previewItem" class="asset-lineage">
           <div class="asset-lineage-title"><span>版本与来源</span><el-button text size="small" :loading="lineageLoading" @click="loadLineage(previewItem.id)">刷新</el-button></div>
           <div v-if="lineageLoading" class="asset-lineage-empty">正在加载素材谱系…</div>
@@ -371,9 +371,7 @@ async function renameItem(item) {
 
 function sd2Status(item) { return String(item?.seedance2_asset?.status || 'none').toLowerCase() }
 function sd2Label(item) { return ({ active: '认证可用', processing: '认证中', stale: '需刷新', failed: '认证失败', none: '未认证' })[sd2Status(item)] || '未认证' }
-async function setIdentity(item, value) {
-  try { const updated = await omniVideoAPI.updateAsset(item.id, { requires_sd2_identity: !!value }); Object.assign(item, updated); if (value) await certify(item) } catch (error) { ElMessage.error(error.message || '真人声明保存失败') }
-}
+async function setIdentity(item, value) { try { const updated = await omniVideoAPI.updateAsset(item.id, { requires_sd2_identity: !!value }); Object.assign(item, updated) } catch (error) { ElMessage.error(error.message || '真人声明保存失败') } }
 async function certify(item) {
   if (!item || certifyingId.value === item.id || sd2Status(item) === 'active') return
   certifyingId.value = item.id

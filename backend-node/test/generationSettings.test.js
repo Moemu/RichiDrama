@@ -19,6 +19,16 @@ test('free-create shot stores independent model, duration and resolution', () =>
   assert.deepEqual(updated.settings, { model: 'seedance-2', aspect_ratio: '9:16', duration: 10, resolution: '1080p', audio_strategy: 'reference_only' });
 });
 
+test('new free-create shots default to 15 seconds', () => {
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE omni_video_sequences (id INTEGER PRIMARY KEY, name TEXT, is_default INTEGER, deleted_at TEXT, created_at TEXT, updated_at TEXT);
+    CREATE TABLE omni_video_sequence_shots (id INTEGER PRIMARY KEY, sequence_id INTEGER, title TEXT, sort_order INTEGER, prompt TEXT, prompt_document_json TEXT, assets_json TEXT, settings_json TEXT, omni_job_id INTEGER, deleted_at TEXT, created_at TEXT, updated_at TEXT);
+    CREATE TABLE omni_video_jobs (id INTEGER PRIMARY KEY, video_generation_id INTEGER);
+    CREATE TABLE video_generations (id INTEGER PRIMARY KEY, status TEXT, video_url TEXT, local_path TEXT, error_msg TEXT);`);
+  const sequence = sequenceService.createSequence(db, { name: 'defaults' });
+  assert.equal(sequence.shots[0].settings.duration, 15);
+});
+
 test('classic storyboard persists per-shot text and video generation settings', () => {
   const db = new Database(':memory:');
   db.exec(`CREATE TABLE storyboards (id INTEGER PRIMARY KEY, episode_id INTEGER, title TEXT, duration REAL, text_model TEXT, video_model TEXT, video_resolution TEXT, video_aspect_ratio TEXT, updated_at TEXT, deleted_at TEXT);

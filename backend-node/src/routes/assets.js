@@ -5,7 +5,7 @@ function routes(db, log, cfg) {
   return {
     list: (req, res) => {
       try {
-        const query = { ...req.query, owner_user_id: req.auth.role === 'admin' ? undefined : req.auth.id };
+        const query = { ...req.query, owner_user_id: req.auth.id };
         // Backfill legacy projects on their first material-pool read. New
         // entity writes are synchronized in their services, so this only
         // migrates existing character/scene/prop images once.
@@ -20,7 +20,7 @@ function routes(db, log, cfg) {
     create: (req, res) => {
       try {
         const body = req.body || {};
-        if (req.auth.role !== 'admin' && body.drama_id && !db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id)) return response.notFound(res, '项目不存在');
+        if (body.drama_id && !db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id)) return response.notFound(res, '项目不存在');
         const item = assetService.create(db, log, { ...body, owner_user_id: req.auth.id });
         response.created(res, item);
       } catch (err) {

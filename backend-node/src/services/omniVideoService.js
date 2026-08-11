@@ -9,7 +9,7 @@ const IMAGE_USAGES = new Set(['primary', 'identity', 'environment', 'style', 'pr
 // provider request body, whose fields are built later by videoService.
 function buildAuthorizationUsage(meters, billingSettings, duration) {
   const usage = {};
-  if (meters.includes('second')) usage.second = Number(duration) || 5;
+  if (meters.includes('second')) usage.second = Number(duration) || 15;
   if (meters.includes('request')) usage.request = 1;
   if (meters.includes('input_token')) {
     const cap = Number(billingSettings.billing_reserve_input_tokens);
@@ -25,6 +25,7 @@ function buildAuthorizationUsage(meters, billingSettings, duration) {
 }
 
 function create(db, log, body, billingUser) {
+  body = { ...(body || {}), duration: Math.min(15, Math.max(1, Number(body?.duration) || 15)) };
   const prompt = String(body.prompt || '').trim();
   if (!prompt) throw new Error('提示词不能为空');
   const input = Array.isArray(body.assets) ? body.assets : [];
@@ -177,12 +178,8 @@ function routeAssets(assets, supports, audioStrategy) {
     if (asset.type === 'image') { send = send && imageCount < maxImages; if (send) imageCount++; if (!send) strategy = 'not_supported'; }
     if (asset.type === 'audio') { send = send && !!supports.audio_reference && audioStrategy !== 'post_mix'; strategy = send ? 'native' : 'post_mix'; }
     if (asset.type === 'video') { send = send && !!supports.video_reference; strategy = send ? 'native' : 'keyframe_or_post'; }
-    const certified = asset.type === 'image'
-      && asset.requires_sd2_identity
-      && asset.seedance2_asset
-      && String(asset.seedance2_asset.status || '').toLowerCase() === 'active'
-      && String(asset.seedance2_asset.asset_url || '').startsWith('asset://');
-    return { ...asset, model_url: certified ? asset.seedance2_asset.asset_url : (asset.local_path || asset.url), send_to_model: send, strategy };
+    // 真人标记是声明信息，不把供应商认证资源作为生成前置条件。
+    return { ...asset, model_url: asset.local_path || asset.url, send_to_model: send, strategy };
   });
 }
 
@@ -224,6 +221,9 @@ function expandVideoReferences(db, log, assets, supports) {
 
 function isSeedanceCapability(capability) { return /seedance|doubao-seedance/i.test(String(capability?.model || '')) && /volc|volces/i.test(String(capability?.provider || '')); }
 function enforceSd2IdentityAssets(assets, capability, log) {
+  // 真人/非真人只是素材声明，不再让认证状态阻断视频提交。
+  void assets; void capability; void log;
+  return;
   if (!isSeedanceCapability(capability)) return;
   const undeclared = assets.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && asset.send_to_model && !asset.requires_sd2_identity);
   if (undeclared.length) throw new Error(`人物一致性素材请先勾选“含真人／需要身份一致性”：${undeclared.map((asset) => asset.alias).join('、')}`);
