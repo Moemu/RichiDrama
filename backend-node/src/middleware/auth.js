@@ -13,7 +13,13 @@ function requireAuth(db) {
     const match = /^Bearer\s+(.+)$/i.exec(raw);
     const token = match?.[1] || readCookie(req, 'lmd_session');
     if (!token) return response.error(res, 401, 'UNAUTHORIZED', '请先登录');
-    try { req.auth = authService.authenticate(db, token); return next(); }
+    try {
+      req.auth = authService.authenticate(db, token);
+      // Keep the authenticated credential available to routes that need to
+      // establish a browser cookie for protected static media.
+      req.authToken = token;
+      return next();
+    }
     catch (_) { return response.error(res, 401, 'UNAUTHORIZED', '登录已过期，请重新登录'); }
   };
 }

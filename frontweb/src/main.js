@@ -12,6 +12,7 @@ import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
+import request from './utils/request'
 
 const app = createApp({
   name: 'RootProvider',
@@ -38,4 +39,14 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 app.use(pinia)
 app.use(router)
 app.use(ElementPlus, { locale: zhCn })
-app.mount('#app')
+async function mountApp() {
+  // API calls use the bearer token, while <video>/<img> requests cannot add
+  // that header. Restore the HttpOnly media cookie for sessions created before
+  // static media was protected, then mount routes that render those elements.
+  if (localStorage.getItem('lmd_auth_token')) {
+    try { await request.post('/auth/session-cookie') } catch (_) { /* request interceptor handles expired sessions */ }
+  }
+  app.mount('#app')
+}
+
+mountApp()

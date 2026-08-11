@@ -40,6 +40,7 @@ function setupRouter(cfg, db, log) {
   // calls, so every text-model invocation can participate in billing.
   r.use((req, res, next) => require('../services/billingRequestContext').run({ actor: req.auth, db, log }, next));
   r.get('/auth/me', auth.me);
+  r.post('/auth/session-cookie', auth.sessionCookie);
   r.post('/auth/logout', auth.logout);
   r.post('/auth/change-password', auth.changePassword);
   r.use(ownershipGuard(db));
