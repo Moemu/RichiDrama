@@ -332,6 +332,7 @@ function updateCharacter(db, log, characterId, req) {
   }
   params.push(new Date().toISOString(), characterId);
   db.prepare('UPDATE characters SET ' + updates.join(', ') + ', updated_at = ? WHERE id = ?').run(...params);
+  require('./assetMappingService').syncEntities(db, log, 'character', [characterId]);
   log.info('Character updated', { character_id: characterId });
   return { ok: true };
 }
@@ -910,6 +911,7 @@ async function registerCharacterViaJimengHub(db, log, cfg, characterId, hubCtx, 
     Number(characterId)
   );
   log.info('[SD2认证][hub] 素材已登记', { characterId, hub_asset_id: assetId, status: nextPayload.status });
+  require('./assetMappingService').syncEntities(db, log, 'character', [characterId]);
   return { ok: true, seedance2_asset: nextPayload };
 }
 
@@ -977,6 +979,7 @@ async function registerCharacterViaModelArk(db, log, cfg, characterId, arkCtx, p
     Number(characterId)
   );
   log.info('[SD2认证][model_ark] 素材已登记', { characterId, hub_asset_id: assetId, status: nextPayload.status });
+  require('./assetMappingService').syncEntities(db, log, 'character', [characterId]);
   return { ok: true, seedance2_asset: nextPayload };
 }
 
@@ -1041,6 +1044,7 @@ async function refreshCharacterJimengMaterialAsset(db, log, cfg, characterId) {
     now,
     Number(characterId)
   );
+  require('./assetMappingService').syncEntities(db, log, 'character', [characterId]);
   return { ok: true, seedance2_asset: nextPayload };
 }
 

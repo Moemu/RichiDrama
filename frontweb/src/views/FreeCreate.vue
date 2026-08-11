@@ -79,11 +79,15 @@
           <div class="identity-heading"><b>素材声明</b><small>只需勾选含真人；未勾选即为不含真人，不再需要额外认证。</small></div>
           <div v-for="asset in chosenImageAssets" :key="asset.id" class="identity-row">
             <el-checkbox :model-value="asset.requires_sd2_identity" @change="setRealPerson(asset, $event)">{{ asset.alias || asset.name }}</el-checkbox>
-            <small class="identity-help">{{ asset.requires_sd2_identity ? '已声明为含真人素材。' : '不含真人素材。' }}</small>
+            <small v-if="asset.requires_sd2_identity" class="identity-status" :class="`is-${sd2Status(asset)}`">
+              SD2 认证：{{ sd2StatusLabel(asset) }}
+              <el-button text size="small" :loading="certifyingId === asset.id" @click="certify(asset)">{{ sd2ActionLabel(asset) }}</el-button>
+            </small>
+            <small v-else class="identity-help">不含真人素材。</small>
           </div>
         </div>
         <div v-if="audioStrategy === 'post_mix'" class="audio-options"><el-checkbox v-model="keepOriginalAudio">保留原声</el-checkbox><el-slider v-model="audioVolume" :min="0" :max="2" :step="0.1"/><el-input-number v-model="audioFadeSeconds" :min="0" :max="10" size="small"/></div>
-        <div v-if="expiredIdentityAssets.length" class="identity-expired-warn"><el-icon><WarningFilled /></el-icon><span>以下真人素材认证已失效，本次将回退原始图生成，建议重新认证：{{ expiredIdentityAssets.map((a) => a.alias || a.name).join('、') }}</span></div>
+        <div v-if="expiredIdentityAssets.length" class="identity-expired-warn"><el-icon><WarningFilled /></el-icon><span>以下真人素材尚未完成或已失效 SD2 认证，请刷新或重新认证后再生成：{{ expiredIdentityAssets.map((a) => a.alias || a.name).join('、') }}</span></div>
         <section class="generation-history">
           <div class="generation-history-head"><b>本镜生成记录</b><small>{{ shotHistory.length }} 个版本</small></div>
           <div class="generation-history-grid">
@@ -218,6 +222,13 @@ function containEmbeddedScroll(event) {
 function shotCover(shot) { const first = (shot.assets || []).find((item) => item.type === 'image'); const asset = first && assets.value.find((item) => item.id === Number(first.asset_id)); return assetUrl(asset) }
 function sd2Status(asset) { return String(asset?.seedance2_asset?.status || 'none').toLowerCase() }
 function sd2StatusLabel(asset) { return ({ none: '未认证', processing: '认证中', active: '可用', invalid: '已失效', failed: '认证失败' })[sd2Status(asset)] || '认证状态未知' }
+function sd2ActionLabel(asset) {
+  const status = sd2Status(asset)
+  if (status === 'active') return '刷新状态'
+  if (status === 'processing') return '刷新状态'
+  if (status === 'invalid' || status === 'failed' || status === 'stale') return '重新认证'
+  return '认证'
+}
 function localVideoUrl(video) {
   const localPath = String(video?.local_path || '').replace(/^\/+/, '')
   if (!localPath) return video?.video_url || ''
@@ -429,7 +440,22 @@ function pickFiles() { fileInput.value?.click() }
 function dropFiles(event) { upload(event.dataTransfer.files) }
 function uploadFiles(event) { upload(event.target.files); event.target.value = '' }
 async function upload(files) { for (const file of Array.from(files || [])) { try { const out = await omniVideoAPI.upload(file, { name: file.name, drama_id: isProjectMode.value ? projectDramaId.value : undefined }); if (out.asset) { const item = { ...out.asset, alias: out.asset.name, usage: out.asset.type === 'image' ? 'reference' : out.asset.type === 'video' ? 'motion' : 'ambience' }; assets.value.unshift(item); toggle(item) } } catch (error) { ElMessage.error(`${file.name}：${error.message || '上传失败'}`) } } }
-async function certify(asset) { if (!asset || asset.type !== 'image' || sd2Status(asset) === 'active' || certifyingId.value === asset.id) return; certifyingId.value = asset.id; try { const out = sd2Status(asset) === 'processing' ? await omniVideoAPI.refreshAssetCertification(asset.id) : await omniVideoAPI.certifyAsset(asset.id); asset.seedance2_asset = out.seedance2_asset } finally { certifyingId.value = null } }
+async function certify(asset) {
+  if (!asset || asset.type !== 'image' || certifyingId.value === asset.id) return
+  certifyingId.value = asset.id
+  try {
+    const status = sd2Status(asset)
+    const out = ['processing', 'active'].includes(status)
+      ? await omniVideoAPI.refreshAssetCertification(asset.id)
+      : await omniVideoAPI.certifyAsset(asset.id)
+    if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
+    ElMessage.success(`「${asset.alias || asset.name}」SD2 认证状态：${sd2StatusLabel(asset)}`)
+  } catch (error) {
+    showCertificationError(error)
+  } finally {
+    certifyingId.value = null
+  }
+}
 
 async function create() { creating.value = true; stagePhase.value = '保存镜头'; try { if (!canCreate.value) throw new Error('请补齐当前视频创作模式所需的素材与模型能力'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id }), prompt: prompt.value, prompt_document: promptDocument.value, creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: Math.min(15, Number(duration.value) || 15), resolution: resolution.value || '720p', audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: chosenAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: asset.alias || asset.name, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const job = { id: res.omni_job_id, prompt: prompt.value, status: 'processing', video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = 'processing'; stagePhase.value = '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
 async function poll(id) { for (let n = 0; n < 450; n++) { await new Promise((resolve) => setTimeout(resolve, 4000)); try { const data = await omniVideoAPI.get(id), job = normalizeJob(data), index = jobs.value.findIndex((item) => String(item.id) === String(id)), historyIndex = shotHistory.value.findIndex((item) => String(item.id) === String(id)); if (index >= 0) jobs.value[index] = job; if (historyIndex >= 0) shotHistory.value[historyIndex] = job; if (String(currentShot.value?.omni_job_id) === String(id)) { currentShot.value.status = job.status; currentShot.value.video_url = job.videoUrl; currentShot.value.generation_error = job.error_msg } if (['completed','failed','retryable'].includes(job.status)) return } catch (_) { return } } }

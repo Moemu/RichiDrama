@@ -27,7 +27,20 @@ function ensureAsset(db, log, entityType, entity) {
     return null;
   }
   const payload = { drama_id: Number(entity.drama_id), name: config.name(entity), type: 'image', url: url || '', local_path: localPath, source_type: 'project_resource', processing_status: 'ready', metadata: { resource_type: entityType, resource_id: Number(entity.id) } };
-  return existing ? assetService.update(db, log, existing.id, payload) : assetService.create(db, log, payload);
+  const mapped = existing ? assetService.update(db, log, existing.id, payload) : assetService.create(db, log, payload);
+  // A mapped media item is only a projection of its project resource. Copy the
+  // resource certification so the material pool cannot display a second,
+  // contradictory SD2 state for the same image.
+  try {
+    db.prepare('UPDATE assets SET seedance2_asset = ?, updated_at = ? WHERE id = ?').run(
+      entity.seedance2_asset || null,
+      new Date().toISOString(),
+      Number(mapped.id)
+    );
+    return assetService.getById(db, mapped.id);
+  } catch (_) {
+    return mapped;
+  }
 }
 
 function syncEntities(db, log, entityType, ids) {

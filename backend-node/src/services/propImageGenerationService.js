@@ -147,6 +147,7 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
     local_path: localPath,
     prop_id: propId,
   });
+  try { require('./assetMappingService').syncEntities(db, log, 'prop', [propId]); } catch (_) {}
   log.info('Prop image generation completed', { prop_id: propId, image_url: result.image_url, local_path: localPath });
 }
 

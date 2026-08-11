@@ -94,7 +94,34 @@ function createStoryboard(db, log, req) {
   return getStoryboardById(db, info.lastInsertRowid);
 }
 
-function updateStoryboard(db, log, id, req) {
+function activeOmniAssetIds(db, storyboardId, rawIds, ownerUserId, log) {
+  const requested = [...new Set(parseJsonArray(rawIds).map(Number).filter(Number.isFinite))];
+  if (!requested.length) return [];
+  // Tests and old databases may not contain the material table yet. In that
+  // case preserve legacy behavior; production databases always validate.
+  try {
+    const marks = requested.map(() => '?').join(', ');
+    const rows = db.prepare(`SELECT a.id FROM assets a
+      JOIN storyboards s ON s.id = ?
+      JOIN episodes e ON e.id = s.episode_id
+      WHERE a.id IN (${marks}) AND a.deleted_at IS NULL
+        AND (a.drama_id = e.drama_id OR (a.drama_id IS NULL AND a.owner_user_id = ?))`)
+      .all(Number(storyboardId), ...requested, Number(ownerUserId));
+    const active = new Set(rows.map((row) => Number(row.id)));
+    const kept = requested.filter((assetId) => active.has(assetId));
+    if (kept.length !== requested.length) {
+      log.warn('Removed unavailable storyboard asset references', {
+        storyboard_id: Number(storyboardId),
+        removed_asset_ids: requested.filter((assetId) => !active.has(assetId)),
+      });
+    }
+    return kept;
+  } catch (_) {
+    return requested;
+  }
+}
+
+function updateStoryboard(db, log, id, req, ownerUserId = null) {
   const row = db.prepare('SELECT id FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!row) return null;
   const allowed = ['title', 'description', 'location', 'time', 'duration', 'dialogue', 'narration', 'action', 'result', 'atmosphere', 'image_prompt', 'polished_prompt', 'video_prompt', 'text_model', 'video_model', 'video_resolution', 'video_aspect_ratio', 'scene_id', 'characters', 'composed_image', 'image_url', 'local_path', 'main_panel_idx', 'video_url', 'audio_local_path', 'narration_audio_local_path', 'status', 'shot_type', 'angle', 'angle_h', 'angle_v', 'angle_s', 'movement', 'segment_index', 'segment_title', 'creation_mode', 'universal_segment_text', 'layout_description', 'first_frame_image_id', 'last_frame_image_id', 'last_frame_image_url', 'last_frame_local_path', 'omni_asset_ids', 'audio_strategy', 'keep_original_audio', 'audio_volume', 'audio_fade_seconds', 'omni_creation_mode', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'omni_asset_usage_json'];
@@ -114,7 +141,7 @@ function updateStoryboard(db, log, id, req) {
     if (req[key] !== undefined) {
       updates.push(key + ' = ?');
       const val = req[key];
-      if (key === 'omni_asset_ids') params.push(JSON.stringify(parseJsonArray(val).map((id) => Number(id)).filter((id) => Number.isFinite(id))));
+      if (key === 'omni_asset_ids') params.push(JSON.stringify(activeOmniAssetIds(db, id, val, ownerUserId, log)));
       else if (key === 'omni_asset_usage_json') params.push(JSON.stringify(parseJsonObject(val)));
       else if (key === 'keep_original_audio') params.push(val ? 1 : 0);
       else params.push(val);
