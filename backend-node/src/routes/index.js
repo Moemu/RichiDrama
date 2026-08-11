@@ -150,17 +150,16 @@ function setupRouter(cfg, db, log) {
   r.delete('/dramas/:id', drama.deleteDrama);
 
   // ---------- ai-configs ----------
-  // Creators may read a credential-free model list. All configuration changes
-  // and credentials remain admin-only.
+  // AI configuration is shared across the workspace. Any signed-in member
+  // may maintain it, while list responses stay credential-free.
   r.get('/ai-configs', aiConfig.list);
   r.get('/ai-configs/vendor-lock', aiConfig.vendorLock);
-  r.use('/ai-configs', requireAdmin);
   r.post('/ai-configs', aiConfig.create);
   r.post('/ai-configs/test', aiConfig.testConnection);
   r.post('/ai-configs/jimeng2-list-assets', aiConfig.listJimeng2MaterialAssets);
   r.post('/ai-configs/model-ark-asset', aiConfig.modelArkAsset);
-  r.put('/ai-configs/bulk-update-key', aiConfig.bulkUpdateKey);  // 必须在 /:id 之前
-  r.get('/ai-configs/:id', aiConfig.get);
+  r.put('/ai-configs/bulk-update-key', requireAdmin, aiConfig.bulkUpdateKey);  // 必须在 /:id 之前
+  r.get('/ai-configs/:id', requireAdmin, aiConfig.get);
   r.put('/ai-configs/:id', aiConfig.update);
   r.delete('/ai-configs/:id', aiConfig.delete);
 

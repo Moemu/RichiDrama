@@ -58,6 +58,25 @@ function update(db, log, cfg) {
     if (isNaN(id)) return response.badRequest(res, '无效的配置ID');
 
     let body = req.body || {};
+
+    // 普通成员只拿到不含凭据的共享配置列表。限制其更新字段，避免前端的
+    // 空端点/空设置覆盖管理员已经保存的供应商接入和计费参数。
+    if (req.auth?.role !== 'admin') {
+      const editableFields = [
+        'name',
+        'model',
+        'default_model',
+        'priority',
+        'is_default',
+        'is_active'
+      ];
+      body = Object.fromEntries(
+        editableFields
+          .filter((field) => Object.prototype.hasOwnProperty.call(body, field))
+          .map((field) => [field, body[field]])
+      );
+    }
+
     // 锁定模式下只允许修改 api_key、default_model、is_default
     if (aiConfigService.getVendorLockStatus(cfg).enabled) {
       const allowed = {};
@@ -105,21 +124,34 @@ function bulkUpdateKey(db, log, cfg) {
   };
 }
 
-function testConnection(log) {
+function testConnection(db, log) {
   return async (req, res) => {
     const body = req.body || {};
-    if (!body.base_url || !body.api_key) {
+    // Creators see a credential-free shared-config list. Resolve a selected
+    // config on the server so they can test it without exposing its API key.
+    let input = body;
+    if (body.config_id != null) {
+      const config = aiConfigService.getConfig(db, Number(body.config_id));
+      if (!config) return response.notFound(res, '配置不存在');
+      input = {
+        ...config,
+        model: body.model || config.model,
+        endpoint: body.endpoint ?? config.endpoint,
+        settings: body.settings ?? config.settings,
+      };
+    }
+    if (!input.base_url || !input.api_key) {
       return response.badRequest(res, '缺少 base_url 或 api_key');
     }
     try {
       await aiConfigService.testConnection({
-        base_url: body.base_url,
-        api_key: body.api_key,
-        model: body.model,
-        provider: body.provider,
-        endpoint: body.endpoint,
-        service_type: body.service_type,
-        settings: body.settings,
+        base_url: input.base_url,
+        api_key: input.api_key,
+        model: input.model,
+        provider: input.provider,
+        endpoint: input.endpoint,
+        service_type: input.service_type,
+        settings: input.settings,
       });
       response.success(res, { message: '连接测试成功' });
     } catch (err) {
@@ -192,7 +224,7 @@ module.exports = function aiConfigRoutes(db, log, cfg) {
     create: create(db, log, cfg),
     update: update(db, log, cfg),
     delete: remove(db, log, cfg),
-    testConnection: testConnection(log),
+    testConnection: testConnection(db, log),
     listJimeng2MaterialAssets: listJimeng2MaterialAssets(log),
     modelArkAsset: modelArkAsset(log),
     bulkUpdateKey: bulkUpdateKey(db, log, cfg),
