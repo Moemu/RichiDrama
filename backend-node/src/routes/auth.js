@@ -21,6 +21,12 @@ module.exports = function authRoutes(db) {
       response.success(res, { message: '已退出登录' });
     },
     me: (req, res) => response.success(res, req.auth),
+    sessionCookie: (req, res) => {
+      // Existing SPA sessions may predate the protected-media cookie. Refresh
+      // it from the already-validated bearer token before mounting media tags.
+      res.cookie('lmd_session', req.authToken, authService.sessionCookieOptions(req));
+      response.success(res, { message: 'SESSION_COOKIE_REFRESHED' });
+    },
     changePassword: (req, res) => {
       try {
         authService.changePassword(db, req.auth.id, req.body?.old_password, req.body?.new_password);
