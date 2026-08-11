@@ -8,12 +8,16 @@ const ENTITY_CONFIG = {
 
 function findMappedAsset(db, dramaId, entityType, entityId) {
   try {
-    return db.prepare("SELECT * FROM assets WHERE drama_id = ? AND source_type = 'project_resource' AND deleted_at IS NULL AND json_extract(metadata_json, '$.resource_type') = ? AND json_extract(metadata_json, '$.resource_id') = ? ORDER BY id DESC LIMIT 1")
+    return db.prepare("SELECT * FROM assets WHERE drama_id = ? AND source_type = 'project_resource' AND json_extract(metadata_json, '$.resource_type') = ? AND json_extract(metadata_json, '$.resource_id') = ? ORDER BY id DESC LIMIT 1")
       .get(Number(dramaId), entityType, Number(entityId));
   } catch (_) {
-    return db.prepare("SELECT * FROM assets WHERE drama_id = ? AND source_type = 'project_resource' AND deleted_at IS NULL AND metadata_json LIKE ? AND metadata_json LIKE ? ORDER BY id DESC LIMIT 1")
+    return db.prepare("SELECT * FROM assets WHERE drama_id = ? AND source_type = 'project_resource' AND metadata_json LIKE ? AND metadata_json LIKE ? ORDER BY id DESC LIMIT 1")
       .get(Number(dramaId), '%"resource_type":"' + entityType + '"%', '%"resource_id":' + Number(entityId) + '%');
   }
+}
+
+function parseCertification(raw) {
+  try { return raw ? JSON.parse(raw) : null; } catch (_) { return null; }
 }
 
 function ensureAsset(db, log, entityType, entity) {
@@ -22,25 +26,30 @@ function ensureAsset(db, log, entityType, entity) {
   const localPath = entity.local_path || null;
   const url = entity.image_url || null;
   const existing = findMappedAsset(db, entity.drama_id, entityType, entity.id);
+  // A user-deleted mapping is a deliberate detach. Do not recreate it during
+  // a routine list/sync; otherwise the media library appears impossible to
+  // delete and the same stale asset ID keeps returning.
+  if (existing?.deleted_at) return null;
   if (!localPath && !url) {
-    if (existing) assetService.deleteById(db, log, existing.id);
-    return null;
+    // A missing project-resource image must not delete the mapped asset: old
+    // storyboards still reference its stable ID and may need it for replay,
+    // rebinding, or manual cleanup.
+    return existing ? assetService.getById(db, existing.id) : null;
   }
   const payload = { drama_id: Number(entity.drama_id), name: config.name(entity), type: 'image', url: url || '', local_path: localPath, source_type: 'project_resource', processing_status: 'ready', metadata: { resource_type: entityType, resource_id: Number(entity.id) } };
   const mapped = existing ? assetService.update(db, log, existing.id, payload) : assetService.create(db, log, payload);
-  // A mapped media item is only a projection of its project resource. Copy the
-  // resource certification so the material pool cannot display a second,
-  // contradictory SD2 state for the same image.
+  // Never let an empty legacy project-resource state erase a valid material
+  // certification. When a resource does have a state, it remains authoritative
+  // because its certification routes update that canonical resource first.
   try {
-    db.prepare('UPDATE assets SET seedance2_asset = ?, updated_at = ? WHERE id = ?').run(
-      entity.seedance2_asset || null,
-      new Date().toISOString(),
-      Number(mapped.id)
-    );
-    return assetService.getById(db, mapped.id);
+    const resourceCert = parseCertification(entity.seedance2_asset);
+    if (resourceCert) {
+      db.prepare('UPDATE assets SET seedance2_asset = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(resourceCert), new Date().toISOString(), Number(mapped.id));
+    }
   } catch (_) {
-    return mapped;
+    // The mapped asset remains usable even on old SQLite schemas.
   }
+  return assetService.getById(db, mapped.id) || mapped;
 }
 
 function syncEntities(db, log, entityType, ids) {

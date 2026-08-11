@@ -515,7 +515,7 @@
         </div>
         <div class="resource-media-library">
           <header><div><b>媒体素材库</b><small>上传的图片、视频、音频会在分镜引用区统一可用。</small></div><div class="resource-media-header-actions"><el-button size="small" @click="router.push('/media-library')">管理媒体库</el-button><span>{{ universalLibraryAssets.length }} 项</span></div></header>
-          <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card"><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><small>{{ asset.name || `素材 ${asset.id}` }}</small><div v-if="asset.source_type !== 'project_resource'" class="resource-media-card-actions"><el-button size="small" text @click="renameResourceMedia(asset)">重命名</el-button><el-button size="small" type="danger" text @click="deleteResourceMedia(asset)">删除</el-button></div><small v-else>关联资源（请在角色、场景或道具中管理）</small></article></div>
+          <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card"><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><small>{{ asset.name || `素材 ${asset.id}` }}</small><div class="resource-media-card-actions"><el-button size="small" text @click="renameResourceMedia(asset)">重命名</el-button><el-button size="small" type="danger" text @click="deleteResourceMedia(asset)">{{ asset.source_type === 'project_resource' ? '解除素材' : '删除' }}</el-button></div><small v-if="asset.source_type === 'project_resource'">关联资源：解除后不会被自动重建</small></article></div>
           <p v-else class="resource-center-empty">还没有上传媒体素材。</p>
         </div>
       </section>
@@ -6254,7 +6254,10 @@ async function renameResourceMedia(asset) {
 
 async function deleteResourceMedia(asset) {
   try {
-    await ElMessageBox.confirm(`确定删除“${asset.name || `素材 ${asset.id}`}”？`, '删除素材', { type: 'warning' })
+    const linked = asset.source_type === 'project_resource'
+    await ElMessageBox.confirm(linked
+      ? `确定解除“${asset.name || `素材 ${asset.id}`}”的媒体库关联？历史分镜不会被删除。`
+      : `确定删除“${asset.name || `素材 ${asset.id}`}”？`, linked ? '解除素材关联' : '删除素材', { type: 'warning' })
     await omniVideoAPI.deleteAsset(asset.id)
     universalLibraryAssets.value = universalLibraryAssets.value.filter((item) => Number(item.id) !== Number(asset.id))
     ElMessage.success('素材已删除')
