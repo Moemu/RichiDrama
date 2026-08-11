@@ -1379,11 +1379,37 @@ const oneKeyAgnesVisible = ref(false)
 const oneKeyAgnesKey = ref('')
 const oneKeyAgnesSaving = ref(false)
 
+// 火山方舟官方模型预设（2026-08 核对）。这是配置选择清单，不代表
+// 当前账号已开通；实际调用仍会由方舟账户权限和本项目价目表校验。
+const VOLC_TEXT_MODELS = [
+  'doubao-seed-2-1-pro-250528',
+  'doubao-seed-2-1-turbo-250528',
+  'doubao-seed-2-0-lite-260428',
+  'deepseek-v3-2-251201',
+  'doubao-1-5-pro-32k-250115',
+  'kimi-k2-thinking-251104',
+]
+const VOLC_IMAGE_MODELS = [
+  'doubao-seedream-5-0-260128',
+  'doubao-seedream-4-5-251128',
+  'doubao-seedream-4-0-250828',
+]
+const VOLC_VIDEO_MODELS = [
+  'doubao-seedance-2-0-260128',
+  'doubao-seedance-2-0-fast-260128',
+  'doubao-seedance-1-5-pro-251215',
+  'doubao-seedance-1-0-lite-i2v-250428',
+  'doubao-seedance-1-0-lite-t2v-250428',
+  'doubao-seedance-1-0-pro-250528',
+  'doubao-seedance-1-0-pro-fast-251015',
+]
+const VOLC_TTS_MODELS = ['doubao-tts-2-0']
+
 /** 预设厂商与模型（与参考前端一致） */
 const providerConfigs = {
   text: [
     { id: 'openai', name: 'OpenAI', models: ['gpt-4o', 'gpt-4', 'gpt-3.5-turbo'] },
-    { id: 'volcengine', name: '火山引擎', models: ['deepseek-v3-2-251201', 'doubao-1-5-pro-32k-250115', 'kimi-k2-thinking-251104'] },
+    { id: 'volcengine', name: '火山引擎（方舟）', models: VOLC_TEXT_MODELS },
     // { id: 'chatfire', name: 'Chatfire', models: ['gemini-3-flash-preview', 'claude-sonnet-4-5-20250929', 'doubao-seed-1-8-251228'] },
     { id: 'gemini', name: 'Google Gemini', models: ['gemini-2.5-pro', 'gemini-3-flash-preview'] },
     { id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
@@ -1391,7 +1417,7 @@ const providerConfigs = {
     { id: 'agnes', name: 'Agnes AI', models: ['agnes-2.0-flash'] }
   ],
   image: [
-    { id: 'volcengine', name: '火山引擎', models: ['doubao-seedream-4-5-251128', 'doubao-seedream-4-0-250828'] },
+    { id: 'volcengine', name: '火山引擎（方舟）', models: VOLC_IMAGE_MODELS },
     { id: 'kling', name: '可灵 Kling', models: ['kling-image', 'kling-omni-image'] },
     { id: 'nano_banana', name: 'NanoBanana', models: ['nano-banana-2', 'nano-banana-pro', 'nano-banana'] },
     // { id: 'chatfire', name: 'Chatfire', models: ['nano-banana-pro', 'doubao-seedream-4-5-251128', 'qwen-image'] },
@@ -1403,7 +1429,7 @@ const providerConfigs = {
   ],
   storyboard_image: [
     { id: 'dashscope', name: '通义万象', models: ['wan2.6-image', 'qwen-image-edit-plus-2026-01-09', 'qwen-image-edit-plus', 'qwen-image-edit-max'] },
-    { id: 'volcengine', name: '火山引擎', models: ['doubao-seedream-4-5-251128', 'doubao-seedream-4-0-250828'] },
+    { id: 'volcengine', name: '火山引擎（方舟）', models: VOLC_IMAGE_MODELS },
     { id: 'kling', name: '可灵 Kling', models: ['kling-image', 'kling-omni-image'] },
     { id: 'nano_banana', name: 'NanoBanana', models: ['nano-banana-2', 'nano-banana-pro', 'nano-banana'] },
     // { id: 'chatfire', name: 'Chatfire', models: ['nano-banana-pro', 'doubao-seedream-4-5-251128', 'qwen-image'] },
@@ -1416,7 +1442,7 @@ const providerConfigs = {
     { id: 'ffir', name: '飞儿API / 可灵 Omni-Video (ffir.cn)', models: ['kling-video-o1', 'kling-v3-omni'] },
     { id: 'kling', name: '可灵 Kling', models: ['kling-omni-video', 'kling-video', 'kling-motion-control'] },
     { id: 'vidu', name: 'Vidu', models: ['viduq2', 'viduq2-pro', 'viduq2-turbo', 'viduq3-pro'] },
-    { id: 'volces', name: '火山引擎', models: ['doubao-seedance-2-0-260128', 'doubao-seedance-2-0-fast-260128', 'doubao-seedance-1-5-pro-251215', 'doubao-seedance-1-0-lite-i2v-250428', 'doubao-seedance-1-0-lite-t2v-250428', 'doubao-seedance-1-0-pro-250528', 'doubao-seedance-1-0-pro-fast-251015'] },
+    { id: 'volces', name: '火山引擎（方舟）', models: VOLC_VIDEO_MODELS },
     // { id: 'chatfire', name: 'Chatfire', models: ['doubao-seedance-1-5-pro-251215', 'doubao-seedance-1-0-lite-i2v-250428', 'doubao-seedance-1-0-lite-t2v-250428', 'doubao-seedance-1-0-pro-250528', 'doubao-seedance-1-0-pro-fast-251015', 'sora-2', 'sora-2-pro'] },
     { id: 'minimax', name: 'MiniMax 海螺', models: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02'] },
     { id: 'gemini', name: 'Google Gemini (Veo)', models: ['veo-3.1-generate-preview', 'veo-3.0-generate-preview', 'veo-3.0-fast-generate-preview'] },
@@ -1438,6 +1464,7 @@ const providerConfigs = {
     { id: 'agnes', name: 'Agnes AI', models: ['agnes-video-v2.0'] },
   ],
   tts: [
+    { id: 'doubao', name: '火山引擎 豆包语音', models: VOLC_TTS_MODELS },
     { id: 'minimax', name: 'MiniMax T2A', models: ['speech-02-hd', 'speech-02-turbo'] },
   ],
   jimeng2_character_auth: [
@@ -1757,10 +1784,10 @@ const TONGYI_CONFIGS = [
 
 /** 火山引擎一键配置用 */
 const VOLCENGINE_CONFIGS = [
-  { service_type: 'text', name: '火山引擎 文本', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: ['deepseek-v3-2-251201', 'doubao-1-5-pro-32k-250115', 'kimi-k2-thinking-251104'] },
-  { service_type: 'image', name: '火山引擎 即梦 文本生图', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: ['doubao-seedream-4-5-251128'] },
-  { service_type: 'storyboard_image', name: '火山引擎 即梦 分镜图', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: ['doubao-seedream-4-5-251128'] },
-  { service_type: 'video', name: '火山引擎 即梦 视频', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volces', model: ['doubao-seedance-1-5-pro-251215'] }
+  { service_type: 'text', name: '火山引擎 文本', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: VOLC_TEXT_MODELS },
+  { service_type: 'image', name: '火山引擎 即梦 文本生图', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: VOLC_IMAGE_MODELS },
+  { service_type: 'storyboard_image', name: '火山引擎 即梦 分镜图', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: VOLC_IMAGE_MODELS },
+  { service_type: 'video', name: '火山引擎 即梦 视频', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volces', model: VOLC_VIDEO_MODELS }
 ]
 
 /** Agnes 一键配置用 */
