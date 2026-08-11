@@ -11,9 +11,9 @@ services:
       # 对外访问走 80 端口的 lens-rhyme-nginx，用域名 drama.richbest.cn
       - "10588:5679"
     volumes:
-      # 数据持久化：SQLite 库 + 所有上传/生成素材
-      # 部署前请确保 ./volumes/data 存在（部署脚本会自动创建）
-      - ./volumes/data:/app/backend-node/data
+      # 数据与代码目录分离：SQLite 库 + 所有上传/生成素材。
+      # 默认使用固定宿主机目录，避免重新克隆/替换仓库目录时丢失旧素材 ID。
+      - ${MINIDRAMA_DATA_DIR:-/data/minidrama-data}:/app/backend-node/data
     environment:
       - NODE_ENV=production
       - PORT=5679

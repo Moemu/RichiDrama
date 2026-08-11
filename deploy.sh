@@ -14,6 +14,11 @@ set -euo pipefail
 PROJECT_DIR="/data/apps/LocalMiniDrama"
 COMPOSE_FILE="${PROJECT_DIR}/docker-compose.yml"
 LOG_FILE="/var/log/minidrama-deploy.log"
+DATA_DIR="${MINIDRAMA_DATA_DIR:-/data/minidrama-data}"
+BACKUP_DIR="${MINIDRAMA_BACKUP_DIR:-/data/minidrama-backups}"
+LEGACY_DATA_DIR="${PROJECT_DIR}/volumes/data"
+export MINIDRAMA_DATA_DIR="${DATA_DIR}"
+export MINIDRAMA_BACKUP_DIR="${BACKUP_DIR}"
 
 # 部署日志
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -25,6 +30,8 @@ fail() { log "ERROR: $*"; exit 1; }
 log "===== LocalMiniDrama 部署开始 ====="
 log "工作目录: ${PROJECT_DIR}"
 cd "${PROJECT_DIR}" || fail "项目目录不存在: ${PROJECT_DIR}"
+[[ "${DATA_DIR}" = /* ]] || fail "MINIDRAMA_DATA_DIR 必须是绝对路径: ${DATA_DIR}"
+[[ "${BACKUP_DIR}" = /* ]] || fail "MINIDRAMA_BACKUP_DIR 必须是绝对路径: ${BACKUP_DIR}"
 
 # ---------- restart 子命令 ----------
 if [[ "${1:-}" == "restart" ]]; then
@@ -42,16 +49,44 @@ git reset --hard origin/main
 git log -1 --oneline
 
 # ---------- 2. 确保数据目录存在 ----------
-log "[2/5] 确保数据目录..."
-mkdir -p "${PROJECT_DIR}/volumes/data"
+log "[2/6] 确保持久化数据目录..."
+mkdir -p "${DATA_DIR}" "${BACKUP_DIR}"
+log "数据目录: ${DATA_DIR}"
+
+# One-time migration from the legacy repository-relative bind mount. Do this
+# before the first deployment using the new Compose path, otherwise the app
+# would boot a fresh SQLite database and old asset IDs would appear missing.
+if [[ ! -f "${DATA_DIR}/drama_generator.db" && -f "${LEGACY_DATA_DIR}/drama_generator.db" ]]; then
+  log "检测到旧数据目录，正在迁移: ${LEGACY_DATA_DIR} -> ${DATA_DIR}"
+  if docker compose -f "${COMPOSE_FILE}" ps -q app 2>/dev/null | grep -q .; then
+    docker compose -f "${COMPOSE_FILE}" exec -T app node -e "const Database=require('better-sqlite3'); const db=new Database('/app/backend-node/data/drama_generator.db'); db.pragma('wal_checkpoint(TRUNCATE)'); db.close();"
+  fi
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -aHAX "${LEGACY_DATA_DIR}/" "${DATA_DIR}/"
+  else
+    cp -a "${LEGACY_DATA_DIR}/." "${DATA_DIR}/"
+  fi
+  [[ -f "${DATA_DIR}/drama_generator.db" ]] || fail "旧数据迁移后未找到 SQLite 数据库"
+  log "旧数据迁移完成"
+fi
+
+# 备份放在代码目录之外；即使仓库重新克隆或回滚，SQLite 和上传素材都可恢复。
+log "[3/6] 备份现有数据..."
+bash "${PROJECT_DIR}/deploy/backup-data.sh" --quiet || fail "数据备份失败，已取消部署"
 
 # ---------- 3. 重新构建 ----------
-log "[3/5] 重新构建镜像..."
+log "[4/6] 重新构建镜像..."
 docker compose -f "${COMPOSE_FILE}" build --pull
 
 # ---------- 4. 启动 / 重启 ----------
-log "[4/5] 启动容器..."
+log "[5/6] 启动容器..."
 docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans
+
+# 防止 compose 环境变量或工作目录变化后把空目录挂载到容器，造成“旧资源不存在”。
+MOUNT_SOURCE="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/backend-node/data"}}{{.Source}}{{end}}{{end}}' local-minidrama 2>/dev/null || true)"
+[[ -n "${MOUNT_SOURCE}" ]] || fail "容器未挂载 /app/backend-node/data"
+[[ "$(realpath -m "${MOUNT_SOURCE}")" = "$(realpath -m "${DATA_DIR}")" ]] || fail "数据卷挂载错误: ${MOUNT_SOURCE}（期望 ${DATA_DIR}）"
+log "数据卷挂载已校验: ${MOUNT_SOURCE}"
 
 # ---------- 5. 同步 nginx 反代配置（解决 lens-rhyme-nginx 配置不持久问题）----------
 # lens-rhyme-nginx 是手动管理的容器(无 compose/无挂载)，重建后会丢失配置，
@@ -59,7 +94,7 @@ docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans
 NGINX_CONTAINER="lens-rhyme-nginx-1"
 NGINX_CONF_SRC="${PROJECT_DIR}/deploy/nginx-drama-richbest.conf"
 if docker ps --format '{{.Names}}' | grep -q "^${NGINX_CONTAINER}$"; then
-  log "[5/5] 同步 nginx 反代配置 (${NGINX_CONTAINER})..."
+  log "[6/6] 同步 nginx 反代配置 (${NGINX_CONTAINER})..."
   docker cp "${NGINX_CONF_SRC}" "${NGINX_CONTAINER}:/etc/nginx/conf.d/minidrama.conf"
   # 测试配置；若失败不中断（保持旧配置继续服务），仅告警
   if docker exec "${NGINX_CONTAINER}" nginx -t 2>&1; then
@@ -69,7 +104,7 @@ if docker ps --format '{{.Names}}' | grep -q "^${NGINX_CONTAINER}$"; then
     log "⚠️ nginx 配置测试失败，跳过 reload(保持现状)"
   fi
 else
-  log "[5/5] 跳过 nginx 配置同步：未找到容器 ${NGINX_CONTAINER}"
+  log "[6/6] 跳过 nginx 配置同步：未找到容器 ${NGINX_CONTAINER}"
 fi
 
 # ---------- 健康检查 ----------
