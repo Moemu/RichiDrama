@@ -296,7 +296,7 @@ function setupRouter(cfg, db, log) {
   r.get('/tool-runs/:id', tools.get);
   r.delete('/tool-runs/:id', tools.remove);
   r.post('/tool-runs/:id/restore', tools.restore);
-  r.post('/tool-runs/:id/retry', tools.retry);
+  r.post('/tool-runs/:id/retry', (req, res, next) => { require('../services/billingRequestContext').disableAutoBilling(); next(); }, tools.retry);
   r.post('/tool-runs/:id/import-drama', tools.importDrama);
   r.get('/tool-runs/:id/stream', tools.stream);
   r.post('/tools/:type/runs', (req, res, next) => { require('../services/billingRequestContext').disableAutoBilling(); next(); }, tools.execute);

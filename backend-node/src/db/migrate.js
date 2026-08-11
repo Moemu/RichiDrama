@@ -55,6 +55,51 @@ function runMigrations(database) {
   }
 }
 
+// Prior releases stored whole points in columns already named *_micro. Convert
+// once to true micro-points (1 point = 10,000 micro-points). This runs in one
+// SQLite transaction and uses a durable marker, so restarts never rescale
+// balances or historical snapshots.
+function migrateBillingPrecision(database) {
+  const hasSettings = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='billing_settings'").get();
+  if (!hasSettings) return;
+  const marker = database.prepare("SELECT value FROM billing_settings WHERE key = 'billing_precision_scale_v2'").get();
+  if (marker) return;
+  const scale = 10000;
+  const multiplyMicroFields = (value) => {
+    if (Array.isArray(value)) return value.map(multiplyMicroFields);
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => {
+      if (key.endsWith('_micro') && typeof child === 'number' && Number.isSafeInteger(child)) return [key, child * scale];
+      return [key, multiplyMicroFields(child)];
+    }));
+  };
+  const updateJsonColumn = (table, column) => {
+    const rows = database.prepare(`SELECT rowid, ${column} value FROM ${table} WHERE ${column} IS NOT NULL AND ${column} <> ''`).all();
+    const update = database.prepare(`UPDATE ${table} SET ${column} = ? WHERE rowid = ?`);
+    for (const row of rows) {
+      try { update.run(JSON.stringify(multiplyMicroFields(JSON.parse(row.value))), row.rowid); } catch (_) {}
+    }
+  };
+  database.transaction(() => {
+    database.exec(`
+      UPDATE billing_accounts SET
+        balance_micro = balance_micro * ${scale}, frozen_micro = frozen_micro * ${scale},
+        total_recharged_micro = total_recharged_micro * ${scale}, total_consumed_micro = total_consumed_micro * ${scale};
+      UPDATE billing_transactions SET
+        amount_micro = amount_micro * ${scale}, balance_after_micro = balance_after_micro * ${scale}, frozen_after_micro = frozen_after_micro * ${scale};
+      UPDATE billing_usage_logs SET charged_micro = charged_micro * ${scale};
+      UPDATE billing_price_book_items SET unit_price_micro = unit_price_micro * ${scale};
+    `);
+    updateJsonColumn('billing_transactions', 'snapshot_json');
+    updateJsonColumn('billing_usage_logs', 'snapshot_json');
+    updateJsonColumn('billing_reconciliation_cases', 'resolution_json');
+    updateJsonColumn('billing_audit_logs', 'detail_json');
+    database.prepare("INSERT INTO billing_settings (key, value, updated_at) VALUES ('billing_precision_scale_v2', ?, ?)")
+      .run(String(scale), new Date().toISOString());
+  })();
+  console.log('Migrated billing ledger to micro-points:', scale);
+}
+
 /**
  * 通用：确保某张表存在指定列，不存在则 ALTER TABLE ADD COLUMN。
  * @param {object} database - better-sqlite3 实例
@@ -574,6 +619,7 @@ function ensureAllColumns(database) {
 /** 对已打开的 database 执行迁移与兜底补列（供 app 启动时调用） */
 function runMigrationsAndEnsure(database) {
   runMigrations(database);
+  migrateBillingPrecision(database);
   ensureAllColumns(database);
 }
 

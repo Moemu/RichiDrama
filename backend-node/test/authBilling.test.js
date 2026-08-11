@@ -38,12 +38,13 @@ test('billing freezes, caps settlement at the frozen amount, and rejects unprice
     billing.adjustBalance(db, admin.id, user.id, 200, 'test points');
 
     const authorization = billing.createAuthorization(db, actor, { idempotency_key: 'one-image', service_type: 'image', model: 'seedream', usage: { image: 1 } });
-    assert.equal(authorization.amount_micro, 25);
-    assert.equal(billing.account(db, user.id).frozen_micro, 25);
+    assert.equal(authorization.amount_micro, 250000);
+    assert.equal(authorization.amount, 25);
+    assert.equal(billing.account(db, user.id).frozen_micro, 250000);
     const settled = billing.settleAuthorization(db, actor, authorization.authorization_id, { usage: { image: 2 }, provider_request_id: 'provider-image-1' });
-    assert.equal(settled.charged_micro, 25);
-    assert.equal(settled.overage_micro, 25);
-    assert.equal(billing.account(db, user.id).balance_micro, 175);
+    assert.equal(settled.charged_micro, 250000);
+    assert.equal(settled.overage_micro, 250000);
+    assert.equal(billing.account(db, user.id).balance_micro, 1750000);
     assert.equal(billing.account(db, user.id).frozen_micro, 0);
     assert.equal(billing.settleAuthorization(db, actor, authorization.authorization_id, { usage: { image: 1 } }).reused, true);
     assert.throws(() => billing.quote(db, actor, { service_type: 'image', model: 'unapproved', usage: { image: 1 } }), /未定价/);
@@ -57,11 +58,11 @@ test('setting a balance targets the requested amount instead of adding to it', (
     const user = auth.createUser(db, { username: 'set-balance-user', password: '1' }, admin.id);
     billing.adjustBalance(db, admin.id, user.id, 200, 'initial credit');
     billing.setBalance(db, admin.id, user.id, 75, 'set target');
-    assert.equal(billing.account(db, user.id).balance_micro, 75);
-    assert.equal(billing.account(db, user.id).total_recharged_micro, 200);
+    assert.equal(billing.account(db, user.id).balance_micro, 750000);
+    assert.equal(billing.account(db, user.id).total_recharged_micro, 2000000);
     const transaction = billing.listTransactions(db, { user_id: user.id })[0];
     assert.equal(transaction.type, 'adjustment');
-    assert.equal(transaction.amount_micro, -125);
+    assert.equal(transaction.amount_micro, -1250000);
     assert.equal(transaction.snapshot.operation, 'set_balance');
   } finally { teardown(dbPath); }
 });
@@ -154,9 +155,59 @@ test('conditional video token rates use integer points with no floating point dr
         ] },
       }],
     });
-    assert.equal(billing.quote(db, user, { service_type: 'video', model: 'seedance', usage: { input_token: 250000 }, pricing_context: { has_video_input: true } }).amount_micro, 700);
-    assert.equal(billing.quote(db, user, { service_type: 'video', model: 'seedance', usage: { input_token: 250000 }, pricing_context: { has_video_input: false } }).amount_micro, 1150);
+    assert.equal(billing.quote(db, user, { service_type: 'video', model: 'seedance', usage: { input_token: 250000 }, pricing_context: { has_video_input: true } }).amount_micro, 7000000);
+    assert.equal(billing.quote(db, user, { service_type: 'video', model: 'seedance', usage: { input_token: 250000 }, pricing_context: { has_video_input: false } }).amount_micro, 11500000);
     assert.throws(() => billing.quote(db, user, { service_type: 'video', model: 'seedance', usage: { input_token: 1.5 } }), /整数/);
+  } finally { teardown(dbPath); }
+});
+
+test('token price tiers use only canonical usage and reject uncovered ranges', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'tiered-text-user', password: '1' }, admin.id);
+    const tiers = [
+      { id: 'up-to-32k', selector_meter: 'input_token', min_inclusive: 0, max_inclusive: 32000, unit_price_points: 10, unit_size: 1000000 },
+      { id: '32k-to-50k', selector_meter: 'input_token', min_inclusive: 32001, max_inclusive: 50000, unit_price_points: 20, unit_size: 1000000 },
+    ];
+    billing.savePriceBook(db, admin.id, { name: 'tiered text', status: 'published', items: [
+      { service_type: 'text', model: 'tiered-text', meter: 'input_token', unit_price: 10, conditions_json: { unit_size: 1000000, usage_tiers: tiers } },
+      { service_type: 'text', model: 'tiered-text', meter: 'output_token', unit_price: 10, conditions_json: { unit_size: 1000000, usage_tiers: tiers } },
+    ] });
+    billing.adjustBalance(db, admin.id, user.id, 100, 'test points');
+    const authorization = billing.createAuthorization(db, user, {
+      idempotency_key: 'tier-reservation', service_type: 'text', model: 'tiered-text', usage: { input_token: 40000, output_token: 1000 },
+    });
+    assert.equal(authorization.amount_micro, 8200);
+    const settled = billing.settleAuthorization(db, user, authorization.authorization_id, { usage: { input_token: 1000, output_token: 100 } });
+    assert.equal(settled.charged_micro, 110);
+    assert.throws(() => billing.quote(db, user, {
+      service_type: 'text', model: 'tiered-text', usage: { input_token: 50001, output_token: 1 },
+    }), /价目未覆盖实际/);
+  } finally { teardown(dbPath); }
+});
+
+test('micro-points preserve a non-zero charge for low token usage', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'small-usage-user', password: '1' }, admin.id);
+    billing.savePriceBook(db, admin.id, { name: 'low token price', status: 'published', items: [
+      { service_type: 'text', model: 'low-token', meter: 'input_token', unit_price: 60, conditions_json: { unit_size: 1000000 } },
+    ] });
+    const quote = billing.quote(db, user, { service_type: 'text', model: 'low-token', usage: { input_token: 4056 } });
+    assert.equal(quote.amount_micro, 2434);
+    assert.equal(quote.amount, 0.2434);
+  } finally { teardown(dbPath); }
+});
+
+test('billing precision migration is idempotent after the ledger is converted', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'precision-migration-user', password: '1' }, admin.id);
+    billing.adjustBalance(db, admin.id, user.id, 12.3456, 'exact balance');
+    const before = billing.account(db, user.id).balance_micro;
+    runMigrationsAndEnsure(db);
+    assert.equal(billing.account(db, user.id).balance_micro, before);
+    assert.equal(billing.publicAccount(billing.account(db, user.id)).balance, 12.3456);
   } finally { teardown(dbPath); }
 });
 
@@ -187,8 +238,8 @@ test('custom provider billing keys isolate identical provider model names', () =
     const b = aiConfigs.resolveBillingTarget(db, 'image', 'shared-model', second.id);
     assert.equal(a.billing_key, 'custom-a-image');
     assert.equal(b.billing_key, 'custom-b-image');
-    assert.equal(billing.quote(db, admin, { service_type: 'image', model: a.billing_key, usage: { image: 1 } }).amount_micro, 10);
-    assert.equal(billing.quote(db, admin, { service_type: 'image', model: b.billing_key, usage: { image: 1 } }).amount_micro, 20);
+    assert.equal(billing.quote(db, admin, { service_type: 'image', model: a.billing_key, usage: { image: 1 } }).amount_micro, 100000);
+    assert.equal(billing.quote(db, admin, { service_type: 'image', model: b.billing_key, usage: { image: 1 } }).amount_micro, 200000);
   } finally { teardown(dbPath); }
 });
 
@@ -251,12 +302,12 @@ test('authenticated text calls settle exact provider usage and hold missing usag
     assert.equal(result, 'ok');
     const usage = billing.listUsage(db, { user_id: user.id });
     assert.deepEqual(usage[0].usage, { input_token: 10, output_token: 5 });
-    assert.equal(usage[0].charged_micro, 35);
+    assert.equal(usage[0].charged_micro, 350000);
     assert.equal(billing.account(db, user.id).frozen_micro, 0);
     sendUsage = false;
     await billingContext.run({ actor: { id: user.id, role: 'user' }, db, log }, () => aiClient.generateText(db, log, 'text', 'missing', 'system', { max_tokens: 100 }));
     assert.equal(billing.listUsage(db, { user_id: user.id }).length, 1);
-    assert.equal(billing.account(db, user.id).balance_micro, 965);
+    assert.equal(billing.account(db, user.id).balance_micro, 9650000);
     assert.ok(billing.account(db, user.id).frozen_micro > 0);
     const cases = billing.listReconciliationCases(db, { user_id: user.id, status: 'pending' });
     assert.equal(cases.length, 1);
@@ -265,7 +316,61 @@ test('authenticated text calls settle exact provider usage and hold missing usag
       usage: { input_token: 2, output_token: 1 }, provider_request_id: 'reconciled-provider-usage',
     });
     assert.equal(billing.account(db, user.id).frozen_micro, 0);
-    assert.equal(billing.account(db, user.id).balance_micro, 958);
+    assert.equal(billing.account(db, user.id).balance_micro, 9580000);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    teardown(dbPath);
+  }
+});
+
+test('a tool retry replaces the settled authorization with a newly frozen one', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'tool-retry-user', password: '1' }, admin.id);
+    const actor = { id: user.id, role: 'user' };
+    billing.savePriceBook(db, admin.id, { name: 'tool retry price', status: 'published', items: [
+      { service_type: 'text', model: 'tool-retry-model', meter: 'request', unit_price: 10 },
+    ] });
+    billing.adjustBalance(db, admin.id, user.id, 100, 'test points');
+    const first = billing.createAuthorization(db, actor, { idempotency_key: 'tool-retry-first', service_type: 'text', model: 'tool-retry-model', usage: { request: 1 } });
+    const run = tools.create(db, { tool_type: 'script_analysis', model: 'tool-retry-model', owner_user_id: user.id, billing_authorization_id: first.authorization_id, input: { script: 'test' } });
+    tools.set(db, run.id, { status: 'completed', output: { ok: true } });
+    const second = billing.createAuthorization(db, actor, { idempotency_key: 'tool-retry-second', service_type: 'text', model: 'tool-retry-model', usage: { request: 1 } });
+    const retried = tools.retryWithAuthorization(db, run.id, second.authorization_id);
+    assert.equal(retried.billing_authorization_id, second.authorization_id);
+    assert.equal(retried.continuation_count, 1);
+    assert.equal(billing.account(db, user.id).frozen_micro, 100000);
+    tools.set(db, run.id, { status: 'completed', output: { ok: true } });
+    assert.equal(billing.listUsage(db, { user_id: user.id }).length, 2);
+    assert.equal(billing.account(db, user.id).frozen_micro, 0);
+  } finally { teardown(dbPath); }
+});
+
+test('authenticated text requests send the same default output cap that billing freezes', async () => {
+  const { db, dbPath, admin, log } = setup();
+  let requestBody = null;
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      requestBody = JSON.parse(raw);
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: {"usage":{"prompt_tokens":2,"completion_tokens":1}}\n\ndata: [DONE]\n\n');
+    });
+  });
+  try {
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const user = auth.createUser(db, { username: 'default-cap-user', password: '1' }, admin.id);
+    aiConfigs.createConfig(db, log, { service_type: 'text', provider: 'openai', name: 'default cap', base_url: `http://127.0.0.1:${server.address().port}`, endpoint: '/chat', api_key: 'test', model: ['default-cap-model'], default_model: 'default-cap-model', billing_key: 'default-cap-key', is_default: true });
+    billing.savePriceBook(db, admin.id, { name: 'default cap price', status: 'published', items: [
+      { service_type: 'text', model: 'default-cap-key', meter: 'input_token', unit_price: 1 },
+      { service_type: 'text', model: 'default-cap-key', meter: 'output_token', unit_price: 1 },
+    ] });
+    billing.adjustBalance(db, admin.id, user.id, 10000, 'test points');
+    await billingContext.run({ actor: { id: user.id, role: 'user' }, db, log }, () => aiClient.generateText(db, log, 'text', 'hello', 'system'));
+    assert.equal(requestBody.max_tokens, 8192);
+    const authorization = billing.listTransactions(db, { user_id: user.id }).find((row) => row.type === 'authorization');
+    assert.equal(authorization.snapshot.usage.output_token, 8192);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     teardown(dbPath);

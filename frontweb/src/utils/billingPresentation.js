@@ -17,7 +17,7 @@ const METER_LABELS = {
 }
 
 function number(value) {
-  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(Math.abs(Number(value) || 0))
+  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 4 }).format(Math.abs(Number(value) || 0))
 }
 
 function modelName(row) {

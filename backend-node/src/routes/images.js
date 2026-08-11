@@ -23,6 +23,13 @@ function routes(db, cfg, log) {
           if (!own) return response.notFound(res, '项目不存在');
         }
         const billing = require('../services/billingService');
+        // The current provider adapters request exactly one image (n: 1) and
+        // completion persists one image row. Reject a mismatched count instead
+        // of freezing several images then settling one.
+        const requestedCount = body.count == null ? 1 : Number(body.count);
+        if (!Number.isSafeInteger(requestedCount) || requestedCount !== 1) {
+          return response.badRequest(res, '当前图片接口每次仅支持生成 1 张');
+        }
         const imageConfig = require('../services/aiConfigService').listConfigs(db, body.service_type || 'image')[0]
           || require('../services/aiConfigService').listConfigs(db, 'storyboard_image')[0];
         const model = String(body.model || imageConfig?.default_model || imageConfig?.model?.[0] || '').trim();
@@ -31,7 +38,7 @@ function routes(db, cfg, log) {
         const authorization = billing.createAuthorization(db, req.auth, {
           idempotency_key: body.idempotency_key || `image:${req.auth.id}:${Date.now()}:${Math.random()}`,
           service_type: body.service_type || 'image', model: billingTarget.billing_key,
-          usage: { image: Number(body.count || 1) || 1 }, reference_type: 'image_generation', reference_id: body.drama_id || null,
+          usage: { image: 1 }, reference_type: 'image_generation', reference_id: body.drama_id || null,
         });
         const rec = imageService.create(db, log, { ...body, model, owner_user_id: req.auth.id, billing_authorization_id: authorization.authorization_id });
         response.created(res, rec);
