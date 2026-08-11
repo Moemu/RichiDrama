@@ -234,7 +234,7 @@ async function loadMedia() {
     if (keyword.value) params.keyword = keyword.value
     if (favoriteOnly.value) params.favorite = 1
     const res = await request.get('/assets', { params })
-    mediaItems.value = (res?.items || []).map(normalizeItem)
+    mediaItems.value = (res?.items || []).filter((item) => item && Number.isFinite(Number(item.id))).map(normalizeItem)
     total.value = Number(res?.pagination?.total ?? res?.total ?? 0)
   } catch (err) {
     mediaItems.value = []

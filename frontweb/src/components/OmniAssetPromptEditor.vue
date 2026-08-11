@@ -53,19 +53,19 @@ onMounted(() => syncReferences(text.value))
 const pickerQuery = computed(() => (activeMentionRange()?.query || '').toLocaleLowerCase())
 const pickerAssets = computed(() =>
   (props.assets || [])
-    .filter((a) => !pickerQuery.value || String(a.alias || a.name || '').toLocaleLowerCase().includes(pickerQuery.value))
+    .filter((a) => a && a.id != null && (!pickerQuery.value || String(a.alias || a.name || '').toLocaleLowerCase().includes(pickerQuery.value)))
     .map((a) => ({ ...a, _chosen: props.chosenIds.has(a.id) }))
     .slice(0, 30)
 )
 const referenced = computed(() => {
   const tokens = referencesFromText(text.value)
   return tokens.flatMap((alias) => {
-    const matches = (props.assets || []).filter((asset) => (asset.alias || asset.name) === alias)
+    const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.name) === alias)
     return matches.length === 1 ? matches : []
   })
 })
 const unresolved = computed(() => referencesFromText(text.value).flatMap((alias) => {
-  const matches = (props.assets || []).filter((asset) => (asset.alias || asset.name) === alias)
+  const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.name) === alias)
   return matches.length > 1 ? [{ alias, candidates: matches.map((asset) => asset.id) }] : []
 }))
 
@@ -99,7 +99,7 @@ function referencesFromText(value) {
 function syncReferences(value) {
   const refs = []; const unresolvedRefs = []
   referencesFromText(value).forEach((alias) => {
-    const matches = (props.assets || []).filter((asset) => (asset.alias || asset.name) === alias)
+    const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.name) === alias)
     if (matches.length === 1) refs.push({ asset_id: matches[0].id, alias })
     if (matches.length > 1) unresolvedRefs.push({ alias, candidate_asset_ids: matches.map((asset) => asset.id) })
   })

@@ -297,7 +297,7 @@ async function refreshProjectShots(preferredId = activeShotId.value) {
   else activeShotId.value = null
 }
 async function ensureProjectResourceAssets(project, mediaItems) {
-  const all = [...(mediaItems || [])]
+  const all = (mediaItems || []).filter((asset) => asset && Number.isFinite(Number(asset.id)))
   const groups = [
     ['character', project?.characters || []], ['scene', project?.scenes || []], ['prop', project?.props || []],
   ]
@@ -329,7 +329,7 @@ async function loadAllAssets(params = {}) {
   let total = Infinity
   while (items.length < total) {
     const result = await omniVideoAPI.assets({ ...params, page, page_size: 100 })
-    const batch = result?.items || []
+    const batch = (result?.items || []).filter((asset) => asset && Number.isFinite(Number(asset.id)))
     items.push(...batch)
     total = Number(result?.pagination?.total ?? items.length)
     if (!batch.length || page >= Number(result?.pagination?.total_pages || 1)) break
@@ -473,7 +473,7 @@ onMounted(async () => {
     if (isProjectMode.value) {
       const [media, caps, history, limits, boards, project] = await Promise.all([...baseRequests, dramaAPI.getStoryboards(projectEpisodeId.value), dramaAPI.get(projectDramaId.value)])
       const allAssets = await ensureProjectResourceAssets(project, media.items || [])
-      assets.value = allAssets.map((item) => ({ ...item, alias: item.name, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' }))
+      assets.value = allAssets.filter(Boolean).map((item) => ({ ...item, alias: item.name, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' }))
       capabilities.value = caps || []; uploadLimits.value = limits || null; jobs.value = (history || []).map(normalizeJob)
       sequence.value = { id: projectEpisodeId.value, name: `项目剧集 ${projectEpisodeId.value}` }
       const projectStoryboards = boards?.storyboards || []
@@ -483,7 +483,7 @@ onMounted(async () => {
     }
     const sequenceRequest = route.query.sequence_id ? omniVideoAPI.getSequence(route.query.sequence_id) : omniVideoAPI.defaultSequence()
     const [media, caps, history, limits, seq] = await Promise.all([...baseRequests, sequenceRequest])
-    assets.value = (media.items || []).map((item) => ({ ...item, alias: item.name, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' }))
+    assets.value = (media.items || []).filter((item) => item && Number.isFinite(Number(item.id))).map((item) => ({ ...item, alias: item.name, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' }))
     capabilities.value = caps || []; uploadLimits.value = limits || null; jobs.value = (history || []).map(normalizeJob); sequence.value = seq; shots.value = seq.shots || []; if (shots.value[0]) loadShot(shots.value[0])
   } catch (error) { ElMessage.error(error.message || '全能创作工作台加载失败') }
 })
