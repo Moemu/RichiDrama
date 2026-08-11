@@ -91,7 +91,11 @@ function tierFor(conditions, usage) {
 function rateFor(row, context = {}, usage = {}) {
   const conditions = parseConditions(row.conditions_json);
   const rates = Array.isArray(conditions.rates) ? conditions.rates : [];
-  const selected = rates.find((rate) => Object.entries(rate.when || {}).every(([k, v]) => context[k] === v))
+  // Prefer the most specific matching condition instead of trusting the
+  // administrator's JSON-array order. Price-book validation rejects equally
+  // specific overlapping rules, so this remains deterministic.
+  const selected = rates.filter((rate) => Object.entries(rate.when || {}).every(([k, v]) => context[k] === v))
+    .sort((left, right) => Object.keys(right.when || {}).length - Object.keys(left.when || {}).length)[0]
     || rates.find((rate) => rate.id === conditions.default_rate_id)
     || null;
   const tier = tierFor(conditions, usage);
@@ -436,12 +440,24 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
     if (status === 'published' && !item.is_free && unitPrice <= 0) throw new Error(`${serviceType}/${model}/${meter} 的免费价目必须显式勾选免费`);
     const conditions = item.conditions_json || {};
     const rates = Array.isArray(conditions.rates) ? conditions.rates : [];
+    const rateWhen = [];
     for (const rate of rates) {
       let ratePrice;
       try { ratePrice = creditsToMicro(rate.unit_price_points); } catch (_) { throw new Error('条件价格必须使用非负积分（最多四位小数）和整数计量单位'); }
       if (ratePrice < 0 || !Number.isSafeInteger(Number(rate.unit_size || conditions.unit_size || 1)) || Number(rate.unit_size || conditions.unit_size || 1) <= 0) throw new Error('条件价格必须使用非负积分（最多四位小数）和整数计量单位');
       const keys = Object.keys(rate.when || {});
       if (keys.some((key) => !['has_video_input', 'resolution', 'has_audio'].includes(key))) throw new Error('条件价格只能使用已由视频请求明确传入的 has_video_input、resolution、has_audio 字段');
+      rateWhen.push(rate.when || {});
+    }
+    for (let left = 0; left < rateWhen.length; left += 1) {
+      for (let right = left + 1; right < rateWhen.length; right += 1) {
+        const a = rateWhen[left]; const b = rateWhen[right];
+        const overlaps = Object.keys(a).every((key) => !(key in b) || a[key] === b[key])
+          && Object.keys(b).every((key) => !(key in a) || a[key] === b[key]);
+        if (overlaps && Object.keys(a).length === Object.keys(b).length) {
+          throw new Error('条件价格存在相同优先级且可同时命中的规则，请合并或增加明确条件');
+        }
+      }
     }
     const tiers = Array.isArray(conditions.usage_tiers) ? conditions.usage_tiers : [];
     const seenTiers = new Set();

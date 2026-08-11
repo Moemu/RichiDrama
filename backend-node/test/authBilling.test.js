@@ -161,6 +161,32 @@ test('conditional video token rates use integer points with no floating point dr
   } finally { teardown(dbPath); }
 });
 
+test('conditional video rates prefer the most specific matching rule and reject ambiguity', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'specific-video-rate-user', password: '1' }, admin.id);
+    billing.savePriceBook(db, admin.id, {
+      name: 'specific video rates', status: 'published', items: [{
+        service_type: 'video', model: 'specific-seedance', meter: 'output_token', unit_price: 4600,
+        conditions_json: { unit_size: 1000000, rates: [
+          { id: 'generic', when: { has_video_input: true }, unit_price_points: 2800, unit_size: 1000000 },
+          { id: 'specific-1080p', when: { has_video_input: true, resolution: '1080p' }, unit_price_points: 3100, unit_size: 1000000 },
+        ] },
+      }],
+    });
+    assert.equal(billing.quote(db, user, { service_type: 'video', model: 'specific-seedance', usage: { output_token: 1000000 }, pricing_context: { has_video_input: true, resolution: '1080p', has_audio: false } }).amount_micro, 31000000);
+    assert.throws(() => billing.savePriceBook(db, admin.id, {
+      name: 'ambiguous video rates', status: 'published', items: [{
+        service_type: 'video', model: 'ambiguous-seedance', meter: 'output_token', unit_price: 1,
+        conditions_json: { rates: [
+          { id: 'a', when: { has_video_input: true }, unit_price_points: 1, unit_size: 1 },
+          { id: 'b', when: { has_video_input: true }, unit_price_points: 2, unit_size: 1 },
+        ] },
+      }],
+    }), /相同优先级/);
+  } finally { teardown(dbPath); }
+});
+
 test('token price tiers use only canonical usage and reject uncovered ranges', () => {
   const { db, dbPath, admin } = setup();
   try {
