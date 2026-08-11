@@ -112,12 +112,20 @@ function getLineage(db, id) {
   return { current: rowToItem(current), ancestors, descendants };
 }
 
-function findByChecksum(db, checksum, dramaId = null) {
+function findByChecksum(db, checksum, dramaId = null, ownerUserId = null) {
   if (!checksum) return null;
-  const row = db.prepare(`SELECT * FROM assets
-    WHERE deleted_at IS NULL AND checksum = ?
-      AND ((drama_id IS NULL AND ? IS NULL) OR drama_id = ?)
-    ORDER BY id DESC LIMIT 1`).get(checksum, dramaId, dramaId);
+  // Project material is shared only within its project. Personal/global media
+  // is shared only within its owner account: otherwise a duplicate upload can
+  // return an asset that the uploader cannot list, edit, or delete.
+  const row = dramaId
+    ? db.prepare(`SELECT * FROM assets WHERE deleted_at IS NULL AND checksum = ? AND drama_id = ? ORDER BY id DESC LIMIT 1`)
+      .get(checksum, Number(dramaId))
+    : ownerUserId != null
+      ? db.prepare(`SELECT * FROM assets WHERE deleted_at IS NULL AND checksum = ? AND drama_id IS NULL AND owner_user_id = ? ORDER BY id DESC LIMIT 1`)
+        .get(checksum, Number(ownerUserId))
+      // Kept for internal callers that have no authenticated scope.
+      : db.prepare(`SELECT * FROM assets WHERE deleted_at IS NULL AND checksum = ? AND drama_id IS NULL ORDER BY id DESC LIMIT 1`)
+        .get(checksum);
   return row ? rowToItem(row) : null;
 }
 

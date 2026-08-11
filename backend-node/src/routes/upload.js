@@ -103,7 +103,19 @@ function routes(cfg, log, db) {
       if (!req.file || !req.file.buffer) return response.badRequest(res, '请选择文件');
       try {
         const mediaAssetService = require('../services/mediaAssetService');
-        const asset = await mediaAssetService.upload(db, cfg, log, req.file, req.body || {});
+        const body = req.body || {};
+        const dramaId = Number(body.drama_id) || null;
+        // A media upload must be owned immediately. Previously global uploads
+        // were inserted with a NULL owner, so they were hidden by the library's
+        // ownership filter and their subsequent rename/delete calls returned 404.
+        if (dramaId && !db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(dramaId, req.auth.id)) {
+          return response.notFound(res, '项目不存在');
+        }
+        const asset = await mediaAssetService.upload(db, cfg, log, req.file, {
+          ...body,
+          drama_id: dramaId,
+          owner_user_id: req.auth.id,
+        });
         response.created(res, { asset });
       } catch (err) {
         log.error('upload media', { error: err.message });

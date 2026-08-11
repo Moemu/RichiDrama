@@ -73,6 +73,17 @@ test('asset checksum lookup deduplicates only within the same asset scope', () =
   assert.equal(assetService.findByChecksum(db, 'unknown', null), null);
 });
 
+test('personal media checksum lookup never returns another user\'s asset', () => {
+  const db = createDb();
+  db.prepare('UPDATE assets SET checksum = ?, owner_user_id = ? WHERE id = 1').run('same-content', 7);
+  db.prepare('INSERT INTO assets (name, type, checksum, owner_user_id, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run('other-user.png', 'image', 'same-content', 8, new Date().toISOString());
+
+  assert.equal(assetService.findByChecksum(db, 'same-content', null, 7).id, 1);
+  assert.equal(assetService.findByChecksum(db, 'same-content', null, 8).id, 2);
+  assert.equal(assetService.findByChecksum(db, 'same-content', null, 9), null);
+});
+
 test('asset lineage retains ancestors and derived versions, including soft-deleted entries', () => {
   const db = createDb();
   db.prepare('INSERT INTO assets (name, type, parent_asset_id, updated_at) VALUES (?, ?, ?, ?)').run('trim.mp4', 'video', 1, '2026-01-01T00:00:01.000Z');

@@ -65,7 +65,7 @@ async function upload(db, cfg, log, file, body = {}) {
   const storagePath = path.isAbsolute(rawStorage) ? rawStorage : path.join(process.cwd(), rawStorage);
   const dramaId = Number(body.drama_id) || null;
   const checksum = crypto.createHash('sha256').update(file.buffer).digest('hex');
-  const duplicate = assetService.findByChecksum(db, checksum, dramaId);
+  const duplicate = assetService.findByChecksum(db, checksum, dramaId, body.owner_user_id);
   if (duplicate) {
     log.info('媒体上传命中内容去重，复用已有素材', { asset_id: duplicate.id, drama_id: dramaId, type });
     return { ...duplicate, deduplicated: true };
@@ -76,6 +76,7 @@ async function upload(db, cfg, log, file, body = {}) {
   const displayName = String(body.name || readableUploadName(file.originalname) || 'untitled-media').slice(0, 255);
   return assetService.create(db, log, {
     drama_id: dramaId,
+    owner_user_id: body.owner_user_id ?? null,
     name: displayName,
     type, category: body.category || null, url: result.url, local_path: result.local_path,
     file_size: file.size, mime_type: file.mimetype || null, source_type: 'upload', checksum,
