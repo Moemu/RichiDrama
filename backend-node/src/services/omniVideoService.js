@@ -5,6 +5,25 @@ const SHOT_ASSET_LIMITS = { total: 12, image: 9, video: 3, audio: 3 };
 
 const IMAGE_USAGES = new Set(['primary', 'identity', 'environment', 'style', 'prop', 'first_frame', 'last_frame', 'reference']);
 
+// This produces only the local billing reservation. It never changes the
+// provider request body, whose fields are built later by videoService.
+function buildAuthorizationUsage(meters, billingSettings, duration) {
+  const usage = {};
+  if (meters.includes('second')) usage.second = Number(duration) || 5;
+  if (meters.includes('request')) usage.request = 1;
+  if (meters.includes('input_token')) {
+    const cap = Number(billingSettings.billing_reserve_input_tokens);
+    if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('视频模型按 token 计费，需在 AI 配置 settings 中设置 billing_reserve_input_tokens 作为单次预授权上限');
+    usage.input_token = cap;
+  }
+  if (meters.includes('output_token')) {
+    const cap = Number(billingSettings.billing_reserve_output_tokens ?? billingSettings.billing_reserve_input_tokens);
+    if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('视频模型按 token 计费，需在 AI 配置 settings 中设置 billing_reserve_output_tokens 作为单次预授权上限');
+    usage.output_token = cap;
+  }
+  return usage;
+}
+
 function create(db, log, body, billingUser) {
   const prompt = String(body.prompt || '').trim();
   if (!prompt) throw new Error('提示词不能为空');
@@ -28,14 +47,7 @@ function create(db, log, body, billingUser) {
   const config = aiConfigs.getConfig(db, capability.config_id);
   let billingSettings = {}; try { billingSettings = JSON.parse(config?.settings || '{}'); } catch (_) {}
   const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key);
-  const usage = {};
-  if (meters.includes('second')) usage.second = Number(body.duration) || 5;
-  if (meters.includes('request')) usage.request = 1;
-  if (meters.includes('input_token')) {
-    const cap = Number(billingSettings.billing_reserve_input_tokens);
-    if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('视频模型按 token 计费，需在 AI 配置 settings 中设置 billing_reserve_input_tokens 作为单次预授权上限');
-    usage.input_token = cap;
-  }
+  const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
   const authorization = billing.createAuthorization(db, payer, {
     idempotency_key: body.idempotency_key || `omni-video:${payer.id}:${Date.now()}:${Math.random()}`,
@@ -301,4 +313,4 @@ function retry(db, log, id, billingUser) {
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry, validateShotAssetLimits, validateCreationMode, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, retry, buildAuthorizationUsage, validateShotAssetLimits, validateCreationMode, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };
