@@ -31,13 +31,18 @@ function list(db, query) {
 }
 
 function rowToItem(r) {
+  // Supplier URLs (especially TOS signed URLs) are deliberately short-lived.
+  // A locally archived file is the durable application resource and must win
+  // even if an older record still retains the original supplier URL.
+  const local = r.local_path && String(r.local_path).trim();
+  const publicUrl = local ? `/static/${local.replace(/^\/+/, '')}` : r.url;
   return {
     id: r.id,
     drama_id: r.drama_id,
     name: r.name,
     type: r.type,
     category: r.category,
-    url: r.url,
+    url: publicUrl,
     local_path: r.local_path,
     file_size: r.file_size,
     mime_type: r.mime_type,

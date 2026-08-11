@@ -267,6 +267,11 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
   } catch (error) {
     log.warn('全能视频本地归档/后期处理失败，保留原始生成结果', { video_gen_id: videoGenId, error: error.message });
   }
+  // Never persist a provider's signed delivery URL as the application's
+  // completed-media URL once the file has been archived locally. TOS links
+  // normally expire after 24 hours and otherwise reappear through older API
+  // consumers or material-library imports.
+  if (localPath) videoUrl = `/static/${String(localPath).replace(/^\/+/, '')}`;
   try {
     db.prepare(
       'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, completed_at = ?, updated_at = ? WHERE id = ?'
