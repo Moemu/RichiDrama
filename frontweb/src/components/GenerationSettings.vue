@@ -62,5 +62,12 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.generation-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 12px;width:100%;padding:10px 12px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-light)}.generation-settings label{display:grid;gap:5px;font-size:14px;color:var(--el-text-color-regular)}.generation-settings :deep(.el-select),.generation-settings :deep(.el-input-number){width:100%}.duration-setting{grid-column:span 1}.duration-controls{display:grid;gap:6px}.duration-controls :deep(.el-button-group){display:flex}.duration-controls :deep(.el-button){flex:1;padding-inline:7px}.duration-controls :deep(.el-input-number){max-width:130px}@media(max-width:700px){.generation-settings{grid-template-columns:1fr 1fr}}@media(max-width:420px){.generation-settings{grid-template-columns:1fr}}
+.generation-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 12px;width:100%;padding:10px 12px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-light)}.generation-settings label{display:grid;gap:5px;font-size:14px;color:var(--el-text-color-regular)}.generation-settings :deep(.el-select),.generation-settings :deep(.el-input-number){width:100%}.duration-setting{grid-column:span 1}.duration-controls{display:grid;gap:6px}.duration-controls :deep(.el-button-group){display:flex}.duration-controls :deep(.el-button){flex:1;padding-inline:7px}.duration-controls :deep(.el-input-number){max-width:130px}
+/* 右侧或左侧窄栏的宽度不足以承载三列，必须按容器而非按屏幕宽度折行。 */
+:global(.creation-panel .generation-settings){grid-template-columns:1fr;gap:12px;padding:10px}
+:global(.creation-panel .generation-settings .duration-setting){grid-column:1}
+:global(.creation-panel .generation-settings .duration-controls){grid-template-columns:minmax(0,1fr) 88px;align-items:center}
+:global(.creation-panel .generation-settings .duration-controls .el-input-number){max-width:none}
+:global(.creation-panel .generation-settings .duration-controls .el-button){padding-inline:4px;font-size:12px}
+@media(max-width:700px){.generation-settings{grid-template-columns:1fr 1fr}}@media(max-width:420px){.generation-settings{grid-template-columns:1fr}}
 </style>
