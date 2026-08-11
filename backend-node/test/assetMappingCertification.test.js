@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 const mapping = require('../src/services/assetMappingService');
+const { createdAssetFromResult } = require('../src/services/assetSd2Service');
 
 const log = { info() {}, warn() {}, error() {} };
 
@@ -70,4 +71,10 @@ test('a deliberately deleted mapped asset is not recreated by later resource syn
 
   assert.deepEqual(mapping.syncEntities(db, log, 'character', [1]), []);
   assert.equal(db.prepare('SELECT COUNT(*) total FROM assets').get().total, 1);
+});
+
+test('SD2 certificate creation reports a missing provider asset instead of dereferencing null', () => {
+  const result = createdAssetFromResult({ ok: true, data: null }, 'hub');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /资产 ID/);
 });
