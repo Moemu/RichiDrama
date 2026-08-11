@@ -72,6 +72,16 @@ function getById(db, id) {
   return r ? rowToItem(r) : null;
 }
 
+// Assets may belong directly to a user or to one of that user's projects.
+// Keep this lookup aligned with list() so numeric IDs cannot bypass scope.
+function getByIdForOwner(db, id, ownerUserId) {
+  const r = db.prepare(`SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL
+    AND (owner_user_id = ? OR drama_id IN (
+      SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL
+    ))`).get(Number(id), Number(ownerUserId), Number(ownerUserId));
+  return r ? rowToItem(r) : null;
+}
+
 function getLineage(db, id) {
   const current = db.prepare('SELECT * FROM assets WHERE id = ?').get(Number(id));
   if (!current) return null;
@@ -140,8 +150,13 @@ function create(db, log, req) {
   return getById(db, info.lastInsertRowid);
 }
 
-function update(db, log, id, req) {
-  const row = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id));
+function update(db, log, id, req, ownerUserId = null) {
+  const row = ownerUserId == null
+    ? db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id))
+    : db.prepare(`SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL
+      AND (owner_user_id = ? OR drama_id IN (
+        SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL
+      ))`).get(Number(id), Number(ownerUserId), Number(ownerUserId));
   if (!row) return null;
   const updates = [];
   const params = [];
@@ -163,9 +178,17 @@ function update(db, log, id, req) {
   return getById(db, id);
 }
 
-function deleteById(db, log, id) {
+function deleteById(db, log, id, ownerUserId = null) {
   const now = new Date().toISOString();
-  const result = db.prepare('UPDATE assets SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').run(now, Number(id));
+  const sql = ownerUserId == null
+    ? 'UPDATE assets SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL'
+    : `UPDATE assets SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL
+      AND (owner_user_id = ? OR drama_id IN (
+        SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL
+      ))`;
+  const result = ownerUserId == null
+    ? db.prepare(sql).run(now, Number(id))
+    : db.prepare(sql).run(now, Number(id), Number(ownerUserId), Number(ownerUserId));
   return result.changes > 0;
 }
 
@@ -200,6 +223,7 @@ function importFromVideo(db, log, videoGenId) {
 module.exports = {
   list,
   getById,
+  getByIdForOwner,
   getLineage,
   findByChecksum,
   create,

@@ -1771,6 +1771,9 @@ function createAndGenerateImage(db, log, opts) {
         }
         log.info('Character image updated', { character_id: charIdNum, image_url: result.image_url, local_path: localPath });
       }
+      if (charIdNum != null) {
+        try { require('./assetMappingService').syncEntities(db, log, 'character', [charIdNum]); } catch (_) {}
+      }
       if (sceneIdNum != null) {
         try {
           // 旧图追加到 extra_images，与上传逻辑保持一致
@@ -1797,6 +1800,9 @@ function createAndGenerateImage(db, log, opts) {
           }
         }
         log.info('Scene image updated', { scene_id: sceneIdNum, image_url: result.image_url, local_path: localPath });
+      }
+      if (sceneIdNum != null) {
+        try { require('./assetMappingService').syncEntities(db, log, 'scene', [sceneIdNum]); } catch (_) {}
       }
       log.info('Image generation completed', { image_gen_id: imageGenId, local_path: localPath });
     } catch (err) {

@@ -22,7 +22,7 @@
 
     <!-- 筛选栏 -->
     <div class="filter-bar">
-      <el-radio-group v-model="mediaType" class="type-filter" @change="loadMedia">
+      <el-radio-group v-model="mediaType" class="type-filter" @change="resetAndLoad">
         <el-radio-button value="all">全部</el-radio-button>
         <el-radio-button value="image">图片</el-radio-button>
         <el-radio-button value="video">视频</el-radio-button>
@@ -37,7 +37,7 @@
       >
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
-      <el-checkbox v-model="favoriteOnly" class="favorite-filter" @change="loadMedia">只看收藏</el-checkbox>
+      <el-checkbox v-model="favoriteOnly" class="favorite-filter" @change="resetAndLoad">只看收藏</el-checkbox>
     </div>
 
     <!-- 上传进度 -->
@@ -71,6 +71,7 @@
               >
                 <el-icon><ZoomIn /></el-icon>
               </el-button>
+              <el-button size="small" plain title="重命名素材" @click.stop="renameItem(item)"><el-icon><Edit /></el-icon></el-button>
               <el-button size="small" plain :type="item.is_favorite ? 'warning' : 'info'" :title="item.is_favorite ? '取消收藏' : '收藏素材'" @click.stop="toggleFavorite(item)"><el-icon><StarFilled v-if="item.is_favorite" /><Star v-else /></el-icon></el-button>
               <el-button
                 size="small"
@@ -157,7 +158,7 @@ import { ref, onMounted, reactive, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, Upload, Search, Loading, CircleCheck,
-  ZoomIn, Delete, Files, Star, StarFilled
+  ZoomIn, Delete, Edit, Files, Star, StarFilled
 } from '@element-plus/icons-vue'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { useRouter } from 'vue-router'
@@ -213,7 +214,13 @@ async function onUpload(e) {
 
 function debouncedLoad() {
   clearTimeout(keywordTimer)
-  keywordTimer = setTimeout(loadMedia, 400)
+  keywordTimer = setTimeout(resetAndLoad, 400)
+}
+
+function resetAndLoad() {
+  page.value = 1
+  selectedIds.clear()
+  return loadMedia()
 }
 
 async function loadMedia() {
@@ -228,7 +235,7 @@ async function loadMedia() {
     if (favoriteOnly.value) params.favorite = 1
     const res = await request.get('/assets', { params })
     mediaItems.value = (res?.items || []).map(normalizeItem)
-    total.value = res?.total || 0
+    total.value = Number(res?.pagination?.total ?? res?.total ?? 0)
   } catch (err) {
     mediaItems.value = []
   } finally {

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 
 const assetService = require('../src/services/assetService');
-const { validateShotAssetLimits, validateCreationMode, safeSnapshot } = require('../src/services/omniVideoService');
+const { validateShotAssetLimits, validateCreationMode, safeSnapshot, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences } = require('../src/services/omniVideoService');
 const { normalizeSupports } = require('../src/services/videoModelCapabilities');
 
 const log = { info() {}, warn() {}, error() {} };
@@ -14,6 +14,7 @@ function createDb() {
     CREATE TABLE assets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       drama_id INTEGER,
+      owner_user_id INTEGER,
       name TEXT,
       type TEXT,
       url TEXT,
@@ -28,6 +29,7 @@ function createDb() {
       updated_at TEXT,
       deleted_at TEXT
     );
+    CREATE TABLE dramas (id INTEGER PRIMARY KEY, owner_user_id INTEGER, deleted_at TEXT);
   `);
   db.prepare('INSERT INTO assets (name, type, updated_at) VALUES (?, ?, ?)')
     .run('portrait.png', 'image', new Date().toISOString());
@@ -94,6 +96,19 @@ test('locally archived media never exposes a supplier signed URL', () => {
   assert.equal(item.url.includes('ExpiresSeconds'), false);
 });
 
+test('asset lookup by id uses the same personal/project scope as the library', () => {
+  const db = createDb();
+  db.prepare('UPDATE assets SET owner_user_id = ? WHERE id = 1').run(7);
+  db.prepare('INSERT INTO dramas (id, owner_user_id) VALUES (?, ?)').run(9, 7);
+  db.prepare('INSERT INTO assets (drama_id, name, type, updated_at) VALUES (?, ?, ?, ?)')
+    .run(9, 'project-image.png', 'image', new Date().toISOString());
+
+  assert.equal(assetService.getByIdForOwner(db, 1, 7).id, 1);
+  assert.equal(assetService.getByIdForOwner(db, 2, 7).id, 2);
+  assert.equal(assetService.getByIdForOwner(db, 1, 8), null);
+  assert.equal(assetService.getByIdForOwner(db, 2, 8), null);
+});
+
 test('omni video rejects material counts above the per-shot media limits', () => {
   assert.doesNotThrow(() => validateShotAssetLimits([
     ...Array.from({ length: 9 }, () => ({ type: 'image' })),
@@ -113,6 +128,18 @@ test('first-last-frame mode accepts a first frame without an optional tail frame
   const capability = { supports: { first_last_frame: true } };
   assert.doesNotThrow(() => validateCreationMode('first_last_frame', [{ type: 'image', usage: 'first_frame' }], capability));
   assert.throws(() => validateCreationMode('first_last_frame', [{ type: 'image', usage: 'first_frame' }, { type: 'video', usage: 'last_frame' }], capability), /尾帧可选/);
+});
+
+test('Seedance rejects declared real-person material without an active certification', () => {
+  const capability = { model: 'doubao-seedance-2-0', provider: 'volcengine' };
+  const pending = [{ type: 'image', alias: '演员参考', send_to_model: true, requires_sd2_identity: true, seedance2_asset: { status: 'stale', asset_url: 'asset://old' } }];
+  assert.throws(() => enforceSd2IdentityAssets(pending, capability, log), /SD2/);
+
+  const active = [{ type: 'image', alias: '演员参考', send_to_model: true, requires_sd2_identity: true, model_url: '/static/a.png', seedance2_asset: { status: 'active', asset_url: 'asset://active-1' } }];
+  assert.doesNotThrow(() => enforceSd2IdentityAssets(active, capability, log));
+  applySd2CertifiedAssetReferences(active, capability);
+  assert.equal(active[0].model_url, 'asset://active-1');
+  assert.equal(active[0].strategy, 'sd2_certified_asset');
 });
 
 test('omni job API snapshot masks local and remote source URLs', () => {

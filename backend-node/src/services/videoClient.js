@@ -3569,7 +3569,17 @@ async function callVideoApi(db, log, opts) {
           }
         } catch (_) {}
       }
-      if (!chosen) {
+      let hasStoryboardCharacters = false;
+      if (opts.storyboard_id) {
+        try {
+          const value = db.prepare('SELECT characters FROM storyboards WHERE id = ?').get(opts.storyboard_id)?.characters;
+          const list = typeof value === 'string' ? JSON.parse(value) : value;
+          hasStoryboardCharacters = Array.isArray(list) && list.length > 0;
+        } catch (_) {}
+      }
+      // Never substitute another person's voice for an explicitly bound
+      // character; a project default is only valid for a characterless shot.
+      if (!chosen && !hasStoryboardCharacters) {
         // 取 Map 中的第一个
         chosen = voiceMap.values().next().value;
       }

@@ -497,25 +497,25 @@
           <article class="resource-center-group">
             <header><b>角色</b><span>{{ characters.length }}</span></header>
             <div class="resource-center-actions"><el-button size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button><el-button size="small" @click="openAddCharacter">添加角色</el-button><el-button v-if="characters.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'character'" @click="onGenerateMissingResourceImages('character')">生成缺图</el-button></div>
-            <div v-if="characters.length" class="resource-center-list"><div v-for="char in characters" :key="char.id" class="resource-center-item"><img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" alt="" /><span v-else class="resource-center-placeholder">角色</span><div><b>{{ char.name }}</b><small>{{ char.appearance || char.description || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="openResourceAssetPicker('character', char)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `char-${char.id}`" @click="onUploadResourceClick('character', char.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char)">生成图</el-button></div></div></div>
+            <div v-if="characters.length" class="resource-center-list"><div v-for="char in characters" :key="char.id" class="resource-center-item"><img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" alt="" /><span v-else class="resource-center-placeholder">角色</span><div><b>{{ char.name }}</b><small>{{ char.appearance || char.description || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editCharacter(char)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('character', char)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `char-${char.id}`" @click="onUploadResourceClick('character', char.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteCharacter(char)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从剧本提取角色，或手动添加。</p>
           </article>
           <article class="resource-center-group">
             <header><b>场景</b><span>{{ scenes.length }}</span></header>
             <div class="resource-center-actions"><el-button size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button><el-button size="small" @click="openAddScene">添加场景</el-button><el-button v-if="scenes.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'scene'" @click="onGenerateMissingResourceImages('scene')">生成缺图</el-button></div>
-            <div v-if="scenes.length" class="resource-center-list"><div v-for="scene in scenes" :key="scene.id" class="resource-center-item"><img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" alt="" /><span v-else class="resource-center-placeholder">场景</span><div><b>{{ scene.location }}</b><small>{{ scene.description || scene.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="openResourceAssetPicker('scene', scene)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `scene-${scene.id}`" @click="onUploadResourceClick('scene', scene.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid)">生成图</el-button></div></div></div>
+            <div v-if="scenes.length" class="resource-center-list"><div v-for="scene in scenes" :key="scene.id" class="resource-center-item"><img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" alt="" /><span v-else class="resource-center-placeholder">场景</span><div><b>{{ scene.location }}</b><small>{{ scene.description || scene.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editScene(scene)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('scene', scene)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `scene-${scene.id}`" @click="onUploadResourceClick('scene', scene.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteScene(scene)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从当前剧本提取场景。</p>
           </article>
           <article class="resource-center-group">
             <header><b>道具</b><span>{{ props.length }}</span></header>
             <div class="resource-center-actions"><el-button size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button><el-button size="small" @click="showAddProp = true">添加道具</el-button><el-button v-if="props.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'prop'" @click="onGenerateMissingResourceImages('prop')">生成缺图</el-button></div>
-            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item"><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="openResourceAssetPicker('prop', prop)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `prop-${prop.id}`" @click="onUploadResourceClick('prop', prop.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid)">生成图</el-button></div></div></div>
+            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item"><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editProp(prop)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('prop', prop)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `prop-${prop.id}`" @click="onUploadResourceClick('prop', prop.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteProp(prop)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从当前剧本提取道具。</p>
           </article>
         </div>
         <div class="resource-media-library">
-          <header><div><b>媒体素材库</b><small>上传的图片、视频、音频会在分镜引用区统一可用。</small></div><span>{{ universalLibraryAssets.length }} 项</span></header>
-          <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card"><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><small>{{ asset.name || `素材 ${asset.id}` }}</small></article></div>
+          <header><div><b>媒体素材库</b><small>上传的图片、视频、音频会在分镜引用区统一可用。</small></div><div class="resource-media-header-actions"><el-button size="small" @click="router.push('/media-library')">管理媒体库</el-button><span>{{ universalLibraryAssets.length }} 项</span></div></header>
+          <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card"><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><small>{{ asset.name || `素材 ${asset.id}` }}</small><div v-if="asset.source_type !== 'project_resource'" class="resource-media-card-actions"><el-button size="small" text @click="renameResourceMedia(asset)">重命名</el-button><el-button size="small" type="danger" text @click="deleteResourceMedia(asset)">删除</el-button></div><small v-else>关联资源（请在角色、场景或道具中管理）</small></article></div>
           <p v-else class="resource-center-empty">还没有上传媒体素材。</p>
         </div>
       </section>
@@ -6241,6 +6241,28 @@ async function onResourceMediaFileChange(e) {
   }
 }
 
+async function renameResourceMedia(asset) {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入素材名称', '重命名素材', { inputValue: asset.name || '' })
+    const name = String(value || '').trim()
+    if (!name) return
+    const updated = await omniVideoAPI.updateAsset(asset.id, { name })
+    Object.assign(asset, updated || {}, { name })
+    ElMessage.success('素材名称已更新')
+  } catch (_) {}
+}
+
+async function deleteResourceMedia(asset) {
+  try {
+    await ElMessageBox.confirm(`确定删除“${asset.name || `素材 ${asset.id}`}”？`, '删除素材', { type: 'warning' })
+    await omniVideoAPI.deleteAsset(asset.id)
+    universalLibraryAssets.value = universalLibraryAssets.value.filter((item) => Number(item.id) !== Number(asset.id))
+    ElMessage.success('素材已删除')
+  } catch (err) {
+    if (err !== 'cancel' && err?.action !== 'cancel') ElMessage.error(err?.message || '删除素材失败')
+  }
+}
+
 async function onSbOmniFileInputChange(e) {
   const files = e.target?.files
   const target = sbOmniUploadTargetId.value
@@ -6311,6 +6333,14 @@ async function onSbOmniAssetRealPersonToggle(sb, asset, value) {
     else if (!value && sbOmniAssetUsage.value[sb?.id]?.[asset.id] === 'identity') await onSbOmniAssetUsageChange(sb, asset, 'reference')
   } catch (err) {
     asset.requires_sd2_identity = prev
+    if (err?.response?.status === 404) {
+      // The card was rendered from a stale in-memory library response. Remove
+      // it immediately and repair every storyboard that still points at it.
+      universalLibraryAssets.value = universalLibraryAssets.value.filter((item) => Number(item.id) !== Number(asset.id))
+      await reconcileUnavailableStoryboardAssets()
+      ElMessage.warning('该素材已不存在，已移除相关分镜引用')
+      return
+    }
     ElMessage.error(err?.message || '真人声明保存失败')
   }
 }
@@ -6319,7 +6349,7 @@ async function onSbOmniAssetCertify(sb, asset) {
   if (!asset || asset.type !== 'image') return
   sbOmniCertifyingIds.value.add(asset.id)
   try {
-    const out = sbOmniSd2Status(asset) === 'processing'
+    const out = ['processing', 'active'].includes(sbOmniSd2Status(asset))
       ? await omniVideoAPI.refreshAssetCertification(asset.id)
       : await omniVideoAPI.certifyAsset(asset.id)
     if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
@@ -6380,9 +6410,39 @@ async function loadUniversalLibraryAssets() {
     ])
     universalLibraryAssets.value = (result?.items || []).filter((asset) => ['image', 'video', 'audio'].includes(asset.type) && asset.processing_status !== 'processing')
     sbUniversalUploadLimits.value = limits || null
+    await reconcileUnavailableStoryboardAssets()
   } catch (_) {
     universalLibraryAssets.value = []
   }
+}
+
+// A material may have been deleted in another tab or by the media library
+// while this storyboard remained open. Remove only those stale references and
+// retain all valid selections, rather than allowing generation to fail later
+// with an opaque "resource not found" response.
+async function reconcileUnavailableStoryboardAssets() {
+  const available = new Set(universalLibraryAssets.value.map((asset) => Number(asset.id)))
+  let repaired = 0
+  for (const sb of storyboards.value || []) {
+    const current = (sbOmniAssetIds.value[sb.id] || []).map(Number)
+    const ids = current.filter((id) => available.has(id))
+    const first = sbOmniFirstFrameAssetId.value[sb.id]
+    const last = sbOmniLastFrameAssetId.value[sb.id]
+    const patch = { omni_asset_ids: ids }
+    let changed = ids.length !== current.length
+    if (first != null && !available.has(Number(first))) { patch.omni_first_frame_asset_id = null; changed = true }
+    if (last != null && !available.has(Number(last))) { patch.omni_last_frame_asset_id = null; changed = true }
+    if (!changed) continue
+    try {
+      await storyboardsAPI.update(sb.id, patch)
+      sbOmniAssetIds.value = { ...sbOmniAssetIds.value, [sb.id]: ids }
+      if (patch.omni_first_frame_asset_id === null) sbOmniFirstFrameAssetId.value = { ...sbOmniFirstFrameAssetId.value, [sb.id]: null }
+      if (patch.omni_last_frame_asset_id === null) sbOmniLastFrameAssetId.value = { ...sbOmniLastFrameAssetId.value, [sb.id]: null }
+      Object.assign(sb, patch)
+      repaired += 1
+    } catch (_) {}
+  }
+  if (repaired) ElMessage.warning(`已从 ${repaired} 个分镜移除不存在的素材引用，请重新选择后生成`)
 }
 
 async function loadAllUniversalLibraryAssets() {

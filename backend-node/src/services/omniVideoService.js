@@ -38,6 +38,7 @@ function create(db, log, body, billingUser) {
   validateCreationMode(creationMode, assets, capability);
   const routed = routeAssets(expandVideoReferences(db, log, assets, capability.supports), capability.supports, body.audio_strategy);
   enforceSd2IdentityAssets(routed, capability, log);
+  applySd2CertifiedAssetReferences(routed, capability);
   const modelPrompt = bindPromptReferences(prompt, body.prompt_document, routed);
   const now = new Date().toISOString();
   const billing = require('./billingService');
@@ -219,22 +220,35 @@ function expandVideoReferences(db, log, assets, supports) {
   return output;
 }
 
-function isSeedanceCapability(capability) { return /seedance|doubao-seedance/i.test(String(capability?.model || '')) && /volc|volces/i.test(String(capability?.provider || '')); }
+function isSeedanceCapability(capability) {
+  return /seedance|doubao-seedance/i.test(String(capability?.model || ''));
+}
+
+function hasActiveSd2Certification(asset) {
+  return !!(asset?.seedance2_asset
+    && String(asset.seedance2_asset.status || '').toLowerCase() === 'active'
+    && String(asset.seedance2_asset.asset_url || '').startsWith('asset://'));
+}
+
 function enforceSd2IdentityAssets(assets, capability, log) {
-  // 真人/非真人只是素材声明，不再让认证状态阻断视频提交。
-  void assets; void capability; void log;
-  return;
   if (!isSeedanceCapability(capability)) return;
-  const undeclared = assets.filter((asset) => asset.type === 'image' && asset.usage === 'identity' && asset.send_to_model && !asset.requires_sd2_identity);
-  if (undeclared.length) throw new Error(`人物一致性素材请先勾选“含真人／需要身份一致性”：${undeclared.map((asset) => asset.alias).join('、')}`);
-  // 勾选了真人身份一致性的图片若 asset 失效（如更换 ARK/项目/组后旧 asset 在火山侧已不存在），
-  // 不再硬阻断生成，而是降级为原始图片 URL，避免 400 “asset not found”。
-  // 注意：requires_sd2_identity 与 usage 独立判断（真人图可能被编排为 reference/primary 等任意用途）。
-  const invalid = assets.filter((asset) => asset.type === 'image' && asset.send_to_model && asset.requires_sd2_identity && !(asset.seedance2_asset && String(asset.seedance2_asset.status || '').toLowerCase() === 'active' && String(asset.seedance2_asset.asset_url || '').startsWith('asset://')));
+  // "contains real person" is a declaration. Once declared, Seedance calls
+  // must not silently downgrade it to an unregistered raw image.
+  const invalid = assets.filter((asset) => asset.type === 'image' && asset.send_to_model && asset.requires_sd2_identity && !hasActiveSd2Certification(asset));
   if (invalid.length) {
-    invalid.forEach((asset) => { asset.seedance2_asset = null; });
     const names = invalid.map((asset) => asset.alias).join('、');
-    if (log && typeof log.warn === 'function') log.warn('[SD2] 以下真人素材认证已失效，本次回退原始图（建议在素材库重新认证）：' + names);
+    if (log && typeof log.warn === 'function') log.warn('[SD2] rejected request with inactive declared-real-person assets', { assets: names });
+    throw new Error(`以下含真人素材尚未完成或已失效 SD2 认证，请刷新或重新认证后再生成：${names}`);
+  }
+}
+
+function applySd2CertifiedAssetReferences(assets, capability) {
+  if (!isSeedanceCapability(capability)) return;
+  for (const asset of assets) {
+    if (asset.type === 'image' && asset.send_to_model && hasActiveSd2Certification(asset)) {
+      asset.model_url = asset.seedance2_asset.asset_url;
+      asset.strategy = 'sd2_certified_asset';
+    }
   }
 }
 // Keep retry snapshots server-side and complete, but never return raw file paths,
@@ -313,4 +327,4 @@ function retry(db, log, id, billingUser) {
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry, buildAuthorizationUsage, validateShotAssetLimits, validateCreationMode, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, retry, buildAuthorizationUsage, validateShotAssetLimits, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };

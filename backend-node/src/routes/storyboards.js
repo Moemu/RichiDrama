@@ -270,7 +270,7 @@ function routes(db, log) {
     },
     update: (req, res) => {
       try {
-        const sb = storyboardService.updateStoryboard(db, log, req.params.id, req.body || {});
+        const sb = storyboardService.updateStoryboard(db, log, req.params.id, req.body || {}, req.auth.id);
         if (!sb) return response.notFound(res, '分镜不存在');
         response.success(res, sb);
       } catch (err) {

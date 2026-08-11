@@ -23,7 +23,17 @@ async function publicImageUrl(asset, cfg, log) {
   return { ok: false, error: 'SD2 认证需要可由云端访问的图片，请配置图床或公开 storage.base_url' };
 }
 function payload(asset, created, sourceUrl, provider) {
-  return { hub_asset_id: created.id, asset_url: created.asset_url || modelArk.assetUrlForVideo(created), status: created.status || 'processing', sd2_provider: provider, source_image_url: sourceUrl, source_fingerprint: sourceFingerprint(asset), updated_at: new Date().toISOString() };
+  return {
+    hub_asset_id: created.id,
+    asset_url: created.asset_url || modelArk.assetUrlForVideo(created),
+    status: created.status || 'processing',
+    sd2_provider: provider,
+    source_image_url: sourceUrl,
+    certified_image_url: asset?.image_url || asset?.url || null,
+    certified_local_path: asset?.local_path || null,
+    source_fingerprint: sourceFingerprint(asset),
+    updated_at: new Date().toISOString(),
+  };
 }
 function chooseProvider(db, cfg, log) {
   const ark = modelArk.buildModelArkContext(db, log);
@@ -33,14 +43,29 @@ function chooseProvider(db, cfg, log) {
   return { provider: null, error: '未配置 SD2 资产库，请配置 ModelArk 资产库或即梦2认证网关' };
 }
 
+function mappedResource(asset) {
+  if (asset?.source_type !== 'project_resource') return null;
+  try {
+    const meta = asset.metadata_json ? JSON.parse(asset.metadata_json) : {};
+    const kind = String(meta.resource_type || '');
+    const id = Number(meta.resource_id);
+    return ['character', 'scene', 'prop'].includes(kind) && id > 0 ? { kind, id } : null;
+  } catch (_) { return null; }
+}
+
+function mappedAssetAfterSync(db, log, linked) {
+  const mapped = require('./assetMappingService').syncEntities(db, log, linked.kind, [linked.id])[0];
+  return mapped?.seedance2_asset || null;
+}
+
 async function certifyResource(db, log, cfg, kind, id) {
   const table = tableFor(kind);
   if (!table) return { ok: false, error: '不支持的 SD2 素材类型' };
   const row = db.prepare(`SELECT * FROM ${table} WHERE id = ? AND deleted_at IS NULL`).get(Number(id));
   if (!row) return { ok: false, error: '素材不存在' };
-  if (!String(row.image_url || '').trim() && !String(row.local_path || '').trim()) return { ok: false, error: '请先为素材上传图片后再认证' };
+  if (!String(row.image_url || row.url || '').trim() && !String(row.local_path || '').trim()) return { ok: false, error: '请先为素材上传图片后再认证' };
   const route = chooseProvider(db, cfg, log); if (!route.provider) return { ok: false, error: route.error };
-  const source = await publicImageUrl({ ...row, url: row.image_url }, cfg, log); if (!source.ok) return source;
+  const source = await publicImageUrl(row, cfg, log); if (!source.ok) return source;
   const name = row.name || row.location || `${kind}-${row.id}`;
   const create = route.provider === 'model_ark' ? await modelArk.createImageAsset(route.ctx, { name, url: source.url }, log) : await materialHub.createImageAsset(route.ctx, { name, url: source.url }, log);
   if (!create.ok) return { ok: false, error: create.error };
@@ -76,6 +101,12 @@ function markResourceStale(db, kind, previous, next) {
   const cert = parse(previous?.seedance2_asset); if (!cert) return;
   const oldFp = sourceFingerprint(previous); const newFp = sourceFingerprint({ ...previous, ...next, image_url: next?.image_url ?? previous?.image_url });
   if (oldFp === newFp) return;
+  if (String(cert.status || '').toLowerCase() === 'stale' && cert.source_fingerprint && cert.source_fingerprint === newFp) {
+    const at = new Date().toISOString();
+    const restored = { ...cert, status: 'active', stale_reason: null, restored_from_stale_at: at, updated_at: at };
+    db.prepare(`UPDATE ${table} SET seedance2_asset = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(restored), at, previous.id);
+    return;
+  }
   const out = { ...cert, status: 'stale', stale_reason: 'asset_source_changed', updated_at: new Date().toISOString() };
   db.prepare(`UPDATE ${table} SET seedance2_asset = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(out), out.updated_at, previous.id);
 }
@@ -84,9 +115,29 @@ async function certify(db, log, cfg, id) {
   const asset = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!asset) return { ok: false, error: '素材不存在' };
   if (asset.type !== 'image') return { ok: false, error: '仅图片素材支持 SD2 认证' };
+  const linked = mappedResource(asset);
+  if (linked?.kind === 'character') {
+    return require('./characterLibraryService').registerCharacterJimengMaterialAsset(db, log, cfg, linked.id);
+  }
+  if (linked) {
+    const out = await certifyResource(db, log, cfg, linked.kind, linked.id);
+    if (!out.ok) return out;
+    return { ...out, seedance2_asset: mappedAssetAfterSync(db, log, linked) || out.seedance2_asset };
+  }
   return certifyResource(db, log, cfg, 'asset', id);
 }
-async function refresh(db, log, cfg, id) { return refreshResource(db, log, cfg, 'asset', id); }
+async function refresh(db, log, cfg, id) {
+  const asset = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id));
+  if (!asset) return { ok: false, error: '素材不存在' };
+  const linked = mappedResource(asset);
+  if (linked?.kind === 'character') return require('./characterLibraryService').refreshCharacterJimengMaterialAsset(db, log, cfg, linked.id);
+  if (linked) {
+    const out = await refreshResource(db, log, cfg, linked.kind, linked.id);
+    if (!out.ok) return out;
+    return { ...out, seedance2_asset: mappedAssetAfterSync(db, log, linked) || out.seedance2_asset };
+  }
+  return refreshResource(db, log, cfg, 'asset', id);
+}
 function markStale(db, previous, next) { return markResourceStale(db, 'asset', previous, next); }
 
 module.exports = { certify, refresh, markStale, certifyResource, refreshResource, markResourceStale, parse, sourceFingerprint };

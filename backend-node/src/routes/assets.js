@@ -30,7 +30,7 @@ function routes(db, log, cfg) {
     },
     get: (req, res) => {
       try {
-        const item = assetService.getById(db, req.params.id);
+        const item = assetService.getByIdForOwner(db, req.params.id, req.auth.id);
         if (!item) return response.notFound(res, '资源不存在');
         response.success(res, item);
       } catch (err) {
@@ -50,7 +50,7 @@ function routes(db, log, cfg) {
     },
     update: (req, res) => {
       try {
-        const item = assetService.update(db, log, req.params.id, req.body || {});
+        const item = assetService.update(db, log, req.params.id, req.body || {}, req.auth.id);
         if (!item) return response.notFound(res, '资源不存在');
         response.success(res, item);
       } catch (err) {
@@ -60,7 +60,7 @@ function routes(db, log, cfg) {
     },
     delete: (req, res) => {
       try {
-        const ok = assetService.deleteById(db, log, req.params.id);
+        const ok = assetService.deleteById(db, log, req.params.id, req.auth.id);
         if (!ok) return response.notFound(res, '资源不存在');
         response.success(res, { message: '删除成功' });
       } catch (err) {
