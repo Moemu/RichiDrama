@@ -2117,10 +2117,8 @@ async function openTest(row) {
   testServiceType.value = row.service_type || 'text'
   try {
     await aiAPI.testConnection({
-      base_url: row.base_url,
-      api_key: row.api_key,
+      config_id: row.id,
       model: Array.isArray(row.model) ? row.model[0] : row.model,
-      provider: row.provider,
       endpoint: row.endpoint,
       service_type: row.service_type,
       settings: row.settings
