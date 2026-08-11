@@ -81,6 +81,19 @@ test('asset lineage retains ancestors and derived versions, including soft-delet
   assert.deepEqual(lineage.descendants.map((item) => item.name), ['keyframe.jpg']);
 });
 
+test('locally archived media never exposes a supplier signed URL', () => {
+  const db = createDb();
+  db.prepare('UPDATE assets SET type = ?, url = ?, local_path = ? WHERE id = 1').run(
+    'video',
+    'https://tos.example/video.mp4?ExpiresSeconds=86400&signature=temporary',
+    'projects/demo/videos/archived.mp4'
+  );
+
+  const item = assetService.getById(db, 1);
+  assert.equal(item.url, '/static/projects/demo/videos/archived.mp4');
+  assert.equal(item.url.includes('ExpiresSeconds'), false);
+});
+
 test('omni video rejects material counts above the per-shot media limits', () => {
   assert.doesNotThrow(() => validateShotAssetLimits([
     ...Array.from({ length: 9 }, () => ({ type: 'image' })),
