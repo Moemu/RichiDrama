@@ -120,6 +120,16 @@ test('asset lookup by id uses the same personal/project scope as the library', (
   assert.equal(assetService.getByIdForOwner(db, 2, 8), null);
 });
 
+test('project owner retains CRUD access when a legacy asset has a stale direct owner', () => {
+  const db = createDb();
+  db.prepare('INSERT INTO dramas (id, owner_user_id) VALUES (?, ?)').run(9, 7);
+  db.prepare('UPDATE assets SET drama_id = ?, owner_user_id = ? WHERE id = 1').run(9, 8);
+
+  assert.equal(assetService.getByIdForOwner(db, 1, 7).id, 1);
+  assert.equal(assetService.update(db, log, 1, { name: 'recovered-project-asset' }, 7).name, 'recovered-project-asset');
+  assert.equal(assetService.deleteById(db, log, 1, 7), true);
+});
+
 test('omni video rejects material counts above the per-shot media limits', () => {
   assert.doesNotThrow(() => validateShotAssetLimits([
     ...Array.from({ length: 9 }, () => ({ type: 'image' })),

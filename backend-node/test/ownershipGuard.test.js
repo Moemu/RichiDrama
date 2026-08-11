@@ -40,3 +40,21 @@ test('ownership guard rejects cross-user generation for both user and admin acco
     assert.equal(res.statusCode, 404);
   }
 });
+
+test('ownership guard resolves a project asset through its project owner before a stale direct owner', () => {
+  let queriedSql = '';
+  const db = {
+    prepare(sql) {
+      queriedSql = sql;
+      return { get: () => ({ owner_user_id: 42 }) };
+    },
+  };
+  const req = request({ id: 42, role: 'user' }, 42);
+  req.path = '/assets/123';
+  let nextCalled = false;
+
+  ownershipGuard(db)(req, responseRecorder(), () => { nextCalled = true; });
+
+  assert.equal(nextCalled, true);
+  assert.match(queriedSql, /COALESCE\(d\.owner_user_id, a\.owner_user_id\)/);
+});
