@@ -33,5 +33,13 @@ module.exports = function authRoutes(db) {
         response.success(res, { message: '密码已更新' });
       } catch (err) { response.badRequest(res, err.message); }
     },
+    changeUsername: (req, res) => {
+      try {
+        const user = authService.changeUsername(db, req.auth.id, req.body?.username);
+        const session = authService.issueSession(db, user);
+        res.cookie('lmd_session', session.token, authService.sessionCookieOptions(req));
+        response.success(res, session);
+      } catch (err) { response.badRequest(res, err.message); }
+    },
   };
 };

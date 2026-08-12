@@ -297,16 +297,20 @@ async function processVideoMerge(db, log, mergeId, baseUrl) {
     try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (_) {}
   }
 
-  const finalMergedUrl = mergedRelativePath || mergedUrlFallback;
+  if (!mergedRelativePath) {
+    const message = '视频合成未生成本地文件，不能使用可能过期的供应商链接作为成片。请检查 ffmpeg 后重试。';
+    db.prepare('UPDATE video_merges SET status = ?, merged_url = NULL, error_msg = ? WHERE id = ?').run('failed', message, mergeId);
+    if (taskId) taskService.updateTaskError(db, taskId, message);
+    log.warn('Video merge failed without a local output', { merge_id: mergeId, episode_id: episodeId });
+    return;
+  }
+  const finalMergedUrl = mergedRelativePath;
   db.prepare(
     'UPDATE video_merges SET status = ?, merged_url = ?, duration = ?, completed_at = ?, error_msg = ? WHERE id = ?'
   ).run('completed', finalMergedUrl, Math.round(totalDuration) || null, now, null, mergeId);
   db.prepare('UPDATE episodes SET video_url = ?, status = ?, updated_at = ? WHERE id = ?').run(finalMergedUrl, 'completed', now, episodeId);
   if (taskId) {
     taskService.updateTaskResult(db, taskId, { merge_id: mergeId, video_url: finalMergedUrl, duration: Math.round(totalDuration) });
-  }
-  if (!mergedRelativePath) {
-    log.info('Video merge completed (first-clip fallback)', { merge_id: mergeId, episode_id: episodeId });
   }
 }
 

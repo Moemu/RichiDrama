@@ -41,8 +41,13 @@ function createApp() {
   applyVendorLock(db, logger, config);
   const log = logger;
 
-  const { resumeProcessingVideoGenerations } = require('./services/videoService');
+  const { resumeProcessingVideoGenerations, reconcileUnarchivedCompletedVideos, resumePendingVideoArchives, startPendingVideoArchiveRetry } = require('./services/videoService');
+  reconcileUnarchivedCompletedVideos(db, log);
   resumeProcessingVideoGenerations(db, log);
+  resumePendingVideoArchives(db, log);
+  startPendingVideoArchiveRetry(db, log);
+  require('./services/assetSd2Service').resumePendingCertifications(db, log, config);
+  require('./services/omniVideoService').startSd2WaitingGenerationRecovery(db, log);
   const taskService = require('./services/taskService');
   taskService.failOrphanedAsyncTasksOnStartup(db, log);
 
@@ -75,12 +80,14 @@ function createApp() {
   try {
     if (!fs.existsSync(storageRoot)) fs.mkdirSync(storageRoot, { recursive: true });
     const protectStatic = config.security?.protect_static ?? process.env.NODE_ENV === 'production';
+    const mediaStorage = require('./services/mediaStorageService');
     if (protectStatic) {
       const { requireAuth } = require('./middleware/auth');
-      app.use('/static', requireAuth(db), express.static(storageRoot));
+      app.use('/static', requireAuth(db), mediaStorage.staticHandler(config, storageRoot));
     } else {
-      app.use('/static', express.static(storageRoot));
+      app.use('/static', mediaStorage.staticHandler(config, storageRoot));
     }
+    mediaStorage.startArchiveScheduler(config, storageRoot, log);
   } catch (e) {
     console.warn('Static storage mount skipped:', e.message);
   }

@@ -170,9 +170,9 @@ function downloadEpisodeVideo(db) {
 }
 
 function exportDrama(db, cfg, log) {
-  return (req, res) => {
+  return async (req, res) => {
     try {
-      const { buffer, title } = dramaExportService.exportDrama(db, cfg, log, req.params.id);
+      const { buffer, title } = await dramaExportService.exportDrama(db, cfg, log, req.params.id);
       const safeName = (title || 'drama').replace(/[^\w\u4e00-\u9fff\-]/g, '_').slice(0, 50);
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeName)}.zip`);

@@ -1403,6 +1403,7 @@ const VOLC_IMAGE_MODELS = [
 const VOLC_VIDEO_MODELS = [
   'doubao-seedance-2-0-260128',
   'doubao-seedance-2-0-fast-260128',
+  'doubao-seedance-2-0-mini-260615',
   'doubao-seedance-1-5-pro-251215',
   'doubao-seedance-1-0-lite-i2v-250428',
   'doubao-seedance-1-0-lite-t2v-250428',

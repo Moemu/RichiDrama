@@ -5,6 +5,7 @@ const { spawnSync } = require('child_process');
 const uploadService = require('./uploadService');
 const storageLayout = require('./storageLayout');
 const assetService = require('./assetService');
+const mediaStorage = require('./mediaStorageService');
 const { getFfmpegPath, getFfprobePath } = require('../utils/ffmpegPath');
 
 const LIMITS = { image: 30, video: 50, audio: 15 };
@@ -74,7 +75,7 @@ async function upload(db, cfg, log, file, body = {}) {
   const result = uploadService.uploadFile(storagePath, cfg?.storage?.base_url || '', log, file.buffer, file.originalname, file.mimetype, `${type}s`, projectSubdir);
   const inspection = await inspectMedia(path.join(storagePath, result.local_path.replace(/\//g, path.sep)), type, storagePath, result.local_path, log);
   const displayName = String(body.name || readableUploadName(file.originalname) || 'untitled-media').slice(0, 255);
-  return assetService.create(db, log, {
+  const asset = assetService.create(db, log, {
     drama_id: dramaId,
     owner_user_id: body.owner_user_id ?? null,
     name: displayName,
@@ -84,6 +85,26 @@ async function upload(db, cfg, log, file, body = {}) {
     metadata: { original_name: displayName, uploaded_mime_type: file.mimetype || '', ...inspection.metadata },
     processing_status: 'ready',
   });
+  // User uploads are local-first.  When OSS is enabled, make a second durable
+  // copy before returning, but never fail or delete the local upload merely
+  // because the mirror is temporarily unavailable.  SD2 can still consume the
+  // local image while a later retry/migration catches up.
+  if (!mediaStorage.isOss(cfg)) return asset;
+  const syncedAt = new Date().toISOString();
+  const metadata = { ...(asset.metadata || {}) };
+  try {
+    const mirrored = await mediaStorage.archiveLocalFile(cfg, storagePath, result.local_path, log, { removeLocal: false, contentType: file.mimetype || undefined });
+    metadata.persistence = { local: 'available', oss: { status: 'synced', key: mirrored.key, url: mirrored.url, synced_at: syncedAt } };
+    db.prepare('UPDATE assets SET metadata_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(metadata), syncedAt, asset.id);
+    return { ...asset, metadata };
+  } catch (error) {
+    metadata.persistence = { local: 'available', oss: { status: 'pending', error: String(error.message || 'OSS mirror failed').slice(0, 500), updated_at: syncedAt } };
+    db.prepare('UPDATE assets SET metadata_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(metadata), syncedAt, asset.id);
+    log.warn('Media uploaded locally but OSS mirror is pending', { asset_id: asset.id, local_path: result.local_path, error: error.message });
+    return { ...asset, metadata };
+  }
 }
 
 async function inspectMedia(filePath, type, storageRoot, localPath, log) {

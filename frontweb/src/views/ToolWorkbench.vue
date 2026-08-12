@@ -3,7 +3,7 @@
     <header class="workbench-header"><div><el-button text @click="$router.push('/ai-tools')">← AI 工具箱</el-button><p class="breadcrumb">独立运行 · 自动保存 · 按需导入项目</p></div><div class="workbench-title"><span class="title-mark">{{ config.symbol }}</span><div><h1>{{ config.title }}</h1><p>{{ config.description }}</p></div></div></header>
     <section class="tool-layout">
       <form class="tool-form" @submit.prevent="run"><div class="panel-kicker"><span>01</span><div><b>创作输入</b><small>运行参数会随历史记录保存</small></div></div>
-        <label>运行标题<el-input v-model="title" :placeholder="`${config.title} · ${new Date().toLocaleDateString()}`" /></label>
+        <label>运行标题<el-input v-model="title" :placeholder="`${config.title} · ${formatChinaDate(new Date())}`" /></label>
         <label>语言<el-select v-model="language"><el-option label="中文" value="zh"/><el-option label="English" value="en"/><el-option v-if="kind === 'reverse_prompt'" label="双语" value="bilingual"/></el-select></label>
         <label v-if="kind !== 'reverse_prompt'">模型（可选）<el-input v-model="model" placeholder="留空使用默认文本模型" /></label>
         <label v-if="kind === 'script_analysis' || kind === 'script_analysis_stream'">项目资料<el-input v-model="projectInfo" type="textarea" :rows="3" placeholder="题材、受众、已有设定（可选）" /></label>
@@ -13,7 +13,7 @@
         <template v-else><ToolAssetSelector v-model="assetId" label="反推素材" /><small>可从素材库直接选择，或本地上传后自动选中。图片直接分析；视频仅提取首、中、尾代表帧后交给视觉模型，不会上传完整视频。</small></template>
         <el-button native-type="submit" type="primary" :loading="running">{{ config.action }}</el-button>
       </form>
-      <aside class="run-history"><div class="panel-kicker"><span>02</span><div><b>运行历史</b><small>{{ runs.length }} 条独立记录</small></div><el-button text @click="load">刷新</el-button></div><button v-for="runItem in runs" :key="runItem.id" class="run-item" :class="{active:active?.id===runItem.id}" @click="open(runItem)"><span :class="`dot ${runItem.status}`"></span><div><b>{{ runItem.title || `运行 #${runItem.id}` }}</b><small>{{ statusText(runItem.status) }} · {{ new Date(runItem.updated_at).toLocaleString() }}</small></div></button><p v-if="!runs.length" class="history-empty">没有运行记录。首次运行后会出现在这里。</p></aside>
+      <aside class="run-history"><div class="panel-kicker"><span>02</span><div><b>运行历史</b><small>{{ runs.length }} 条独立记录</small></div><el-button text @click="load">刷新</el-button></div><button v-for="runItem in runs" :key="runItem.id" class="run-item" :class="{active:active?.id===runItem.id}" @click="open(runItem)"><span :class="`dot ${runItem.status}`"></span><div><b>{{ runItem.title || `运行 #${runItem.id}` }}</b><small>{{ statusText(runItem.status) }} · {{ formatChinaDateTime(runItem.updated_at) }}</small></div></button><p v-if="!runs.length" class="history-empty">没有运行记录。首次运行后会出现在这里。</p></aside>
       <section class="result"><div class="result-heading"><div class="panel-kicker"><span>03</span><div><b>成果舞台</b><small>{{ active ? '可阅读结果、流式文本与结构化内容' : '等待一次运行' }}</small></div></div><div v-if="active"><el-button text @click="copy">复制</el-button><el-button text @click="download">下载 JSON</el-button><el-button v-if="['script_analysis','script_analysis_stream','script_writing'].includes(active.tool_type) && active.status==='completed'" type="primary" plain size="small" @click="importProject">导入短剧项目</el-button><el-button text type="danger" @click="remove">删除</el-button></div></div><div v-if="active" class="status"><span :class="`dot ${active.status}`"></span>{{ statusText(active.status) }}<span v-if="active.status==='processing'" class="saving">输出将持续保存到本地历史</span><el-button v-if="active.status==='failed'" text @click="retry">重新执行</el-button></div><ToolResultRenderer v-if="active" :run="active" /><div v-else class="empty"><span>◌</span><b>从左侧开始一次运行</b><p>输入、生成结果和错误信息都会独立保存，之后可随时复制、删除或导入项目。</p></div></section>
     </section>
   </main>
@@ -24,6 +24,7 @@ import { ElMessage } from 'element-plus'
 import { toolsAPI } from '@/api/tools'
 import ToolAssetSelector from '@/components/ToolAssetSelector.vue'
 import ToolResultRenderer from '@/components/ToolResultRenderer.vue'
+import { formatChinaDate, formatChinaDateTime } from '@/utils/time'
 const props=defineProps({ kind:{type:String,required:true} })
 const configs={script_analysis:{symbol:'◎',title:'剧本分析',description:'将剧本拆解为项目、角色、场景、道具与镜头建议。',action:'开始分析'},script_analysis_stream:{symbol:'≋',title:'剧本分析（流式）',description:'持续保存增量输出；断线后可从历史继续查看。',action:'开始流式分析'},script_writing:{symbol:'✦',title:'剧本创作',description:'从创意生成分集短剧正文，可再导入项目。',action:'生成剧本'},reverse_prompt:{symbol:'◌',title:'反推提示词',description:'分析图片的主体、构图、镜头、光影与完整提示词。',action:'开始反推'}}
 const config=computed(()=>configs[props.kind]||configs.script_analysis),runs=ref([]),active=ref(null),running=ref(false),title=ref(''),language=ref('zh'),model=ref(''),projectInfo=ref(''),content=ref(''),genre=ref(''),episodeCount=ref(1),assetId=ref(''),timer=ref(null)

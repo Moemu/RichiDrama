@@ -68,6 +68,28 @@ function routes(db, log, cfg) {
         response.internalError(res, err.message);
       }
     },
+    batchDelete: (req, res) => {
+      try {
+        const body = req.body || {};
+        const ids = Array.isArray(body.ids) ? body.ids : [];
+        // all_matching is deliberately explicit so an empty selected list can
+        // never erase a library by accident.
+        if (!ids.length && body.all_matching !== true) return response.badRequest(res, '请至少选择一个素材，或明确指定清空素材库');
+        const count = assetService.deleteMany(db, log, {
+          ids,
+          owner_user_id: req.auth.id,
+          ...(body.all_matching === true ? {
+            type: body.type,
+            keyword: body.keyword,
+            favorite: body.favorite,
+          } : {}),
+        });
+        response.success(res, { count, message: count ? `已删除 ${count} 个素材` : '没有可删除的素材' });
+      } catch (err) {
+        log.error('assets batch delete', { error: err.message });
+        response.internalError(res, err.message);
+      }
+    },
     importImage: (req, res) => {
       try {
         const item = assetService.importFromImage(db, log, req.params.image_gen_id);
@@ -113,8 +135,19 @@ function routes(db, log, cfg) {
       }
     },
     sd2Certify: async (req, res) => {
-      try { const out = await require('../services/assetSd2Service').certify(db, log, cfg, req.params.id); if (!out.ok) return response.badRequest(res, out.error); response.success(res, out); }
+      try {
+        if (!assetService.getByIdForOwner(db, req.params.id, req.auth.id)) return response.notFound(res, '素材不存在');
+        const out = await require('../services/assetSd2Service').certify(db, log, cfg, req.params.id); if (!out.ok) return response.badRequest(res, out.error); response.success(res, out);
+      }
       catch (err) { log.error('assets sd2-certify', { error: err.message }); response.internalError(res, err.message); }
+    },
+    sd2BatchCertify: (req, res) => {
+      try {
+        const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+        if (!ids.length) return response.badRequest(res, '请至少选择一张图片素材');
+        const out = require('../services/assetSd2Service').queueBatchCertification(db, log, cfg, req.auth.id, ids);
+        response.success(res, { ...out, message: `已排队 ${out.queued} 张真人素材认证，将自动完成` });
+      } catch (err) { log.error('assets sd2 batch certify', { error: err.message }); response.internalError(res, err.message); }
     },
     sd2CertifyRefresh: async (req, res) => {
       try { const out = await require('../services/assetSd2Service').refresh(db, log, cfg, req.params.id); if (!out.ok) return response.badRequest(res, out.error); response.success(res, out); }

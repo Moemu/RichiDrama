@@ -18,18 +18,25 @@ function parseSettings(raw) {
 }
 
 function list(db) {
-  return aiConfigService.listConfigs(db, 'video').filter((item) => item.is_active).map((item) => {
+  // A config can declare several models while choosing one default.  Expose
+  // every declared model to creators so selecting a cheaper/safer SKU does
+  // not silently collapse back to the default model.
+  return aiConfigService.listConfigs(db, 'video').filter((item) => item.is_active).flatMap((item) => {
     const settings = parseSettings(item.settings);
     const declared = settings.video_capabilities || settings.capabilities || {};
-    return {
+    const models = [...new Set([
+      ...(Array.isArray(item.model) ? item.model : item.model ? [item.model] : []),
+      item.default_model,
+    ].map((model) => String(model || '').trim()).filter(Boolean))];
+    return (models.length ? models : [item.name || `video-${item.id}`]).map((model) => ({
       config_id: item.id,
-      model: item.default_model || (Array.isArray(item.model) ? item.model[0] : item.model) || item.name || `video-${item.id}`,
+      model,
       provider: item.provider || '',
       supports: normalizeSupports(item, declared.supports || declared),
       limits: declared.limits || settings.video_limits || {},
-      is_default: !!item.is_default,
+      is_default: !!item.is_default && model === item.default_model,
       priority: item.priority || 0,
-    };
+    }));
   });
 }
 

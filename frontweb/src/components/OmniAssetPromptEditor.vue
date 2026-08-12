@@ -17,7 +17,11 @@
     <div v-if="dragging" class="drop-hint">松开以插入该素材 @引用</div>
     <div v-if="showPicker" class="asset-picker">
       <button v-for="asset in pickerAssets" :key="asset.id" type="button" @click="insertAsset(asset)">
-        <span class="pa-icon">{{ icon(asset.type) }}</span>
+        <span class="pa-thumb">
+          <img v-if="asset.type === 'image' && thumbUrl(asset)" :src="thumbUrl(asset)" class="pa-thumb-img" alt="" />
+          <img v-else-if="asset.type === 'video' && thumbUrl(asset)" :src="thumbUrl(asset)" class="pa-thumb-img" alt="" />
+          <span v-else class="pa-thumb-icon">{{ icon(asset.type) }}</span>
+        </span>
         <span class="pa-name">{{ asset.alias || asset.name }}</span>
         <span v-if="asset._chosen" class="pa-chosen">已选</span>
       </button>
@@ -134,6 +138,15 @@ function insertAsset(asset, opts = {}) {
 }
 
 function icon(type) { return type === 'video' ? '🎬' : type === 'audio' ? '🎵' : '🖼️' }
+
+/** 素材缩略图 URL：优先 thumbnail_local_path，其次 url/local_path */
+function thumbUrl(asset) {
+  if (!asset) return ''
+  const t = asset.thumbnail_local_path || asset.local_path || asset.url || asset.image_url || ''
+  if (!t) return ''
+  if (/^https?:\/\//i.test(t) || t.startsWith('data:')) return t
+  return '/static/' + String(t).replace(/^\/+/, '')
+}
 
 // ===== 拖拽支持 =====
 function onDragOver(e) { dragging.value = true }

@@ -200,6 +200,34 @@ function deleteById(db, log, id, ownerUserId = null) {
   return result.changes > 0;
 }
 
+// Logical deletion is intentional: an asset can be referenced by existing
+// generation history. Physical local/OSS cleanup is handled separately by the
+// retention job, after the record is no longer recoverable from the product.
+function deleteMany(db, log, { ids, owner_user_id, type, keyword, favorite } = {}) {
+  const ownerId = Number(owner_user_id);
+  if (!Number.isInteger(ownerId) || ownerId <= 0) throw new Error('缺少素材所有者');
+  const normalizedIds = [...new Set((Array.isArray(ids) ? ids : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+  let where = `deleted_at IS NULL AND (owner_user_id = ? OR drama_id IN (
+    SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL
+  ))`;
+  const params = [ownerId, ownerId];
+  if (normalizedIds.length) {
+    where += ` AND id IN (${normalizedIds.map(() => '?').join(', ')})`;
+    params.push(...normalizedIds);
+  }
+  if (type) { where += ' AND type = ?'; params.push(String(type)); }
+  if (keyword) {
+    where += ' AND (name LIKE ? OR tags_json LIKE ?)';
+    const value = `%${String(keyword).trim()}%`;
+    params.push(value, value);
+  }
+  if (String(favorite || '') === '1' || String(favorite || '').toLowerCase() === 'true') where += ' AND is_favorite = 1';
+  const result = db.prepare(`UPDATE assets SET deleted_at = ?, updated_at = ? WHERE ${where}`)
+    .run(new Date().toISOString(), new Date().toISOString(), ...params);
+  log.info('Assets soft deleted in bulk', { owner_user_id: ownerId, count: result.changes, all_matching: normalizedIds.length === 0 });
+  return result.changes;
+}
+
 function importFromImage(db, log, imageGenId) {
   const img = db.prepare('SELECT * FROM image_generations WHERE id = ? AND deleted_at IS NULL').get(Number(imageGenId));
   if (!img) return null;
@@ -216,13 +244,14 @@ function importFromImage(db, log, imageGenId) {
 
 function importFromVideo(db, log, videoGenId) {
   const vid = db.prepare('SELECT * FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(Number(videoGenId));
-  if (!vid) return null;
+  // Do not convert a provider's expiring signed URL into a persistent asset.
+  if (!vid || vid.status !== 'completed' || !String(vid.local_path || '').trim()) return null;
   return create(db, log, {
     drama_id: vid.drama_id,
     owner_user_id: vid.owner_user_id,
     name: `视频 ${videoGenId}`,
     type: 'video',
-    url: vid.video_url || '',
+    url: `/static/${String(vid.local_path).replace(/^\/+/, '')}`,
     local_path: vid.local_path,
     video_gen_id: vid.id,
   });
@@ -237,6 +266,7 @@ module.exports = {
   create,
   update,
   deleteById,
+  deleteMany,
   importFromImage,
   importFromVideo,
 };

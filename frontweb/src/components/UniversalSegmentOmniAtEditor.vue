@@ -643,9 +643,9 @@ html.light .omni-at-menu-item:hover {
 }
 .omni-at-menu-thumb-wrap {
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
-  border-radius: 6px;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
   overflow: hidden;
   background: #0f172a;
   border: 1px solid rgba(148, 163, 184, 0.25);

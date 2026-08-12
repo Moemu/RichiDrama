@@ -101,7 +101,7 @@ function failOrphanedAsyncTasksOnStartup(db, log) {
   const rows = db.prepare(
     `SELECT id, type, status, resource_id FROM async_tasks
      WHERE status IN ('pending', 'processing') AND deleted_at IS NULL${hasVideoGenerations
-       ? " AND id NOT IN (SELECT task_id FROM video_generations WHERE status = 'processing' AND task_id IS NOT NULL)"
+       ? " AND id NOT IN (SELECT task_id FROM video_generations WHERE status IN ('processing', 'sd2_waiting') AND task_id IS NOT NULL)"
        : ''}`
   ).all();
   if (!rows.length) return 0;

@@ -116,9 +116,19 @@ function login(db, username, password) {
   if (!user || !user.is_active || !verifyPassword(password, user.password_hash)) return null;
   const at = now();
   db.prepare('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?').run(at, at, user.id);
-  const publicData = publicUser({ ...user, last_login_at: at });
+  return issueSession(db, { ...user, last_login_at: at });
+}
+
+function issueSession(db, user) {
+  const publicData = publicUser(user);
   const token = jwt.sign({ sub: user.id, role: user.role, username: user.username }, jwtSecret(db), { expiresIn: TOKEN_TTL });
   return { token, user: publicData };
+}
+
+function normalizeUsername(username) {
+  const value = String(username || '').trim();
+  if (!/^[A-Za-z0-9_.-]{3,64}$/.test(value)) throw new Error('用户名需为 3-64 位字母、数字或 ._-');
+  return value;
 }
 
 function register(db, input) {
@@ -134,8 +144,7 @@ function authenticate(db, token) {
 }
 
 function createUser(db, input, actorId) {
-  const username = String(input.username || '').trim();
-  if (!/^[A-Za-z0-9_.-]{3,64}$/.test(username)) throw new Error('用户名需为 3-64 位字母、数字或 ._-');
+  const username = normalizeUsername(input.username);
   const at = now();
   const info = db.prepare(`INSERT INTO users (username, password_hash, display_name, role, is_active, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)`)
@@ -151,6 +160,17 @@ function changePassword(db, userId, oldPassword, newPassword) {
   db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').run(hashPassword(newPassword), now(), userId);
 }
 
+function changeUsername(db, userId, username) {
+  const next = normalizeUsername(username);
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(userId));
+  if (!user) throw new Error('账户不存在');
+  if (user.username === next) return user;
+  const duplicate = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(next, user.id);
+  if (duplicate) throw new Error('该用户名已被使用');
+  db.prepare('UPDATE users SET username = ?, updated_at = ? WHERE id = ?').run(next, now(), user.id);
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+}
+
 function updateUser(db, id, input) {
   const updates = [], params = [];
   if (input.display_name !== undefined) { updates.push('display_name = ?'); params.push(String(input.display_name || '').trim()); }
@@ -163,4 +183,4 @@ function updateUser(db, id, input) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
-module.exports = { validateRuntimeSecurity, ensureBootstrapAdmin, sessionCookieOptions, login, register, authenticate, createUser, updateUser, changePassword, publicUser, jwtSecret };
+module.exports = { validateRuntimeSecurity, ensureBootstrapAdmin, sessionCookieOptions, login, register, authenticate, createUser, updateUser, changePassword, changeUsername, issueSession, publicUser, jwtSecret };

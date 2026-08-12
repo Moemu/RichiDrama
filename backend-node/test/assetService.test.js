@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 
 const assetService = require('../src/services/assetService');
-const { validateShotAssetLimits, validateCreationMode, safeSnapshot, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences } = require('../src/services/omniVideoService');
+const { validateShotAssetLimits, validateCreationMode, safeSnapshot, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState } = require('../src/services/omniVideoService');
 const { normalizeSupports } = require('../src/services/videoModelCapabilities');
 
 const log = { info() {}, warn() {}, error() {} };
@@ -130,6 +130,33 @@ test('project owner retains CRUD access when a legacy asset has a stale direct o
   assert.equal(assetService.deleteById(db, log, 1, 7), true);
 });
 
+test('bulk asset deletion is scoped to the current user and includes their project assets', () => {
+  const db = createDb();
+  db.prepare('UPDATE assets SET owner_user_id = ? WHERE id = 1').run(7);
+  db.prepare('INSERT INTO dramas (id, owner_user_id) VALUES (?, ?)').run(9, 7);
+  db.prepare('INSERT INTO assets (drama_id, owner_user_id, name, type, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(9, 8, 'project.png', 'image', new Date().toISOString());
+  db.prepare('INSERT INTO assets (owner_user_id, name, type, updated_at) VALUES (?, ?, ?, ?)')
+    .run(8, 'other-user.png', 'image', new Date().toISOString());
+
+  assert.equal(assetService.deleteMany(db, log, { owner_user_id: 7 }), 2);
+  assert.equal(db.prepare('SELECT COUNT(*) total FROM assets WHERE deleted_at IS NULL').get().total, 1);
+  assert.equal(db.prepare('SELECT name FROM assets WHERE deleted_at IS NULL').get().name, 'other-user.png');
+});
+
+test('SD2 batch queue only marks the caller-owned image assets', () => {
+  const db = createDb();
+  db.prepare('UPDATE assets SET owner_user_id = ? WHERE id = 1').run(7);
+  db.prepare('INSERT INTO assets (owner_user_id, name, type, updated_at) VALUES (?, ?, ?, ?)')
+    .run(8, 'other-user.png', 'image', new Date().toISOString());
+  const { queueBatchCertification } = require('../src/services/assetSd2Service');
+  const queued = queueBatchCertification(db, log, {}, 7, [1, 2]);
+  assert.deepEqual(queued, { queued: 1, skipped: 1 });
+  assert.equal(db.prepare('SELECT requires_sd2_identity FROM assets WHERE id = 1').get().requires_sd2_identity, 1);
+  assert.equal(JSON.parse(db.prepare('SELECT seedance2_asset FROM assets WHERE id = 1').get().seedance2_asset).status, 'queued');
+  assert.equal(db.prepare('SELECT seedance2_asset FROM assets WHERE id = 2').get().seedance2_asset, null);
+});
+
 test('omni video rejects material counts above the per-shot media limits', () => {
   assert.doesNotThrow(() => validateShotAssetLimits([
     ...Array.from({ length: 9 }, () => ({ type: 'image' })),
@@ -161,6 +188,12 @@ test('Seedance rejects declared real-person material without an active certifica
   applySd2CertifiedAssetReferences(active, capability);
   assert.equal(active[0].model_url, 'asset://active-1');
   assert.equal(active[0].strategy, 'sd2_certified_asset');
+});
+
+test('Seedance treats a declared real-person certification in processing as a wait state, not a generation rejection', () => {
+  const state = sd2IdentityState([{ type: 'image', alias: '演员参考', send_to_model: true, requires_sd2_identity: true, seedance2_asset: { status: 'processing' } }], { model: 'seedance-2.0', supports: {} });
+  assert.equal(state.pending.length, 1);
+  assert.equal(state.invalid.length, 0);
 });
 
 test('omni job API snapshot masks local and remote source URLs', () => {
