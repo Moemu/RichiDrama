@@ -67,6 +67,48 @@ function mappedAssetAfterSync(db, log, linked) {
   return mapped?.seedance2_asset || null;
 }
 
+const activeCertificationPolls = new Set();
+const activeBatchCertificationRuns = new Set();
+
+function saveResourceCertification(db, table, id, value) {
+  db.prepare(`UPDATE ${table} SET seedance2_asset = ?, updated_at = ? WHERE id = ?`)
+    .run(JSON.stringify(value), value.updated_at, id);
+}
+
+function scheduleResourceSettlement(db, log, table, id, route, created, initial, pollOverride = null) {
+  const key = `${table}:${id}`;
+  if (activeCertificationPolls.has(key)) return;
+  activeCertificationPolls.add(key);
+  setImmediate(async () => {
+    try {
+      const settled = pollOverride
+        ? await pollOverride()
+        : route.provider === 'model_ark'
+          ? await modelArk.pollAssetUntilSettled(route.ctx, created.id, { log })
+          : await materialHub.pollAssetUntilSettled(route.ctx, created.id, { log });
+      const at = new Date().toISOString();
+      if (!settled.ok) {
+        saveResourceCertification(db, table, id, { ...initial, status: 'failed', error: settled.error, updated_at: at });
+        return;
+      }
+      const data = settled.asset || created;
+      saveResourceCertification(db, table, id, {
+        ...initial,
+        asset_url: data?.asset_url || initial.asset_url || modelArk.assetUrlForVideo(data),
+        status: data?.status || initial.status,
+        poll_timed_out: !!settled.timedOut,
+        updated_at: at,
+      });
+    } catch (error) {
+      const at = new Date().toISOString();
+      saveResourceCertification(db, table, id, { ...initial, status: 'failed', error: error.message, updated_at: at });
+      log.error('SD2 background certification poll failed', { table, id, error: error.message });
+    } finally {
+      activeCertificationPolls.delete(key);
+    }
+  });
+}
+
 async function certifyResource(db, log, cfg, kind, id) {
   const table = tableFor(kind);
   if (!table) return { ok: false, error: '不支持的 SD2 素材类型' };
@@ -81,13 +123,11 @@ async function certifyResource(db, log, cfg, kind, id) {
   if (!createdResult.ok) return createdResult;
   const created = createdResult.asset;
   let out = payload(row, created, source.url, route.provider);
-  db.prepare(`UPDATE ${table} SET seedance2_asset = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(out), out.updated_at, row.id);
-  const settled = route.provider === 'model_ark' ? await modelArk.pollAssetUntilSettled(route.ctx, created.id, { log }) : await materialHub.pollAssetUntilSettled(route.ctx, created.id, { log });
-  if (!settled.ok) return { ok: false, error: settled.error };
-  const data = settled.asset || created;
-  out = { ...out, asset_url: data?.asset_url || out.asset_url || modelArk.assetUrlForVideo(data), status: data?.status || out.status, poll_timed_out: !!settled.timedOut, updated_at: new Date().toISOString() };
-  db.prepare(`UPDATE ${table} SET seedance2_asset = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(out), out.updated_at, row.id);
-  return { ok: true, seedance2_asset: out };
+  saveResourceCertification(db, table, row.id, out);
+  // Do not hold the HTTP request open for provider polling (typically 5–30s).
+  // The persisted processing state is observable through the refresh endpoint.
+  scheduleResourceSettlement(db, log, table, row.id, route, created, out);
+  return { ok: true, async: true, seedance2_asset: out };
 }
 
 async function refreshResource(db, log, cfg, kind, id) {
@@ -149,6 +189,80 @@ async function refresh(db, log, cfg, id) {
   }
   return refreshResource(db, log, cfg, 'asset', id);
 }
+
+function ownedImageAssetIds(db, ownerUserId, ids) {
+  const normalized = [...new Set((Array.isArray(ids) ? ids : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))].slice(0, 100);
+  if (!normalized.length) return [];
+  return db.prepare(`SELECT id FROM assets WHERE deleted_at IS NULL AND type = 'image'
+    AND id IN (${normalized.map(() => '?').join(', ')})
+    AND (owner_user_id = ? OR drama_id IN (SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL))`)
+    .all(...normalized, Number(ownerUserId), Number(ownerUserId)).map((row) => Number(row.id));
+}
+
+async function runCertificationBatch(db, log, cfg, ids, concurrency = 2) {
+  const queue = [...ids]; const outcome = { started: 0, failed: 0 };
+  const worker = async () => { while (queue.length) {
+    const id = queue.shift();
+    try { const result = await certify(db, log, cfg, id); if (result.ok) outcome.started++; else outcome.failed++; }
+    catch (error) { outcome.failed++; log.warn('SD2 batch certification submission failed', { asset_id: id, error: error.message }); }
+  } };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, Number(concurrency) || 2), ids.length) }, worker));
+  return outcome;
+}
+
+function queueBatchCertification(db, log, cfg, ownerUserId, ids) {
+  const assetIds = ownedImageAssetIds(db, ownerUserId, ids);
+  const now = new Date().toISOString();
+  const queued = JSON.stringify({ status: 'queued', queued_at: now, updated_at: now });
+  const update = db.prepare(`UPDATE assets SET requires_sd2_identity = 1, seedance2_asset = ?, updated_at = ?
+    WHERE id = ? AND (seedance2_asset IS NULL OR json_extract(seedance2_asset, '$.status') NOT IN ('active', 'processing'))`);
+  db.transaction(() => assetIds.forEach((id) => update.run(queued, now, id)))();
+  const key = assetIds.join(',');
+  if (assetIds.length && !activeBatchCertificationRuns.has(key)) {
+    activeBatchCertificationRuns.add(key);
+    setImmediate(() => runCertificationBatch(db, log, cfg, assetIds, 2)
+      .then((outcome) => log.info('SD2 batch certification submitted', { ...outcome, count: assetIds.length }))
+      .finally(() => activeBatchCertificationRuns.delete(key)));
+  }
+  return { queued: assetIds.length, skipped: Math.max(0, (Array.isArray(ids) ? ids.length : 0) - assetIds.length) };
+}
 function markStale(db, previous, next) { return markResourceStale(db, 'asset', previous, next); }
 
-module.exports = { certify, refresh, markStale, certifyResource, refreshResource, markResourceStale, parse, sourceFingerprint, createdAssetFromResult };
+function resumePendingCertifications(db, log, cfg, options = {}) {
+  const kinds = [['asset', 'assets'], ['scene', 'scenes'], ['prop', 'props']];
+  const refreshOne = async () => {
+    for (const [kind, table] of kinds) {
+      let rows = [];
+      try { rows = db.prepare(`SELECT id, seedance2_asset FROM ${table} WHERE deleted_at IS NULL AND seedance2_asset IS NOT NULL`).all(); } catch (_) { continue; }
+      for (const row of rows) {
+        const cert = parse(row.seedance2_asset);
+        const status = String(cert?.status || '').toLowerCase();
+        if (status === 'queued') {
+          try { await (kind === 'asset' ? certify(db, log, cfg, row.id) : certifyResource(db, log, cfg, kind, row.id)); }
+          catch (error) { log.warn('SD2 queued certification recovery failed', { table, id: row.id, error: error.message }); }
+          continue;
+        }
+        if (status !== 'processing' || !cert?.hub_asset_id) continue;
+        try { await (options.refreshResource || refreshResource)(db, log, cfg, kind, row.id); }
+        catch (error) { log.warn('SD2 restart recovery refresh failed', { table, id: row.id, error: error.message }); }
+      }
+    }
+    // Characters use a separate library representation but follow the same
+    // persisted processing contract.
+    try {
+      const characters = db.prepare('SELECT id, seedance2_asset FROM characters WHERE deleted_at IS NULL AND seedance2_asset IS NOT NULL').all();
+      for (const row of characters) {
+        if (String(parse(row.seedance2_asset)?.status || '').toLowerCase() === 'processing') {
+          await (options.refreshCharacter || require('./characterLibraryService').refreshCharacterJimengMaterialAsset)(db, log, cfg, row.id);
+        }
+      }
+    } catch (error) { log.warn('Character SD2 restart recovery refresh failed', { error: error.message }); }
+  };
+  if (options.immediate !== false) setImmediate(() => refreshOne().catch((error) => log.error('SD2 restart recovery failed', { error: error.message })));
+  const interval = Number(options.interval_ms ?? 10_000);
+  const timer = interval > 0 ? setInterval(() => refreshOne().catch((error) => log.error('SD2 recovery poll failed', { error: error.message })), interval) : null;
+  if (typeof timer?.unref === 'function') timer.unref();
+  return { refreshNow: refreshOne, stop: () => timer && clearInterval(timer) };
+}
+
+module.exports = { certify, refresh, queueBatchCertification, runCertificationBatch, ownedImageAssetIds, markStale, certifyResource, refreshResource, markResourceStale, parse, sourceFingerprint, createdAssetFromResult, scheduleResourceSettlement, resumePendingCertifications };

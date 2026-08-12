@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { extractVideoProviderUsage, sanitizeVideoProviderResponse } = require('../src/services/videoClient');
+const { textUsage } = require('../src/services/billingUsageService');
 
 test('extractVideoProviderUsage accepts every supported provider completion envelope', () => {
   const cases = [
@@ -20,6 +21,19 @@ test('extractVideoProviderUsage accepts every supported provider completion enve
 
 test('extractVideoProviderUsage never fabricates usage from a completed task', () => {
   assert.deepEqual(extractVideoProviderUsage({ data: { status: 'succeeded', duration: 5 } }), { usage: null, path: null });
+});
+
+test('Seedance completion usage is converted to the actual token settlement, not the reservation', () => {
+  // Captured shape from a successful Ark Seedance 2.0 task response. Values
+  // are representative and intentionally contain no prompt, URL, or secret.
+  const completion = {
+    id: 'cgt-example', model: 'doubao-seedance-2-0-260128', status: 'succeeded',
+    duration: 5, resolution: '480p', usage: { completion_tokens: 50638, total_tokens: 50638 },
+  };
+  const provider = extractVideoProviderUsage(completion);
+  assert.equal(provider.path, 'usage');
+  assert.deepEqual(textUsage(provider.usage), { output_token: 50638 });
+  assert.notDeepEqual(textUsage(provider.usage), { output_token: 200000 }); // reservation cap
 });
 
 test('sanitizeVideoProviderResponse preserves usage but redacts sensitive fields', () => {

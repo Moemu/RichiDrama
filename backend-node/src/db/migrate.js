@@ -423,6 +423,12 @@ function ensureAllColumns(database) {
     { name: 'scene_id',             type: 'INTEGER' },
     { name: 'completed_at',         type: 'TEXT' },
     { name: 'error_msg',            type: 'TEXT' },
+    // Delivery/archive is intentionally independent from model completion.
+    // A locally playable result can wait for OSS retry without becoming failed.
+    { name: 'archive_status',        type: 'TEXT' },
+    { name: 'archive_error',         type: 'TEXT' },
+    { name: 'archive_attempts',      type: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'archived_at',           type: 'TEXT' },
     { name: 'created_at',           type: 'TEXT' },
     { name: 'updated_at',           type: 'TEXT' },
     { name: 'deleted_at',           type: 'TEXT' },

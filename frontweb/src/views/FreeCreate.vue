@@ -79,15 +79,12 @@
           <div class="identity-heading"><b>素材声明</b><small>只需勾选含真人；未勾选即为不含真人，不再需要额外认证。</small></div>
           <div v-for="asset in chosenImageAssets" :key="asset.id" class="identity-row">
             <el-checkbox :model-value="asset.requires_sd2_identity" @change="setRealPerson(asset, $event)">{{ asset.alias || asset.name }}</el-checkbox>
-            <small v-if="asset.requires_sd2_identity" class="identity-status" :class="`is-${sd2Status(asset)}`">
-              SD2 认证：{{ sd2StatusLabel(asset) }}
-              <el-button text size="small" :loading="certifyingId === asset.id" @click="certify(asset)">{{ sd2ActionLabel(asset) }}</el-button>
-            </small>
+            <small v-if="asset.requires_sd2_identity" class="identity-help">系统将自动完成真人素材准备。</small>
             <small v-else class="identity-help">不含真人素材。</small>
           </div>
         </div>
         <div v-if="audioStrategy === 'post_mix'" class="audio-options"><el-checkbox v-model="keepOriginalAudio">保留原声</el-checkbox><el-slider v-model="audioVolume" :min="0" :max="2" :step="0.1"/><el-input-number v-model="audioFadeSeconds" :min="0" :max="10" size="small"/></div>
-        <div v-if="expiredIdentityAssets.length" class="identity-expired-warn"><el-icon><WarningFilled /></el-icon><span>以下真人素材尚未完成或已失效 SD2 认证，请刷新或重新认证后再生成：{{ expiredIdentityAssets.map((a) => a.alias || a.name).join('、') }}</span></div>
+        <div v-if="expiredIdentityAssets.length" class="identity-expired-warn"><el-icon><WarningFilled /></el-icon><span>以下真人素材认证未成功：{{ expiredIdentityAssets.map((a) => a.alias || a.name).join('、') }}。请检查素材或认证配置后重新勾选“含真人”。</span></div>
         <section class="generation-history">
           <div class="generation-history-head"><b>本镜生成记录</b><small>{{ shotHistory.length }} 个版本</small></div>
           <div class="generation-history-grid">
@@ -130,6 +127,7 @@ import { dramaAPI } from '@/api/drama'
 import { storyboardsAPI } from '@/api/storyboards'
 import OmniAssetPromptEditor from '@/components/OmniAssetPromptEditor.vue'
 import GenerationSettings from '@/components/GenerationSettings.vue'
+import { formatChinaDateTime } from '@/utils/time'
 
 const componentProps = defineProps({ projectEpisodeId: { type: [Number, String], default: null }, projectDramaId: { type: [Number, String], default: null }, embedded: { type: Boolean, default: false } })
 const emit = defineEmits(['reordered', 'changed'])
@@ -167,8 +165,8 @@ const lastFrameCount = computed(() => chosenAssets.value.filter((asset) => asset
 const firstFrameAsset = computed(() => chosenAssets.value.find((asset) => asset.usage === 'first_frame') || null)
 const lastFrameAsset = computed(() => chosenAssets.value.find((asset) => asset.usage === 'last_frame') || null)
 const pickerImageAssets = computed(() => assets.value.filter((asset) => asset.type === 'image'))
-/** 已声明需要真人一致性但 SD2 认证失效/未完成的素材（提醒用户重新认证，否则生成时回退原始图） */
-const expiredIdentityAssets = computed(() => chosenImageAssets.value.filter((asset) => asset.requires_sd2_identity && sd2Status(asset) !== 'active'))
+/** 认证中的素材会由服务端等待并自动续跑；仅终态失败才提示用户处理。 */
+const expiredIdentityAssets = computed(() => chosenImageAssets.value.filter((asset) => asset.requires_sd2_identity && ['invalid', 'failed', 'stale'].includes(sd2Status(asset))))
 const framePicker = ref({ open: false, target: 'first_frame' })
 const canCreate = computed(() => !!currentCapability.value && prompt.value.trim() && (creationMode.value !== 'first_last_frame' || (firstFrameCount.value === 1 && lastFrameCount.value <= 1 && currentCapability.value.supports?.first_last_frame)))
 const nativeImageLimit = computed(() => Math.min(shotLimits.value.image, Number(currentCapability.value?.supports?.image_reference?.max || 0)))
@@ -204,7 +202,7 @@ function assetRouteHint(asset) {
 }
 function shotState(shot) { return ({ completed:'已完成',processing:'生成中',failed:'失败',retryable:'可重试',invalid:'无效',draft:'草稿' })[shot.status] || '草稿' }
 function historyStatus(status) { return ({ completed: '已完成', processing: '生成中', failed: '失败', retryable: '可重试', invalid: '无效' })[status] || '等待中' }
-function formatHistoryTime(value) { return value ? new Date(value).toLocaleString() : '刚刚' }
+function formatHistoryTime(value) { return formatChinaDateTime(value) }
 function selectHistoryJob(job) { selectedHistoryJobId.value = job.id }
 function historyPoster(job) {
   const image = String(job?.image_url || job?.generation?.image_url || '')
@@ -414,7 +412,28 @@ function onAssetDragStart(event, asset) { const payload = JSON.stringify({ id: a
 function onPickFromEditor(asset) { if (asset && !selected.value.has(asset.id)) toggle(asset) }
 function setPromptReferences(value) { promptDocument.value = value || { text: prompt.value, refs: [] } }
 function showCertificationError(error) { ElMessage.error(error?.message || 'SD2 认证失败，请检查资产库配置后重试') }
-async function setRealPerson(asset, value) { asset.requires_sd2_identity = !!value; try { const updated = await omniVideoAPI.updateAsset(asset.id, { requires_sd2_identity: !!value }); Object.assign(asset, updated) } catch (error) { asset.requires_sd2_identity = !value; ElMessage.error(error.message || '真人声明保存失败') } }
+async function refreshCertificationUntilSettled(asset) {
+  for (let attempt = 0; attempt < 30 && sd2Status(asset) === 'processing'; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    const out = await omniVideoAPI.refreshAssetCertification(asset.id)
+    if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
+  }
+}
+async function setRealPerson(asset, value) {
+  asset.requires_sd2_identity = !!value
+  try {
+    const updated = await omniVideoAPI.updateAsset(asset.id, { requires_sd2_identity: !!value })
+    Object.assign(asset, updated)
+    if (value && asset.type === 'image') {
+      const out = await omniVideoAPI.certifyAsset(asset.id)
+      if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
+      if (sd2Status(asset) === 'processing') void refreshCertificationUntilSettled(asset).catch(showCertificationError)
+    }
+  } catch (error) {
+    asset.requires_sd2_identity = !value
+    ElMessage.error(error.message || '真人声明保存或认证失败')
+  }
+}
 function onUsageChange(asset) { void asset; scheduleSave() }
 /** 首尾帧占位选择器：当前目标位置已选的素材（用于对话框高亮） */
 const framePickerValue = computed(() => framePicker.value.target === 'first_frame' ? firstFrameAsset.value : lastFrameAsset.value)
@@ -449,6 +468,7 @@ async function certify(asset) {
       ? await omniVideoAPI.refreshAssetCertification(asset.id)
       : await omniVideoAPI.certifyAsset(asset.id)
     if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
+    if (sd2Status(asset) === 'processing') void refreshCertificationUntilSettled(asset).catch(showCertificationError)
     ElMessage.success(`「${asset.alias || asset.name}」SD2 认证状态：${sd2StatusLabel(asset)}`)
   } catch (error) {
     showCertificationError(error)
@@ -457,7 +477,7 @@ async function certify(asset) {
   }
 }
 
-async function create() { creating.value = true; stagePhase.value = '保存镜头'; try { if (!canCreate.value) throw new Error('请补齐当前视频创作模式所需的素材与模型能力'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id }), prompt: prompt.value, prompt_document: promptDocument.value, creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: Math.min(15, Number(duration.value) || 15), resolution: resolution.value || '720p', audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: chosenAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: asset.alias || asset.name, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const job = { id: res.omni_job_id, prompt: prompt.value, status: 'processing', video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = 'processing'; stagePhase.value = '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
+async function create() { creating.value = true; stagePhase.value = '保存镜头'; try { if (!canCreate.value) throw new Error('请补齐当前视频创作模式所需的素材与模型能力'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id }), prompt: prompt.value, prompt_document: promptDocument.value, creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: Math.min(15, Number(duration.value) || 15), resolution: resolution.value || '720p', audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: chosenAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: asset.alias || asset.name, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const status = res.status || 'processing'; const job = { id: res.omni_job_id, prompt: prompt.value, status, video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = status; stagePhase.value = status === 'sd2_waiting' ? '真人素材认证准备中，完成后自动生成' : '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
 async function poll(id) { for (let n = 0; n < 450; n++) { await new Promise((resolve) => setTimeout(resolve, 4000)); try { const data = await omniVideoAPI.get(id), job = normalizeJob(data), index = jobs.value.findIndex((item) => String(item.id) === String(id)), historyIndex = shotHistory.value.findIndex((item) => String(item.id) === String(id)); if (index >= 0) jobs.value[index] = job; if (historyIndex >= 0) shotHistory.value[historyIndex] = job; if (String(currentShot.value?.omni_job_id) === String(id)) { currentShot.value.status = job.status; currentShot.value.video_url = job.videoUrl; currentShot.value.generation_error = job.error_msg } if (['completed','failed','retryable'].includes(job.status)) return } catch (_) { return } } }
 async function retry(job) { const res = await omniVideoAPI.retry(job.id); const next = { id: res.omni_job_id, prompt: job.prompt, status: 'processing', video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value?.id : null, shot_id: isProjectMode.value ? null : currentShot.value?.id, created_at: new Date().toISOString() }; jobs.value.unshift(next); shotHistory.value.unshift(next); selectedHistoryJobId.value = next.id; currentShot.value.omni_job_id = next.id; currentShot.value.status = 'processing'; poll(next.id) }
 function downloadCurrentVideo() { if (!activeVideoUrl.value) return; const link = document.createElement('a'); link.href = activeVideoUrl.value; link.download = `local-mini-drama-${activeJob.value?.video_generation_id || currentShot.value?.id || 'storyboard'}.mp4`; document.body.appendChild(link); link.click(); link.remove() }

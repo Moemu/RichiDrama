@@ -10,11 +10,9 @@ function getStoragePath(cfg) {
   return path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw);
 }
 
-function safeReadFile(filePath) {
-  try {
-    if (fs.existsSync(filePath)) return fs.readFileSync(filePath);
-  } catch (_) {}
-  return null;
+async function safeReadMedia(cfg, storagePath, localPath) {
+  try { return await require('./mediaStorageService').readMediaBuffer(cfg, storagePath, localPath); }
+  catch (_) { return null; }
 }
 
 function localPathToAbs(storagePath, relPath) {
@@ -77,7 +75,7 @@ function parseSbChars(raw) {
  * 导出一个剧集为 ZIP Buffer
  * @returns {Buffer}
  */
-function exportDrama(db, cfg, log, dramaId) {
+async function exportDrama(db, cfg, log, dramaId) {
   const storagePath = getStoragePath(cfg);
 
   // ---- 1. 读取 drama 基本信息 ----
@@ -379,16 +377,14 @@ function exportDrama(db, cfg, log, dramaId) {
 
   // 分镜图片完整历史（含首尾帧 first/last 专用图 + 所有历史生成）
   for (const { localRelPath, zipPath } of imageFilesToPack) {
-    const abs = localPathToAbs(storagePath, localRelPath);
-    const buf = safeReadFile(abs);
+    const buf = await safeReadMedia(cfg, storagePath, localRelPath);
     if (buf) zip.addFile(zipPath, buf);
   }
 
   // 分镜视频
   for (const [sbId, vg] of Object.entries(videosBySb)) {
     if (vg.local_path) {
-      const abs = localPathToAbs(storagePath, vg.local_path);
-      const buf = safeReadFile(abs);
+      const buf = await safeReadMedia(cfg, storagePath, vg.local_path);
       if (buf) zip.addFile(`media/videos/sb_${sbId}${extOf(vg.local_path)}`, buf);
     }
   }
@@ -397,13 +393,11 @@ function exportDrama(db, cfg, log, dramaId) {
   for (const ep of episodes) {
     for (const sb of storyboardsByEp[ep.id] || []) {
       if (sb.audio_local_path) {
-        const abs = localPathToAbs(storagePath, sb.audio_local_path);
-        const buf = safeReadFile(abs);
+        const buf = await safeReadMedia(cfg, storagePath, sb.audio_local_path);
         if (buf) zip.addFile(`media/audio/sb_${sb.id}${extOf(sb.audio_local_path)}`, buf);
       }
       if (sb.narration_audio_local_path) {
-        const abs = localPathToAbs(storagePath, sb.narration_audio_local_path);
-        const buf = safeReadFile(abs);
+        const buf = await safeReadMedia(cfg, storagePath, sb.narration_audio_local_path);
         if (buf) zip.addFile(`media/audio/sb_${sb.id}_narration${extOf(sb.narration_audio_local_path)}`, buf);
       }
     }
@@ -412,8 +406,7 @@ function exportDrama(db, cfg, log, dramaId) {
   // 角色主图
   for (const c of characters) {
     if (c.local_path) {
-      const abs = localPathToAbs(storagePath, c.local_path);
-      const buf = safeReadFile(abs);
+      const buf = await safeReadMedia(cfg, storagePath, c.local_path);
       if (buf) zip.addFile(`media/characters/char_${c.id}${extOf(c.local_path)}`, buf);
     }
   }
@@ -421,8 +414,7 @@ function exportDrama(db, cfg, log, dramaId) {
   // 场景主图
   for (const s of dedupedScenes) {
     if (s.local_path) {
-      const abs = localPathToAbs(storagePath, s.local_path);
-      const buf = safeReadFile(abs);
+      const buf = await safeReadMedia(cfg, storagePath, s.local_path);
       if (buf) zip.addFile(`media/scenes/scene_${s.id}${extOf(s.local_path)}`, buf);
     }
   }
@@ -430,16 +422,14 @@ function exportDrama(db, cfg, log, dramaId) {
   // 道具主图
   for (const p of props) {
     if (p.local_path) {
-      const abs = localPathToAbs(storagePath, p.local_path);
-      const buf = safeReadFile(abs);
+      const buf = await safeReadMedia(cfg, storagePath, p.local_path);
       if (buf) zip.addFile(`media/props/prop_${p.id}${extOf(p.local_path)}`, buf);
     }
   }
 
   // extra_images（角色/场景/道具的额外参考图）
   for (const { localRelPath, zipPath } of extraFilesToPack) {
-    const abs = localPathToAbs(storagePath, localRelPath);
-    const buf = safeReadFile(abs);
+    const buf = await safeReadMedia(cfg, storagePath, localRelPath);
     if (buf) zip.addFile(zipPath, buf);
   }
 

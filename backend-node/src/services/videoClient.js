@@ -1088,6 +1088,8 @@ const VOLC_MODEL_ALIASES = {
   'doubao-seedance-2-0-pro':       'doubao-seedance-2-0-260128',
   'doubao-seedance-2.0-fast':      'doubao-seedance-2-0-fast-260128',
   'doubao-seedance-2-0-fast':      'doubao-seedance-2-0-fast-260128',
+  'doubao-seedance-2.0-mini':      'doubao-seedance-2-0-mini-260615',
+  'doubao-seedance-2-0-mini':      'doubao-seedance-2-0-mini-260615',
 };
 
 function normalizeVolcModel(name) {

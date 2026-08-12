@@ -6,6 +6,7 @@ export const accountAPI = {
   usage: () => request.get('/billing/usage'),
   models: () => request.get('/models/available'),
   changePassword: (data) => request.post('/auth/change-password', data),
+  changeUsername: (data) => request.patch('/auth/username', data),
 }
 
 export const adminAPI = {

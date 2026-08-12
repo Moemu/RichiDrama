@@ -15,7 +15,9 @@ function publicVideoUrl(videoUrl, localPath) {
   if (local && /\.(?:mp4|webm|mov|m4v|avi|mkv)(?:[?#].*)?$/i.test(local)) {
     return `/static/${local.replace(/^\/+/, '')}`;
   }
-  return videoUrl || null;
+  // Provider delivery URLs (notably Volcengine/TOS) are signed and expire.
+  // A generated video is public only after its bytes have been archived here.
+  return null;
 }
 
 /** 将 video_generations 标为失败；若无 error_msg 列则只更新 status/updated_at */
@@ -141,6 +143,10 @@ async function downloadVideoToLocal(storagePath, videoUrl, videoGenId, log, proj
       return null;
     }
     const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) {
+      log.warn('Download video returned an empty body', { videoGenId });
+      return null;
+    }
     fs.writeFileSync(filePath, buf);
     const relativePath = `${relPrefix}/${name}`.replace(/\\/g, '/');
     log.info('Video saved to local', { videoGenId, local_path: relativePath, projectSubdir: projectSubdir || '(root)' });
@@ -148,6 +154,36 @@ async function downloadVideoToLocal(storagePath, videoUrl, videoGenId, log, proj
   } catch (e) {
     log.warn('Download video error', { videoGenId, error: e.message });
     return null;
+  }
+}
+
+function markVideoArchivePending(db, log, videoGenId, error) {
+  const at = new Date().toISOString();
+  const message = String(error?.message || 'OSS 归档待重试').slice(0, 500);
+  try {
+    db.prepare('UPDATE video_generations SET archive_status = ?, archive_error = ?, archive_attempts = COALESCE(archive_attempts, 0) + 1, updated_at = ? WHERE id = ?')
+      .run('pending', message, at, videoGenId);
+  } catch (_) {}
+  log.warn('Video OSS archive pending retry; local delivery remains available', { id: videoGenId, error: message });
+}
+
+async function archiveCompletedVideo(db, log, videoGenId, cfg = null) {
+  const row = db.prepare('SELECT id, local_path, status FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(Number(videoGenId));
+  if (!row?.local_path || row.status !== 'completed') return { skipped: 'not_completed_local_video' };
+  cfg = cfg || require('../config').loadConfig();
+  const storage = require('./mediaStorageService');
+  if (!storage.isOss(cfg)) {
+    try { db.prepare('UPDATE video_generations SET archive_status = ?, archive_error = NULL, archived_at = ? WHERE id = ?').run('local', new Date().toISOString(), row.id); } catch (_) {}
+    return { provider: 'local' };
+  }
+  try {
+    const saved = await storage.archiveLocalFile(cfg, resolveStoragePath(cfg), row.local_path, log, { removeLocal: true });
+    const at = new Date().toISOString();
+    try { db.prepare('UPDATE video_generations SET archive_status = ?, archive_error = NULL, archive_attempts = COALESCE(archive_attempts, 0) + 1, archived_at = ?, updated_at = ? WHERE id = ?').run('archived', at, at, row.id); } catch (_) {}
+    return saved;
+  } catch (error) {
+    markVideoArchivePending(db, log, row.id, error);
+    return { provider: 'oss', pending: true, error: error.message };
   }
 }
 
@@ -265,19 +301,36 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
       }
     }
   } catch (error) {
-    log.warn('全能视频本地归档/后期处理失败，保留原始生成结果', { video_gen_id: videoGenId, error: error.message });
+    log.warn('全能视频本地归档/后期处理失败', { video_gen_id: videoGenId, error: error.message });
+    // No local bytes exist, so this is a genuine generation-delivery failure.
+    setVideoGenFailed(db, videoGenId, '视频下载或本地处理失败：' + error.message, new Date().toISOString());
+    if (row?.task_id) taskService.updateTaskError(db, row.task_id, '视频下载或本地处理失败');
+    return;
+  }
+  if (!localPath) {
+    setVideoGenFailed(db, videoGenId, '视频下载失败，供应商临时地址未能归档到本地', new Date().toISOString());
+    if (row?.task_id) taskService.updateTaskError(db, row.task_id, '视频下载失败');
+    return;
   }
   // Never persist a provider's signed delivery URL as the application's
-  // completed-media URL once the file has been archived locally. TOS links
-  // normally expire after 24 hours and otherwise reappear through older API
-  // consumers or material-library imports.
-  if (localPath) videoUrl = `/static/${String(localPath).replace(/^\/+/, '')}`;
+  // completed-media URL. TOS links normally expire after 24 hours.
+  videoUrl = `/static/${String(localPath).replace(/^\/+/, '')}`;
   try {
     db.prepare(
-      'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, completed_at = ?, updated_at = ? WHERE id = ?'
-    ).run('completed', videoUrl, localPath, now, now, videoGenId);
+      'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, archive_status = ?, archive_error = NULL, completed_at = ?, updated_at = ? WHERE id = ?'
+    ).run('completed', videoUrl, localPath, require('./mediaStorageService').isOss(require('../config').loadConfig()) ? 'pending' : 'local', now, now, videoGenId);
   } catch (e) {
-    if ((e.message || '').includes('completed_at')) {
+    if ((e.message || '').includes('archive_')) {
+      try {
+        db.prepare(
+          'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, completed_at = ?, updated_at = ? WHERE id = ?'
+        ).run('completed', videoUrl, localPath, now, now, videoGenId);
+      } catch (_) {
+        db.prepare(
+          'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, updated_at = ? WHERE id = ?'
+        ).run('completed', videoUrl, localPath, now, videoGenId);
+      }
+    } else if ((e.message || '').includes('completed_at')) {
       db.prepare(
         'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, updated_at = ? WHERE id = ?'
       ).run('completed', videoUrl, localPath, now, videoGenId);
@@ -338,6 +391,9 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
       status: 'completed',
     });
   }
+  // OSS is a durability concern, not a user-visible generation-success gate.
+  // Failure here leaves the completed local asset playable and schedules retry.
+  await archiveCompletedVideo(db, log, videoGenId);
   log.info('Video generation completed' + (logLabel ? ` (${logLabel})` : ''), {
     id: videoGenId,
     video_url: videoUrl,
@@ -461,6 +517,62 @@ function resumeProcessingVideoGenerations(db, log) {
       });
     });
   }
+}
+
+function reconcileUnarchivedCompletedVideos(db, log) {
+  let rows;
+  try {
+    rows = db.prepare(`SELECT id, task_id, storyboard_id FROM video_generations
+      WHERE status = 'completed' AND deleted_at IS NULL
+        AND (local_path IS NULL OR TRIM(local_path) = '')`).all();
+  } catch (_) {
+    // Compatibility for a database that has not yet gained storyboard_id.
+    rows = db.prepare(`SELECT id, task_id FROM video_generations
+      WHERE status = 'completed' AND deleted_at IS NULL
+        AND (local_path IS NULL OR TRIM(local_path) = '')`).all();
+  }
+  const at = new Date().toISOString();
+  const message = '历史视频没有本地归档文件，原供应商链接可能已过期；请重新生成。';
+  for (const row of rows) {
+    db.prepare('UPDATE video_generations SET status = ?, video_url = NULL, error_msg = ?, updated_at = ? WHERE id = ?')
+      .run('failed', message, at, row.id);
+    if (row.task_id) taskService.updateTaskError(db, row.task_id, message);
+    // Storyboards may have copied the same signed URL. Clear only the video
+    // field; local_path can also be an image cover and must be preserved.
+    if (row.storyboard_id) {
+      try {
+        const hasArchivedReplacement = db.prepare(`SELECT 1 FROM video_generations
+          WHERE storyboard_id = ? AND status = 'completed' AND local_path IS NOT NULL
+            AND TRIM(local_path) != '' AND deleted_at IS NULL LIMIT 1`).get(row.storyboard_id);
+        if (!hasArchivedReplacement) {
+          db.prepare('UPDATE storyboards SET video_url = NULL, updated_at = ? WHERE id = ?').run(at, row.storyboard_id);
+        }
+      } catch (_) {}
+    }
+  }
+  // Earlier releases allowed direct imports from a completed supplier URL.
+  // Such an asset has no bytes under storage and therefore cannot be durable.
+  try {
+    db.prepare(`UPDATE assets SET url = '', updated_at = ?
+      WHERE type = 'video' AND deleted_at IS NULL
+        AND (local_path IS NULL OR TRIM(local_path) = '')
+        AND url LIKE 'http%'`).run(at);
+  } catch (_) {}
+  if (rows.length) log.warn('Marked unarchived completed videos as failed', { count: rows.length });
+  return { reconciled: rows.length };
+}
+
+function resumePendingVideoArchives(db, log) {
+  let rows = [];
+  try { rows = db.prepare(`SELECT id FROM video_generations WHERE status = 'completed' AND local_path IS NOT NULL AND TRIM(local_path) != '' AND archive_status = 'pending' AND deleted_at IS NULL`).all(); } catch (_) { return; }
+  for (const row of rows) setImmediate(() => archiveCompletedVideo(db, log, row.id).catch((error) => log.warn('Video archive retry failed', { id: row.id, error: error.message })));
+}
+
+function startPendingVideoArchiveRetry(db, log) {
+  const run = () => resumePendingVideoArchives(db, log);
+  const timer = setInterval(run, 60_000);
+  if (typeof timer.unref === 'function') timer.unref();
+  return { runNow: run, stop: () => clearInterval(timer) };
 }
 
 async function processVideoGeneration(db, log, videoGenId) {
@@ -617,5 +729,10 @@ module.exports = {
   getById,
   deleteById,
   processVideoGeneration,
+  archiveCompletedVideo,
+  resumePendingVideoArchives,
+  startPendingVideoArchiveRetry,
   resumeProcessingVideoGenerations,
+  reconcileUnarchivedCompletedVideos,
+  publicVideoUrl,
 };

@@ -573,6 +573,7 @@ import { sceneAPI } from '@/api/scenes'
 import { propAPI } from '@/api/props'
 import { useGenerationTaskStore } from '@/stores/generationTaskStore'
 import { stylePromptMetadataForSave, backfillDramaStylePromptMetadataIfNeeded } from '@/constants/styleOptions'
+import { formatChinaDate } from '@/utils/time'
 
 const route = useRoute()
 const router = useRouter()
@@ -881,8 +882,7 @@ function assetImageUrl(item) {
 }
 
 function formatDate(val) {
-  if (!val) return ''
-  return new Date(val).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+  return formatChinaDate(val)
 }
 
 async function loadDrama() {

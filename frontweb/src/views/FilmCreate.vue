@@ -604,16 +604,14 @@
                     </el-select>
                     <el-button text size="small" class="sb-universal-library-move" :disabled="index <= 0" @click="moveSbOmniAsset(activeSb, asset.id, -1)">↑</el-button>
                     <el-button text size="small" class="sb-universal-library-move" :disabled="index >= (sbOmniAssetIds[activeSb.id] || []).length - 1" @click="moveSbOmniAsset(activeSb, asset.id, 1)">↓</el-button>
-                    <el-button v-if="asset.type === 'image'" text size="small" class="sb-universal-library-sd2" :loading="sbOmniCertifyingIds.has(asset.id)" @click.stop="onSbOmniAssetCertify(activeSb, asset)">{{ sbOmniSd2ShortLabel(asset) }}</el-button>
+                    <span v-if="asset.type === 'image' && asset.requires_sd2_identity" class="sb-universal-library-sd2">{{ sbOmniSd2StatusLabel(asset) }} · 自动准备</span>
                     <el-button text size="small" type="danger" @click="removeSbOmniAsset(activeSb, asset.id)">移除</el-button>
                   </div>
                 </div>
               </template>
               <div v-for="asset in sbOmniIdentityAssets(activeSb)" :key="`human-${asset.id}`" class="sb-universal-identity-row">
                 <el-checkbox :model-value="!!asset.requires_sd2_identity" @change="(value) => onSbOmniAssetRealPersonToggle(activeSb, asset, value)">含真人</el-checkbox>
-                <span class="sb-universal-identity-status" :class="`is-${sbOmniSd2Status(asset)}`">SD2 认证：{{ sbOmniSd2StatusLabel(asset) }}
-                  <el-button text size="small" :loading="sbOmniCertifyingIds.has(asset.id)" @click="onSbOmniAssetCertify(activeSb, asset)">{{ sbOmniSd2Status(asset) === 'active' ? '重新认证' : (sbOmniSd2Status(asset) === 'processing' ? '刷新状态' : '认证') }}</el-button>
-                </span>
+                <span class="sb-universal-identity-status">系统自动准备真人素材</span>
               </div>
               <div v-if="(sbOmniCreationMode[activeSb.id] || 'multi_reference') === 'first_last_frame'" class="sb-universal-frame-actions">
                 <el-button v-for="asset in sbOmniFrameCandidates(activeSb)" :key="`f-${asset.id}`" size="small" plain @click="setSbOmniFrameAsset(activeSb, 'first', asset.id)">设为首帧：{{ asset.name || `素材${asset.id}` }}</el-button>
@@ -2596,6 +2594,7 @@ import { propLibraryAPI } from '@/api/propLibrary'
 import { generationSettingsAPI } from '@/api/prompts'
 import { parseScriptIntoEpisodes, episodesListToPlainScript } from '@/utils/scriptEpisodes'
 import { exportStoryboardSheet } from '@/utils/exportStoryboardSheet'
+import { formatChinaTime } from '@/utils/time'
 import StylePickerButton from '@/components/StylePickerButton.vue'
 import AIConfigContent from '@/components/AIConfigContent.vue'
 import UniversalSegmentOmniAtEditor from '@/components/UniversalSegmentOmniAtEditor.vue'
@@ -6133,11 +6132,6 @@ function sbOmniSd2Status(asset) { return String(asset?.seedance2_asset?.status |
 function sbOmniSd2StatusLabel(asset) {
   return ({ none: '未认证', processing: '认证中', active: '可用', invalid: '已失效', failed: '认证失败' })[sbOmniSd2Status(asset)] || '状态未知'
 }
-/** 已选素材行上的 SD2 短标签：真人图片可一键认证 */
-function sbOmniSd2ShortLabel(asset) {
-  return ({ none: 'SD2认证', processing: 'SD2认证中', active: 'SD2✓', invalid: 'SD2失效', failed: 'SD2重试' })[sbOmniSd2Status(asset)] || 'SD2认证'
-}
-
 const OMNI_USAGE_OPTIONS = {
   image: [
     { label: '普通参考', value: 'reference' },
@@ -8250,7 +8244,7 @@ function onPipelineResume() {
 }
 
 function addPipelineError(step, message) {
-  const time = new Date().toLocaleTimeString('zh-CN')
+  const time = formatChinaTime(new Date())
   pipelineErrorLog.value = [...pipelineErrorLog.value, { time, step, message }]
 }
 

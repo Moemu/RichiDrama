@@ -53,6 +53,7 @@ import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
 import ToolAssetSelector from '@/components/ToolAssetSelector.vue'
 import GenerationSettings from '@/components/GenerationSettings.vue'
+import { formatChinaDateTime } from '@/utils/time'
 const props = defineProps({ media: { type: String, required: true } })
 const router = useRouter(), prompt = ref(''), model = ref(''), reference = ref(''), selectedAssetId = ref(null), firstFrameAssetId = ref(null), lastFrameAssetId = ref(null), firstFrameAssetUrl = ref(''), lastFrameAssetUrl = ref(''), videoSettings = ref({ video_model: 'auto', duration: 15, resolution: '720p', aspect_ratio: '16:9' }), running = ref(false), importing = ref(false), items = ref([]), mode = ref('text'), featured = ref(null)
 const modes = computed(() => props.media === 'image' ? [
@@ -66,7 +67,7 @@ const mediaUrl = (item) => item?.local_path ? `/static/${item.local_path}` : ite
 const applySelectedAsset = (asset) => { reference.value = asset?.local_path || asset?.url || '' }
 const applyFirstFrame = (asset) => { firstFrameAssetUrl.value = asset?.local_path || asset?.url || '' }
 const applyLastFrame = (asset) => { lastFrameAssetUrl.value = asset?.local_path || asset?.url || '' }
-const formatDate = (value) => value ? new Date(value).toLocaleString() : '刚刚'
+const formatDate = (value) => formatChinaDateTime(value)
 async function load() { const out = props.media === 'image' ? await imagesAPI.list({ page_size:30, drama_id:0 }) : await videosAPI.list({ page_size:30, drama_id:0 }); items.value = out.items || out || []; featured.value = items.value.find((item) => item.id === featured.value?.id) || featured.value || items.value[0] || null }
 async function submit() { if (!prompt.value.trim()) return ElMessage.warning('请输入提示词'); running.value = true; try { const refs = reference.value.split(',').map((item) => item.trim()).filter(Boolean); if (props.media === 'image') await imagesAPI.create({ drama_id:0, prompt:prompt.value, model:model.value || undefined, image_url:reference.value || undefined, reference_images:mode.value === 'multi' ? refs : undefined }); else { const settings = videoSettings.value || {}; const body = { drama_id:0, prompt:prompt.value, model:settings.video_model && settings.video_model !== 'auto' ? settings.video_model : undefined, duration:settings.duration, resolution:settings.resolution, aspect_ratio:settings.aspect_ratio }; if (mode.value === 'image') body.image_url = refs[0]; if (mode.value === 'multi') body.reference_image_urls = refs; if (mode.value === 'first_last') { const first = firstFrameAssetUrl.value || refs[0], last = lastFrameAssetUrl.value || refs[1]; if (!first || !last) throw new Error('请选择或填写首帧与尾帧素材'); body.first_frame_url = first; body.last_frame_url = last } await videosAPI.create(body) } ElMessage.success('任务已提交，记录已保存'); await load() } catch (error) { ElMessage.error(error.message) } finally { running.value = false } }
 async function importAsset() { importing.value = true; try { const path = props.media === 'image' ? `/assets/import/image/${featured.value.id}` : `/assets/import/video/${featured.value.id}`; const asset = await request.post(path); ElMessage.success('已导入素材库'); return asset } catch (error) { ElMessage.error(error.message); return null } finally { importing.value = false } }

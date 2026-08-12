@@ -20,6 +20,14 @@ storage:
   type: local
   local_path: ./data/storage
   base_url: http://localhost:5679/static
+  # Set type to oss only after the dry-run migration succeeds. Keep all
+  # credentials out of this file; use CFG_STORAGE__OSS__... environment vars.
+  # oss:
+  #   endpoint: https://oss-cn-hangzhou.aliyuncs.com
+  #   bucket: your-private-or-public-bucket
+  #   prefix: local-mini-drama
+  #   public_base_url: https://media.example.com
+  #   auto_archive_enabled: false
 # 异步视频任务轮询总超时（分钟）；省略或 ≤0 时默认 30
 video:
   generation_timeout_minutes: 30

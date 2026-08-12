@@ -846,6 +846,45 @@ function buildSeedance2BasePayload(charRow, assetId, created, registerImageUrl, 
   };
 }
 
+const activeCharacterSd2Polls = new Set();
+
+function scheduleCharacterSd2Settlement(db, log, characterId, created, initial, poll) {
+  const key = Number(characterId);
+  if (activeCharacterSd2Polls.has(key)) return;
+  activeCharacterSd2Polls.add(key);
+  setImmediate(async () => {
+    try {
+      const result = await poll();
+      const at = new Date().toISOString();
+      if (!result.ok) {
+        db.prepare('UPDATE characters SET seedance2_asset = ?, updated_at = ? WHERE id = ?').run(
+          JSON.stringify({ ...initial, status: 'failed', error: result.error, updated_at: at }), at, key
+        );
+        return;
+      }
+      const settled = result.asset || created;
+      const next = {
+        ...initial,
+        asset_url: settled.asset_url ?? initial.asset_url,
+        status: settled.status || initial.status,
+        hub_url: settled.url || created.url || null,
+        poll_timed_out: !!result.timedOut,
+        updated_at: at,
+      };
+      db.prepare('UPDATE characters SET seedance2_asset = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(next), at, key);
+      require('./assetMappingService').syncEntities(db, log, 'character', [key]);
+    } catch (error) {
+      const at = new Date().toISOString();
+      db.prepare('UPDATE characters SET seedance2_asset = ?, updated_at = ? WHERE id = ?').run(
+        JSON.stringify({ ...initial, status: 'failed', error: error.message, updated_at: at }), at, key
+      );
+      log.error('Character SD2 background certification poll failed', { characterId: key, error: error.message });
+    } finally {
+      activeCharacterSd2Polls.delete(key);
+    }
+  });
+}
+
 async function registerCharacterViaJimengHub(db, log, cfg, characterId, hubCtx, prep) {
   const { charRow, imageUrl, registerImageUrl: initialUrl, pub, assetName } = prep;
   let registerImageUrl = initialUrl;
@@ -890,29 +929,13 @@ async function registerCharacterViaJimengHub(db, log, cfg, characterId, hubCtx, 
     Number(characterId)
   );
 
-  const poll = await jimengMaterialHubService.pollAssetUntilSettled(hubCtx, assetId, {
+  scheduleCharacterSd2Settlement(db, log, characterId, created, basePayload, () => jimengMaterialHubService.pollAssetUntilSettled(hubCtx, assetId, {
     maxMs: hubCtx.poll_max_ms != null ? Number(hubCtx.poll_max_ms) : 120000,
     intervalMs: hubCtx.poll_interval_ms != null ? Number(hubCtx.poll_interval_ms) : 2000,
     log,
-  });
-  if (!poll.ok) return { ok: false, error: poll.error };
-  const settled = poll.asset || created;
-  const nextPayload = {
-    ...basePayload,
-    asset_url: settled.asset_url ?? basePayload.asset_url,
-    status: settled.status || basePayload.status,
-    hub_url: settled.url || created.url || null,
-    poll_timed_out: !!poll.timedOut,
-    updated_at: new Date().toISOString(),
-  };
-  db.prepare('UPDATE characters SET seedance2_asset = ?, updated_at = ? WHERE id = ?').run(
-    JSON.stringify(nextPayload),
-    nextPayload.updated_at,
-    Number(characterId)
-  );
-  log.info('[SD2认证][hub] 素材已登记', { characterId, hub_asset_id: assetId, status: nextPayload.status });
+  }));
   require('./assetMappingService').syncEntities(db, log, 'character', [characterId]);
-  return { ok: true, seedance2_asset: nextPayload };
+  return { ok: true, async: true, seedance2_asset: basePayload };
 }
 
 async function registerCharacterViaModelArk(db, log, cfg, characterId, arkCtx, prep) {
@@ -963,24 +986,9 @@ async function registerCharacterViaModelArk(db, log, cfg, characterId, arkCtx, p
     Number(characterId)
   );
 
-  const poll = await modelArkAssetConfigService.pollAssetUntilSettled(arkCtx, assetId, { log });
-  if (!poll.ok) return { ok: false, error: poll.error };
-  const settled = poll.asset || created;
-  const nextPayload = {
-    ...basePayload,
-    asset_url: settled.asset_url ?? basePayload.asset_url,
-    status: settled.status || basePayload.status,
-    poll_timed_out: !!poll.timedOut,
-    updated_at: new Date().toISOString(),
-  };
-  db.prepare('UPDATE characters SET seedance2_asset = ?, updated_at = ? WHERE id = ?').run(
-    JSON.stringify(nextPayload),
-    nextPayload.updated_at,
-    Number(characterId)
-  );
-  log.info('[SD2认证][model_ark] 素材已登记', { characterId, hub_asset_id: assetId, status: nextPayload.status });
+  scheduleCharacterSd2Settlement(db, log, characterId, created, basePayload, () => modelArkAssetConfigService.pollAssetUntilSettled(arkCtx, assetId, { log }));
   require('./assetMappingService').syncEntities(db, log, 'character', [characterId]);
-  return { ok: true, seedance2_asset: nextPayload };
+  return { ok: true, async: true, seedance2_asset: basePayload };
 }
 
 /**

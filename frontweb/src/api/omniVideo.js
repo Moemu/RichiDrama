@@ -27,6 +27,7 @@ export const omniVideoAPI = {
   concatAssets(assetIds) { return request.post('/assets/concat', { asset_ids: assetIds }) },
   uploadLimits() { return request.get('/upload-limits') },
   certifyAsset(id) { return request.post(`/assets/${id}/sd2-certify`) },
+  certifyAssetsBatch(ids) { return request.post('/assets/sd2-certify/batch', { ids }) },
   refreshAssetCertification(id) { return request.post(`/assets/${id}/sd2-certify/refresh`) },
   listSequences() { return request.get('/omni-video-sequences') },
   listDeletedSequences() { return request.get('/omni-video-sequences/deleted') },

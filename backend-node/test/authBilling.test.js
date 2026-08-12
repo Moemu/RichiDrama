@@ -128,6 +128,19 @@ test('self registration creates a normal user and an authenticated session', () 
   } finally { teardown(dbPath); }
 });
 
+test('a user can change a unique username and receives a session for the new identity', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'original-name', password: '1' }, admin.id);
+    const changed = auth.changeUsername(db, user.id, 'renamed-user');
+    const session = auth.issueSession(db, changed);
+    assert.equal(changed.username, 'renamed-user');
+    assert.equal(auth.login(db, 'original-name', '1'), null);
+    assert.equal(auth.authenticate(db, session.token).username, 'renamed-user');
+    assert.throws(() => auth.changeUsername(db, admin.id, 'renamed-user'), /已被使用/);
+  } finally { teardown(dbPath); }
+});
+
 test('published price books require explicit, positive or free prices', () => {
   const { db, dbPath, admin } = setup();
   try {

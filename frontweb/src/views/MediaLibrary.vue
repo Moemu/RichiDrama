@@ -10,6 +10,7 @@
         <h2 class="page-title">媒体素材库</h2>
       </div>
       <div class="header-actions">
+        <el-button type="danger" plain :disabled="!total" @click="clearLibrary">一键清空素材库</el-button>
         <el-button type="primary" plain @click="triggerUpload">
           <el-icon><Upload /></el-icon>
           上传素材
@@ -112,7 +113,9 @@
     <!-- 批量操作 -->
     <div v-if="selectedIds.size > 0" class="batch-bar">
       <span>已选 {{ selectedIds.size }} 项</span>
+      <el-button size="small" @click="selectCurrentPage">全选当前页图片</el-button>
       <el-button size="small" @click="selectedIds.clear()">取消选择</el-button>
+      <el-button size="small" type="primary" plain @click="batchCertifyRealPeople">批量标记含真人并认证</el-button>
       <el-button size="small" type="danger" plain @click="batchDelete">批量删除</el-button>
       <el-button size="small" type="primary" @click="createWithSelected">用选中素材创作</el-button>
     </div>
@@ -137,7 +140,7 @@
         <div class="meta-row"><span>大小：</span>{{ formatSize(previewItem?.size) }}</div>
         <div class="meta-row"><span>创建时间：</span>{{ previewItem?.created_at }}</div>
         <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔，例如：人物, 夜景" @change="saveTags" /></div>
-        <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人</el-checkbox><span>未勾选即为不含真人</span></div>
+        <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人</el-checkbox><span v-if="previewItem?.requires_sd2_identity">{{ sd2Label(previewItem) }}，系统自动准备，生成会自动等待。</span><span v-else>未勾选即为不含真人</span></div>
         <section v-if="previewItem" class="asset-lineage">
           <div class="asset-lineage-title"><span>版本与来源</span><el-button text size="small" :loading="lineageLoading" @click="loadLineage(previewItem.id)">刷新</el-button></div>
           <div v-if="lineageLoading" class="asset-lineage-empty">正在加载素材谱系…</div>
@@ -180,7 +183,6 @@ const selectedMedia = computed(() => mediaItems.value.filter((item) => selectedI
 const canConcatSelected = computed(() => selectedMedia.value.length >= 2 && selectedMedia.value.every((item) => item.type === 'video'))
 const showPreview = ref(false)
 const previewItem = ref(null)
-const certifyingId = ref(null)
 const editableTags = ref('')
 const trimStart = ref(0), trimEnd = ref(5), trimming = ref(false)
 const lineage = ref(null), lineageLoading = ref(false)
@@ -378,26 +380,65 @@ async function renameItem(item) {
 
 function sd2Status(item) { return String(item?.seedance2_asset?.status || 'none').toLowerCase() }
 function sd2Label(item) { return ({ active: '认证可用', processing: '认证中', stale: '需刷新', failed: '认证失败', none: '未认证' })[sd2Status(item)] || '未认证' }
-async function setIdentity(item, value) { try { const updated = await omniVideoAPI.updateAsset(item.id, { requires_sd2_identity: !!value }); Object.assign(item, updated) } catch (error) { ElMessage.error(error.message || '真人声明保存失败') } }
-async function certify(item) {
-  if (!item || certifyingId.value === item.id || sd2Status(item) === 'active') return
-  certifyingId.value = item.id
-  try { const out = sd2Status(item) === 'processing' ? await omniVideoAPI.refreshAssetCertification(item.id) : await omniVideoAPI.certifyAsset(item.id); item.seedance2_asset = out.seedance2_asset; ElMessage.success('SD2 认证状态已更新') } catch (error) { ElMessage.error(error.message || 'SD2 认证失败') } finally { certifyingId.value = null }
+async function setIdentity(item, value) {
+  const previous = !!item.requires_sd2_identity
+  item.requires_sd2_identity = !!value
+  try {
+    const updated = await omniVideoAPI.updateAsset(item.id, { requires_sd2_identity: !!value })
+    Object.assign(item, updated)
+    if (value && sd2Status(item) !== 'active') {
+      const out = await omniVideoAPI.certifyAsset(item.id)
+      if (out?.seedance2_asset) item.seedance2_asset = out.seedance2_asset
+    }
+  } catch (error) {
+    item.requires_sd2_identity = previous
+    ElMessage.error(error.message || '真人声明保存或自动认证失败')
+  }
 }
 
 async function batchDelete() {
   const count = selectedIds.size
   await ElMessageBox.confirm(`确定删除选中的 ${count} 个素材？`, '批量删除', { type: 'warning' })
-  let failed = 0
-  for (const id of selectedIds) {
-    try {
-      await request.delete(`/assets/${id}`)
-    } catch (_) { failed++ }
+  try {
+    const result = await request.post('/assets/batch-delete', { ids: [...selectedIds] })
+    selectedIds.clear()
+    ElMessage.success(result?.message || `${count} 个素材已删除`)
+    loadMedia()
+  } catch (error) { ElMessage.error(error.message || '批量删除失败') }
+}
+
+function selectCurrentPage() {
+  mediaItems.value.filter((item) => item.type === 'image').forEach((item) => selectedIds.add(item.id))
+}
+
+async function batchCertifyRealPeople() {
+  const ids = mediaItems.value.filter((item) => selectedIds.has(item.id) && item.type === 'image').map((item) => item.id)
+  if (!ids.length) return ElMessage.warning('请选择至少一张图片素材')
+  try {
+    await ElMessageBox.confirm(`将 ${ids.length} 张图片标记为含真人，并在后台按受控并发自动认证。生成会等待认证完成后自动续跑。`, '批量真人认证', { type: 'info' })
+    const result = await omniVideoAPI.certifyAssetsBatch(ids)
+    ElMessage.success(result?.message || `已排队 ${ids.length} 张素材认证`)
+    await loadMedia()
+  } catch (error) {
+    if (error !== 'cancel' && error?.message !== 'cancel') ElMessage.error(error.message || '批量认证提交失败')
   }
-  selectedIds.clear()
-  if (failed > 0) ElMessage.warning(`${count - failed} 个删除成功，${failed} 个失败`)
-  else ElMessage.success(`${count} 个素材已删除`)
-  loadMedia()
+}
+
+async function clearLibrary() {
+  try {
+    await ElMessageBox.confirm(
+      '将清空你有权限访问的全部媒体素材。该操作会从素材库隐藏记录，但不会立即物理删除本地或 OSS 文件，以保证已有作品可追溯。',
+      '一键清空素材库',
+      { type: 'warning', confirmButtonText: '确认清空', cancelButtonText: '取消' }
+    )
+    const result = await request.post('/assets/batch-delete', { all_matching: true })
+    selectedIds.clear()
+    showPreview.value = false
+    ElMessage.success(result?.message || '素材库已清空')
+    await resetAndLoad()
+  } catch (error) {
+    if (error !== 'cancel' && error?.message !== 'cancel') ElMessage.error(error.message || '清空素材库失败')
+  }
 }
 
 onMounted(loadMedia)

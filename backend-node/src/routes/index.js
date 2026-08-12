@@ -43,6 +43,7 @@ function setupRouter(cfg, db, log) {
   r.post('/auth/session-cookie', auth.sessionCookie);
   r.post('/auth/logout', auth.logout);
   r.post('/auth/change-password', auth.changePassword);
+  r.patch('/auth/username', auth.changeUsername);
   r.use(ownershipGuard(db));
   const drama = dramaRoutes(db, cfg, log);
   const task = taskRoutes(db, log);
@@ -369,6 +370,8 @@ function setupRouter(cfg, db, log) {
   r.post('/assets/import/image/:image_gen_id', assets.importImage);
   r.post('/assets/import/video/:video_gen_id', assets.importVideo);
   r.post('/assets/concat', assets.concat);
+  r.post('/assets/batch-delete', assets.batchDelete);
+  r.post('/assets/sd2-certify/batch', assets.sd2BatchCertify);
   r.post('/assets/:id/trim', assets.trim);
   r.post('/assets/:id/sd2-certify', assets.sd2Certify);
   r.post('/assets/:id/sd2-certify/refresh', assets.sd2CertifyRefresh);

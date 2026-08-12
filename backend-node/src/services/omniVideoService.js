@@ -37,7 +37,9 @@ function create(db, log, body, billingUser) {
   const creationMode = body.creation_mode || body.settings?.creation_mode || 'multi_reference';
   validateCreationMode(creationMode, assets, capability);
   const routed = routeAssets(expandVideoReferences(db, log, assets, capability.supports), capability.supports, body.audio_strategy);
-  enforceSd2IdentityAssets(routed, capability, log);
+  const sd2 = sd2IdentityState(routed, capability);
+  if (sd2.invalid.length) enforceSd2IdentityAssets(routed, capability, log);
+  const waitingForSd2 = sd2.pending.length > 0;
   applySd2CertifiedAssetReferences(routed, capability);
   const modelPrompt = bindPromptReferences(prompt, body.prompt_document, routed);
   const now = new Date().toISOString();
@@ -51,31 +53,52 @@ function create(db, log, body, billingUser) {
   const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key);
   const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
-  const authorization = billing.createAuthorization(db, payer, {
-    idempotency_key: body.idempotency_key || `omni-video:${payer.id}:${Date.now()}:${Math.random()}`,
+  const existingWaitingId = Number(body.__sd2_waiting_generation_id) || null;
+  const authorization = waitingForSd2 ? null : billing.createAuthorization(db, payer, {
+    idempotency_key: body.idempotency_key || (existingWaitingId ? `sd2-wait:${existingWaitingId}` : `omni-video:${payer.id}:${Date.now()}:${Math.random()}`),
     service_type: 'video', model: billingTarget.billing_key, usage,
     pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || null,
   });
-  const task = taskService.createTask(db, log, 'video_generation', '', body.owner_user_id || payer.id);
+  let task = null;
+  let videoGenerationId = null;
+  let jobId = null;
+  if (existingWaitingId) {
+    const existing = db.prepare('SELECT id, task_id, status, owner_user_id FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(existingWaitingId);
+    if (!existing || existing.status !== 'sd2_waiting' || Number(existing.owner_user_id) !== Number(payer.id)) throw new Error('SD2 等待任务不存在或已被处理');
+    task = taskService.getTask(db, existing.task_id) || { id: existing.task_id };
+    videoGenerationId = existing.id;
+  } else task = taskService.createTask(db, log, 'video_generation', '', body.owner_user_id || payer.id);
   const imageUrls = routed.filter((asset) => asset.send_to_model && asset.type === 'image').map((asset) => asset.model_url || asset.local_path || asset.url).filter(Boolean);
   const first = routed.find((asset) => asset.usage === 'first_frame' && asset.send_to_model);
   const last = routed.find((asset) => asset.usage === 'last_frame' && asset.send_to_model);
-  const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, status, task_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)`)
-    .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.owner_user_id || payer.id, authorization.authorization_id, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null,
-      body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
-      imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null,
-      imageUrls.length ? JSON.stringify(imageUrls) : null, task.id, now, now);
-  const videoGenerationId = Number(result.lastInsertRowid);
+  if (existingWaitingId) {
+    db.prepare(`UPDATE video_generations SET billing_authorization_id = ?, provider = ?, prompt = ?, model = ?, duration = ?, aspect_ratio = ?, resolution = ?, seed = ?, camera_fixed = ?, watermark = ?, image_url = ?, first_frame_url = ?, last_frame_url = ?, reference_image_urls = ?, status = ?, error_msg = NULL, updated_at = ? WHERE id = ?`)
+      .run(authorization.authorization_id, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0, imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null, imageUrls.length ? JSON.stringify(imageUrls) : null, 'processing', now, videoGenerationId);
+  } else {
+    const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, status, task_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.owner_user_id || payer.id, authorization?.authorization_id || null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null,
+        body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
+        imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null,
+        imageUrls.length ? JSON.stringify(imageUrls) : null, waitingForSd2 ? 'sd2_waiting' : 'processing', task.id, now, now);
+    videoGenerationId = Number(result.lastInsertRowid);
+  }
   const postProcess = { keep_original_audio: !!body.keep_original_audio, audio_volume: clamp(body.audio_volume, 0, 2, 1), audio_fade_seconds: clamp(body.audio_fade_seconds, 0, 10, 0) };
   const requestSnapshot = { prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
-  const job = db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, owner_user_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, storyboard_id, created_at, updated_at)
+  const job = !existingWaitingId ? db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, owner_user_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, storyboard_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(videoGenerationId, body.owner_user_id || payer.id, modelPrompt, body.negative_prompt || null, body.model || 'auto', capability.model,
       JSON.stringify({ supports: capability.supports, limits: capability.limits, reason: capability.reason }), JSON.stringify(requestSnapshot),
       JSON.stringify(routed.filter((asset) => asset.strategy !== 'native').map(publicAsset)), JSON.stringify(buildSummary(routed)), body.audio_strategy || 'reference_only',
-      body.sequence_id ? Number(body.sequence_id) : null, body.shot_id ? Number(body.shot_id) : null, body.storyboard_id ? Number(body.storyboard_id) : null, now, now);
-  const jobId = Number(job.lastInsertRowid);
+      body.sequence_id ? Number(body.sequence_id) : null, body.shot_id ? Number(body.shot_id) : null, body.storyboard_id ? Number(body.storyboard_id) : null, now, now) : null;
+  jobId = existingWaitingId
+    ? Number(db.prepare('SELECT id FROM omni_video_jobs WHERE video_generation_id = ? ORDER BY id DESC LIMIT 1').get(videoGenerationId)?.id)
+    : Number(job.lastInsertRowid);
+  if (existingWaitingId) {
+    db.prepare('UPDATE omni_video_jobs SET prompt = ?, negative_prompt = ?, model_resolved = ?, capability_snapshot_json = ?, request_snapshot_json = ?, preprocess_snapshot_json = ?, input_summary_json = ?, updated_at = ? WHERE id = ?')
+      .run(modelPrompt, body.negative_prompt || null, capability.model, JSON.stringify({ supports: capability.supports, limits: capability.limits, reason: capability.reason }), JSON.stringify(requestSnapshot), JSON.stringify(routed.filter((asset) => asset.strategy !== 'native').map(publicAsset)), JSON.stringify(buildSummary(routed)), now, jobId);
+    db.prepare('DELETE FROM omni_video_job_assets WHERE omni_job_id = ?').run(jobId);
+  }
   const insertAsset = db.prepare(`INSERT INTO omni_video_job_assets (omni_job_id, asset_id, ordinal, alias, media_type, role, usage, send_to_model, derived_asset_id, snapshot_json, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   for (const asset of routed) insertAsset.run(jobId, asset.id, asset.ordinal, asset.alias, asset.type, asset.role, asset.usage, asset.send_to_model ? 1 : 0, null, JSON.stringify(publicAsset(asset)), now);
@@ -83,6 +106,10 @@ function create(db, log, body, billingUser) {
     const shot = db.prepare('SELECT id FROM omni_video_sequence_shots WHERE id = ? AND sequence_id = ? AND deleted_at IS NULL').get(Number(body.shot_id), Number(body.sequence_id));
     if (shot) db.prepare('UPDATE omni_video_sequence_shots SET omni_job_id = ?, prompt = ?, prompt_document_json = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?').run(
       jobId, modelPrompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model || 'auto', creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: Math.min(15, Number(body.duration) || 5), resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
+  }
+  if (waitingForSd2) {
+    taskService.updateTaskStatus(db, task.id, 'processing', 0, '真人素材认证准备中，完成后将自动开始生成');
+    return { omni_job_id: jobId, video_generation_id: videoGenerationId, task_id: task.id, status: 'sd2_waiting', resolved_model: capability.model, routing_summary: buildSummary(routed) };
   }
   setImmediate(() => videoService.processVideoGeneration(db, log, videoGenerationId));
   return { omni_job_id: jobId, video_generation_id: videoGenerationId, task_id: task.id, status: 'processing', resolved_model: capability.model, routing_summary: buildSummary(routed) };
@@ -171,6 +198,10 @@ function referenceRenderRule(usage) {
 }
 
 function routeAssets(assets, supports, audioStrategy) {
+  let storage = null;
+  try { storage = require('./mediaStorageService'); } catch (_) {}
+  let cfg = null;
+  try { cfg = require('../config').loadConfig(); } catch (_) {}
   const maxImages = Number(supports.image_reference?.max || 0);
   let imageCount = 0;
   return assets.map((asset) => {
@@ -180,7 +211,13 @@ function routeAssets(assets, supports, audioStrategy) {
     if (asset.type === 'audio') { send = send && !!supports.audio_reference && audioStrategy !== 'post_mix'; strategy = send ? 'native' : 'post_mix'; }
     if (asset.type === 'video') { send = send && !!supports.video_reference; strategy = send ? 'native' : 'keyframe_or_post'; }
     // 真人标记是声明信息，不把供应商认证资源作为生成前置条件。
-    return { ...asset, model_url: asset.local_path || asset.url, send_to_model: send, strategy };
+    // After an OSS migration old local_path values remain unchanged, but their
+    // local files may no longer exist. Prefer the CDN object URL so reference
+    // media can still be supplied to the model without filesystem access.
+    const modelUrl = asset.local_path && storage?.isOss?.(cfg)
+      ? storage.objectUrl(cfg, asset.local_path)
+      : (asset.local_path || asset.url);
+    return { ...asset, model_url: modelUrl, send_to_model: send, strategy };
   });
 }
 
@@ -228,6 +265,15 @@ function hasActiveSd2Certification(asset) {
   return !!(asset?.seedance2_asset
     && String(asset.seedance2_asset.status || '').toLowerCase() === 'active'
     && String(asset.seedance2_asset.asset_url || '').startsWith('asset://'));
+}
+
+function sd2IdentityState(assets, capability) {
+  if (!isSeedanceCapability(capability)) return { pending: [], invalid: [] };
+  const declared = assets.filter((asset) => asset.type === 'image' && asset.send_to_model && asset.requires_sd2_identity);
+  return {
+    pending: declared.filter((asset) => String(asset.seedance2_asset?.status || '').toLowerCase() === 'processing'),
+    invalid: declared.filter((asset) => !hasActiveSd2Certification(asset) && String(asset.seedance2_asset?.status || '').toLowerCase() !== 'processing'),
+  };
 }
 
 function enforceSd2IdentityAssets(assets, capability, log) {
@@ -280,7 +326,8 @@ function get(db, id) {
   if (!job) return null;
   const generation = db.prepare('SELECT * FROM video_generations WHERE id = ?').get(job.video_generation_id);
   const assets = db.prepare('SELECT * FROM omni_video_job_assets WHERE omni_job_id = ? ORDER BY ordinal').all(job.id);
-  return { ...job, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), generation };
+  const safeGeneration = generation ? { ...generation, video_url: videoService.publicVideoUrl(generation.video_url, generation.local_path) } : null;
+  return { ...job, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), generation: safeGeneration };
 }
 function list(db, query = {}) {
   const storyboardId = Number(query.storyboard_id);
@@ -301,7 +348,7 @@ function list(db, query = {}) {
   }
   if (filters.length) sql += ' WHERE ' + filters.join(' AND ');
   sql += ' ORDER BY j.id DESC LIMIT 100';
-  return db.prepare(sql).all(...params).map((item) => ({ ...item, request_snapshot: safeSnapshot(parse(item.request_snapshot_json)) }));
+  return db.prepare(sql).all(...params).map((item) => ({ ...item, video_url: videoService.publicVideoUrl(item.video_url, item.local_path), request_snapshot: safeSnapshot(parse(item.request_snapshot_json)) }));
 }
 function retry(db, log, id, billingUser) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
@@ -325,6 +372,42 @@ function retry(db, log, id, billingUser) {
     owner_user_id: job.owner_user_id,
   }, billingUser);
 }
+function resumeSd2WaitingGenerations(db, log) {
+  let rows = [];
+  try { rows = db.prepare(`SELECT j.*, v.id video_generation_id, v.drama_id, v.storyboard_id, v.status generation_status, u.role user_role
+    FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id LEFT JOIN users u ON u.id = j.owner_user_id
+    WHERE v.status = 'sd2_waiting' AND v.deleted_at IS NULL`).all(); } catch (_) { return; }
+  for (const job of rows) {
+    let snapshot; try { snapshot = parse(job.request_snapshot_json); } catch (_) { snapshot = null; }
+    if (!snapshot?.original_prompt || !Array.isArray(snapshot.assets)) continue;
+    try {
+      create(db, log, {
+        prompt: snapshot.original_prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
+        aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
+        creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy,
+        keep_original_audio: snapshot.post_process?.keep_original_audio, audio_volume: snapshot.post_process?.audio_volume, audio_fade_seconds: snapshot.post_process?.audio_fade_seconds,
+        drama_id: job.drama_id || undefined, sequence_id: job.sequence_id || undefined, shot_id: job.shot_id || undefined, storyboard_id: job.storyboard_id || undefined,
+        assets: snapshot.assets.map((asset) => ({ asset_id: asset.asset_id, alias: asset.alias, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, send_to_model: asset.send_to_model, url: asset.url || null, local_path: asset.local_path || null, type: asset.type || 'image' })),
+        owner_user_id: job.owner_user_id, __sd2_waiting_generation_id: job.video_generation_id,
+      }, { id: job.owner_user_id, role: job.user_role || 'user' });
+    } catch (error) {
+      // Still processing is normal; only terminal certification failures should
+      // surface to the user, and never create a billing authorization.
+      if (/SD2/.test(String(error.message || ''))) {
+        const now = new Date().toISOString();
+        db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run('failed', error.message, now, job.video_generation_id);
+        const task = db.prepare('SELECT task_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
+        if (task?.task_id) taskService.updateTaskError(db, task.task_id, error.message);
+      } else log.warn('SD2 waiting generation resume failed', { video_generation_id: job.video_generation_id, error: error.message });
+    }
+  }
+}
+function startSd2WaitingGenerationRecovery(db, log) {
+  const run = () => resumeSd2WaitingGenerations(db, log);
+  setImmediate(run);
+  const timer = setInterval(run, 5_000); if (typeof timer.unref === 'function') timer.unref();
+  return { runNow: run, stop: () => clearInterval(timer) };
+}
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry, buildAuthorizationUsage, validateShotAssetLimits, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, retry, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };
