@@ -166,8 +166,11 @@ function onDrop(e) {
 }
 </script>
 <style scoped>
-.editor { position: relative; }
-.editor :deep(.el-textarea__inner) { transition: border-color 0.2s, background 0.2s; }
+.editor { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 188px; }
+/* textarea 区作为主体撑满 editor 剩余高度；@选择器/引用标签为兄弟元素，按内容自适应 */
+.editor :deep(.el-input) { flex: 1; min-height: 0; display: flex; }
+.editor :deep(.el-textarea) { flex: 1; min-height: 0; display: flex; }
+.editor :deep(.el-textarea__inner) { flex: 1; height: 100% !important; min-height: 160px; resize: none; transition: border-color 0.2s, background 0.2s; }
 .drop-hint {
   position: absolute; inset: 0; display: grid; place-items: center;
   background: color-mix(in srgb, var(--bg-hover) 82%, transparent); border: 2px dashed var(--border-strong); border-radius: var(--radius-sm);
