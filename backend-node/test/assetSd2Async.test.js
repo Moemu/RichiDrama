@@ -38,3 +38,18 @@ test('SD2 processing certifications resume after a backend restart', async () =>
   assert.deepEqual(recovered, ['asset:1']);
   assert.equal(JSON.parse(db.prepare('SELECT seedance2_asset FROM assets WHERE id = 1').get().seedance2_asset).status, 'active');
 });
+
+test('a queued SD2 certification with a permanent submission error becomes failed instead of retrying forever', async () => {
+  const db = new Database(':memory:');
+  db.exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, deleted_at TEXT, name TEXT, type TEXT, url TEXT, local_path TEXT, seedance2_asset TEXT, updated_at TEXT)');
+  db.prepare('INSERT INTO assets (id, name, type, seedance2_asset) VALUES (1, ?, ?, ?)')
+    .run('unreachable portrait', 'image', JSON.stringify({ status: 'queued' }));
+  db.exec('CREATE TABLE scenes (id INTEGER PRIMARY KEY, deleted_at TEXT, seedance2_asset TEXT, updated_at TEXT)');
+  db.exec('CREATE TABLE props (id INTEGER PRIMARY KEY, deleted_at TEXT, seedance2_asset TEXT, updated_at TEXT)');
+  db.exec('CREATE TABLE characters (id INTEGER PRIMARY KEY, deleted_at TEXT, seedance2_asset TEXT, updated_at TEXT)');
+  const runner = resumePendingCertifications(db, { warn() {}, error() {} }, {}, { immediate: false, interval_ms: 0 });
+  await runner.refreshNow();
+  const certification = JSON.parse(db.prepare('SELECT seedance2_asset FROM assets WHERE id = 1').get().seedance2_asset);
+  assert.equal(certification.status, 'failed');
+  assert.match(certification.error, /图片|图像|URL|SD2/);
+});

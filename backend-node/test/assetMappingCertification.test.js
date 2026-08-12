@@ -73,6 +73,23 @@ test('a deliberately deleted mapped asset is not recreated by later resource syn
   assert.equal(db.prepare('SELECT COUNT(*) total FROM assets').get().total, 1);
 });
 
+test('a deleted project-resource tombstone wins over a legacy duplicate and blocks storyboard relinking', () => {
+  const db = dbWithProjectResource();
+  db.prepare('INSERT INTO characters (id, drama_id, name, local_path) VALUES (1, 8, ?, ?)')
+    .run('主角', 'drama_8/characters/hero.png');
+  const [first] = mapping.syncEntities(db, log, 'character', [1]);
+  db.prepare('UPDATE assets SET deleted_at = ? WHERE id = ?').run(new Date().toISOString(), first.id);
+  // This represents the old storyboard client, which created an anonymous
+  // asset instead of using the canonical project-resource mapping.
+  db.prepare(`INSERT INTO assets (drama_id, name, type, source_type, metadata_json, created_at, updated_at)
+    VALUES (?, ?, 'image', 'entity', ?, ?, ?)`)
+    .run(8, 'legacy anonymous asset', JSON.stringify({ resource_type: 'character', resource_id: 1 }), new Date().toISOString(), new Date().toISOString());
+
+  assert.deepEqual(mapping.syncEntities(db, log, 'character', [1]), []);
+  assert.equal(mapping.linkProjectResource(db, log, 8, 'character', 1).status, 'detached');
+  assert.equal(db.prepare('SELECT COUNT(*) total FROM assets').get().total, 2);
+});
+
 test('SD2 certificate creation reports a missing provider asset instead of dereferencing null', () => {
   const result = createdAssetFromResult({ ok: true, data: null }, 'hub');
   assert.equal(result.ok, false);

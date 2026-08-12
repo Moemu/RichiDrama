@@ -89,6 +89,17 @@ async function readMediaBuffer(cfg, storageRoot, localPath) {
   if (result.status < 200 || result.status >= 300) throw new Error(`OSS read failed: HTTP ${result.status}`);
   return result.body;
 }
+async function verifyOssObject(cfg, localPath) {
+  if (!isOss(cfg)) return { ok: false, reason: 'local_storage' };
+  const oss = ossConfig(cfg); const key = objectKey(cfg, localPath); const date = new Date().toUTCString();
+  const result = await requestBuffer(endpointUrl(oss, key), { method: 'HEAD', headers: {
+    Date: date, Authorization: ossAuthorization(oss, 'HEAD', '', date, key),
+  } });
+  const size = Number(result.headers['content-length'] || 0);
+  if (result.status < 200 || result.status >= 300) return { ok: false, reason: `HTTP ${result.status}`, key };
+  if (!Number.isFinite(size) || size <= 0) return { ok: false, reason: 'empty_object', key };
+  return { ok: true, key, bytes: size, etag: result.headers.etag || null };
+}
 async function archiveLocalFile(cfg, storageRoot, localPath, log, options = {}) {
   const relative = normalizeKey(localPath);
   if (!isOss(cfg)) return { provider: 'local', key: relative, url: `/static/${relative}` };
@@ -104,15 +115,120 @@ async function archiveLocalFile(cfg, storageRoot, localPath, log, options = {}) 
   if (log) log.info('Media archived to OSS', { local_path: relative, oss_key: saved.key, bytes: buffer.length });
   return { provider: 'oss', ...saved };
 }
+
+function archiveStamp() { return new Date().toISOString(); }
+function retentionDays(cfg, sourceType) {
+  const configured = ossConfig(cfg).local_retention_days;
+  const values = typeof configured === 'object' && configured ? configured : { default: configured };
+  const type = String(sourceType || '').toLowerCase();
+  const key = type.includes('video') ? 'video' : type.includes('image') ? 'image' : type.includes('audio') ? 'audio' : 'default';
+  const fallback = key === 'video' ? 14 : 30;
+  const days = Number(values[key] ?? values.default ?? fallback);
+  return Number.isFinite(days) && days >= 1 ? Math.min(days, 3650) : fallback;
+}
+function deleteAfter(cfg, sourceType, at = Date.now()) { return new Date(at + retentionDays(cfg, sourceType) * 86400_000).toISOString(); }
+function trackArchive(db, localPath, sourceType, sourceId, patch = {}) {
+  if (!db) return;
+  const at = archiveStamp();
+  try {
+    db.prepare(`INSERT INTO media_archive_records
+      (local_path, source_type, source_id, oss_key, oss_etag, archive_status, archive_attempts, archive_error, verified_at, local_delete_after, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(local_path) DO UPDATE SET source_type=excluded.source_type, source_id=excluded.source_id,
+        oss_key=excluded.oss_key, oss_etag=excluded.oss_etag, archive_status=excluded.archive_status,
+        archive_attempts=excluded.archive_attempts, archive_error=excluded.archive_error,
+        verified_at=excluded.verified_at, local_delete_after=excluded.local_delete_after, updated_at=excluded.updated_at`)
+      .run(normalizeKey(localPath), sourceType || 'media', sourceId || null, patch.oss_key || null, patch.oss_etag || null,
+        patch.archive_status || 'local_ready', Number(patch.archive_attempts || 0), patch.archive_error || null,
+        patch.verified_at || null, patch.local_delete_after || null, at, at);
+  } catch (_) { /* Older unit-test schemas and pre-migration databases remain local-first. */ }
+}
+
+async function mirrorAndTrack(db, cfg, storageRoot, localPath, sourceType, sourceId, log, options = {}) {
+  const relative = normalizeKey(localPath);
+  if (!isOss(cfg)) {
+    trackArchive(db, relative, sourceType, sourceId, { archive_status: 'local_ready' });
+    return { provider: 'local', status: 'local_ready', local_path: relative };
+  }
+  try {
+    // A mirror never deletes the hot local file. Retention cleanup is a
+    // separate, database-driven operation after the configured retention age.
+    const saved = await archiveLocalFile(cfg, storageRoot, relative, log, { ...options, removeLocal: false });
+    trackArchive(db, relative, sourceType, sourceId, {
+      oss_key: saved.key, oss_etag: saved.etag, archive_status: 'oss_synced',
+      archive_attempts: 1, verified_at: archiveStamp(), local_delete_after: deleteAfter(cfg, sourceType),
+    });
+    return { ...saved, status: 'oss_synced' };
+  } catch (error) {
+    trackArchive(db, relative, sourceType, sourceId, {
+      archive_status: 'pending', archive_attempts: 1,
+      archive_error: String(error.message || 'OSS mirror failed').slice(0, 500),
+    });
+    throw error;
+  }
+}
+
+async function pruneVerifiedLocalCopies(db, cfg, storageRoot, log, limit = 100) {
+  if (!db || !isOss(cfg)) return { skipped: !db ? 'no_database' : 'local_storage' };
+  let rows = [];
+  try {
+    rows = db.prepare(`SELECT local_path, source_type, source_id, oss_key, oss_etag, local_delete_after
+      FROM media_archive_records
+      WHERE archive_status = 'oss_synced' AND local_delete_after IS NOT NULL AND local_delete_after <= ?
+      ORDER BY local_delete_after ASC LIMIT ?`).all(archiveStamp(), limit);
+  } catch (_) { return { skipped: 'archive_table_unavailable' }; }
+  const result = { scanned: rows.length, pruned: 0, retained: 0, failed: 0 };
+  for (const row of rows) {
+    const relative = normalizeKey(row.local_path); const local = path.join(storageRoot, relative);
+    if (!fs.existsSync(local)) {
+      trackArchive(db, relative, row.source_type, row.source_id, { ...row, archive_status: 'local_pruned', verified_at: archiveStamp() }); result.pruned++; continue;
+    }
+    try {
+      // HEAD is the deletion gate: an upload acknowledgment alone is not
+      // enough; the private object must still be readable through OSS.
+      const verified = await verifyOssObject(cfg, relative);
+      if (!verified.ok) {
+        trackArchive(db, relative, row.source_type, row.source_id, { ...row, archive_status: 'oss_synced', archive_error: `Retention check failed: ${verified.reason}`, local_delete_after: new Date(Date.now() + 86400_000).toISOString() });
+        result.retained++; continue;
+      }
+      fs.unlinkSync(local);
+      trackArchive(db, relative, row.source_type, row.source_id, { ...row, oss_key: verified.key, oss_etag: verified.etag || row.oss_etag, archive_status: 'local_pruned', archive_error: null, verified_at: archiveStamp(), local_delete_after: null });
+      result.pruned++;
+      log?.info('Pruned verified local media hot copy', { local_path: relative, oss_key: verified.key });
+    } catch (error) {
+      trackArchive(db, relative, row.source_type, row.source_id, { ...row, archive_status: 'oss_synced', archive_error: `Retention deletion failed: ${String(error.message || error).slice(0, 400)}` });
+      result.failed++;
+    }
+  }
+  return result;
+}
+
+async function retryPendingMirrors(db, cfg, storageRoot, log, limit = 100) {
+  if (!db || !isOss(cfg)) return { skipped: !db ? 'no_database' : 'local_storage' };
+  let rows = [];
+  try { rows = db.prepare(`SELECT local_path, source_type, source_id FROM media_archive_records WHERE archive_status = 'pending' ORDER BY updated_at ASC LIMIT ?`).all(limit); } catch (_) { return { skipped: 'archive_table_unavailable' }; }
+  let synced = 0; let failed = 0;
+  for (const row of rows) {
+    try { await mirrorAndTrack(db, cfg, storageRoot, row.local_path, row.source_type, row.source_id, log); synced += 1; }
+    catch (_) { failed += 1; }
+  }
+  return { synced, failed };
+}
 function staticHandler(cfg, storageRoot) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     let key; try { key = normalizeKey(decodeURIComponent(req.path)); } catch (_) { return res.status(400).end(); }
     const local = path.join(storageRoot, key);
-    // Legacy and not-yet-migrated files keep working. New OSS-only videos have
-    // no local file and are redirected straight to the CDN/OSS object.
+    // The application route remains the authorization boundary. If a future
+    // retention job removes a verified local hot copy, proxy bytes from the
+    // private OSS object instead of leaking a permanent public object URL.
     if (fs.existsSync(local)) return res.sendFile(local);
-    if (isOss(cfg) && ossConfig(cfg).public_base_url) return res.redirect(302, objectUrl(cfg, key));
-    return next();
+    try {
+      const body = await readMediaBuffer(cfg, storageRoot, key);
+      if (!body) return next();
+      const ext = path.extname(key).toLowerCase();
+      const type = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' }[ext] || 'application/octet-stream';
+      res.type(type).send(body);
+    } catch (error) { next(error); }
   };
 }
 async function migrateLocalTree(cfg, storageRoot, log, options = {}) {
@@ -135,17 +251,20 @@ async function migrateLocalTree(cfg, storageRoot, log, options = {}) {
 
 function startArchiveScheduler(cfg, storageRoot, log, options = {}) {
   if (!isOss(cfg)) return { runNow: async () => ({ skipped: 'local_storage' }), stop: () => {} };
-  if (ossConfig(cfg).auto_archive_enabled !== true) return { runNow: async () => ({ skipped: 'auto_archive_disabled' }), stop: () => {} };
-  assertOssDeliveryReady(cfg);
-  const minAgeMs = Math.max(30_000, Number(options.min_age_ms ?? 5 * 60_000));
+  if (!ossConfig(cfg).auto_archive_enabled) return { runNow: async () => ({ skipped: 'auto_archive_disabled' }), stop: () => {} };
+  // Do not scan a directory and delete files after a fixed age. Mirroring is
+  // tracked per media record; local cleanup belongs to a future retention job.
+  if (!options.db) return { runNow: async () => ({ skipped: 'no_archive_database' }), stop: () => {} };
   const intervalMs = Math.max(30_000, Number(options.interval_ms ?? 60_000));
   let running = false;
   const runNow = async () => {
     if (running) return { skipped: 'already_running' };
     running = true;
     try {
-      const result = await migrateLocalTree(cfg, storageRoot, log, { remove_local: true, min_age_ms: minAgeMs });
-      if (result.migrated || result.failed) log.info('OSS background archive sweep completed', result);
+      const mirror = await retryPendingMirrors(options.db, cfg, storageRoot, log);
+      const retention = await pruneVerifiedLocalCopies(options.db, cfg, storageRoot, log);
+      const result = { mirror, retention };
+      if (mirror.synced || mirror.failed || retention.pruned || retention.failed) log.info('OSS mirror and retention sweep completed', result);
       return result;
     } finally { running = false; }
   };
@@ -155,4 +274,4 @@ function startArchiveScheduler(cfg, storageRoot, log, options = {}) {
   return { runNow, stop: () => clearInterval(timer) };
 }
 
-module.exports = { normalizeKey, isOss, objectKey, objectUrl, publicBaseUrl, putBuffer, readMediaBuffer, archiveLocalFile, staticHandler, migrateLocalTree, startArchiveScheduler, assertOssDeliveryReady };
+module.exports = { normalizeKey, isOss, objectKey, objectUrl, publicBaseUrl, putBuffer, readMediaBuffer, verifyOssObject, archiveLocalFile, mirrorAndTrack, retryPendingMirrors, pruneVerifiedLocalCopies, staticHandler, migrateLocalTree, startArchiveScheduler, assertOssDeliveryReady };

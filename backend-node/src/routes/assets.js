@@ -6,6 +6,12 @@ function routes(db, log, cfg) {
     list: (req, res) => {
       try {
         const query = { ...req.query, owner_user_id: req.auth.id };
+        if (String(query.scope || '').toLowerCase() === 'project') {
+          const dramaId = Number(query.drama_id);
+          if (!Number.isInteger(dramaId) || dramaId <= 0 || !db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(dramaId, req.auth.id)) {
+            return response.notFound(res, '项目不存在');
+          }
+        }
         // Backfill legacy projects on their first material-pool read. New
         // entity writes are synchronized in their services, so this only
         // migrates existing character/scene/prop images once.
@@ -26,6 +32,22 @@ function routes(db, log, cfg) {
       } catch (err) {
         log.error('assets create', { error: err.message });
         response.internalError(res, err.message);
+      }
+    },
+    linkProjectResource: (req, res) => {
+      try {
+        const dramaId = Number(req.body?.drama_id);
+        const resourceType = String(req.body?.resource_type || '').trim();
+        const resourceId = Number(req.body?.resource_id);
+        if (!Number.isInteger(dramaId) || dramaId <= 0 || !Number.isInteger(resourceId) || resourceId <= 0) return response.badRequest(res, '请提供有效的项目与资源 ID');
+        if (!db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(dramaId, req.auth.id)) return response.notFound(res, '项目不存在');
+        const linked = require('../services/assetMappingService').linkProjectResource(db, log, dramaId, resourceType, resourceId);
+        if (linked.status === 'not_found') return response.notFound(res, '项目资源不存在');
+        if (linked.status === 'detached') return response.error(res, 409, 'RESOURCE_DETACHED', '该资源已从素材库解除关联；分镜引用不会自动恢复。');
+        response.success(res, linked.asset);
+      } catch (err) {
+        log.error('assets link project resource', { error: err.message });
+        response.badRequest(res, err.message);
       }
     },
     get: (req, res) => {

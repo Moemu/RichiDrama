@@ -75,6 +75,21 @@ function saveResourceCertification(db, table, id, value) {
     .run(JSON.stringify(value), value.updated_at, id);
 }
 
+function markCertificationFailed(db, kind, id, error) {
+  const table = tableFor(kind);
+  if (!table) return;
+  try {
+    const row = db.prepare(`SELECT seedance2_asset FROM ${table} WHERE id = ? AND deleted_at IS NULL`).get(Number(id));
+    if (!row) return;
+    const previous = parse(row.seedance2_asset) || {};
+    const updated_at = new Date().toISOString();
+    saveResourceCertification(db, table, id, { ...previous, status: 'failed', error: String(error || 'SD2 认证提交失败'), updated_at });
+  } catch (_) {
+    // A missing legacy column must never turn a recoverable provider failure
+    // into a process-level crash.
+  }
+}
+
 function scheduleResourceSettlement(db, log, table, id, route, created, initial, pollOverride = null) {
   const key = `${table}:${id}`;
   if (activeCertificationPolls.has(key)) return;
@@ -203,8 +218,14 @@ async function runCertificationBatch(db, log, cfg, ids, concurrency = 2) {
   const queue = [...ids]; const outcome = { started: 0, failed: 0 };
   const worker = async () => { while (queue.length) {
     const id = queue.shift();
-    try { const result = await certify(db, log, cfg, id); if (result.ok) outcome.started++; else outcome.failed++; }
-    catch (error) { outcome.failed++; log.warn('SD2 batch certification submission failed', { asset_id: id, error: error.message }); }
+    try {
+      const result = await certify(db, log, cfg, id);
+      if (result.ok) outcome.started++;
+      else { outcome.failed++; markCertificationFailed(db, 'asset', id, result.error); }
+    } catch (error) {
+      outcome.failed++; markCertificationFailed(db, 'asset', id, error.message);
+      log.warn('SD2 batch certification submission failed', { asset_id: id, error: error.message });
+    }
   } };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, Number(concurrency) || 2), ids.length) }, worker));
   return outcome;
@@ -238,8 +259,13 @@ function resumePendingCertifications(db, log, cfg, options = {}) {
         const cert = parse(row.seedance2_asset);
         const status = String(cert?.status || '').toLowerCase();
         if (status === 'queued') {
-          try { await (kind === 'asset' ? certify(db, log, cfg, row.id) : certifyResource(db, log, cfg, kind, row.id)); }
-          catch (error) { log.warn('SD2 queued certification recovery failed', { table, id: row.id, error: error.message }); }
+          try {
+            const result = await (kind === 'asset' ? certify(db, log, cfg, row.id) : certifyResource(db, log, cfg, kind, row.id));
+            if (!result?.ok) markCertificationFailed(db, kind, row.id, result?.error);
+          } catch (error) {
+            markCertificationFailed(db, kind, row.id, error.message);
+            log.warn('SD2 queued certification recovery failed', { table, id: row.id, error: error.message });
+          }
           continue;
         }
         if (status !== 'processing' || !cert?.hub_asset_id) continue;
@@ -265,4 +291,4 @@ function resumePendingCertifications(db, log, cfg, options = {}) {
   return { refreshNow: refreshOne, stop: () => timer && clearInterval(timer) };
 }
 
-module.exports = { certify, refresh, queueBatchCertification, runCertificationBatch, ownedImageAssetIds, markStale, certifyResource, refreshResource, markResourceStale, parse, sourceFingerprint, createdAssetFromResult, scheduleResourceSettlement, resumePendingCertifications };
+module.exports = { certify, refresh, queueBatchCertification, runCertificationBatch, ownedImageAssetIds, markStale, markCertificationFailed, certifyResource, refreshResource, markResourceStale, parse, sourceFingerprint, createdAssetFromResult, scheduleResourceSettlement, resumePendingCertifications };

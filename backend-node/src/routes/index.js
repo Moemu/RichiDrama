@@ -367,6 +367,7 @@ function setupRouter(cfg, db, log) {
   // ---------- assets ----------
   r.get('/assets', assets.list);
   r.post('/assets', assets.create);
+  r.post('/assets/project-resource-link', assets.linkProjectResource);
   r.post('/assets/import/image/:image_gen_id', assets.importImage);
   r.post('/assets/import/video/:video_gen_id', assets.importVideo);
   r.post('/assets/concat', assets.concat);

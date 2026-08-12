@@ -87,7 +87,7 @@ function createApp() {
     } else {
       app.use('/static', mediaStorage.staticHandler(config, storageRoot));
     }
-    mediaStorage.startArchiveScheduler(config, storageRoot, log);
+    mediaStorage.startArchiveScheduler(config, storageRoot, log, { db });
   } catch (e) {
     console.warn('Static storage mount skipped:', e.message);
   }

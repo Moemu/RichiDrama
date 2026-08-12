@@ -24,16 +24,22 @@ function buildAuthorizationUsage(meters, billingSettings, duration) {
   return usage;
 }
 
+function maxDurationForModel(model) {
+  return /seedance[-_]?2[-_]?5|2[-_]?5[-_]?260628/i.test(String(model || '')) ? 30 : 15;
+}
+
 function create(db, log, body, billingUser) {
-  body = { ...(body || {}), duration: Math.min(15, Math.max(1, Number(body?.duration) || 15)) };
+  body = { ...(body || {}) };
+  if (!String(body.model || '').trim() || String(body.model).trim() === 'auto') throw new Error('请选择一个明确的视频模型');
   const prompt = String(body.prompt || '').trim();
   if (!prompt) throw new Error('提示词不能为空');
   const input = Array.isArray(body.assets) ? body.assets : [];
-  if (input.length > 12) throw new Error('一次创作最多使用 12 个素材');
+  if (input.length > 50) throw new Error('一次创作最多使用 50 个素材');
   const assets = prioritizePromptReferenceAssets(input.map((entry, ordinal) => resolveAsset(db, entry, ordinal, body.owner_user_id)), body.prompt_document, prompt);
-  validateShotAssetLimits(assets);
   const capability = capabilityService.resolve(db, body.model, assets);
   if (!capability.model) throw new Error('请先在 AI 配置中启用视频模型');
+  validateShotAssetLimits(assets, capability);
+  body.duration = Math.min(maxDurationForModel(capability.model), Math.max(4, Math.round(Number(body.duration) || 15)));
   const creationMode = body.creation_mode || body.settings?.creation_mode || 'multi_reference';
   validateCreationMode(creationMode, assets, capability);
   const routed = routeAssets(expandVideoReferences(db, log, assets, capability.supports), capability.supports, body.audio_strategy);
@@ -105,7 +111,7 @@ function create(db, log, body, billingUser) {
   if (body.shot_id && body.sequence_id) {
     const shot = db.prepare('SELECT id FROM omni_video_sequence_shots WHERE id = ? AND sequence_id = ? AND deleted_at IS NULL').get(Number(body.shot_id), Number(body.sequence_id));
     if (shot) db.prepare('UPDATE omni_video_sequence_shots SET omni_job_id = ?, prompt = ?, prompt_document_json = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?').run(
-      jobId, modelPrompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model || 'auto', creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: Math.min(15, Number(body.duration) || 5), resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
+      jobId, modelPrompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model, creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: body.duration, resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
   }
   if (waitingForSd2) {
     taskService.updateTaskStatus(db, task.id, 'processing', 0, '真人素材认证准备中，完成后将自动开始生成');
@@ -231,14 +237,27 @@ function validateCreationMode(mode, assets, capability) {
   if (!capability.supports?.first_last_frame) throw new Error(`模型“${capability.model}”不支持首尾帧生视频，请切换模型或创作模式`);
 }
 
-function validateShotAssetLimits(assets) {
+function assetLimitsForCapability(capability) {
+  if (!/seedance[-_]?2[-_]?5|2[-_]?5[-_]?260628/i.test(String(capability?.model || ''))) return SHOT_ASSET_LIMITS;
+  const limits = capability?.limits || {};
+  return {
+    total: Number(limits.total_reference?.max || 50),
+    image: Number(limits.image_reference?.max || 30),
+    video: Number(limits.video_reference?.max || 10),
+    audio: Number(limits.audio_reference?.max || 10),
+  };
+}
+
+function validateShotAssetLimits(assets, capability = null) {
+  const max = assetLimitsForCapability(capability);
+  if (assets.length > max.total) throw new Error(`asset count exceeds the per-shot limit of ${max.total}`);
   const counts = assets.reduce((result, asset) => {
-    if (Object.prototype.hasOwnProperty.call(SHOT_ASSET_LIMITS, asset.type)) result[asset.type] += 1;
+    if (Object.prototype.hasOwnProperty.call(max, asset.type)) result[asset.type] += 1;
     return result;
   }, { image: 0, video: 0, audio: 0 });
   for (const type of ['image', 'video', 'audio']) {
-    if (counts[type] > SHOT_ASSET_LIMITS[type]) {
-      throw new Error(`${type} asset count exceeds the per-shot limit of ${SHOT_ASSET_LIMITS[type]}`);
+    if (counts[type] > max[type]) {
+      throw new Error(`${type} asset count exceeds the per-shot limit of ${max[type]}`);
     }
   }
 }
@@ -410,4 +429,4 @@ function startSd2WaitingGenerationRecovery(db, log) {
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, retry, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };

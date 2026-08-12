@@ -29,7 +29,7 @@
           <template v-else-if="activeJob && ['failed','retryable','invalid'].includes(activeJob.status)"><el-icon class="stage-warning"><WarningFilled /></el-icon><b>{{ activeJob.status === 'invalid' ? '当前历史任务无效' : '当前镜头生成失败' }}</b><small>{{ activeJob.error_msg }}</small><el-button v-if="activeJob.status === 'retryable'" type="primary" @click="retry(activeJob)">重新生成</el-button></template>
           <template v-else><div class="selected-mosaic"><img v-for="asset in chosenImageAssets.slice(0, 5)" :key="asset.id" :src="assetUrl(asset)" /></div><div class="empty-play">▶</div><b>{{ chosenAssets.length ? '当前镜头已编排，等待生成' : '为当前镜头添加素材' }}</b></template>
         </div>
-        <div class="time-ruler"><span>0秒</span><div><i :style="{ width: `${Math.min(100, duration / 15 * 100)}%` }"></i></div><span>{{ duration }}秒 / 15秒</span></div>
+        <div class="time-ruler"><span>0秒</span><div><i :style="{ width: `${Math.min(100, duration / maxDuration * 100)}%` }"></i></div><span>{{ duration }}秒 / {{ maxDuration }}秒</span></div>
         <div class="shot-tabs"><span class="active">本分镜脚本</span><span>本分镜素材 {{ chosenAssets.length }}</span><span>镜头 {{ activeShotIndex + 1 }} / {{ shots.length }}</span></div>
         <div class="shot-script"><OmniAssetPromptEditor v-model="prompt" :assets="assets" :chosen-ids="selected" @pick="onPickFromEditor" @references="setPromptReferences" /></div>
       </section>
@@ -57,7 +57,11 @@
             <div v-if="!lastFrameAsset" class="frame-empty"><el-icon><Picture /></el-icon><span class="frame-label">尾帧</span><small>点击选择</small></div>
           </div>
         </div>
-        <details class="advanced-settings"><summary>镜头与模型设置 <span>模型、比例、时长、分辨率、音频</span></summary><GenerationSettings v-model="generationSettings" :max-duration="15" /><div class="parameters"><label>音频<el-select v-model="audioStrategy" size="small"><el-option label="音频参考" value="reference_only"/><el-option label="成片混音" value="post_mix"/></el-select></label></div></details>
+        <section class="t0-generation-settings" aria-label="生成参数">
+          <div class="t0-settings-heading"><b>生成参数</b><small>模型、比例、时长、分辨率、音频</small></div>
+          <GenerationSettings v-model="generationSettings" :max-duration="maxDuration" />
+          <div class="parameters"><label>音频<el-select v-model="audioStrategy" size="small"><el-option label="音频参考" value="reference_only"/><el-option label="成片混音" value="post_mix"/></el-select></label></div>
+        </section>
 
         <div class="materials-title"><b>当前镜头素材</b><div><el-select v-if="isProjectMode" v-model="assetScope" size="small" class="asset-scope"><el-option label="全部素材" value="all"/><el-option label="本项目素材" value="project"/><el-option label="全局素材" value="global"/></el-select><el-button text size="small" @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
         <input ref="fileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="uploadFiles" />
@@ -138,7 +142,7 @@ const embedded = computed(() => componentProps.embedded)
 const projectEpisodeId = computed(() => Number(componentProps.projectEpisodeId || route.query.episode_id || 0))
 const projectDramaId = computed(() => Number(componentProps.projectDramaId || route.query.drama_id || 0))
 const isProjectMode = computed(() => Number.isInteger(projectEpisodeId.value) && projectEpisodeId.value > 0)
-const selected = ref(new Set()), selectedOrder = ref([]), assetScope = ref('all'), prompt = ref(''), model = ref('auto'), aspectRatio = ref('16:9'), duration = ref(15), resolution = ref('720p'), audioStrategy = ref('reference_only'), creationMode = ref('multi_reference')
+const selected = ref(new Set()), selectedOrder = ref([]), assetScope = ref('project'), prompt = ref(''), model = ref(''), aspectRatio = ref('16:9'), duration = ref(15), resolution = ref('720p'), audioStrategy = ref('reference_only'), creationMode = ref('multi_reference')
 const promptDocument = ref({ text: '', refs: [] })
 const keepOriginalAudio = ref(false), audioVolume = ref(1), audioFadeSeconds = ref(0), creating = ref(false), certifyingId = ref(null), extractingPosition = ref(''), savedResultJobId = ref(null), requestPreviewOpen = ref(false), polishingPrompt = ref(false), polishSuggestion = ref(''), stagePhase = ref(''), fileInput = ref(null), uploadLimits = ref(null)
 const draggedShotId = ref(null), draggedAssetId = ref(null), loadingShot = ref(false)
@@ -156,9 +160,19 @@ const activeJob = computed(() => {
 })
 const activeVideoUrl = computed(() => activeJob.value?.videoUrl || currentShot.value?.video_url || '')
 const canExtractFrames = computed(() => Number(activeJob.value?.video_generation_id) > 0 && activeJob.value?.status === 'completed')
-const shotLimits = computed(() => uploadLimits.value?.shot || { total: 12, image: 9, video: 3, audio: 3 })
-const currentCapability = computed(() => capabilities.value.find((item) => item.model === model.value) || capabilities.value.find((item) => item.is_default) || capabilities.value[0] || null)
-const generationSettings = computed({ get: () => ({ video_model: model.value, aspect_ratio: aspectRatio.value, duration: duration.value, resolution: resolution.value }), set: (next) => { model.value = next.video_model || 'auto'; aspectRatio.value = next.aspect_ratio || '16:9'; duration.value = Math.min(15, Number(next.duration) || 15); resolution.value = next.resolution || '720p' } })
+const currentCapability = computed(() => capabilities.value.find((item) => item.model === model.value) || null)
+const shotLimits = computed(() => {
+  const base = uploadLimits.value?.shot || { total: 12, image: 9, video: 3, audio: 3 }
+  const limits = currentCapability.value?.limits || {}
+  if (!limits.total_reference?.max) return base
+  return {
+    total: Number(limits.total_reference.max), image: Number(limits.image_reference?.max || base.image),
+    video: Number(limits.video_reference?.max || base.video), audio: Number(limits.audio_reference?.max || base.audio),
+  }
+})
+const maxDuration = computed(() => Math.max(4, Number(currentCapability.value?.limits?.duration?.max || 15)))
+const normalizeDuration = (value) => Math.min(maxDuration.value, Math.max(4, Math.round(Number(value) || 15)))
+const generationSettings = computed({ get: () => ({ video_model: model.value, aspect_ratio: aspectRatio.value, duration: duration.value, resolution: resolution.value }), set: (next) => { model.value = next.video_model || ''; aspectRatio.value = next.aspect_ratio || '16:9'; duration.value = normalizeDuration(next.duration); resolution.value = next.resolution || '720p' } })
 const selectionCounts = computed(() => chosenAssets.value.reduce((result, asset) => { if (Object.prototype.hasOwnProperty.call(result, asset.type)) result[asset.type] += 1; return result }, { image: 0, video: 0, audio: 0 }))
 const firstFrameCount = computed(() => chosenAssets.value.filter((asset) => asset.usage === 'first_frame').length)
 const lastFrameCount = computed(() => chosenAssets.value.filter((asset) => asset.usage === 'last_frame').length)
@@ -168,13 +182,13 @@ const pickerImageAssets = computed(() => assets.value.filter((asset) => asset.ty
 /** 认证中的素材会由服务端等待并自动续跑；仅终态失败才提示用户处理。 */
 const expiredIdentityAssets = computed(() => chosenImageAssets.value.filter((asset) => asset.requires_sd2_identity && ['invalid', 'failed', 'stale'].includes(sd2Status(asset))))
 const framePicker = ref({ open: false, target: 'first_frame' })
-const canCreate = computed(() => !!currentCapability.value && prompt.value.trim() && (creationMode.value !== 'first_last_frame' || (firstFrameCount.value === 1 && lastFrameCount.value <= 1 && currentCapability.value.supports?.first_last_frame)))
+const canCreate = computed(() => !!model.value && !!currentCapability.value && prompt.value.trim() && (creationMode.value !== 'first_last_frame' || (firstFrameCount.value === 1 && lastFrameCount.value <= 1 && currentCapability.value.supports?.first_last_frame)))
 const nativeImageLimit = computed(() => Math.min(shotLimits.value.image, Number(currentCapability.value?.supports?.image_reference?.max || 0)))
 const limitSummary = computed(() => `单文件：图片 ${uploadLimits.value?.files?.image?.max_mb || 30}MB、视频 ${uploadLimits.value?.files?.video?.max_mb || 50}MB、音频 ${uploadLimits.value?.files?.audio?.max_mb || 15}MB；单镜头最多 ${shotLimits.value.total} 个素材。`)
 const selectionSummary = computed(() => `已选 ${chosenAssets.value.length}/${shotLimits.value.total}；图片 ${selectionCounts.value.image}/${shotLimits.value.image}，视频 ${selectionCounts.value.video}/${shotLimits.value.video}，音频 ${selectionCounts.value.audio}/${shotLimits.value.audio}${currentCapability.value ? `；当前模型原生图片参考 ${selectionCounts.value.image}/${nativeImageLimit.value}` : ''}`)
 const stageLabel = computed(() => ({ completed: '成片完成', processing: '生成中', failed: '生成失败', retryable: '可重试', invalid: '无效任务' })[activeJob.value?.status] || '镜头草稿')
 const stageTagType = computed(() => ({ completed: 'success', failed: 'danger', retryable: 'warning', invalid: 'info' })[activeJob.value?.status] || 'info')
-const requestPreview = computed(() => ({ prompt: prompt.value, creation_mode: creationMode.value, model: currentCapability.value?.model || model.value, aspect_ratio: aspectRatio.value, duration_seconds: Math.min(15, Number(duration.value) || 15), resolution: resolution.value, audio_strategy: audioStrategy.value, assets: chosenAssets.value.map((asset, index) => ({ ordinal: index + 1, name: asset.alias || asset.name, type: asset.type, usage: asset.usage, routing: assetRouteHint(asset) })) }))
+const requestPreview = computed(() => ({ prompt: prompt.value, creation_mode: creationMode.value, model: currentCapability.value?.model || model.value, aspect_ratio: aspectRatio.value, duration_seconds: normalizeDuration(duration.value), resolution: resolution.value, audio_strategy: audioStrategy.value, assets: chosenAssets.value.map((asset, index) => ({ ordinal: index + 1, name: asset.alias || asset.name, type: asset.type, usage: asset.usage, routing: assetRouteHint(asset) })) }))
 
 async function suggestPolish() {
   if (!prompt.value.trim() || polishingPrompt.value) return
@@ -260,7 +274,7 @@ function projectShot(storyboard, video = null) {
     prompt_document: promptDocumentFor(storyboard.universal_segment_text || storyboard.video_prompt || ''),
     assets: assetIds.map((asset_id) => ({ asset_id, usage: asset_id === firstFrameId ? 'first_frame' : asset_id === lastFrameId ? 'last_frame' : usage[asset_id] || 'reference' })),
     settings: {
-      model: storyboard.video_model || 'auto', creation_mode: storyboard.omni_creation_mode || 'multi_reference',
+      model: storyboard.video_model === 'auto' ? '' : (storyboard.video_model || ''), creation_mode: storyboard.omni_creation_mode || 'multi_reference',
       aspect_ratio: storyboard.video_aspect_ratio || '16:9', duration: Number(storyboard.duration) || 5,
       resolution: storyboard.video_resolution || '720p', audio_strategy: storyboard.audio_strategy || 'reference_only',
       keep_original_audio: !!storyboard.keep_original_audio, audio_volume: storyboard.audio_volume ?? 1, audio_fade_seconds: storyboard.audio_fade_seconds ?? 0,
@@ -336,7 +350,17 @@ async function loadAllAssets(params = {}) {
   return { items }
 }
 
-function loadShot(shot) { loadingShot.value = true; activeShotId.value = shot.id; selectedHistoryJobId.value = null; prompt.value = shot.prompt || ''; promptDocument.value = promptDocumentFor(prompt.value); const settings = shot.settings || {}; model.value = settings.model || 'auto'; creationMode.value = settings.creation_mode || 'multi_reference'; aspectRatio.value = settings.aspect_ratio || '16:9'; duration.value = Math.min(15, Number(settings.duration) || 5); resolution.value = settings.resolution || '720p'; audioStrategy.value = settings.audio_strategy || 'reference_only'; keepOriginalAudio.value = !!settings.keep_original_audio; audioVolume.value = settings.audio_volume ?? 1; audioFadeSeconds.value = settings.audio_fade_seconds ?? 0; const ids = (shot.assets || []).map((item) => Number(item.asset_id)).filter((id) => assets.value.some((asset) => asset.id === id)); const firstFrameId = Number(shot.omni_first_frame_asset_id) || null; const lastFrameId = Number(shot.omni_last_frame_asset_id) || null; selected.value = new Set(ids); selectedOrder.value = ids; (shot.assets || []).forEach((saved) => { const asset = assets.value.find((item) => item.id === Number(saved.asset_id)); if (asset) { asset.usage = Number(saved.asset_id) === firstFrameId ? 'first_frame' : Number(saved.asset_id) === lastFrameId ? 'last_frame' : saved.usage || asset.usage; asset.alias = saved.alias || asset.alias } }); promptDocument.value = promptDocumentFor(prompt.value); loadShotHistory(shot); queueMicrotask(() => { loadingShot.value = false }) }
+async function loadProjectScopedAssets() {
+  const [project, global] = await Promise.all([
+    loadAllAssets({ scope: 'project', drama_id: projectDramaId.value }),
+    loadAllAssets({ scope: 'global' }),
+  ])
+  const byId = new Map()
+  ;[...(project.items || []), ...(global.items || [])].forEach((item) => byId.set(Number(item.id), item))
+  return { items: [...byId.values()] }
+}
+
+function loadShot(shot) { loadingShot.value = true; activeShotId.value = shot.id; selectedHistoryJobId.value = null; prompt.value = shot.prompt || ''; promptDocument.value = promptDocumentFor(prompt.value); const settings = shot.settings || {}; model.value = settings.model === 'auto' ? '' : (settings.model || ''); creationMode.value = settings.creation_mode || 'multi_reference'; aspectRatio.value = settings.aspect_ratio || '16:9'; duration.value = normalizeDuration(settings.duration || 5); resolution.value = settings.resolution || '720p'; audioStrategy.value = settings.audio_strategy || 'reference_only'; keepOriginalAudio.value = !!settings.keep_original_audio; audioVolume.value = settings.audio_volume ?? 1; audioFadeSeconds.value = settings.audio_fade_seconds ?? 0; const ids = (shot.assets || []).map((item) => Number(item.asset_id)).filter((id) => assets.value.some((asset) => asset.id === id)); const firstFrameId = Number(shot.omni_first_frame_asset_id) || null; const lastFrameId = Number(shot.omni_last_frame_asset_id) || null; selected.value = new Set(ids); selectedOrder.value = ids; (shot.assets || []).forEach((saved) => { const asset = assets.value.find((item) => item.id === Number(saved.asset_id)); if (asset) { asset.usage = Number(saved.asset_id) === firstFrameId ? 'first_frame' : Number(saved.asset_id) === lastFrameId ? 'last_frame' : saved.usage || asset.usage; asset.alias = saved.alias || asset.alias } }); promptDocument.value = promptDocumentFor(prompt.value); loadShotHistory(shot); queueMicrotask(() => { loadingShot.value = false }) }
 async function loadShotHistory(shot) {
   if (!shot?.id) return
   const shotId = Number(shot.id)
@@ -356,7 +380,7 @@ async function selectShot(shot) { if (shot.id === activeShotId.value) return; aw
 async function saveCurrentShot(showMessage = true) {
   if (!sequence.value || !currentShot.value || loadingShot.value) return
   clearTimeout(saveTimer)
-  const settings = { model: model.value, creation_mode: creationMode.value, aspect_ratio: aspectRatio.value, duration: Math.min(15, Number(duration.value) || 15), resolution: resolution.value || '720p', audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value }
+  const settings = { model: model.value, creation_mode: creationMode.value, aspect_ratio: aspectRatio.value, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value }
   if (isProjectMode.value) {
     const ids = chosenAssets.value.map((asset) => Number(asset.id))
     const usage = Object.fromEntries(chosenAssets.value.map((asset) => [asset.id, asset.usage || 'reference']))
@@ -477,7 +501,7 @@ async function certify(asset) {
   }
 }
 
-async function create() { creating.value = true; stagePhase.value = '保存镜头'; try { if (!canCreate.value) throw new Error('请补齐当前视频创作模式所需的素材与模型能力'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id }), prompt: prompt.value, prompt_document: promptDocument.value, creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: Math.min(15, Number(duration.value) || 15), resolution: resolution.value || '720p', audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: chosenAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: asset.alias || asset.name, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const status = res.status || 'processing'; const job = { id: res.omni_job_id, prompt: prompt.value, status, video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = status; stagePhase.value = status === 'sd2_waiting' ? '真人素材认证准备中，完成后自动生成' : '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
+async function create() { creating.value = true; stagePhase.value = '保存镜头'; try { if (!canCreate.value) throw new Error('请补齐当前视频创作模式所需的素材与模型能力'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id }), prompt: prompt.value, prompt_document: promptDocument.value, creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: chosenAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: asset.alias || asset.name, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const status = res.status || 'processing'; const job = { id: res.omni_job_id, prompt: prompt.value, status, video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = status; stagePhase.value = status === 'sd2_waiting' ? '真人素材认证准备中，完成后自动生成' : '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
 async function poll(id) { for (let n = 0; n < 450; n++) { await new Promise((resolve) => setTimeout(resolve, 4000)); try { const data = await omniVideoAPI.get(id), job = normalizeJob(data), index = jobs.value.findIndex((item) => String(item.id) === String(id)), historyIndex = shotHistory.value.findIndex((item) => String(item.id) === String(id)); if (index >= 0) jobs.value[index] = job; if (historyIndex >= 0) shotHistory.value[historyIndex] = job; if (String(currentShot.value?.omni_job_id) === String(id)) { currentShot.value.status = job.status; currentShot.value.video_url = job.videoUrl; currentShot.value.generation_error = job.error_msg } if (['completed','failed','retryable'].includes(job.status)) return } catch (_) { return } } }
 async function retry(job) { const res = await omniVideoAPI.retry(job.id); const next = { id: res.omni_job_id, prompt: job.prompt, status: 'processing', video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value?.id : null, shot_id: isProjectMode.value ? null : currentShot.value?.id, created_at: new Date().toISOString() }; jobs.value.unshift(next); shotHistory.value.unshift(next); selectedHistoryJobId.value = next.id; currentShot.value.omni_job_id = next.id; currentShot.value.status = 'processing'; poll(next.id) }
 function downloadCurrentVideo() { if (!activeVideoUrl.value) return; const link = document.createElement('a'); link.href = activeVideoUrl.value; link.download = `local-mini-drama-${activeJob.value?.video_generation_id || currentShot.value?.id || 'storyboard'}.mp4`; document.body.appendChild(link); link.click(); link.remove() }
@@ -489,9 +513,8 @@ watch(chosenAssets, scheduleSave, { deep: true })
 onBeforeUnmount(() => { clearTimeout(saveTimer); saveCurrentShot(false).catch(() => {}) })
 onMounted(async () => {
   try {
-    const baseRequests = [loadAllAssets(), omniVideoAPI.capabilities(), omniVideoAPI.list(), omniVideoAPI.uploadLimits()]
     if (isProjectMode.value) {
-      const [media, caps, history, limits, boards, project] = await Promise.all([...baseRequests, dramaAPI.getStoryboards(projectEpisodeId.value), dramaAPI.get(projectDramaId.value)])
+      const [media, caps, history, limits, boards, project] = await Promise.all([loadProjectScopedAssets(), omniVideoAPI.capabilities(), omniVideoAPI.list(), omniVideoAPI.uploadLimits(), dramaAPI.getStoryboards(projectEpisodeId.value), dramaAPI.get(projectDramaId.value)])
       const allAssets = await ensureProjectResourceAssets(project, media.items || [])
       assets.value = allAssets.filter(Boolean).map((item) => ({ ...item, alias: item.name, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' }))
       capabilities.value = caps || []; uploadLimits.value = limits || null; jobs.value = (history || []).map(normalizeJob)
@@ -501,6 +524,7 @@ onMounted(async () => {
       if (shots.value[0]) loadShot(shots.value[0])
       return
     }
+    const baseRequests = [loadAllAssets(), omniVideoAPI.capabilities(), omniVideoAPI.list(), omniVideoAPI.uploadLimits()]
     const sequenceRequest = route.query.sequence_id ? omniVideoAPI.getSequence(route.query.sequence_id) : omniVideoAPI.defaultSequence()
     const [media, caps, history, limits, seq] = await Promise.all([...baseRequests, sequenceRequest])
     assets.value = (media.items || []).filter((item) => item && Number.isFinite(Number(item.id))).map((item) => ({ ...item, alias: item.name, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' }))
@@ -571,6 +595,19 @@ onMounted(() => {
 @media(max-width:1180px){.workbench{grid-template-columns:minmax(184px,22vw) minmax(0,1fr) minmax(244px,27vw)}.panel{padding:10px}.selected-assets article{grid-template-columns:auto minmax(0,1fr) 92px auto}.player-tools{padding:0 10px}.time-ruler{padding:0 10px}}
 @media(max-width:960px){.workbench{grid-template-columns:minmax(176px,23vw) minmax(0,1fr) minmax(226px,29vw)}.shot-actions{gap:4px}.shot-actions .el-button{padding-left:5px;padding-right:5px}.shot-preview{height:94px}.material-pool{grid-template-columns:repeat(3,1fr)}.selected-assets article{grid-template-columns:auto minmax(0,1fr) auto}.selected-assets .el-select{grid-column:2 / -1}.prompt-label{gap:8px}.prompt-label em{max-width:55%;text-align:right}.time-ruler{font-size:11px}}
 @media(max-width:760px){.omni-page{height:auto;overflow:auto}.topbar{height:auto;min-height:58px;flex-wrap:wrap;padding:8px 12px}.topbar-left{flex:1}.topbar-actions{margin-left:auto}.workbench{height:auto;grid-template-columns:minmax(0,1fr)}.center-stage{order:-1;min-height:500px}.shot-panel{max-height:380px}.creation-panel{max-height:none}.shot-list{display:flex;overflow:auto}.shot-card{min-width:190px}.shot-preview{height:100px}.shot-tabs,.player-tools{overflow:auto}.sequence-name{width:min(40vw,180px)}}
+/* T0 创作输入优先：首屏先给提示词与参数留出稳定可编辑面积；播放器和分镜仅保留足够的预览与操作空间。 */
+@media(min-width:761px){
+  .workbench{grid-template-columns:minmax(196px,230px) minmax(0,1fr) minmax(292px,350px)}
+  .video-stage{flex:0 0 clamp(185px,29vh,250px)}
+  .shot-script{flex:1;min-height:214px;display:flex;align-items:stretch}
+  .shot-script :deep(.editor){width:100%;min-height:188px}
+  .shot-preview{height:84px}
+  .shot-card{padding:6px}
+  .t0-generation-settings{position:relative;margin:12px 0 14px!important;padding:11px!important;border:1px solid #77736b!important;border-radius:8px;background:#242321!important;box-shadow:inset 3px 0 0 #f0eee8}
+  .t0-settings-heading{display:flex!important;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px}
+  .t0-settings-heading b{font-size:14px;color:#fffdf7!important}
+  .t0-settings-heading small{font-size:11px;color:#d5d2cb!important}
+}
 /* 左侧分镜管理：统一纵向流自适应宽度，卡片宽度跟随面板，不出横向滚动条。 */
 .shot-list{display:flex!important;flex-direction:column;gap:9px;overflow-y:auto;overflow-x:hidden}
 .shot-card{width:100%;min-width:0!important;box-sizing:border-box}
@@ -616,4 +653,5 @@ onMounted(() => {
 .omni-page.embedded.project-storyboard-page .frame-picker-grid{overscroll-behavior-y:contain;scrollbar-gutter:stable}
 .creation-generate-dock{position:sticky;top:0;z-index:12;display:grid;gap:8px;margin:12px -2px 14px;padding:10px;border:1px solid #69655e;border-radius:8px;background:#181818f2;box-shadow:0 6px 18px #0006;backdrop-filter:blur(8px)}.creation-generate-summary{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.creation-generate-summary b{color:#f5f3ee;font-size:13px}.creation-generate-summary small{color:#c4c1ba;font-size:11px;white-space:nowrap}.creation-generate-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:7px}.creation-generate-actions .generate-button{margin:0!important;min-width:0}.project-storyboard-page .creation-generate-dock{top:-1px;background:#181f29f5;border-color:#3c4958}.project-storyboard-page .creation-generate-summary b{color:#f2f0ea}.project-storyboard-page .creation-generate-summary small{color:#aab4c0}@media(max-width:720px){.creation-generate-dock{position:sticky;top:0;margin-left:0;margin-right:0}.creation-generate-summary{align-items:flex-start;flex-direction:column;gap:3px}.creation-generate-summary small{white-space:normal}}
 @media(max-width:960px){.omni-page.embedded.project-storyboard-page{position:static!important;height:auto!important;min-height:0!important;overflow:visible!important}.omni-page.embedded.project-storyboard-page .workbench{height:auto!important;min-height:520px}}
+.t0-generation-settings{display:grid;gap:10px;margin:12px -2px 14px;padding:12px;border:1px solid #88837a;border-radius:8px;background:#252525}.t0-settings-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.t0-settings-heading b{font-size:14px;color:#f5f3ee}.t0-settings-heading small{font-size:11px;color:#c4c1ba}.center-stage{grid-template-rows:42px minmax(170px,.8fr) 42px 38px minmax(235px,1fr)}.shot-script{min-height:235px;border-top:2px solid #88837a}.project-storyboard-page .t0-generation-settings{background:#202934;border-color:#506174}.project-storyboard-page .t0-settings-heading b{color:#f2f0ea}.project-storyboard-page .t0-settings-heading small{color:#aab4c0}@media(max-width:760px){.center-stage{grid-template-rows:42px minmax(200px,.8fr) 42px 38px minmax(260px,1fr)}.t0-settings-heading{align-items:flex-start;flex-direction:column;gap:3px}}
 </style>

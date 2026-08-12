@@ -28,6 +28,14 @@ storage:
   #   prefix: local-mini-drama
   #   public_base_url: https://media.example.com
   #   auto_archive_enabled: false
+  #   # Local hot copies are pruned only after the matching private OSS object
+  #   # has been verified as readable. Values are days and may also be set by
+  #   # CFG_STORAGE__OSS__LOCAL_RETENTION_DAYS__VIDEO, etc.
+  #   local_retention_days:
+  #     video: 14
+  #     image: 30
+  #     audio: 30
+  #     default: 30
 # 异步视频任务轮询总超时（分钟）；省略或 ≤0 时默认 30
 video:
   generation_timeout_minutes: 30

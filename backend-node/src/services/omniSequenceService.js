@@ -91,7 +91,7 @@ function createShot(db, sequenceId, body) {
   const stamp = now();
   const out = db.prepare(`INSERT INTO omni_video_sequence_shots
     (sequence_id, title, sort_order, prompt, assets_json, settings_json, created_at, updated_at)
-    VALUES (?, ?, ?, '', '[]', ?, ?, ?)`).run(Number(sequenceId), body.title || '未命名镜头', order, JSON.stringify({ model: 'auto', aspect_ratio: '16:9', duration: 15, resolution: '720p', audio_strategy: 'reference_only' }), stamp, stamp);
+    VALUES (?, ?, ?, '', '[]', ?, ?, ?)`).run(Number(sequenceId), body.title || '未命名镜头', order, JSON.stringify({ model: '', aspect_ratio: '16:9', duration: 15, resolution: '720p', audio_strategy: 'reference_only' }), stamp, stamp);
   normalizeOrder(db, sequenceId);
   return listShots(db, sequenceId).find((s) => s.id === Number(out.lastInsertRowid));
 }
@@ -100,7 +100,10 @@ function updateShot(db, sequenceId, shotId, body) {
   const shot = db.prepare('SELECT * FROM omni_video_sequence_shots WHERE id = ? AND sequence_id = ? AND deleted_at IS NULL').get(Number(shotId), Number(sequenceId));
   if (!shot) throw new Error('镜头不存在');
   const settings = body.settings !== undefined ? { ...parse(shot.settings_json, {}), ...body.settings } : parse(shot.settings_json, {});
-  if (settings.duration != null) settings.duration = Math.min(15, Math.max(1, Number(settings.duration) || 15));
+  // Persisted drafts may target Seedance 2.5 (4–30s). The actual generation
+  // route applies the selected model's capability limit before submission.
+  if (settings.duration != null) settings.duration = Math.min(30, Math.max(4, Math.round(Number(settings.duration) || 15)));
+  if (settings.model === 'auto') settings.model = '';
   if (settings.resolution != null && !['480p', '720p', '1080p'].includes(String(settings.resolution))) settings.resolution = '720p';
   db.prepare(`UPDATE omni_video_sequence_shots SET title = ?, prompt = ?, prompt_document_json = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?`).run(
     body.title ?? shot.title, body.prompt ?? shot.prompt, body.prompt_document !== undefined ? JSON.stringify(body.prompt_document) : shot.prompt_document_json,

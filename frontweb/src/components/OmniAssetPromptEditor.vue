@@ -18,8 +18,8 @@
     <div v-if="showPicker" class="asset-picker">
       <button v-for="asset in pickerAssets" :key="asset.id" type="button" @click="insertAsset(asset)">
         <span class="pa-thumb">
-          <img v-if="asset.type === 'image' && thumbUrl(asset)" :src="thumbUrl(asset)" class="pa-thumb-img" alt="" />
-          <img v-else-if="asset.type === 'video' && thumbUrl(asset)" :src="thumbUrl(asset)" class="pa-thumb-img" alt="" />
+          <img v-if="asset.type === 'image' && thumbUrl(asset)" :src="thumbUrl(asset)" class="pa-thumb-img" :alt="asset.alias || asset.name" />
+          <img v-else-if="asset.type === 'video' && thumbUrl(asset)" :src="thumbUrl(asset)" class="pa-thumb-img" :alt="asset.alias || asset.name" />
           <span v-else class="pa-thumb-icon">{{ icon(asset.type) }}</span>
         </span>
         <span class="pa-name">{{ asset.alias || asset.name }}</span>
@@ -187,6 +187,9 @@ function onDrop(e) {
 .asset-picker button { color: var(--text-regular); }
 .asset-picker button:hover { background: var(--bg-hover); color: var(--text-primary); }
 .pa-icon { font-size: 14px; }
+.pa-thumb { width: 64px; height: 64px; flex: 0 0 64px; display: grid; place-items: center; overflow: hidden; border-radius: 5px; background: var(--bg-hover); }
+.pa-thumb-img { width: 100%; height: 100%; object-fit: cover; }
+.pa-thumb-icon { font-size: 20px; }
 .pa-name { flex: 1; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pa-chosen { font-size: 10px; color: var(--text-primary); background: var(--bg-active); padding: 1px 5px; border-radius: 3px; }
 .pa-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 12px; }

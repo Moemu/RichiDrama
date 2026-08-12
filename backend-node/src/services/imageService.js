@@ -1470,6 +1470,19 @@ async function processImageGeneration(db, log, imageGenId) {
     db.prepare(
       'UPDATE image_generations SET status = ?, image_url = ?, local_path = ?, completed_at = ?, updated_at = ? WHERE id = ?'
     ).run('completed', persistedImageUrl, localPath, now2, now2, imageGenId);
+    // Image completion is local-first.  Mirror asynchronously so an OSS
+    // outage never turns a locally readable generation into a failed task;
+    // media_archive_records retains pending mirrors for restart-safe retry.
+    if (localPath) {
+      const mediaStorage = require('./mediaStorageService');
+      const mirrorCfg = require('../config').loadConfig();
+      const mirrorStorageRoot = path.isAbsolute(mirrorCfg.storage?.local_path)
+        ? mirrorCfg.storage.local_path
+        : path.join(process.cwd(), mirrorCfg.storage?.local_path || './data/storage');
+      setImmediate(() => mediaStorage.mirrorAndTrack(
+        db, mirrorCfg, mirrorStorageRoot, localPath, 'image_generation', imageGenId, log
+      ).catch((error) => log.warn('[图生] OSS 镜像待重试，本地文件保持可用', { id: imageGenId, local_path: localPath, error: error.message })));
+    }
     settleImageBilling(db, log, row);
     if (row.task_id) {
       taskService.updateTaskResult(db, row.task_id, {

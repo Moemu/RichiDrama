@@ -32,8 +32,8 @@ function list(db) {
       config_id: item.id,
       model,
       provider: item.provider || '',
-      supports: normalizeSupports(item, declared.supports || declared),
-      limits: declared.limits || settings.video_limits || {},
+      supports: normalizeSupports(item, declared.supports || declared, model),
+      limits: { ...(declared.limits || settings.video_limits || {}), ...seedance25Limits(model) },
       is_default: !!item.is_default && model === item.default_model,
       priority: item.priority || 0,
     }));
@@ -42,18 +42,29 @@ function list(db) {
 
 // A provider setting is only a declaration; native routing needs a matching
 // request adapter. Keep unsupported modes on their explicit fallback paths.
-function normalizeSupports(config, declared = {}) {
+function seedance25Limits(model) {
+  return /seedance[-_]?2[-_]?5|2[-_]?5[-_]?260628/i.test(String(model || ''))
+    ? { duration: { min: 4, max: 30, step: 1 }, image_reference: { max: 30 }, video_reference: { max: 10 }, audio_reference: { max: 10 }, total_reference: { max: 50 }, resolutions: ['480p', '720p'] }
+    : {};
+}
+
+function normalizeSupports(config, declared = {}, selectedModel = '') {
   const supports = { ...DEFAULT_CAPABILITIES, ...declared };
   const protocol = String(config.api_protocol || '').toLowerCase();
-  const model = String(config.default_model || config.model || '').toLowerCase();
+  const model = String(selectedModel || config.default_model || config.model || '').toLowerCase();
   const hasNativeAudioReference = protocol === 'volcengine_omni'
     || protocol === 'kling_omni'
     || ((!protocol || protocol === 'volcengine') && /seedance|doubao-seedance/.test(model));
 
+  const seedance25 = seedance25Limits(model);
+  if (seedance25.image_reference) supports.image_reference = { ...supports.image_reference, ...seedance25.image_reference };
   supports.audio_reference = hasNativeAudioReference && declared.audio_reference !== false;
   // No request adapter currently transmits source-video, extend, or driving-audio
   // parameters. Reporting these as false gives users a deterministic fallback
   // instead of silently dropping a selected asset.
+  // The current ModelArk contents adapter serializes image and audio parts.
+  // Do not advertise native video-reference until the corresponding content
+  // part is implemented; otherwise selected video would be silently omitted.
   supports.video_reference = false;
   supports.video_extend = false;
   supports.audio_driven = false;
@@ -80,4 +91,4 @@ function supportsAssets(supports, assets = []) {
   });
 }
 
-module.exports = { DEFAULT_CAPABILITIES, list, resolve, supportsAssets, normalizeSupports };
+module.exports = { DEFAULT_CAPABILITIES, list, resolve, supportsAssets, normalizeSupports, seedance25Limits };

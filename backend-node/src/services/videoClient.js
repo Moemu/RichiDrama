@@ -507,7 +507,8 @@ function isSeedance2FamilyModel(modelName) {
 
 /**
  * 火山 Seedance 系列：按模型版本归一化时长（秒）。
- * - 2.x：4–15
+ * - 2.5：4–30
+ * - 2.0：4–15
  * - 1.5 Pro/Lite：5–12（官方文档）
  * - 1.0 Pro/Lite：仅 5 或 10
  */
@@ -516,6 +517,9 @@ function normalizeVolcengineDuration(modelName, durationNum) {
   const d = Number(durationNum);
   const safe = Number.isFinite(d) && d > 0 ? Math.round(d) : 5;
 
+  if (/seedance[-_]?2[-_]?5|2[-_]?5[-_]?260628/.test(m)) {
+    return Math.min(30, Math.max(4, safe));
+  }
   if (isSeedance2FamilyModel(m)) {
     return Math.min(15, Math.max(4, safe));
   }
@@ -568,7 +572,9 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
   const refList = Array.isArray(reference_urls) ? reference_urls.filter(Boolean) : [];
   const primary = (image_url || '').trim();
   const orderedUrls = [...(primary ? [primary] : []), ...refList.filter((u) => u !== primary)];
-  const maxRef = 9;
+  // Seedance 2.5 accepts a larger image-reference set. Legacy Seedance
+  // requests keep their established nine-image transport limit.
+  const maxRef = /seedance[-_]?2[-_]?5|2[-_]?5[-_]?260628/i.test(finalModel) ? 30 : 9;
   const urls = orderedUrls.slice(0, maxRef);
 
   const body = {

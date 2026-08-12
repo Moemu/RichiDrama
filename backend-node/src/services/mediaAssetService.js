@@ -93,7 +93,7 @@ async function upload(db, cfg, log, file, body = {}) {
   const syncedAt = new Date().toISOString();
   const metadata = { ...(asset.metadata || {}) };
   try {
-    const mirrored = await mediaStorage.archiveLocalFile(cfg, storagePath, result.local_path, log, { removeLocal: false, contentType: file.mimetype || undefined });
+    const mirrored = await mediaStorage.mirrorAndTrack(db, cfg, storagePath, result.local_path, 'asset', asset.id, log, { contentType: file.mimetype || undefined });
     metadata.persistence = { local: 'available', oss: { status: 'synced', key: mirrored.key, url: mirrored.url, synced_at: syncedAt } };
     db.prepare('UPDATE assets SET metadata_json = ?, updated_at = ? WHERE id = ?')
       .run(JSON.stringify(metadata), syncedAt, asset.id);

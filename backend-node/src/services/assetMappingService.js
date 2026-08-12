@@ -8,10 +8,13 @@ const ENTITY_CONFIG = {
 
 function findMappedAsset(db, dramaId, entityType, entityId) {
   try {
-    return db.prepare("SELECT * FROM assets WHERE drama_id = ? AND source_type = 'project_resource' AND json_extract(metadata_json, '$.resource_type') = ? AND json_extract(metadata_json, '$.resource_id') = ? ORDER BY id DESC LIMIT 1")
+    // A soft-deleted mapping is a durable user decision. Prefer it over any
+    // legacy duplicate so neither list-sync nor storyboard selection can
+    // silently recreate the resource after the user removed it.
+    return db.prepare("SELECT * FROM assets WHERE drama_id = ? AND source_type = 'project_resource' AND json_extract(metadata_json, '$.resource_type') = ? AND json_extract(metadata_json, '$.resource_id') = ? ORDER BY (deleted_at IS NOT NULL) DESC, id DESC LIMIT 1")
       .get(Number(dramaId), entityType, Number(entityId));
   } catch (_) {
-    return db.prepare("SELECT * FROM assets WHERE drama_id = ? AND source_type = 'project_resource' AND metadata_json LIKE ? AND metadata_json LIKE ? ORDER BY id DESC LIMIT 1")
+    return db.prepare("SELECT * FROM assets WHERE drama_id = ? AND source_type = 'project_resource' AND metadata_json LIKE ? AND metadata_json LIKE ? ORDER BY (deleted_at IS NOT NULL) DESC, id DESC LIMIT 1")
       .get(Number(dramaId), '%"resource_type":"' + entityType + '"%', '%"resource_id":' + Number(entityId) + '%');
   }
 }
@@ -69,4 +72,15 @@ function syncDramaAssets(db, log, dramaId) {
   return result;
 }
 
-module.exports = { ensureAsset, syncEntities, syncDramaAssets };
+function linkProjectResource(db, log, dramaId, entityType, entityId) {
+  const config = ENTITY_CONFIG[entityType];
+  if (!config) throw new Error('不支持的项目资源类型');
+  const entity = db.prepare(`SELECT * FROM ${config.table} WHERE id = ? AND drama_id = ? AND deleted_at IS NULL`)
+    .get(Number(entityId), Number(dramaId));
+  if (!entity) return { status: 'not_found', asset: null };
+  const existing = findMappedAsset(db, dramaId, entityType, entityId);
+  if (existing?.deleted_at) return { status: 'detached', asset: null };
+  return { status: 'linked', asset: ensureAsset(db, log, entityType, entity) };
+}
+
+module.exports = { findMappedAsset, ensureAsset, syncEntities, syncDramaAssets, linkProjectResource };

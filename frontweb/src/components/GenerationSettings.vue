@@ -8,17 +8,14 @@
     </label>
     <label>视频模型
       <el-select :model-value="value.video_model || 'auto'" size="small" @update:model-value="set('video_model', $event)">
-        <el-option label="自动匹配" value="auto" />
+        <el-option label="请选择视频模型" value="" disabled />
         <el-option v-for="item in videoModels" :key="item.model" :label="item.is_default ? `${item.model}（默认）` : item.model" :value="item.model" />
       </el-select>
     </label>
     <label class="duration-setting">时长（秒）
-      <div class="duration-controls">
-        <el-button-group>
-          <el-button v-for="preset in durationPresets" :key="preset" size="small" :type="duration === preset ? 'primary' : ''" @click="set('duration', preset)">{{ preset }} 秒</el-button>
-        </el-button-group>
-        <el-input-number :model-value="duration" :min="1" :max="maxDuration" :step="1" controls-position="right" size="small" aria-label="自定义视频时长" @update:model-value="set('duration', $event)" />
-      </div>
+      <el-select :model-value="duration" size="small" aria-label="视频时长" @update:model-value="set('duration', $event)">
+        <el-option v-for="second in durationOptions" :key="second" :label="`${second} 秒`" :value="second" />
+      </el-select>
     </label>
     <label>分辨率
       <el-select :model-value="value.resolution || '720p'" size="small" @update:model-value="set('resolution', $event)">
@@ -44,9 +41,9 @@ const textModels = ref([]), videoModels = ref([])
 let modelOptionsCache = null
 let modelOptionsPromise = null
 const value = computed(() => props.modelValue || {})
-const duration = computed(() => Math.min(props.maxDuration, Math.max(1, Number(value.value.duration) || 15)))
-const durationPresets = computed(() => [5, 10, 15].filter((seconds) => seconds <= props.maxDuration))
-function set(key, next) { emit('update:modelValue', { ...value.value, [key]: key === 'duration' ? Math.min(props.maxDuration, Math.max(1, Number(next) || 15)) : next }) }
+const duration = computed(() => Math.min(props.maxDuration, Math.max(4, Number(value.value.duration) || 15)))
+const durationOptions = computed(() => Array.from({ length: Math.max(0, props.maxDuration - 3) }, (_, index) => index + 4))
+function set(key, next) { emit('update:modelValue', { ...value.value, [key]: key === 'duration' ? Math.min(props.maxDuration, Math.max(4, Number(next) || 15)) : next }) }
 function configModels(configs) { return [...new Set((configs || []).filter((item) => item.is_active !== false).flatMap((item) => Array.isArray(item.model) ? item.model : item.model ? [item.model] : []).filter(Boolean))] }
 onMounted(async () => {
   if (!modelOptionsPromise) {

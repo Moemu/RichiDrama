@@ -177,9 +177,9 @@ async function archiveCompletedVideo(db, log, videoGenId, cfg = null) {
     return { provider: 'local' };
   }
   try {
-    const saved = await storage.archiveLocalFile(cfg, resolveStoragePath(cfg), row.local_path, log, { removeLocal: true });
+    const saved = await storage.mirrorAndTrack(db, cfg, resolveStoragePath(cfg), row.local_path, 'video_generation', row.id, log);
     const at = new Date().toISOString();
-    try { db.prepare('UPDATE video_generations SET archive_status = ?, archive_error = NULL, archive_attempts = COALESCE(archive_attempts, 0) + 1, archived_at = ?, updated_at = ? WHERE id = ?').run('archived', at, at, row.id); } catch (_) {}
+    try { db.prepare('UPDATE video_generations SET archive_status = ?, archive_error = NULL, archive_attempts = COALESCE(archive_attempts, 0) + 1, archived_at = ?, updated_at = ? WHERE id = ?').run('oss_synced', at, at, row.id); } catch (_) {}
     return saved;
   } catch (error) {
     markVideoArchivePending(db, log, row.id, error);

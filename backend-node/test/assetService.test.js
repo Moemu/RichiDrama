@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 
 const assetService = require('../src/services/assetService');
-const { validateShotAssetLimits, validateCreationMode, safeSnapshot, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState } = require('../src/services/omniVideoService');
+const { validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, safeSnapshot, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState } = require('../src/services/omniVideoService');
 const { normalizeSupports } = require('../src/services/videoModelCapabilities');
 
 const log = { info() {}, warn() {}, error() {} };
@@ -170,6 +170,13 @@ test('omni video rejects material counts above the per-shot media limits', () =>
     () => validateShotAssetLimits(Array.from({ length: 4 }, () => ({ type: 'audio' }))),
     /per-shot limit of 3/
   );
+});
+
+test('Seedance 2.5 applies its model-specific reference limits instead of the legacy 12-asset limit', () => {
+  const capability = { model: 'doubao-seedance-2-5-260628', limits: { total_reference: { max: 50 }, image_reference: { max: 30 }, video_reference: { max: 10 }, audio_reference: { max: 10 } } };
+  assert.deepEqual(assetLimitsForCapability(capability), { total: 50, image: 30, video: 10, audio: 10 });
+  assert.doesNotThrow(() => validateShotAssetLimits(Array.from({ length: 30 }, () => ({ type: 'image' })), capability));
+  assert.throws(() => validateShotAssetLimits(Array.from({ length: 31 }, () => ({ type: 'image' })), capability), /per-shot limit of 30/);
 });
 
 test('first-last-frame mode accepts a first frame without an optional tail frame', () => {

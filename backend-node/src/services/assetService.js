@@ -5,9 +5,22 @@ function list(db, query) {
     sql += ' AND (owner_user_id = ? OR drama_id IN (SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL))';
     params.push(Number(query.owner_user_id), Number(query.owner_user_id));
   }
-  if (query.drama_id) {
+  const scope = String(query.scope || '').toLowerCase();
+  if (scope === 'project') {
+    const dramaId = Number(query.drama_id);
+    if (!Number.isInteger(dramaId) || dramaId <= 0) throw new Error('项目素材范围必须提供有效 drama_id');
     sql += ' AND drama_id = ?';
-    params.push(query.drama_id);
+    params.push(dramaId);
+  } else if (scope === 'global') {
+    // Global assets are private to their owner. Never broaden this to all
+    // drama_id IS NULL rows, otherwise users can see each other's material.
+    sql += ' AND drama_id IS NULL AND owner_user_id = ?';
+    params.push(Number(query.owner_user_id));
+  } else if (query.drama_id) {
+    // Compatibility for existing callers: an explicit project ID remains a
+    // strict project filter. New UI callers must pass scope explicitly.
+    sql += ' AND drama_id = ?';
+    params.push(Number(query.drama_id));
   }
   if (query.type) {
     sql += ' AND type = ?';

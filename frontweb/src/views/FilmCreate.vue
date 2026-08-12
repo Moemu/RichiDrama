@@ -6975,24 +6975,18 @@ function sbOmniPoolItems(sb) {
 async function ensureEntityAsset(sb, item) {
   const entity = item?.entity
   if (!entity) return null
-  const localPath = entity.local_path && String(entity.local_path).trim()
-  const imageUrl = entity.image_url || ''
-  const existing = universalLibraryAssets.value.find((a) => {
-    const p = String(a.local_path || '').trim()
-    return localPath ? p === localPath : (a.url || '') === imageUrl
-  })
-  if (existing) return existing.id
-  const created = await omniVideoAPI.createAsset({
+  // Entity images must use the canonical project-resource mapping. Creating
+  // an anonymous copy here used to bypass a deleted mapping tombstone, making
+  // a user-deleted material reappear as soon as a storyboard selected it.
+  const linked = await omniVideoAPI.linkProjectResource({
     drama_id: dramaId.value,
-    name: item.name,
-    type: 'image',
-    url: imageUrl || null,
-    local_path: localPath || null,
-    source_type: 'entity',
-    processing_status: 'ready',
+    resource_type: item.kind,
+    resource_id: entity.id,
   })
-  const assetId = created?.id
-  if (assetId) universalLibraryAssets.value = [created, ...universalLibraryAssets.value]
+  const assetId = linked?.id
+  if (assetId && !universalLibraryAssets.value.some((asset) => Number(asset.id) === Number(assetId))) {
+    universalLibraryAssets.value = [linked, ...universalLibraryAssets.value]
+  }
   return assetId
 }
 
@@ -11022,6 +11016,17 @@ html.light .sb-universal-tooltip strong {
   min-height: 220px !important;
   font-size: 13px;
   line-height: 1.55;
+}
+/* 分镜管理与自由创作保持同一优先级：全能提示词是 T0 输入，不再随
+   左侧素材编排或右侧镜头列表被压缩成一行。 */
+.sb-image--universal .sb-universal-textarea {
+  display: block;
+  width: 100%;
+  min-height: clamp(420px, 58vh, 680px);
+}
+.sb-image--universal .sb-universal-textarea :deep(.omni-at-wrap),
+.sb-image--universal .sb-universal-textarea :deep(.omni-at-editor) {
+  min-height: clamp(390px, 54vh, 640px);
 }
 .vp-mode-hint {
   font-size: 12px;

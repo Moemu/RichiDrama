@@ -31,3 +31,4 @@ volumes/
 # 本地环境变量（含密钥/端口覆盖，不提交）
 .env
 .env.*
+minidrama.oss.env
