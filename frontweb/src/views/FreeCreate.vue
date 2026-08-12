@@ -600,7 +600,9 @@ onMounted(() => {
   .workbench{grid-template-columns:minmax(196px,230px) minmax(0,1fr) minmax(292px,350px)}
   .video-stage{flex:0 0 clamp(185px,29vh,250px)}
   .shot-script{flex:1;min-height:214px;display:flex;align-items:stretch}
-  .shot-script :deep(.editor){width:100%;min-height:188px}
+  .shot-script :deep(.editor){width:100%;min-height:188px;height:100%;display:flex;flex-direction:column}
+  .shot-script :deep(.editor) :deep(.el-textarea){flex:1;min-height:0;display:flex}
+  .shot-script :deep(.editor) :deep(.el-textarea__inner){flex:1;height:100%!important;min-height:180px;resize:none}
   .shot-preview{height:84px}
   .shot-card{padding:6px}
   .t0-generation-settings{position:relative;margin:12px 0 14px!important;padding:11px!important;border:1px solid #77736b!important;border-radius:8px;background:#242321!important;box-shadow:inset 3px 0 0 #f0eee8}
