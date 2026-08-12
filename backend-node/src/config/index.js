@@ -8,28 +8,33 @@ const configPaths = [
   path.join(__dirname, '..', '..', 'configs', 'config.yaml'),
 ];
 
-// The deployment compose file consumes this ignored file, but local `node`
-// debugging bypasses Compose. Load the same non-versioned OSS configuration
-// when present so both paths use one credential source. Explicit CFG_* values
-// still win, and no setting is logged here.
+const DEPLOYMENT_OSS_ENV_MAP = {
+  MINIDRAMA_STORAGE_TYPE: 'CFG_STORAGE__TYPE',
+  MINIDRAMA_OSS_ENDPOINT: 'CFG_STORAGE__OSS__ENDPOINT',
+  MINIDRAMA_OSS_BUCKET: 'CFG_STORAGE__OSS__BUCKET',
+  MINIDRAMA_OSS_ACCESS_KEY_ID: 'CFG_STORAGE__OSS__ACCESS_KEY_ID',
+  MINIDRAMA_OSS_ACCESS_KEY_SECRET: 'CFG_STORAGE__OSS__ACCESS_KEY_SECRET',
+  MINIDRAMA_OSS_PREFIX: 'CFG_STORAGE__OSS__PREFIX',
+  MINIDRAMA_OSS_CDN_DOMAIN: 'CFG_STORAGE__OSS__PUBLIC_BASE_URL',
+  MINIDRAMA_OSS_AUTO_ARCHIVE_ENABLED: 'CFG_STORAGE__OSS__AUTO_ARCHIVE_ENABLED',
+};
+
+function applyDeploymentEnv(name, value) {
+  const target = DEPLOYMENT_OSS_ENV_MAP[name];
+  if (target && !String(process.env[target] || '').trim()) process.env[target] = value;
+}
+
+// Docker Compose does not use `env_file` values while interpolating its
+// `environment` block. Read the deployment variables directly at runtime;
+// local `node` debugging additionally reads the same ignored file. Explicit
+// CFG_* values still win, and no setting is logged here.
 function loadOptionalDeploymentEnv() {
+  for (const name of Object.keys(DEPLOYMENT_OSS_ENV_MAP)) applyDeploymentEnv(name, process.env[name]);
   const envPath = path.join(__dirname, '..', '..', '..', 'minidrama.oss.env');
   if (!fs.existsSync(envPath)) return;
-  const names = {
-    MINIDRAMA_STORAGE_TYPE: 'CFG_STORAGE__TYPE',
-    MINIDRAMA_OSS_ENDPOINT: 'CFG_STORAGE__OSS__ENDPOINT',
-    MINIDRAMA_OSS_BUCKET: 'CFG_STORAGE__OSS__BUCKET',
-    MINIDRAMA_OSS_ACCESS_KEY_ID: 'CFG_STORAGE__OSS__ACCESS_KEY_ID',
-    MINIDRAMA_OSS_ACCESS_KEY_SECRET: 'CFG_STORAGE__OSS__ACCESS_KEY_SECRET',
-    MINIDRAMA_OSS_PREFIX: 'CFG_STORAGE__OSS__PREFIX',
-    MINIDRAMA_OSS_CDN_DOMAIN: 'CFG_STORAGE__OSS__PUBLIC_BASE_URL',
-    MINIDRAMA_OSS_AUTO_ARCHIVE_ENABLED: 'CFG_STORAGE__OSS__AUTO_ARCHIVE_ENABLED',
-  };
   for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
     const match = line.match(/^\s*([A-Z0-9_]+)=(.*)\s*$/);
-    if (!match || !(match[1] in names)) continue;
-    const target = names[match[1]];
-    if (process.env[target] == null) process.env[target] = match[2];
+    if (match) applyDeploymentEnv(match[1], match[2]);
   }
 }
 
