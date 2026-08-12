@@ -21,16 +21,9 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5679
-      # Defaults preserve the existing local-storage deployment. Put real OSS
-      # values in an untracked deployment env file, never in config.yaml.
-      - CFG_STORAGE__TYPE=${MINIDRAMA_STORAGE_TYPE:-local}
-      - CFG_STORAGE__OSS__ENDPOINT=${MINIDRAMA_OSS_ENDPOINT:-}
-      - CFG_STORAGE__OSS__BUCKET=${MINIDRAMA_OSS_BUCKET:-}
-      - CFG_STORAGE__OSS__ACCESS_KEY_ID=${MINIDRAMA_OSS_ACCESS_KEY_ID:-}
-      - CFG_STORAGE__OSS__ACCESS_KEY_SECRET=${MINIDRAMA_OSS_ACCESS_KEY_SECRET:-}
-      - CFG_STORAGE__OSS__PREFIX=${MINIDRAMA_OSS_PREFIX:-local-mini-drama}
-      - CFG_STORAGE__OSS__PUBLIC_BASE_URL=${MINIDRAMA_OSS_CDN_DOMAIN:-}
-      - CFG_STORAGE__OSS__AUTO_ARCHIVE_ENABLED=${MINIDRAMA_OSS_AUTO_ARCHIVE_ENABLED:-false}
+      # minidrama.oss.env is mapped by backend-node/src/config at runtime.
+      # Do not inject CFG_STORAGE defaults here: Compose interpolation happens
+      # before env_file is read and would otherwise force storage.type=local.
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5679/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s
