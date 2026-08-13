@@ -1,5 +1,8 @@
 <template>
-  <div class="editor" @dragover.prevent @drop.prevent="onDrop">
+  <div class="editor" @dragenter.prevent="onDragEnter" @dragover.prevent="onDragOver" @dragleave="onDragLeave" @drop.prevent="onDrop">
+    <div class="drop-status" :class="{ active: dragging }" role="status" aria-live="polite">
+      <span v-if="dragging">移动到目标文字间隙，紫色光标就是插入位置</span>
+    </div>
     <el-input
       ref="inputRef"
       v-model="text"
@@ -11,10 +14,14 @@
       @click="onCursorChange"
       @focus="onCursorChange"
       @dragover.prevent="onDragOver"
-      @dragleave="onDragLeave"
       @drop.prevent.stop="onDrop"
     />
-    <div v-if="dragging" class="drop-hint">松开后在光标位置插入素材 @引用</div>
+    <span
+      v-if="dropCaret.visible"
+      class="drop-caret"
+      :style="{ left: `${dropCaret.x}px`, top: `${dropCaret.y}px`, height: `${dropCaret.height}px` }"
+      aria-hidden="true"
+    ></span>
     <div v-if="showPicker" class="asset-picker">
       <button v-for="asset in pickerAssets" :key="asset.id" type="button" @click="insertAsset(asset)">
         <span class="pa-thumb">
@@ -48,6 +55,7 @@ const inputRef = ref(null)
 const text = ref(props.modelValue)
 const showPicker = ref(false)
 const dragging = ref(false)
+const dropCaret = ref({ visible: false, offset: 0, x: 0, y: 0, height: 18 })
 let dragCounter = 0
 let lastCaretOffset = 0
 
@@ -152,6 +160,14 @@ function insertAsset(asset, opts = {}) {
   showPicker.value = false
 }
 
+// Deterministic alternative to HTML5 drag-and-drop: the parent material card
+// can insert at the last native textarea caret even after the button takes focus.
+function insertAtCaret(asset) {
+  insertAsset(asset, { offset: lastCaretOffset })
+}
+
+defineExpose({ insertAtCaret })
+
 function icon(type) { return type === 'video' ? '🎬' : type === 'audio' ? '🎵' : '🖼️' }
 
 /** 素材缩略图 URL：优先 thumbnail_local_path，其次 url/local_path */
@@ -164,18 +180,32 @@ function thumbUrl(asset) {
 }
 
 // ===== 拖拽支持 =====
-function onDragOver() { dragging.value = true }
-function onDragLeave(e) { /* 由 counter 控制，见 onDrop/ondragenter */ }
+function onDragEnter() { dragCounter += 1; dragging.value = true }
+function onDragOver(event) {
+  dragging.value = true
+  const point = textareaPointFromEvent(event)
+  dropCaret.value = { visible: true, ...point }
+}
+function onDragLeave() {
+  dragCounter = Math.max(0, dragCounter - 1)
+  if (!dragCounter) {
+    dragging.value = false
+    dropCaret.value.visible = false
+  }
+}
 
-function textareaOffsetFromPoint(event) {
+function textareaPointFromEvent(event) {
   const textarea = inputRef.value?.textarea
-  if (!textarea || !Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return lastCaretOffset
+  const editor = textarea?.closest('.editor')
+  if (!textarea || !editor || !Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) {
+    return { offset: lastCaretOffset, x: 0, y: 0, height: 18 }
+  }
   const source = String(text.value || '')
-  if (!source) return 0
   const rect = textarea.getBoundingClientRect()
+  const editorRect = editor.getBoundingClientRect()
   const style = getComputedStyle(textarea)
   const mirror = document.createElement('div')
-  const copied = ['boxSizing', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'padding', 'border', 'whiteSpace', 'overflowWrap', 'wordBreak', 'tabSize', 'textTransform', 'textIndent']
+  const copied = ['boxSizing', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'whiteSpace', 'overflowWrap', 'wordBreak', 'tabSize', 'textTransform', 'textIndent']
   copied.forEach((name) => { mirror.style[name] = style[name] })
   Object.assign(mirror.style, {
     position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`,
@@ -185,7 +215,25 @@ function textareaOffsetFromPoint(event) {
   const textNode = document.createTextNode(source)
   mirror.appendChild(textNode)
   document.body.appendChild(mirror)
-  let best = { offset: lastCaretOffset, score: Number.POSITIVE_INFINITY }
+  mirror.scrollTop = textarea.scrollTop
+  mirror.scrollLeft = textarea.scrollLeft
+  const fallbackHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.5 || 18
+  let best = {
+    offset: source ? lastCaretOffset : 0,
+    x: rect.left + Number.parseFloat(style.paddingLeft || 0),
+    y: rect.top + Number.parseFloat(style.paddingTop || 0),
+    height: fallbackHeight,
+    score: Number.POSITIVE_INFINITY,
+  }
+  const consider = (offset, x, charRect) => {
+    const top = charRect?.top ?? best.y
+    const bottom = charRect?.bottom ?? (top + fallbackHeight)
+    const yDistance = event.clientY < top ? top - event.clientY : event.clientY > bottom ? event.clientY - bottom : 0
+    // Staying on the pointer's visual line is much more important than the
+    // horizontal distance; otherwise long lines can snap to an adjacent row.
+    const score = yDistance * 1000 + Math.abs(event.clientX - x)
+    if (score < best.score) best = { offset, x, y: top, height: Math.max(12, bottom - top || fallbackHeight), score }
+  }
   try {
     for (let i = 0; i < source.length; i++) {
       const range = document.createRange()
@@ -193,20 +241,24 @@ function textareaOffsetFromPoint(event) {
       range.setEnd(textNode, i + 1)
       const charRect = range.getBoundingClientRect()
       if (!charRect.width && !charRect.height) continue
-      const midX = charRect.left + charRect.width / 2
-      const midY = charRect.top + charRect.height / 2
-      const linePenalty = Math.abs(event.clientY - midY) * 4
-      const score = linePenalty + Math.abs(event.clientX - midX)
-      if (score < best.score) best = { offset: event.clientX > midX ? i + 1 : i, score }
+      consider(i, charRect.left, charRect)
+      consider(i + 1, charRect.right, charRect)
     }
   } finally {
     mirror.remove()
   }
-  return best.offset
+  return {
+    offset: best.offset,
+    x: Math.max(0, Math.min(editorRect.width - 2, best.x - editorRect.left)),
+    y: Math.max(0, best.y - editorRect.top),
+    height: best.height,
+  }
 }
 
 function onDrop(e) {
   dragging.value = false
+  const point = dropCaret.value.visible ? dropCaret.value : textareaPointFromEvent(e)
+  dropCaret.value.visible = false
   dragCounter = 0
   const raw = e.dataTransfer?.getData('application/x-localminidrama-asset') || e.dataTransfer?.getData('application/json')
   let asset = null
@@ -216,7 +268,7 @@ function onDrop(e) {
     const a = e.dataTransfer.getData('asset')
     if (a) { try { asset = JSON.parse(a) } catch (_) {} }
   }
-  if (asset && asset.id) insertAsset(asset, { offset: textareaOffsetFromPoint(e) })
+  if (asset && asset.id) insertAsset(asset, { offset: point.offset })
 }
 </script>
 <style scoped>
@@ -225,11 +277,13 @@ function onDrop(e) {
 .editor :deep(.el-input) { flex: 1; min-height: 0; display: flex; }
 .editor :deep(.el-textarea) { flex: 1; min-height: 0; display: flex; }
 .editor :deep(.el-textarea__inner) { flex: 1; height: 100% !important; min-height: 160px; resize: none; transition: border-color 0.2s, background 0.2s; }
-.drop-hint {
-  position: absolute; inset: 0; display: grid; place-items: center;
-  background: color-mix(in srgb, var(--bg-hover) 82%, transparent); border: 2px dashed var(--border-strong); border-radius: var(--radius-sm);
-  color: var(--text-primary); font-size: 13px; font-weight: 600; pointer-events: none; z-index: 4;
+.drop-status {
+  flex: 0 0 26px; min-width: 0; display: flex; align-items: center; justify-content: flex-end;
+  padding: 0 4px; color: var(--text-muted); font-size: 12px; line-height: 1; pointer-events: none;
 }
+.drop-status.active { color: var(--accent); font-weight: 600; }
+.drop-caret { position: absolute; width: 3px; min-height: 16px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-page) 70%, transparent), 0 0 12px var(--accent); pointer-events: none; z-index: 6; animation: drop-caret-pulse .8s ease-in-out infinite alternate; }
+@keyframes drop-caret-pulse { to { opacity: .45; } }
 .asset-picker {
   /* The editor sits in a scrollable side panel. Keeping the picker in normal
      flow prevents overflow:auto from clipping the @ menu at the panel edge. */

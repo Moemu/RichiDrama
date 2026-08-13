@@ -24,7 +24,7 @@
     <section class="panel"><h2>修改密码</h2><el-form inline><el-form-item label="当前密码"><el-input v-model="password.old_password" type="password" show-password /></el-form-item><el-form-item label="新密码"><el-input v-model="password.new_password" type="password" show-password /></el-form-item><el-button type="primary" @click="changePassword">更新密码</el-button></el-form></section>
     <section class="panel"><h2>修改用户名</h2><el-form inline><el-form-item label="用户名"><el-input v-model="username" maxlength="64" /></el-form-item><el-button type="primary" @click="changeUsername">保存用户名</el-button></el-form><p class="muted">仅支持 3–64 位字母、数字和 . _ -；保存后会刷新当前登录会话。</p></section>
 
-    <section class="panel bills"><div class="panel-title"><div><h2>最近账单</h2><p>“冻结”只占用可用额度；只有“已结算”才会计入累计消费。</p></div></div><BillingTransactionTable :rows="transactions" /></section>
+    <section class="panel bills"><div class="panel-title"><div><h2>账单记录</h2><p>“冻结”只占用可用额度；只有“已结算”才会计入累计消费。</p></div></div><BillingTransactionTable :rows="transactions" :total="transactionPage.total" :page="transactionPage.page" :page-size="transactionPage.page_size" @page-change="loadTransactions" /></section>
   </main>
 </template>
 
@@ -36,6 +36,7 @@ import BillingTransactionTable from '@/components/BillingTransactionTable.vue'
 
 const account = ref({})
 const transactions = ref([])
+const transactionPage = reactive({ page: 1, page_size: 20, total: 0 })
 const models = ref([])
 const isAdmin = JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').role === 'admin'
 const password = reactive({ old_password: '', new_password: '' })
@@ -56,8 +57,16 @@ async function changeUsername() {
   ElMessage.success('用户名已更新')
 }
 
+async function loadTransactions(page = transactionPage.page) {
+  const result = await accountAPI.transactions({ page, page_size: transactionPage.page_size })
+  transactions.value = result.items || []
+  Object.assign(transactionPage, { page: result.page || page, page_size: result.page_size || transactionPage.page_size, total: result.total || 0 })
+}
+
 onMounted(async () => {
-  [account.value, transactions.value, models.value] = await Promise.all([accountAPI.me(), accountAPI.transactions(), accountAPI.models()])
+  const [, loadedAccount, loadedModels] = await Promise.all([loadTransactions(), accountAPI.me(), accountAPI.models()])
+  account.value = loadedAccount
+  models.value = loadedModels
 })
 </script>
 

@@ -25,11 +25,11 @@ module.exports = function adminRoutes(db) {
     priceBooks: (_req, res) => response.success(res, billing.listPriceBooks(db)),
     createPriceBook: guarded((req, res) => response.created(res, billing.savePriceBook(db, req.auth.id, req.body || {}))),
     updatePriceBook: guarded((req, res) => response.success(res, billing.savePriceBook(db, req.auth.id, req.body || {}, req.params.id))),
-    transactions: (req, res) => response.success(res, billing.listTransactions(db, req.query)),
-    usage: (req, res) => response.success(res, billing.listUsage(db, req.query)),
+    transactions: (req, res) => response.success(res, billing.pagedTransactions(db, req.query)),
+    usage: (req, res) => response.success(res, billing.pagedUsage(db, req.query)),
     reconciliationCases: (req, res) => response.success(res, billing.listReconciliationCases(db, req.query)),
     settleReconciliationCase: guarded((req, res) => response.success(res, billing.settleReconciliationCase(db, req.auth, req.params.id, req.body || {}))),
     waiveReconciliationCase: guarded((req, res) => response.success(res, billing.waiveReconciliationCase(db, req.auth, req.params.id, req.body?.reason))),
-    audit: (_req, res) => response.success(res, db.prepare('SELECT a.*, u.username AS actor_username FROM billing_audit_logs a JOIN users u ON u.id = a.actor_user_id ORDER BY a.created_at DESC LIMIT 300').all()),
+    audit: (req, res) => response.success(res, billing.pagedAuditLogs(db, req.query)),
   };
 };

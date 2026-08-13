@@ -533,10 +533,53 @@ function listTransactions(db, filters = {}) {
   return rows.map((r) => ({ ...r, amount: microToCredits(r.amount_micro), balance_after: microToCredits(r.balance_after_micro), frozen_after: microToCredits(r.frozen_after_micro), snapshot: parse(r.snapshot_json) }));
 }
 
+function pagination(input = {}) {
+  const page = Math.max(1, Math.trunc(Number(input.page) || 1));
+  const pageSize = Math.max(10, Math.min(100, Math.trunc(Number(input.page_size) || 20)));
+  return { page, page_size: pageSize, offset: (page - 1) * pageSize };
+}
+
+function pagedTransactions(db, filters = {}) {
+  let where = 'WHERE 1=1', params = [];
+  if (filters.user_id) { where += ' AND t.user_id = ?'; params.push(Number(filters.user_id)); }
+  const meta = pagination(filters);
+  const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_transactions t ${where}`).get(...params)?.total || 0);
+  const rows = db.prepare(`SELECT t.*, u.username FROM billing_transactions t JOIN users u ON u.id = t.user_id ${where} ORDER BY t.created_at DESC, t.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
+  return {
+    items: rows.map((r) => ({ ...r, amount: microToCredits(r.amount_micro), balance_after: microToCredits(r.balance_after_micro), frozen_after: microToCredits(r.frozen_after_micro), snapshot: parse(r.snapshot_json) })),
+    total,
+    page: meta.page,
+    page_size: meta.page_size,
+  };
+}
+
 function listUsage(db, filters = {}) {
   let where = 'WHERE 1=1', p = []; if (filters.user_id) { where += ' AND l.user_id = ?'; p.push(Number(filters.user_id)); }
   return db.prepare(`SELECT l.*, u.username FROM billing_usage_logs l JOIN users u ON u.id = l.user_id ${where} ORDER BY l.created_at DESC LIMIT 300`).all(...p)
     .map((r) => ({ ...r, charged: microToCredits(r.charged_micro), usage: parse(r.usage_json), snapshot: parse(r.snapshot_json) }));
 }
 
-module.exports = { account, publicAccount, audit, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, listReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage };
+function pagedUsage(db, filters = {}) {
+  let where = 'WHERE 1=1', params = [];
+  if (filters.user_id) { where += ' AND l.user_id = ?'; params.push(Number(filters.user_id)); }
+  const meta = pagination(filters);
+  const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_usage_logs l ${where}`).get(...params)?.total || 0);
+  const rows = db.prepare(`SELECT l.*, u.username FROM billing_usage_logs l JOIN users u ON u.id = l.user_id ${where} ORDER BY l.created_at DESC, l.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
+  return {
+    items: rows.map((r) => ({ ...r, charged: microToCredits(r.charged_micro), usage: parse(r.usage_json), snapshot: parse(r.snapshot_json) })),
+    total,
+    page: meta.page,
+    page_size: meta.page_size,
+  };
+}
+
+function pagedAuditLogs(db, filters = {}) {
+  const meta = pagination(filters);
+  const total = Number(db.prepare('SELECT COUNT(*) total FROM billing_audit_logs').get()?.total || 0);
+  const items = db.prepare(`SELECT a.*, u.username AS actor_username
+    FROM billing_audit_logs a JOIN users u ON u.id = a.actor_user_id
+    ORDER BY a.created_at DESC, a.rowid DESC LIMIT ? OFFSET ?`).all(meta.page_size, meta.offset);
+  return { items, total, page: meta.page, page_size: meta.page_size };
+}
+
+module.exports = { account, publicAccount, audit, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, listReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, pagedAuditLogs };

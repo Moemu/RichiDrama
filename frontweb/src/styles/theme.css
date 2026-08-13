@@ -418,10 +418,44 @@ html.light body #app .omni-page .el-button.is-link:hover {
 }
 html.light body #app .omni-page .el-button.is-disabled,
 html.light body #app .omni-page .el-button.is-disabled:hover {
-  color: #8d92a0 !important;
+  color: #5f6878 !important;
   background: #ece9e3 !important;
   border-color: #ded9d1 !important;
   opacity: 1 !important;
+}
+/* Legacy creative-workbench rules hard-coded near-white labels for dark panels.
+   Keep the light canvas readable even when those scoped rules use !important. */
+html.light body #app .omni-page .shot-title b,
+html.light body #app .omni-page .shot-tabs .active {
+  color: var(--text-primary) !important;
+}
+html.light body #app .omni-page .shot-tabs,
+html.light body #app .omni-page .shot-tabs span,
+html.light body #app .omni-page .shot-state,
+html.light body #app .omni-page .shot-preview > span,
+html.light body #app .omni-page .drag-handle {
+  color: var(--text-muted) !important;
+}
+html.light body #app .omni-page .shot-controls .el-button:not(.is-disabled) {
+  color: var(--text-regular) !important;
+}
+html body #app .omni-page .player-tools .el-tag {
+  --el-tag-bg-color: color-mix(in srgb, var(--accent) 14%, var(--bg-raised));
+  --el-tag-border-color: color-mix(in srgb, var(--accent) 56%, var(--border-color));
+  --el-tag-text-color: var(--text-primary);
+  background: var(--el-tag-bg-color) !important;
+  border-color: var(--el-tag-border-color) !important;
+  color: var(--el-tag-text-color) !important;
+}
+html body #app .omni-page .creation-generate-actions .generate-button.is-disabled,
+html body #app .omni-page .creation-generate-actions .generate-button.is-disabled:hover {
+  background: var(--bg-active) !important;
+  background-image: none !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-muted) !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  cursor: not-allowed !important;
 }
 html.light body #app .omni-page .el-radio-button__inner {
   background: #faf8f4 !important;
