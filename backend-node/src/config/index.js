@@ -21,7 +21,8 @@ const DEPLOYMENT_OSS_ENV_MAP = {
 
 function applyDeploymentEnv(name, value) {
   const target = DEPLOYMENT_OSS_ENV_MAP[name];
-  if (target && !String(process.env[target] || '').trim()) process.env[target] = value;
+  if (!target || value == null || !String(value).trim()) return;
+  if (!String(process.env[target] || '').trim()) process.env[target] = value;
 }
 
 // Docker Compose does not use `env_file` values while interpolating its

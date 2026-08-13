@@ -34,3 +34,24 @@ test('deployment MINIDRAMA OSS variables activate storage when Compose leaves CF
     if (value === undefined) delete process.env[envKey]; else process.env[envKey] = value;
   }
 });
+
+test('missing deployment OSS variables do not create string undefined CFG overrides', () => {
+  const deploymentKey = 'MINIDRAMA_OSS_AUTO_ARCHIVE_ENABLED';
+  const cfgKey = 'CFG_STORAGE__OSS__AUTO_ARCHIVE_ENABLED';
+  const priorDeployment = process.env[deploymentKey];
+  const priorCfg = process.env[cfgKey];
+  delete process.env[deploymentKey];
+  delete process.env[cfgKey];
+  delete require.cache[require.resolve('../src/config')];
+
+  const configModule = require('../src/config');
+  const config = configModule.loadConfig();
+  assert.equal(process.env[cfgKey], undefined);
+  assert.equal(config.storage.oss?.auto_archive_enabled, undefined);
+  assert.equal(configModule.getEnvOverrideLog().some((entry) => entry.includes(cfgKey)), false);
+
+  if (priorDeployment === undefined) delete process.env[deploymentKey];
+  else process.env[deploymentKey] = priorDeployment;
+  if (priorCfg === undefined) delete process.env[cfgKey];
+  else process.env[cfgKey] = priorCfg;
+});
