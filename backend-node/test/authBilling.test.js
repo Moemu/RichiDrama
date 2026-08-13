@@ -67,6 +67,44 @@ test('setting a balance targets the requested amount instead of adding to it', (
   } finally { teardown(dbPath); }
 });
 
+test('billing, usage, and audit logs expose stable server-side pagination', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'paged-logs-user', password: '1' }, admin.id);
+    billing.savePriceBook(db, admin.id, { name: 'paged logs price', status: 'published', items: [
+      { service_type: 'image', model: 'paged-image', meter: 'image', unit_price: 1 },
+    ] });
+    billing.adjustBalance(db, admin.id, user.id, 100, 'pagination seed');
+    for (let i = 0; i < 12; i += 1) {
+      billing.adjustBalance(db, admin.id, user.id, 1, `audit page seed ${i}`);
+    }
+    for (let i = 0; i < 12; i += 1) {
+      const actor = { id: user.id, role: 'user' };
+      const authorization = billing.createAuthorization(db, actor, {
+        idempotency_key: `paged-log-${i}`, service_type: 'image', model: 'paged-image', usage: { image: 1 },
+      });
+      billing.settleAuthorization(db, actor, authorization.authorization_id, { usage: { image: 1 }, provider_request_id: `page-${i}` });
+    }
+
+    const transactions = billing.pagedTransactions(db, { user_id: user.id, page: 2, page_size: 10 });
+    assert.equal(transactions.page, 2);
+    assert.equal(transactions.page_size, 10);
+    assert.ok(transactions.total >= 25);
+    assert.equal(transactions.items.length, 10);
+    assert.notEqual(transactions.items[0].id, billing.pagedTransactions(db, { user_id: user.id, page: 1, page_size: 10 }).items[0].id);
+
+    const usage = billing.pagedUsage(db, { user_id: user.id, page: 2, page_size: 10 });
+    assert.equal(usage.total, 12);
+    assert.equal(usage.items.length, 2);
+    assert.equal(usage.items[0].username, 'paged-logs-user');
+
+    const audits = billing.pagedAuditLogs(db, { page: 2, page_size: 10 });
+    assert.ok(audits.total >= 14);
+    assert.ok(audits.items.length > 0 && audits.items.length <= 10);
+    assert.ok(audits.items.every((row) => row.actor_username));
+  } finally { teardown(dbPath); }
+});
+
 test('expired reconciliation releases the frozen authorization and leaves an audit trail', () => {
   const { db, dbPath, admin } = setup();
   try {

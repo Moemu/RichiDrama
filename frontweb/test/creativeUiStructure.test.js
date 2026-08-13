@@ -9,7 +9,11 @@ test('自由创作只渲染一个提示词编辑器', async () => {
   const editorTags = source.match(/<OmniAssetPromptEditor\b/g) || []
 
   assert.equal(editorTags.length, 1)
-  assert.match(source, /<div class="shot-script"><OmniAssetPromptEditor\s+v-model="prompt"/)
+  assert.match(source, /<div class="shot-script"><OmniAssetPromptEditor\s+ref="promptEditorRef"\s+v-model="prompt"/)
+  assert.match(source, /class="insert-at-caret"/)
+  assert.match(source, /promptEditorRef\?\.insertAtCaret\(asset\)/)
+  assert.match(source, /@keydown\.up\.prevent="selectRelative\(-1\)"/)
+  assert.match(source, /@keydown\.down\.prevent="selectRelative\(1\)"/)
 })
 
 test('窄屏隐藏的首页动作仍可从更多菜单访问', async () => {
