@@ -10,12 +10,12 @@
 
     <section class="workbench">
       <aside class="panel shot-panel" aria-label="镜头导航">
-        <div class="shot-heading"><b>镜头列表</b><small>{{ shots.length }} 个镜头</small></div>
+        <div class="shot-heading"><b>镜头列表</b><small>{{ shots.length }} 个 · 滚轮切镜</small></div>
         <div class="shot-actions"><el-button size="small" type="primary" plain @click="addShot(false)">+ 尾部添加</el-button><el-button size="small" @click="addShot(true)">当前镜头后添加</el-button></div>
-        <div class="shot-list">
-          <article v-for="(shot, index) in shots" :key="shot.id" class="shot-card" :class="{ active: shot.id === activeShotId, dragging: draggedShotId === shot.id }" draggable="true" @dragstart="draggedShotId = shot.id" @dragend="draggedShotId = null" @dragover.prevent @drop="dropShot(shot.id)" @click="selectShot(shot)">
+        <div ref="shotListRef" class="shot-list" tabindex="0" aria-label="镜头列表，滚轮切换上一镜或下一镜" @wheel.prevent="onShotListWheel">
+          <article v-for="(shot, index) in shots" :key="shot.id" class="shot-card" :class="{ active: shot.id === activeShotId, dragging: draggedShotId === shot.id }" :aria-current="shot.id === activeShotId ? 'true' : undefined" draggable="true" @dragstart="draggedShotId = shot.id" @dragend="draggedShotId = null" @dragover.prevent @drop="dropShot(shot.id)" @click="selectShot(shot)">
             <div class="shot-title"><span class="drag-handle">⠿</span><span class="shot-number">{{ index + 1 }}</span><b>{{ shot.title || '未命名镜头' }}</b><span class="shot-controls"><el-button text size="small" :disabled="index === 0" aria-label="上移镜头" @click.stop="moveShot(index, -1)">↑</el-button><el-button text size="small" :disabled="index === shots.length - 1" aria-label="下移镜头" @click.stop="moveShot(index, 1)">↓</el-button><el-button text size="small" aria-label="重命名镜头" @click.stop="renameShot(shot)"><el-icon><Edit /></el-icon></el-button></span><el-button class="shot-delete" type="danger" plain size="small" :disabled="shots.length <= 1" :title="shots.length <= 1 ? '至少保留一个镜头；请先新增镜头再删除当前镜头' : '删除镜头'" aria-label="删除镜头" @click.stop="removeShot(shot)"><el-icon><Delete /></el-icon><span>删除</span></el-button></div>
-            <div class="shot-preview"><video v-if="shot.video_url" :src="shot.video_url" muted preload="metadata" /><img v-else-if="shotCover(shot)" :src="shotCover(shot)" /><div v-else class="shot-empty"><el-icon><VideoCamera /></el-icon></div><span>{{ shot.settings?.duration || 15 }}s</span></div>
+            <div class="shot-preview"><img v-if="shotCover(shot)" :src="shotCover(shot)" alt="" /><div v-else class="shot-empty shot-video-placeholder"><el-icon><VideoCamera /></el-icon><small>{{ shot.video_url ? '已有成片' : '待生成' }}</small></div><span>{{ shot.settings?.duration || 15 }}s</span></div>
             <div class="shot-state" :class="shot.status"><i></i>{{ shotState(shot) }}</div>
           </article>
         </div>
@@ -24,13 +24,13 @@
       <section class="center-stage" aria-label="当前镜头播放与时间线">
         <div class="player-tools"><el-button text size="small" @click="selectRelative(-1)">上一镜</el-button><el-button text size="small" @click="selectRelative(1)">下一镜</el-button><span></span><el-tag :type="stageTagType" effect="dark">{{ stageLabel }}</el-tag></div>
         <div class="video-stage" :class="{ rendering: activeJob?.status === 'processing' }">
-          <template v-if="activeVideoUrl"><video :src="activeVideoUrl" controls autoplay class="main-video" /><div class="frame-actions"><el-button size="small" @click="downloadCurrentVideo">下载成片</el-button><template v-if="activeJob"><el-button size="small" type="primary" :disabled="savedResultJobId === activeJob.id" @click="saveResultAsAsset">{{ savedResultJobId === activeJob.id ? '已加入素材' : '作为视频素材继续创作' }}</el-button><el-button v-if="isProjectMode && savedResultJobId === activeJob.id" size="small" @click="$router.push(`/film/${projectDramaId}/canvas`)">在项目画布中打开</el-button><template v-if="canExtractFrames"><el-button size="small" :loading="extractingPosition === 'first'" :disabled="!!extractingPosition" @click="extractFrame('first')">提取首帧</el-button><el-button size="small" :loading="extractingPosition === 'last'" :disabled="!!extractingPosition" @click="extractFrame('last')">提取尾帧</el-button></template></template></div></template>
+          <template v-if="activeVideoUrl"><video :src="activeVideoUrl" controls playsinline preload="metadata" class="main-video" /><div class="frame-actions"><el-button size="small" @click="downloadCurrentVideo">下载成片</el-button><template v-if="activeJob"><el-button size="small" type="primary" :disabled="savedResultJobId === activeJob.id" @click="saveResultAsAsset">{{ savedResultJobId === activeJob.id ? '已加入素材' : '作为视频素材继续创作' }}</el-button><el-button v-if="isProjectMode && savedResultJobId === activeJob.id" size="small" @click="$router.push(`/film/${projectDramaId}/canvas`)">在项目画布中打开</el-button><template v-if="canExtractFrames"><el-button size="small" :loading="extractingPosition === 'first'" :disabled="!!extractingPosition" @click="extractFrame('first')">提取首帧</el-button><el-button size="small" :loading="extractingPosition === 'last'" :disabled="!!extractingPosition" @click="extractFrame('last')">提取尾帧</el-button></template></template></div></template>
           <template v-else-if="activeJob?.status === 'processing'"><div class="render-ring ring-one"></div><div class="render-ring ring-two"></div><div class="render-play">▶</div><b>{{ stagePhase || '正在生成当前镜头' }}</b></template>
           <template v-else-if="activeJob && ['failed','retryable','invalid'].includes(activeJob.status)"><el-icon class="stage-warning"><WarningFilled /></el-icon><b>{{ activeJob.status === 'invalid' ? '当前历史任务无效' : '当前镜头生成失败' }}</b><small>{{ activeJob.error_msg }}</small><el-button v-if="activeJob.status === 'retryable'" type="primary" @click="retry(activeJob)">重新生成</el-button></template>
           <template v-else><div class="selected-mosaic"><img v-for="asset in chosenImageAssets.slice(0, 5)" :key="asset.id" :src="assetUrl(asset)" /></div><div class="empty-play">▶</div><b>{{ chosenAssets.length ? '当前镜头已编排，等待生成' : '为当前镜头添加素材' }}</b></template>
         </div>
         <div class="time-ruler"><span>0秒</span><div><i :style="{ width: `${Math.min(100, duration / maxDuration * 100)}%` }"></i></div><span>{{ duration }}秒 / {{ maxDuration }}秒</span></div>
-        <div class="shot-tabs"><span class="active">本分镜脚本</span><span>本分镜素材 {{ chosenAssets.length }}</span><span>镜头 {{ activeShotIndex + 1 }} / {{ shots.length }}</span></div>
+        <div class="shot-tabs"><span class="active">镜头提示词</span><span>输入或拖入 @ 素材</span><span>镜头 {{ activeShotIndex + 1 }} / {{ shots.length }}</span></div>
         <div class="shot-script"><OmniAssetPromptEditor v-model="prompt" :assets="assets" :chosen-ids="selected" @pick="onPickFromEditor" @references="setPromptReferences" /></div>
       </section>
 
@@ -68,13 +68,9 @@
         <div class="dropzone" @click="pickFiles" @dragover.prevent @drop.prevent="dropFiles"><el-icon><Upload /></el-icon>拖入图片、视频或音频</div>
         <small class="upload-limit-note">{{ limitSummary }}</small>
         <div class="material-pool">
-          <article v-for="asset in visibleAssets" :key="asset.id" class="material-card" :class="{ selected: selected.has(asset.id) }" draggable="true" @dragstart="onAssetDragStart($event, asset)" @click="toggle(asset)"><img v-if="asset.type === 'image'" :src="assetUrl(asset)"/><video v-else-if="asset.type === 'video'" :src="assetUrl(asset)" muted/><span v-else>🎵</span><small>{{ asset.alias || asset.name }}</small><em v-if="isProjectMode" class="asset-scope-label">{{ Number(asset.drama_id) === projectDramaId ? '项目' : '全局' }}</em><el-icon v-if="selected.has(asset.id)"><CircleCheckFilled /></el-icon></article>
+          <article v-for="asset in visibleAssets" :key="asset.id" class="material-card" :class="{ selected: selected.has(asset.id) }" draggable="true" @dragstart="onAssetDragStart($event, asset)" @click="toggle(asset)"><img v-if="asset.type === 'image'" :src="assetUrl(asset)" alt=""/><img v-else-if="asset.type === 'video' && assetThumbnailUrl(asset)" :src="assetThumbnailUrl(asset)" alt=""/><span v-else-if="asset.type === 'video'" class="material-video-placeholder"><el-icon><VideoCamera /></el-icon></span><span v-else>🎵</span><small>{{ asset.alias || asset.name }}</small><em v-if="isProjectMode" class="asset-scope-label">{{ Number(asset.drama_id) === projectDramaId ? '项目' : '全局' }}</em><el-icon v-if="selected.has(asset.id)"><CircleCheckFilled /></el-icon></article>
         </div>
 
-        <template v-if="!isProjectMode">
-          <label class="prompt-label">提示词 <em>可拖入上方素材或输入 @ 引用</em></label>
-          <OmniAssetPromptEditor v-model="prompt" :assets="assets" :chosen-ids="selected" @pick="onPickFromEditor" @references="setPromptReferences" />
-        </template>
         <div class="selected-assets">
           <article v-for="asset in chosenAssets" :key="asset.id" draggable="true" @dragstart="draggedAssetId = asset.id" @dragover.prevent @drop="dropSelectedAsset(asset.id)"><span class="drag-handle">⠿</span><span class="asset-name"><b>@{{ asset.alias || asset.name }}</b><small class="asset-route-hint">{{ assetRouteHint(asset) }}</small></span><el-select v-model="asset.usage" size="small" @change="onUsageChange(asset)"><el-option v-for="usage in usages(asset.type)" :key="usage.value" :label="usage.label" :value="usage.value"/></el-select><el-button text size="small" @click="remove(asset.id)">移除</el-button></article>
         </div>
@@ -93,7 +89,7 @@
           <div class="generation-history-head"><b>本镜生成记录</b><small>{{ shotHistory.length }} 个版本</small></div>
           <div class="generation-history-grid">
             <button v-for="job in shotHistory" :key="job.id" type="button" class="generation-history-item" :class="{ active: String(selectedHistoryJobId) === String(job.id) }" @click="selectHistoryJob(job)">
-              <video v-if="job.videoUrl" :src="job.videoUrl" :poster="historyPoster(job)" muted playsinline preload="auto" /><span v-else class="history-video-empty">{{ job.status === 'processing' ? '生成中' : '暂无预览' }}</span>
+              <img v-if="historyPoster(job)" :src="historyPoster(job)" alt="" class="history-poster"/><span v-else class="history-video-empty"><el-icon><VideoCamera /></el-icon>{{ job.videoUrl ? '点击切换成片' : (job.status === 'processing' ? '生成中' : '暂无预览') }}</span>
               <span class="history-card-meta"><b>{{ job.model_resolved || job.model || '视频版本' }}</b><small>{{ historyStatus(job.status) }} · {{ job.duration || duration }}秒</small></span>
               <span :class="['history-dot', job.status]"></span>
             </button>
@@ -121,7 +117,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, CircleCheckFilled, Delete, Edit, Picture, Upload, VideoCamera, WarningFilled } from '@element-plus/icons-vue'
@@ -146,6 +142,9 @@ const selected = ref(new Set()), selectedOrder = ref([]), assetScope = ref('proj
 const promptDocument = ref({ text: '', refs: [] })
 const keepOriginalAudio = ref(false), audioVolume = ref(1), audioFadeSeconds = ref(0), creating = ref(false), certifyingId = ref(null), extractingPosition = ref(''), savedResultJobId = ref(null), requestPreviewOpen = ref(false), polishingPrompt = ref(false), polishSuggestion = ref(''), stagePhase = ref(''), fileInput = ref(null), uploadLimits = ref(null)
 const draggedShotId = ref(null), draggedAssetId = ref(null), loadingShot = ref(false)
+const shotListRef = ref(null)
+let wheelShotLocked = false
+let wheelShotTimer = null
 const shotHistory = ref([]), selectedHistoryJobId = ref(null)
 let saveTimer = null
 
@@ -201,6 +200,11 @@ async function suggestPolish() {
 }
 function applyPolishSuggestion() { if (!polishSuggestion.value) return; prompt.value = polishSuggestion.value; promptDocument.value = { text: prompt.value, refs: promptDocument.value.refs || [] }; polishSuggestion.value = ''; ElMessage.success('已应用润色建议') }
 function assetUrl(asset) { return asset?.local_path ? `/static/${asset.local_path}` : asset?.url || '' }
+function assetThumbnailUrl(asset) {
+  const path = String(asset?.thumbnail_local_path || '').trim()
+  if (!path) return ''
+  return /^https?:\/\//i.test(path) || path.startsWith('data:') ? path : `/static/${path.replace(/^\/+/, '')}`
+}
 function typeName(type) { return ({ image: '图片', video: '视频', audio: '音频' })[type] || '素材' }
 function usages(type) { return type === 'image' ? [{label:'主视觉',value:'primary'},{label:'人物一致性',value:'identity'},{label:'场景/风格',value:'environment'},{label:'普通参考',value:'reference'},{label:'首帧',value:'first_frame'},{label:'尾帧',value:'last_frame'}] : type === 'video' ? [{label:'动作/镜头参考',value:'motion'},{label:'关键帧提取',value:'keyframes'},{label:'仅后期',value:'post_process'}] : [{label:'音色/氛围参考',value:'ambience'},{label:'成片混音',value:'post_mix'}] }
 function assetRouteHint(asset) {
@@ -428,6 +432,19 @@ async function persistShotOrder(list) { const previous = shots.value; shots.valu
 async function dropShot(targetId) { if (!draggedShotId.value || draggedShotId.value === targetId) return; const list = [...shots.value]; const from = list.findIndex((shot) => shot.id === draggedShotId.value), to = list.findIndex((shot) => shot.id === targetId); const [moved] = list.splice(from, 1); list.splice(to, 0, moved); draggedShotId.value = null; await persistShotOrder(list) }
 async function moveShot(index, offset) { const target = index + offset; if (target < 0 || target >= shots.value.length) return; const list = [...shots.value]; [list[index], list[target]] = [list[target], list[index]]; await persistShotOrder(list) }
 function selectRelative(offset) { const target = shots.value[activeShotIndex.value + offset]; if (target) selectShot(target) }
+function onShotListWheel(event) {
+  if (!event.deltaY || wheelShotLocked || shots.value.length < 2) return
+  if (event.target instanceof Element && event.target.closest('button, input, textarea, select, .el-select')) return
+  const targetIndex = Math.max(0, Math.min(shots.value.length - 1, activeShotIndex.value + (event.deltaY > 0 ? 1 : -1)))
+  const target = shots.value[targetIndex]
+  if (!target || target.id === activeShotId.value) return
+  wheelShotLocked = true
+  selectShot(target).finally(() => {
+    nextTick(() => shotListRef.value?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' }))
+    clearTimeout(wheelShotTimer)
+    wheelShotTimer = setTimeout(() => { wheelShotLocked = false }, 320)
+  })
+}
 
 function toggle(asset) { const next = new Set(selected.value); if (next.has(asset.id)) { next.delete(asset.id); selectedOrder.value = selectedOrder.value.filter((id) => id !== asset.id) } else { const typeCount = selectionCounts.value[asset.type] || 0; if (chosenAssets.value.length >= shotLimits.value.total || typeCount >= shotLimits.value[asset.type]) { ElMessage.warning(`当前镜头最多选择 ${shotLimits.value[asset.type]} 个${typeName(asset.type)}，总数最多 ${shotLimits.value.total} 个`); return } next.add(asset.id); selectedOrder.value = [...selectedOrder.value, asset.id]; asset.usage ||= asset.type === 'image' ? 'reference' : asset.type === 'video' ? 'motion' : 'ambience' } selected.value = next; scheduleSave() }
 function remove(id) { const next = new Set(selected.value); next.delete(id); selected.value = next; selectedOrder.value = selectedOrder.value.filter((item) => item !== id); scheduleSave() }
@@ -510,7 +527,7 @@ async function extractFrame(position) { if (!canExtractFrames.value || extractin
 
 watch([prompt, model, creationMode, aspectRatio, duration, resolution, audioStrategy, keepOriginalAudio, audioVolume, audioFadeSeconds], scheduleSave)
 watch(chosenAssets, scheduleSave, { deep: true })
-onBeforeUnmount(() => { clearTimeout(saveTimer); saveCurrentShot(false).catch(() => {}) })
+onBeforeUnmount(() => { clearTimeout(saveTimer); clearTimeout(wheelShotTimer); saveCurrentShot(false).catch(() => {}) })
 onMounted(async () => {
   try {
     if (isProjectMode.value) {
@@ -654,4 +671,64 @@ onMounted(() => {
 .creation-generate-dock{position:sticky;top:0;z-index:12;display:grid;gap:8px;margin:12px -2px 14px;padding:10px;border:1px solid #69655e;border-radius:8px;background:#181818f2;box-shadow:0 6px 18px #0006;backdrop-filter:blur(8px)}.creation-generate-summary{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.creation-generate-summary b{color:#f5f3ee;font-size:13px}.creation-generate-summary small{color:#c4c1ba;font-size:11px;white-space:nowrap}.creation-generate-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:7px}.creation-generate-actions .generate-button{margin:0!important;min-width:0}.project-storyboard-page .creation-generate-dock{top:-1px;background:#181f29f5;border-color:#3c4958}.project-storyboard-page .creation-generate-summary b{color:#f2f0ea}.project-storyboard-page .creation-generate-summary small{color:#aab4c0}@media(max-width:720px){.creation-generate-dock{position:sticky;top:0;margin-left:0;margin-right:0}.creation-generate-summary{align-items:flex-start;flex-direction:column;gap:3px}.creation-generate-summary small{white-space:normal}}
 @media(max-width:960px){.omni-page.embedded.project-storyboard-page{position:static!important;height:auto!important;min-height:0!important;overflow:visible!important}.omni-page.embedded.project-storyboard-page .workbench{height:auto!important;min-height:520px}}
 .t0-generation-settings{display:grid;gap:10px;margin:12px -2px 14px;padding:12px;border:1px solid #88837a;border-radius:8px;background:#252525}.t0-settings-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.t0-settings-heading b{font-size:14px;color:#f5f3ee}.t0-settings-heading small{font-size:11px;color:#c4c1ba}.center-stage{grid-template-rows:42px minmax(170px,.8fr) 42px 38px minmax(235px,1fr)}.shot-script{min-height:235px;border-top:2px solid #88837a}.project-storyboard-page .t0-generation-settings{background:#202934;border-color:#506174}.project-storyboard-page .t0-settings-heading b{color:#f2f0ea}.project-storyboard-page .t0-settings-heading small{color:#aab4c0}@media(max-width:760px){.center-stage{grid-template-rows:42px minmax(200px,.8fr) 42px 38px minmax(260px,1fr)}.t0-settings-heading{align-items:flex-start;flex-direction:column;gap:3px}}
+/* 2026-08 usability pass: readable T0 controls, wheel navigation, and media-light lists. */
+.omni-page{font-size:14px;line-height:1.5}
+.shot-list:focus-visible{outline:1px solid var(--focus-ring,#c7d2dc);outline-offset:3px}
+.shot-video-placeholder{display:flex!important;flex-direction:column;gap:6px}.shot-video-placeholder small{font-size:12px!important;color:#c4c1ba!important}
+.material-video-placeholder{display:grid!important;place-items:center;font-size:26px;color:#c4c1ba;background:#111}
+.history-poster,.generation-history-item .history-video-empty{display:block;width:100%;height:92px;object-fit:cover;border-radius:4px;background:#0b0b0b}
+.generation-history-item .history-video-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:12px!important}
+.generation-history-item .history-video-empty .el-icon{font-size:24px}
+.omni-page .shot-heading small,.omni-page .shot-state,.omni-page .upload-limit-note,.omni-page .selection-limit-note,
+.omni-page .mode-note,.omni-page .identity-help,.omni-page .asset-route-hint,.omni-page .generation-history-head small,
+.omni-page .history-card-meta small,.omni-page .history-card-meta b,.omni-page .t0-settings-heading small{font-size:12px!important;line-height:1.5}
+.omni-page .parameters label,.omni-page .prompt-label,.omni-page .materials-title,.omni-page .panel-title,
+.omni-page .creation-generate-summary{font-size:13px!important;line-height:1.5}
+.omni-page :deep(.el-input__inner),.omni-page :deep(.el-textarea__inner),.omni-page :deep(.el-select__selected-item),
+.omni-page :deep(.el-button),.omni-page :deep(.el-radio-button__inner){font-size:14px!important}
+@media(min-width:961px){
+  .omni-page:not(.project-storyboard-page) .workbench{grid-template-columns:minmax(220px,240px) minmax(0,1fr) minmax(340px,360px)}
+}
+/* Film-canvas visual system: track / stage / director console. */
+.omni-page{background:var(--bg-page)!important;color:var(--text-primary)!important;--studio-accent:var(--accent);--studio-teal:var(--accent-teal);--studio-warm:var(--accent-warm)}
+.topbar{height:60px!important;padding:0 18px;background:color-mix(in srgb,var(--bg-surface) 90%,transparent)!important;border-color:var(--border-subtle)!important;backdrop-filter:blur(18px) saturate(125%);box-shadow:0 10px 30px rgba(0,0,0,.12)}
+.topbar-left{gap:10px}.topbar-left::before{content:'◢';display:grid;place-items:center;width:28px;height:28px;border-radius:9px;background:linear-gradient(145deg,var(--studio-accent),var(--studio-teal));color:#fff;font-size:12px;box-shadow:0 6px 18px color-mix(in srgb,var(--studio-accent) 28%,transparent)}
+.workbench{height:calc(100vh - 60px);background:var(--bg-page)!important}
+.panel{background:color-mix(in srgb,var(--bg-surface) 94%,transparent)!important;border-color:var(--border-subtle)!important}
+.shot-panel{position:relative}.shot-panel::before,.creation-panel::before{display:block;margin:0 0 8px;color:var(--text-faint);font-size:9px;font-weight:700;letter-spacing:.16em}
+.shot-panel::before{content:'SHOT TRACK'}.creation-panel::before{content:'DIRECTOR CONSOLE'}
+.shot-heading b,.panel-title b,.materials-title b,.t0-settings-heading b{color:var(--text-primary)!important}
+.shot-card{position:relative;background:var(--bg-raised)!important;border-color:var(--border-subtle)!important;border-radius:11px!important;box-shadow:none!important;transition:transform .16s ease,border-color .16s ease,background .16s ease}
+.shot-card:hover{transform:translateX(2px);border-color:var(--border-strong)!important}
+.shot-card.active{background:color-mix(in srgb,var(--studio-accent) 12%,var(--bg-raised))!important;border-color:color-mix(in srgb,var(--studio-accent) 68%,var(--border-color))!important;box-shadow:inset 3px 0 0 var(--studio-accent)!important}
+.shot-number{background:color-mix(in srgb,var(--studio-accent) 18%,var(--bg-elevated))!important;color:var(--text-primary)!important}
+.center-stage{background:#070a11!important;border-inline:1px solid var(--border-subtle)}
+.player-tools,.time-ruler,.shot-tabs,.shot-script{background:color-mix(in srgb,var(--bg-surface) 96%,#070a11)!important;border-color:var(--border-subtle)!important}
+.player-tools{color:var(--text-muted)}.player-tools>span{color:var(--studio-accent);font-size:12px;font-weight:700;letter-spacing:.08em;text-align:center}
+.video-stage{margin:12px;border:1px solid #202940!important;border-radius:14px;box-shadow:inset 0 0 60px rgba(0,0,0,.62),0 18px 46px rgba(0,0,0,.25)}
+.empty-play,.render-play{background:linear-gradient(145deg,var(--studio-accent),#5d4dd2)!important;color:#fff!important;box-shadow:0 14px 36px color-mix(in srgb,var(--studio-accent) 30%,transparent)}
+.render-ring{border-color:color-mix(in srgb,var(--studio-accent) 42%,transparent)!important}.time-ruler i{background:linear-gradient(90deg,var(--studio-accent),var(--studio-teal))!important}
+.shot-script{padding:12px 16px 16px!important;border-top:1px solid var(--border-subtle)!important}
+.creation-panel{background:color-mix(in srgb,var(--bg-surface) 97%,transparent)!important;padding:14px!important}
+.creation-generate-dock{top:-2px;border-color:color-mix(in srgb,var(--studio-accent) 45%,var(--border-color))!important;border-radius:12px!important;background:color-mix(in srgb,var(--bg-surface) 92%,transparent)!important;box-shadow:0 14px 34px rgba(0,0,0,.2),inset 0 1px 0 color-mix(in srgb,var(--text-primary) 8%,transparent)!important}
+.creation-generate-actions .generate-button,.generate-button.el-button--primary{background:linear-gradient(135deg,var(--studio-accent),#6d5de0)!important;border-color:transparent!important;color:#fff!important;box-shadow:0 9px 24px color-mix(in srgb,var(--studio-accent) 28%,transparent)!important}
+.t0-generation-settings{border-color:color-mix(in srgb,var(--studio-accent) 42%,var(--border-color))!important;border-radius:12px!important;background:color-mix(in srgb,var(--studio-accent) 7%,var(--bg-raised))!important;box-shadow:inset 3px 0 0 var(--studio-accent)!important}
+.mode-note{border-left-color:var(--studio-warm)!important;background:color-mix(in srgb,var(--studio-warm) 8%,var(--bg-raised))!important;color:var(--text-regular)!important}
+.advanced-settings,.identity-options,.selected-assets article{background:var(--bg-raised)!important;border-color:var(--border-color)!important}
+.dropzone{background:color-mix(in srgb,var(--studio-teal) 5%,var(--bg-raised))!important;border-color:color-mix(in srgb,var(--studio-teal) 44%,var(--border-color))!important;border-radius:10px!important}
+.material-card{background:var(--bg-raised)!important;border-color:var(--border-color)!important;border-radius:10px!important}.material-card.selected{border-color:var(--studio-teal)!important;box-shadow:inset 0 0 0 1px var(--studio-teal)!important}
+.prompt-label em{color:var(--studio-warm)!important}
+:global(html.light) .omni-page{--el-bg-color:var(--bg-surface);--el-bg-color-overlay:#fff;--el-fill-color-blank:#fff;--el-fill-color:var(--bg-raised);--el-text-color-primary:var(--text-primary);--el-text-color-regular:var(--text-regular);--el-text-color-secondary:var(--text-muted);--el-border-color:var(--border-color)}
+:global(html.light) .topbar,:global(html.light) .panel,:global(html.light) .player-tools,:global(html.light) .time-ruler,:global(html.light) .shot-tabs,:global(html.light) .shot-script{background:rgba(255,255,255,.78)!important}
+:global(html.light) .shot-card,:global(html.light) .advanced-settings,:global(html.light) .identity-options,:global(html.light) .selected-assets article,:global(html.light) .material-card{background:#fff!important}
+:global(html.light) .center-stage{background:#e7e1d8!important}
+:global(html.light) .creation-generate-dock{background:rgba(255,255,255,.9)!important;box-shadow:0 14px 34px rgba(61,48,35,.12)!important}
+:global(html.light) .omni-page :deep(.el-input__wrapper),:global(html.light) .omni-page :deep(.el-select__wrapper),:global(html.light) .omni-page :deep(.el-textarea__inner),:global(html.light) .omni-page :deep(.el-input-number__decrease),:global(html.light) .omni-page :deep(.el-input-number__increase){background:#fff!important;box-shadow:0 0 0 1px var(--border-color) inset!important;color:var(--text-primary)!important}
+:global(html.light) .omni-page :deep(.el-input__inner),:global(html.light) .omni-page :deep(.el-select__selected-item),:global(html.light) .omni-page :deep(.el-textarea__inner){color:var(--text-primary)!important}
+:global(html.light) .omni-page :deep(.el-input__inner::placeholder),:global(html.light) .omni-page :deep(.el-textarea__inner::placeholder){color:var(--text-faint)!important}
+:global(html.light) .mode-switch :deep(.el-radio-button__inner){background:#fff!important;border-color:var(--border-color)!important;color:var(--text-regular)!important}
+:global(html.light) .mode-switch :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner){background:var(--text-primary)!important;border-color:var(--text-primary)!important;color:#fff!important}
+:global(html.light) .advanced-settings summary,:global(html.light) .advanced-settings summary span,:global(html.light) .shot-heading small,:global(html.light) .shot-state,:global(html.light) .parameters label,:global(html.light) .selection-limit-note,:global(html.light) .upload-limit-note{color:var(--text-muted)!important}
+:global(html.light) .shot-script :deep(.el-textarea__inner){background:#fff!important;border-radius:10px!important}
+@media(min-width:961px){.omni-page:not(.project-storyboard-page) .workbench{grid-template-columns:minmax(220px,240px) minmax(0,1fr) minmax(340px,370px)}}
 </style>

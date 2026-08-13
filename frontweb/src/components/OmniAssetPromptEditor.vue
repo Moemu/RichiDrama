@@ -14,7 +14,7 @@
       @dragleave="onDragLeave"
       @drop.prevent.stop="onDrop"
     />
-    <div v-if="dragging" class="drop-hint">松开以插入该素材 @引用</div>
+    <div v-if="dragging" class="drop-hint">松开后在光标位置插入素材 @引用</div>
     <div v-if="showPicker" class="asset-picker">
       <button v-for="asset in pickerAssets" :key="asset.id" type="button" @click="insertAsset(asset)">
         <span class="pa-thumb">
@@ -35,6 +35,7 @@
 </template>
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { insertTokenAtOffset } from '@/utils/promptInsertion'
 const props = defineProps({
   modelValue: { type: String, default: '' },
   /** 全部可选素材（不限于已选）；插入未选中的时会 emit pick 自动加入创作 */
@@ -48,6 +49,7 @@ const text = ref(props.modelValue)
 const showPicker = ref(false)
 const dragging = ref(false)
 let dragCounter = 0
+let lastCaretOffset = 0
 
 watch(() => props.modelValue, (value) => { if (value !== text.value) text.value = value; syncReferences(value || '') })
 watch(() => props.assets, () => syncReferences(text.value), { deep: false })
@@ -95,7 +97,11 @@ function activeMentionRange(value = text.value) {
   // ordinary sentence content, not part of the asset alias.
   return { start: at, end: cursor, query: source.slice(at + 1, cursor) }
 }
-function onCursorChange() { showPicker.value = !!activeMentionRange() }
+function onCursorChange() {
+  const textarea = inputRef.value?.textarea
+  if (Number.isInteger(textarea?.selectionStart)) lastCaretOffset = textarea.selectionStart
+  showPicker.value = !!activeMentionRange()
+}
 
 function referencesFromText(value) {
   return [...new Set([...String(value || '').matchAll(/@([^\s@]+)/g)].map((match) => match[1]))]
@@ -121,8 +127,17 @@ function insertAsset(asset, opts = {}) {
   // 未选中的先加入创作
   if (!props.chosenIds.has(asset.id)) emit('pick', asset)
   const token = `@${asset.alias || asset.name}`
-  const mention = activeMentionRange()
-  if (mention) {
+  const explicitOffset = Number.isFinite(Number(opts.offset)) ? Number(opts.offset) : null
+  const mention = explicitOffset == null ? activeMentionRange() : null
+  if (explicitOffset != null) {
+    const inserted = insertTokenAtOffset(text.value, token, explicitOffset)
+    text.value = inserted.text
+    lastCaretOffset = inserted.caret
+    nextTick(() => {
+      inputRef.value?.textarea?.focus()
+      inputRef.value?.textarea?.setSelectionRange(inserted.caret, inserted.caret)
+    })
+  } else if (mention) {
     // Replace exactly the @ token around the caret, including one in the
     // middle of a sentence, then leave the cursor immediately after it.
     const suffix = text.value.slice(mention.end)
@@ -149,8 +164,47 @@ function thumbUrl(asset) {
 }
 
 // ===== 拖拽支持 =====
-function onDragOver(e) { dragging.value = true }
+function onDragOver() { dragging.value = true }
 function onDragLeave(e) { /* 由 counter 控制，见 onDrop/ondragenter */ }
+
+function textareaOffsetFromPoint(event) {
+  const textarea = inputRef.value?.textarea
+  if (!textarea || !Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return lastCaretOffset
+  const source = String(text.value || '')
+  if (!source) return 0
+  const rect = textarea.getBoundingClientRect()
+  const style = getComputedStyle(textarea)
+  const mirror = document.createElement('div')
+  const copied = ['boxSizing', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'padding', 'border', 'whiteSpace', 'overflowWrap', 'wordBreak', 'tabSize', 'textTransform', 'textIndent']
+  copied.forEach((name) => { mirror.style[name] = style[name] })
+  Object.assign(mirror.style, {
+    position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`,
+    height: `${rect.height}px`, overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none',
+    whiteSpace: 'pre-wrap', overflowWrap: 'break-word', zIndex: '-1',
+  })
+  const textNode = document.createTextNode(source)
+  mirror.appendChild(textNode)
+  document.body.appendChild(mirror)
+  let best = { offset: lastCaretOffset, score: Number.POSITIVE_INFINITY }
+  try {
+    for (let i = 0; i < source.length; i++) {
+      const range = document.createRange()
+      range.setStart(textNode, i)
+      range.setEnd(textNode, i + 1)
+      const charRect = range.getBoundingClientRect()
+      if (!charRect.width && !charRect.height) continue
+      const midX = charRect.left + charRect.width / 2
+      const midY = charRect.top + charRect.height / 2
+      const linePenalty = Math.abs(event.clientY - midY) * 4
+      const score = linePenalty + Math.abs(event.clientX - midX)
+      if (score < best.score) best = { offset: event.clientX > midX ? i + 1 : i, score }
+    }
+  } finally {
+    mirror.remove()
+  }
+  return best.offset
+}
+
 function onDrop(e) {
   dragging.value = false
   dragCounter = 0
@@ -162,7 +216,7 @@ function onDrop(e) {
     const a = e.dataTransfer.getData('asset')
     if (a) { try { asset = JSON.parse(a) } catch (_) {} }
   }
-  if (asset && asset.id) insertAsset(asset, { append: true })
+  if (asset && asset.id) insertAsset(asset, { offset: textareaOffsetFromPoint(e) })
 }
 </script>
 <style scoped>

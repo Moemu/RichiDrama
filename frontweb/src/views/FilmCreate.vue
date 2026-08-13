@@ -1377,13 +1377,22 @@
             <div class="sb-panel sb-video">
               <div v-if="getSbVideo(sb.id)" class="sb-video-area">
                 <video
-                  v-if="assetVideoUrl(getSbVideo(sb.id))"
+                  v-if="assetVideoUrl(getSbVideo(sb.id)) && Number(activeSbId) === Number(sb.id)"
                   :key="sbMainVideoPlayerKey(sb.id)"
                   :src="assetVideoUrl(getSbVideo(sb.id))"
                   controls
                   class="sb-video-player"
                   preload="metadata"
                 />
+                <button
+                  v-else-if="assetVideoUrl(getSbVideo(sb.id))"
+                  type="button"
+                  class="sb-video-lazy-placeholder"
+                  @click.stop="setActiveSbId(sb.id)"
+                >
+                  <el-icon><VideoCamera /></el-icon>
+                  <span>点击加载本镜视频</span>
+                </button>
                 <div
                   v-else
                   class="sb-video-error"
@@ -1429,7 +1438,7 @@
                   :title="`${item.label}（点击切换）`"
                   @click="onSelectSbMainVideo(sb, item.video)"
                 >
-                  <video :src="item.src" preload="metadata" class="sb-video-thumb-player" />
+                  <span class="sb-video-thumb-player sb-video-thumb-placeholder"><el-icon><VideoCamera /></el-icon></span>
                   <span class="sb-video-thumb-label">{{ item.label }}</span>
                 </div>
               </div>
@@ -2595,6 +2604,7 @@ import { generationSettingsAPI } from '@/api/prompts'
 import { parseScriptIntoEpisodes, episodesListToPlainScript } from '@/utils/scriptEpisodes'
 import { exportStoryboardSheet } from '@/utils/exportStoryboardSheet'
 import { formatChinaTime } from '@/utils/time'
+import { insertTokenAtOffset } from '@/utils/promptInsertion'
 import StylePickerButton from '@/components/StylePickerButton.vue'
 import AIConfigContent from '@/components/AIConfigContent.vue'
 import UniversalSegmentOmniAtEditor from '@/components/UniversalSegmentOmniAtEditor.vue'
@@ -6380,7 +6390,7 @@ function onSbOmniAssetDragStart(e, item) {
   e.dataTransfer.setData('text/plain', payload)
 }
 
-/** 素材拖入提示词编辑区：加入本镜已选，并在文本末尾追加 @图片N 引用 */
+/** 素材拖入提示词编辑区：加入本镜已选，并在实际拖放位置插入 @图片N 引用。 */
 async function onUniversalSegmentDropAsset(sb, payload) {
   if (!sb?.id || !payload) return
   let assetId = Number(payload.assetId)
@@ -6392,10 +6402,10 @@ async function onUniversalSegmentDropAsset(sb, payload) {
     await setSbOmniAssetSelected(sb, assetId, true)
   }
   const n = sbOmniEntryIndexByAssetId(sb)[assetId] || ((sbOmniAssetIds.value[sb.id] || []).length + sbOmniAutoRefCount(sb))
-  const token = `@图片${n} `
-  const current = (sbUniversalSegmentText.value[sb.id] ?? sb.universal_segment_text ?? '').toString().trim()
-  const next = current ? `${current} ${token}` : token
-  sbUniversalSegmentText.value = { ...sbUniversalSegmentText.value, [sb.id]: next }
+  const token = `@图片${n}`
+  const current = (sbUniversalSegmentText.value[sb.id] ?? sb.universal_segment_text ?? '').toString()
+  const inserted = insertTokenAtOffset(current, token, payload.offset)
+  sbUniversalSegmentText.value = { ...sbUniversalSegmentText.value, [sb.id]: inserted.text }
   onSaveUniversalSegmentField(sb)
   ElMessage.success(`已引用「${payload.alias || `素材${assetId}`}」为 @图片${n}`)
 }
@@ -11330,6 +11340,31 @@ html.light .sb-video-placeholder {
   object-fit: cover;
   display: block;
   pointer-events: none;
+}
+.sb-video-lazy-placeholder {
+  width: 100%;
+  min-height: 198px;
+  border: 0;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--text-muted);
+  background: var(--bg-inner);
+  cursor: pointer;
+  font: inherit;
+}
+.sb-video-lazy-placeholder:hover,
+.sb-video-lazy-placeholder:focus-visible { color: var(--text-primary); background: var(--bg-hover); }
+.sb-video-lazy-placeholder .el-icon { font-size: 28px; }
+.sb-video-thumb-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  background: var(--bg-inner);
+  font-size: 20px;
 }
 .sb-video-thumb-label {
   position: absolute;

@@ -80,6 +80,7 @@ const composing = ref(false)
 let menuMode = 'insert'
 let insertAtOffset = 0
 let replaceChipEl = null
+let pendingDropOffset = null
 
 let skipNextModelWatch = false
 
@@ -177,11 +178,8 @@ function chipCanonicalLength(node) {
 }
 
 /** 光标在「规范串」中的偏移（与 serializeEditor 一致） */
-function getCaretCanonicalOffset(el) {
-  const win = el?.ownerDocument?.defaultView || window
-  const sel = win.getSelection()
-  if (!sel || sel.rangeCount === 0 || !el) return 0
-  const range = sel.getRangeAt(0)
+function canonicalOffsetForRange(el, range) {
+  if (!el || !range) return 0
   const r = el.ownerDocument.createRange()
   r.selectNodeContents(el)
   r.setEnd(range.endContainer, range.endOffset)
@@ -196,6 +194,13 @@ function getCaretCanonicalOffset(el) {
   const frag = r.cloneContents()
   frag.childNodes.forEach(measure)
   return len
+}
+
+function getCaretCanonicalOffset(el) {
+  const win = el?.ownerDocument?.defaultView || window
+  const sel = win.getSelection()
+  if (!sel || sel.rangeCount === 0 || !el) return 0
+  return canonicalOffsetForRange(el, sel.getRangeAt(0))
 }
 
 function setCaretCanonicalOffset(el, target) {
@@ -365,14 +370,40 @@ function onChipClick(e) {
   menuOpen.value = true
 }
 
-/** 素材库卡片拖入编辑区：透传给父组件（加入已选 + 在文本末尾追加 @图片N） */
+function dropCanonicalOffset(event) {
+  const el = editorRef.value
+  if (!el) return 0
+  const doc = el.ownerDocument
+  let range = null
+  if (typeof doc.caretPositionFromPoint === 'function') {
+    const pos = doc.caretPositionFromPoint(event.clientX, event.clientY)
+    if (pos) {
+      range = doc.createRange()
+      range.setStart(pos.offsetNode, pos.offset)
+      range.collapse(true)
+    }
+  } else if (typeof doc.caretRangeFromPoint === 'function') {
+    range = doc.caretRangeFromPoint(event.clientX, event.clientY)
+  }
+  const container = range?.startContainer?.nodeType === Node.ELEMENT_NODE ? range.startContainer : range?.startContainer?.parentElement
+  if (!range || !container || !el.contains(container)) return getCaretCanonicalOffset(el)
+  return canonicalOffsetForRange(el, range)
+}
+
+/** 素材库卡片拖入编辑区：透传素材和准确落点，由父组件加入已选并插入 @图片N。 */
 function onDropAsset(e) {
   const raw = e.dataTransfer?.getData('application/json') || e.dataTransfer?.getData('text/plain')
   if (!raw) return
   let data = null
   try { data = JSON.parse(raw) } catch (_) { data = null }
-  if (data && data.assetId != null) {
-    emit('drop-asset', { assetId: Number(data.assetId), alias: String(data.alias || data.name || '').slice(0, 80) })
+  if (data && (data.assetId != null || data.entity)) {
+    pendingDropOffset = dropCanonicalOffset(e)
+    emit('drop-asset', {
+      assetId: data.assetId != null ? Number(data.assetId) : null,
+      entity: data.entity || null,
+      alias: String(data.alias || data.name || '').slice(0, 80),
+      offset: pendingDropOffset,
+    })
   }
 }
 
@@ -438,7 +469,13 @@ watch(
     const hadFocus = document.activeElement === el
     applyPlainTextToEditor(el, next)
     if (hadFocus) {
-      setCaretCanonicalOffset(el, next.length)
+      if (pendingDropOffset != null) {
+        const insertedLength = Math.max(0, next.length - cur.length)
+        setCaretCanonicalOffset(el, Math.min(next.length, pendingDropOffset + insertedLength))
+        pendingDropOffset = null
+      } else {
+        setCaretCanonicalOffset(el, next.length)
+      }
     }
   }
 )

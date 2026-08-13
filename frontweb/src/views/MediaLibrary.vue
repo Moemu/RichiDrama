@@ -58,7 +58,7 @@
       >
         <div class="media-thumb">
           <img v-if="item.type === 'video' && item.thumbnail_local_path" :src="thumbnailUrl(item)" class="thumb-img" />
-          <video v-else-if="item.type === 'video'" :src="itemUrl(item)" class="thumb-video" muted />
+          <div v-else-if="item.type === 'video'" class="thumb-video thumb-video-placeholder"><el-icon><VideoCamera /></el-icon><span>视频素材</span></div>
           <div v-else-if="item.type === 'audio'" class="audio-thumb">🎵</div>
           <img v-else :src="itemUrl(item)" class="thumb-img" />
           <div class="media-overlay">
@@ -161,7 +161,7 @@ import { ref, onMounted, reactive, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, Upload, Search, Loading, CircleCheck,
-  ZoomIn, Delete, Edit, Files, Star, StarFilled
+  ZoomIn, Delete, Edit, Files, Star, StarFilled, VideoCamera
 } from '@element-plus/icons-vue'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { useRouter } from 'vue-router'
@@ -532,6 +532,8 @@ onMounted(loadMedia)
   height: 100%;
   object-fit: cover;
 }
+.thumb-video-placeholder { display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--text-muted);font-size:13px;background:var(--bg-inner) }
+.thumb-video-placeholder .el-icon { font-size:30px }
 .audio-thumb { width: 100%; height: 100%; display: grid; place-items: center; font-size: 36px; background: var(--bg-hover); }
 
 .media-overlay {

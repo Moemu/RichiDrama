@@ -6,40 +6,31 @@
           <span class="logo-main">本地短剧助手</span>
           <span class="logo-sub">LocalMiniDrama</span>
         </h1>
-        <!-- 公共资源库（左侧，靛紫调） -->
-        <div class="header-library">
-          <el-button class="btn-library" @click="showCharLibrary = true">
-            <el-icon><User /></el-icon>素材角色
-          </el-button>
-          <el-button class="btn-library" @click="showSceneLibrary = true">
-            <el-icon><PictureFilled /></el-icon>素材场景
-          </el-button>
-          <el-button class="btn-library" @click="showPropLibrary = true">
-            <el-icon><Box /></el-icon>素材道具
-          </el-button>
-        </div>
+        <nav class="header-library" aria-label="创作资源">
+          <el-dropdown trigger="click" @command="handleAssetCommand">
+            <el-button class="btn-library"><el-icon><Files /></el-icon>素材中心</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="characters"><el-icon><User /></el-icon>角色素材</el-dropdown-item>
+                <el-dropdown-item command="scenes"><el-icon><PictureFilled /></el-icon>场景素材</el-dropdown-item>
+                <el-dropdown-item command="props"><el-icon><Box /></el-icon>道具素材</el-dropdown-item>
+                <el-dropdown-item divided command="media"><el-icon><Files /></el-icon>媒体素材库</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </nav>
         <!-- 右侧操作区 -->
         <div class="header-actions">
           <el-button class="btn-library" title="全能视频" @click="createOmniProject">
             <el-icon><MagicStick /></el-icon>全能视频
           </el-button>
-          <el-button class="btn-library" title="已删除全能项目" @click="manageDeletedOmniProjects">已删除项目</el-button>
           <el-button class="btn-library" title="AI 工具箱" @click="$router.push('/ai-tools')">
             <el-icon><MagicStick /></el-icon>AI 工具箱
-          </el-button>
-          <el-button class="btn-library" title="媒体素材库" @click="$router.push('/media-library')">
-            <el-icon><Files /></el-icon>素材库
           </el-button>
           <el-button class="btn-theme" :title="isDark ? '切换到浅色模式' : '切换到暗色模式'" @click="toggleTheme">
             <el-icon><Sunny v-if="isDark" /><Moon v-else /></el-icon>
             {{ isDark ? '浅色' : '暗色' }}
           </el-button>
-          <el-button class="btn-settings" @click="showAiConfigDialog = true">
-            <el-icon><Setting /></el-icon>AI配置
-          </el-button>
-          <el-button class="btn-library" @click="$router.push('/account')">账户</el-button>
-          <el-button v-if="isAdmin" class="btn-settings" @click="$router.push('/admin')">后台</el-button>
-          <el-button class="btn-library" @click="logout">退出</el-button>
           <el-button class="btn-import" :loading="importing" @click="triggerImport">
             <el-icon><Upload /></el-icon>导入项目
           </el-button>
@@ -47,6 +38,21 @@
           <el-button type="primary" class="btn-new" @click="goNewProject">
             <el-icon><Plus /></el-icon>新建项目
           </el-button>
+          <el-dropdown class="header-more" trigger="click" @command="handleHeaderCommand">
+            <el-button class="btn-more" aria-label="更多操作">更多</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="omni"><el-icon><MagicStick /></el-icon>全能视频</el-dropdown-item>
+                <el-dropdown-item command="tools"><el-icon><MagicStick /></el-icon>AI 工具箱</el-dropdown-item>
+                <el-dropdown-item command="import"><el-icon><Upload /></el-icon>导入项目</el-dropdown-item>
+                <el-dropdown-item command="deleted">已删除项目</el-dropdown-item>
+                <el-dropdown-item divided command="config"><el-icon><Setting /></el-icon>AI 配置</el-dropdown-item>
+                <el-dropdown-item command="account">账户</el-dropdown-item>
+                <el-dropdown-item v-if="isAdmin" command="admin">后台</el-dropdown-item>
+                <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
     </header>
@@ -411,6 +417,24 @@ async function logout () {
   localStorage.removeItem('lmd_auth_token')
   localStorage.removeItem('lmd_auth_user')
   router.replace('/login')
+}
+
+function handleAssetCommand(command) {
+  if (command === 'characters') showCharLibrary.value = true
+  else if (command === 'scenes') showSceneLibrary.value = true
+  else if (command === 'props') showPropLibrary.value = true
+  else if (command === 'media') router.push('/media-library')
+}
+
+function handleHeaderCommand(command) {
+  if (command === 'omni') createOmniProject()
+  else if (command === 'tools') router.push('/ai-tools')
+  else if (command === 'import') triggerImport()
+  else if (command === 'deleted') manageDeletedOmniProjects()
+  else if (command === 'config') showAiConfigDialog.value = true
+  else if (command === 'account') router.push('/account')
+  else if (command === 'admin') router.push('/admin')
+  else if (command === 'logout') logout()
 }
 
 // 库编辑图片 – 文件输入 refs
@@ -984,10 +1008,8 @@ onMounted(async () => {
   min-width: 0;
   justify-content: flex-end;
   white-space: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow: visible;
 }
-.header-actions::-webkit-scrollbar { display: none; }
 .header-library .el-button,
 .header-actions .el-button {
   flex: 0 0 auto;
@@ -1523,4 +1545,39 @@ html.light .badge-status--draft {
   object-fit: contain;
 }
 /* LensRhyme monochrome project desk */
+/* Modern creative-product home: brand navigation and an editorial project canvas. */
+.film-list{background:var(--bg-page);background-image:radial-gradient(70% 50% at 8% -10%,color-mix(in srgb,var(--accent) 18%,transparent),transparent 68%),radial-gradient(42% 38% at 100% 35%,color-mix(in srgb,var(--accent-teal) 9%,transparent),transparent 72%)}
+.header{padding:13px 24px;border-bottom-color:var(--border-subtle);box-shadow:none}
+.header-inner{max-width:min(1520px,96vw);gap:12px}
+.logo{position:relative;min-width:146px;padding-left:38px}
+.logo::before{content:'◢';position:absolute;left:0;top:0;display:grid;place-items:center;width:30px;height:30px;border-radius:10px;background:linear-gradient(145deg,var(--accent),#42d3c7);color:#fff;font-size:14px;box-shadow:0 8px 22px color-mix(in srgb,var(--accent) 30%,transparent)}
+.logo-main{font-size:15px;font-weight:720;letter-spacing:-.025em}.logo-sub{font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.header-library{display:flex;flex:0 0 auto;margin-left:8px;padding:4px;border:1px solid var(--border-subtle);border-radius:12px;background:color-mix(in srgb,var(--bg-raised) 74%,transparent)}
+.header-library .el-button,.header-actions .el-button{height:34px;border-radius:9px!important}
+.header-actions{gap:4px}.header-actions .btn-library,.header-actions .btn-settings,.header-actions .btn-theme,.header-actions .btn-import{border-color:transparent!important;background:transparent!important;box-shadow:none!important}
+.header-more{flex:0 0 auto}.btn-more{height:34px!important;border-color:transparent!important;background:transparent!important}.btn-more::after{content:'•••';margin-left:6px;color:var(--text-faint);letter-spacing:1px}
+.header-actions .btn-new{margin-left:6px;height:36px;padding-inline:16px}
+.main{max-width:min(1520px,96vw);padding:42px 20px 64px}
+.projects-heading{position:relative;align-items:center;margin:8px 0 26px;padding:0 4px}
+.projects-heading::after{content:'';position:absolute;right:84px;top:-18px;width:160px;height:80px;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb,var(--accent) 13%,transparent),transparent 70%);filter:blur(8px);pointer-events:none}
+.projects-kicker{color:var(--accent);font-size:10px;letter-spacing:.18em}
+.projects-heading h2{font-size:clamp(28px,3vw,38px);font-weight:700;letter-spacing:-.045em}
+.projects-heading p:not(.projects-kicker){max-width:560px;font-size:15px}
+.projects-count{padding:6px 10px;border:1px solid var(--border-subtle);border-radius:999px;background:color-mix(in srgb,var(--bg-surface) 72%,transparent)}
+.project-grid{grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}
+.project-card{grid-column:span 4;min-height:170px;padding:22px;border-color:var(--border-subtle);background:color-mix(in srgb,var(--bg-surface) 92%,transparent);backdrop-filter:blur(16px)}
+.project-card::before{display:block;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 7%,transparent),transparent 55%)}
+.action-card{grid-column:span 5;align-items:flex-start;justify-content:flex-end;min-height:198px;border-style:solid!important;background:radial-gradient(circle at 88% 10%,color-mix(in srgb,var(--accent-teal) 18%,transparent),transparent 42%),linear-gradient(135deg,color-mix(in srgb,var(--accent) 18%,var(--bg-surface)),var(--bg-surface))!important}
+.action-card::after{content:'IDEA → SHOT → FILM';position:absolute;right:22px;top:21px;color:color-mix(in srgb,var(--text-primary) 52%,transparent);font-size:10px;font-weight:700;letter-spacing:.14em}
+.action-card-inner{align-items:flex-start;justify-content:flex-end;height:100%;gap:14px}.action-card-title{color:var(--text-primary);font-size:21px;font-weight:700}.action-card-buttons{justify-content:flex-start}
+.workspace-links{grid-column:span 3;min-height:198px;background:color-mix(in srgb,var(--bg-raised) 75%,var(--bg-surface))!important}
+.omni-project-card{grid-column:span 4;min-height:198px;border-color:color-mix(in srgb,var(--accent) 35%,var(--border-color));background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 12%,var(--bg-surface)),var(--bg-surface))!important}
+.omni-project-card::after{content:'▶';position:absolute;right:22px;bottom:20px;display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;box-shadow:0 8px 22px color-mix(in srgb,var(--accent) 30%,transparent)}
+.workspace-link-list{grid-template-columns:1fr;gap:6px}.workspace-link-list .el-button{justify-content:flex-start;margin:0;border-color:transparent!important;background:transparent!important}
+.badge{border-color:color-mix(in srgb,var(--border-color) 72%,transparent)!important;background:color-mix(in srgb,var(--bg-raised) 72%,transparent)!important}
+html.light .film-list{background-image:radial-gradient(70% 50% at 8% -10%,rgba(103,87,217,.13),transparent 68%),radial-gradient(42% 38% at 100% 35%,rgba(8,127,120,.07),transparent 72%)}
+html.light .project-card{background:rgba(255,255,255,.72)!important}
+@media(max-width:1180px){.action-card{grid-column:span 7}.workspace-links{grid-column:span 5}.project-card,.omni-project-card{grid-column:span 6}}
+@media(max-width:880px){.header-actions .btn-library,.header-actions .btn-import{display:none}}
+@media(max-width:760px){.header{padding:10px 12px}.logo{min-width:118px}.header-library{margin-left:0}.header-library .el-button{font-size:0!important;padding-inline:9px}.header-library .el-icon{font-size:15px}.header-actions .btn-library,.header-actions .btn-settings,.header-actions .btn-import{display:none}.header-actions .btn-theme{font-size:0!important;padding-inline:9px}.header-actions .btn-theme .el-icon{font-size:15px}.main{padding:28px 12px 44px}.project-grid{display:grid;grid-template-columns:1fr}.project-card,.action-card,.workspace-links,.omni-project-card{grid-column:1}.projects-heading h2{font-size:28px}}
 </style>
