@@ -28,21 +28,48 @@ function resolutionTier(value, heightValue) {
   return '720p';
 }
 
-function createAuthorization(db, row, targetFps) {
+function createAuthorization(db, row, targetFps, retryNonce = '') {
   // Reserve one extra second because container duration can be fractionally
   // longer than the requested duration. Settlement releases the difference.
   const durationMs = Math.max(1000, Math.ceil((Number(row.duration || 15) + 1) * 1000));
   return billing.createAuthorization(db, { id: row.owner_user_id, role: 'admin' }, {
-    idempotency_key: `video-interpolation:${row.id}`,
+    idempotency_key: `video-interpolation:${row.id}${retryNonce ? `:retry:${retryNonce}` : ''}`,
     service_type: 'video_postprocess', model: BILLING_MODEL, usage: { millisecond: durationMs },
     pricing_context: { resolution_tier: resolutionTier(row.upscale_resolution || row.resolution), fps_tier: fpsTier(targetFps) },
     reference_type: 'video_interpolation', reference_id: row.id,
   });
 }
 
+function retryFromSource(db, videoGenerationId) {
+  const row = db.prepare('SELECT * FROM video_generations WHERE id=? AND deleted_at IS NULL').get(Number(videoGenerationId));
+  const source = row?.upscale_local_path || row?.source_local_path;
+  if (!source) throw new Error('插帧重试缺少已归档的视频');
+  const job = db.prepare('SELECT * FROM video_interpolation_jobs WHERE video_generation_id=?').get(row.id);
+  if (!job) return ensureJob(db, row, source);
+  if (!['failed', 'cancelled'].includes(job.status)) throw new Error('当前插帧任务不可重试');
+  // Release a failed attempt before creating the retry authorization, so a
+  // stage retry cannot leave two frozen/settled postprocess charges.
+  billing.voidAuthorization(db, { id: job.owner_user_id, role: 'admin' }, job.billing_authorization_id, '插帧阶段重试前释放失败尝试预授权');
+  const authorization = createAuthorization(db, row, job.target_fps || row.target_fps, `${Number(job.attempts || 0) + 1}:${Date.now()}`);
+  const now = new Date().toISOString();
+  db.prepare(`UPDATE video_interpolation_jobs SET billing_authorization_id=?, source_local_path=?, provider_task_id=NULL,
+    provider_request_id=NULL, input_video_url=NULL, output_local_path=NULL, output_width=NULL, output_height=NULL,
+    output_duration_ms=NULL, output_resolution=NULL, output_fps=NULL, status='pending', error_msg=NULL,
+    completed_at=NULL, updated_at=? WHERE id=?`)
+    .run(authorization.authorization_id, source, now, job.id);
+  db.prepare(`UPDATE video_generations SET status='interpolation_pending', interpolation_status='pending',
+    interpolation_billing_authorization_id=?, error_msg=NULL, updated_at=? WHERE id=?`)
+    .run(authorization.authorization_id, now, row.id);
+  return db.prepare('SELECT * FROM video_interpolation_jobs WHERE id=?').get(job.id);
+}
+
 function ensureJob(db, row, sourceLocalPath) {
   let job = db.prepare('SELECT * FROM video_interpolation_jobs WHERE video_generation_id=?').get(row.id);
   if (job) {
+    // A previous upstream-stage failure cancels the reserved interpolation
+    // authorization. Once a source becomes available again, reopen it with a
+    // fresh authorization instead of leaving the generation stuck pending.
+    if (['failed', 'cancelled'].includes(job.status)) return retryFromSource(db, row.id);
     if (!job.source_local_path && sourceLocalPath) db.prepare("UPDATE video_interpolation_jobs SET source_local_path=?, status='pending', updated_at=? WHERE id=?")
       .run(sourceLocalPath, new Date().toISOString(), job.id);
     return db.prepare('SELECT * FROM video_interpolation_jobs WHERE id=?').get(job.id);
@@ -222,4 +249,4 @@ function resumePending(db, log, storagePath) {
   return { queued: rows.length };
 }
 
-module.exports = { process, resumePending, resolutionTier, fpsTier, ensureJob, createAuthorization, reserveForGeneration, BILLING_MODEL };
+module.exports = { process, resumePending, resolutionTier, fpsTier, ensureJob, createAuthorization, reserveForGeneration, retryFromSource, BILLING_MODEL };

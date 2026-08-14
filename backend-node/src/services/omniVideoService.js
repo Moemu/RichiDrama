@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const taskService = require('./taskService');
 const videoService = require('./videoService');
 const capabilityService = require('./videoModelCapabilities');
@@ -120,8 +122,17 @@ function create(db, log, body, billingUser) {
       jobId, modelPrompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model, creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: body.duration, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
   }
   if (waitingForSd2) {
+    // Persist the user-facing stage as well as the generation row.  Without
+    // this, a page refresh turns an in-progress certification into a vague
+    // storyboard "draft/pending" state.
+    if (body.storyboard_id) {
+      try { db.prepare("UPDATE storyboards SET active_video_generation_id=?, status='sd2_waiting', error_msg=NULL, updated_at=? WHERE id=? AND deleted_at IS NULL").run(videoGenerationId, now, Number(body.storyboard_id)); } catch (_) {}
+    }
     taskService.updateTaskStatus(db, task.id, 'processing', 0, '真人素材认证准备中，完成后将自动开始生成');
     return { omni_job_id: jobId, video_generation_id: videoGenerationId, task_id: task.id, status: 'sd2_waiting', resolved_model: capability.model, routing_summary: buildSummary(routed) };
+  }
+  if (body.storyboard_id) {
+    try { db.prepare("UPDATE storyboards SET active_video_generation_id=?, status='processing', error_msg=NULL, updated_at=? WHERE id=? AND deleted_at IS NULL").run(videoGenerationId, now, Number(body.storyboard_id)); } catch (_) {}
   }
   try {
     if (upscaleResolution) require('./videoUpscaleService').reserveForGeneration(db, videoGenerationId, upscaleResolution);
@@ -360,15 +371,25 @@ function get(db, id) {
   const generation = db.prepare('SELECT * FROM video_generations WHERE id = ?').get(job.video_generation_id);
   const assets = db.prepare('SELECT * FROM omni_video_job_assets WHERE omni_job_id = ? ORDER BY ordinal').all(job.id);
   const safeGeneration = generation ? { ...generation, video_url: videoService.publicVideoUrl(generation.video_url, generation.local_path) } : null;
-  return { ...job, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), generation: safeGeneration };
+  let isCurrent = false;
+  if (generation?.storyboard_id) {
+    try {
+      const storyboard = db.prepare('SELECT active_video_generation_id, local_path FROM storyboards WHERE id=? AND deleted_at IS NULL').get(generation.storyboard_id);
+      isCurrent = Number(storyboard?.active_video_generation_id) === Number(generation.id)
+        || (!storyboard?.active_video_generation_id && String(storyboard?.local_path || '') === String(generation.local_path || ''));
+    } catch (_) {}
+  }
+  return { ...job, is_current: isCurrent, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), generation: safeGeneration };
 }
 function list(db, query = {}) {
   const storyboardId = Number(query.storyboard_id);
   const shotId = Number(query.shot_id);
   let sql = `SELECT j.*, v.status, v.video_url, v.local_path, v.source_local_path, v.upscale_local_path,
     v.resolution, v.aspect_ratio, v.upscale_resolution, v.target_fps, v.upscale_status, v.interpolation_status,
-    v.output_width, v.output_height, v.output_resolution, v.output_fps, v.output_duration_ms, v.error_msg
-    FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id`;
+    v.output_width, v.output_height, v.output_resolution, v.output_fps, v.output_duration_ms, v.error_msg,
+    s.active_video_generation_id, s.local_path AS storyboard_local_path
+    FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id
+    LEFT JOIN storyboards s ON s.id = v.storyboard_id AND s.deleted_at IS NULL`;
   const params = [];
   const filters = [];
   if (query.owner_user_id) { filters.push('j.owner_user_id = ?'); params.push(Number(query.owner_user_id)); }
@@ -385,10 +406,110 @@ function list(db, query = {}) {
   sql += ' ORDER BY j.id DESC LIMIT 100';
   return db.prepare(sql).all(...params).map((item) => ({
     ...item,
+    is_current: item.active_video_generation_id != null
+      ? Number(item.active_video_generation_id) === Number(item.video_generation_id)
+      : Boolean(item.storyboard_local_path && item.local_path && item.storyboard_local_path === item.local_path),
     video_url: videoService.publicVideoUrl(item.video_url, item.local_path),
     postprocess_chain: `${require('./videoPostprocessPolicy').describe(item)} → 本地规范 ${item.aspect_ratio || '原画幅'}`,
     request_snapshot: safeSnapshot(parse(item.request_snapshot_json)),
   }));
+}
+
+function assertOwnedJob(db, omniJobId, actor) {
+  const job = db.prepare(`SELECT j.id AS omni_job_id, j.owner_user_id AS job_owner_user_id, v.id AS video_generation_id, v.* FROM omni_video_jobs j
+    JOIN video_generations v ON v.id=j.video_generation_id
+    WHERE j.id=? AND v.deleted_at IS NULL`).get(Number(omniJobId));
+  if (!job || (Number(job.job_owner_user_id) !== Number(actor?.id) && actor?.role !== 'admin')) throw new Error('视频任务不存在或无权操作');
+  return job;
+}
+
+function postprocessStoragePath() {
+  const cfg = require('../config').loadConfig();
+  return path.isAbsolute(cfg.storage?.local_path) ? cfg.storage.local_path : path.join(process.cwd(), cfg.storage?.local_path || './data/storage');
+}
+
+function retryPostprocess(db, log, omniJobId, actor, requestedStage) {
+  const job = assertOwnedJob(db, omniJobId, actor);
+  if (job.status !== 'failed') throw new Error('只有失败的后处理任务可进行阶段重试');
+  let stage = String(requestedStage || '').toLowerCase();
+  if (!stage) stage = job.upscale_status === 'failed' ? 'upscale' : job.interpolation_status === 'failed' ? 'interpolation' : '';
+  if (!['upscale', 'interpolation'].includes(stage)) throw new Error('该任务不是可阶段重试的超分或插帧失败');
+  if (stage === 'upscale') {
+    if (job.upscale_status !== 'failed' || !job.source_local_path) throw new Error('超分原片不存在，不能只重试超分');
+    require('./videoUpscaleService').retryFromSource(db, job.video_generation_id);
+    setImmediate(async () => {
+      const result = await require('./videoUpscaleService').process(db, log, job.video_generation_id, postprocessStoragePath());
+      if (result?.local_path) await videoService.resumePostprocessVideoGeneration(db, log, job.video_generation_id);
+    });
+  } else {
+    if (job.interpolation_status !== 'failed' || !(job.upscale_local_path || job.source_local_path)) throw new Error('插帧输入视频不存在，不能只重试插帧');
+    require('./videoInterpolationService').retryFromSource(db, job.video_generation_id);
+    setImmediate(async () => {
+      const result = await require('./videoInterpolationService').process(db, log, job.video_generation_id, postprocessStoragePath());
+      if (result?.local_path) await videoService.resumePostprocessVideoGeneration(db, log, job.video_generation_id);
+    });
+  }
+  return get(db, job.omni_job_id);
+}
+
+/**
+ * Explicit opt-in fallback for a failed paid post-process stage. The provider
+ * video has already been generated and downloaded; this publishes precisely
+ * those local bytes as the completed version without submitting any new AI
+ * request or pretending that the requested upscale/fps was achieved.
+ */
+function adoptSourceVideo(db, log, omniJobId, actor, options = {}) {
+  const job = assertOwnedJob(db, omniJobId, actor);
+  if (job.status !== 'failed') throw new Error('只有后处理失败且保留原片的任务可以采用原片');
+  if (!job.source_local_path) throw new Error('原始视频不存在，无法采用');
+  if (!['failed', 'cancelled', 'reconciliation_required'].includes(String(job.upscale_status || ''))
+    && !['failed', 'cancelled', 'reconciliation_required'].includes(String(job.interpolation_status || ''))) {
+    throw new Error('该任务没有可采用原片的后处理失败阶段');
+  }
+
+  const storageRoot = path.resolve(options.storagePath || postprocessStoragePath());
+  const sourceKey = require('./mediaStorageService').normalizeKey(job.source_local_path);
+  const sourcePath = path.resolve(storageRoot, sourceKey);
+  if (!(sourcePath === storageRoot || sourcePath.startsWith(storageRoot + path.sep)) || !fs.statSync(sourcePath, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error('原始视频文件不可读，无法采用');
+  }
+  const probe = (options.probeVideoMedia || require('./videoMediaProbeService').probeVideoMedia)(sourcePath);
+  const now = new Date().toISOString();
+  const fallbackMessage = `后处理失败，已按用户请求采用原始 ${probe.resolution} / ${probe.fps}fps 视频`;
+  const archiveStatus = require('./mediaStorageService').isOss(require('../config').loadConfig()) ? 'pending' : 'local';
+  const apply = db.transaction(() => {
+    db.prepare(`UPDATE video_generations SET status='completed', video_url=?, local_path=?,
+      output_width=?, output_height=?, output_resolution=?, output_fps=?, output_duration_ms=?,
+      upscale_status=?, interpolation_status=?, error_msg=?, archive_status=?, archive_error=NULL,
+      completed_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL`)
+      .run(`/static/${sourceKey}`, sourceKey, probe.width, probe.height, probe.resolution, probe.fps, probe.duration_ms,
+        job.upscale_resolution ? 'source_fallback' : (job.upscale_status || 'skipped'),
+        job.target_fps ? 'source_fallback' : (job.interpolation_status || 'skipped'),
+        fallbackMessage, archiveStatus, now, now, job.video_generation_id);
+    if (job.storyboard_id) {
+      db.prepare(`UPDATE storyboards SET active_video_generation_id=?, video_url=?, local_path=?, status='completed',
+        error_msg=?, updated_at=? WHERE id=? AND deleted_at IS NULL`)
+        .run(job.video_generation_id, `/static/${sourceKey}`, sourceKey, fallbackMessage, now, job.storyboard_id);
+    }
+    if (job.task_id) taskService.updateTaskStatus(db, job.task_id, 'completed', 100, fallbackMessage);
+  });
+  apply();
+  const archive = options.archiveCompletedVideo || videoService.archiveCompletedVideo;
+  setImmediate(() => Promise.resolve(archive(db, log, job.video_generation_id)).catch((error) => {
+    log.warn('Source-video fallback archive deferred', { video_generation_id: job.video_generation_id, error: error.message });
+  }));
+  return get(db, job.omni_job_id);
+}
+
+function adoptCompletedVersion(db, omniJobId, actor) {
+  const job = assertOwnedJob(db, omniJobId, actor);
+  if (!job.storyboard_id || job.status !== 'completed' || !job.local_path) throw new Error('只有已完成并已本地归档的分镜历史版本可设为当前成片');
+  const now = new Date().toISOString();
+  const videoUrl = `/static/${String(job.local_path).replace(/^\/+/, '')}`;
+  const result = db.prepare(`UPDATE storyboards SET active_video_generation_id=?, video_url=?, local_path=?, status='completed',
+    error_msg=NULL, updated_at=? WHERE id=? AND deleted_at IS NULL`).run(job.video_generation_id, videoUrl, job.local_path, now, job.storyboard_id);
+  if (!result.changes) throw new Error('分镜不存在或已删除');
+  return get(db, job.omni_job_id);
 }
 function retry(db, log, id, billingUser) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
@@ -418,9 +539,21 @@ function resumeSd2WaitingGenerations(db, log) {
   try { rows = db.prepare(`SELECT j.*, v.id video_generation_id, v.drama_id, v.storyboard_id, v.status generation_status, u.role user_role
     FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id LEFT JOIN users u ON u.id = j.owner_user_id
     WHERE v.status = 'sd2_waiting' AND v.deleted_at IS NULL`).all(); } catch (_) { return; }
+  const MAX_WAIT_MS = 10 * 60 * 1000;
   for (const job of rows) {
     let snapshot; try { snapshot = parse(job.request_snapshot_json); } catch (_) { snapshot = null; }
-    if (!snapshot?.original_prompt || !Array.isArray(snapshot.assets)) continue;
+    if (!snapshot?.original_prompt || !Array.isArray(snapshot.assets)) {
+      const message = '真人素材认证任务缺少可恢复的请求快照，未提交生成模型；请重新生成。';
+      const now = new Date().toISOString();
+      db.prepare('UPDATE video_generations SET status=?, error_msg=?, updated_at=? WHERE id=?').run('invalid', message, now, job.video_generation_id);
+      if (job.storyboard_id) {
+        try { db.prepare("UPDATE storyboards SET status='invalid', error_msg=?, updated_at=? WHERE id=? AND deleted_at IS NULL").run(message, now, job.storyboard_id); } catch (_) {}
+      }
+      const task = db.prepare('SELECT task_id FROM video_generations WHERE id=?').get(job.video_generation_id);
+      if (task?.task_id) taskService.updateTaskError(db, task.task_id, message);
+      log.warn('Marked SD2 waiting generation invalid: missing request snapshot', { video_generation_id: job.video_generation_id });
+      continue;
+    }
     try {
       create(db, log, {
         prompt: snapshot.original_prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
@@ -434,12 +567,24 @@ function resumeSd2WaitingGenerations(db, log) {
       }, { id: job.owner_user_id, role: job.user_role || 'user' });
     } catch (error) {
       // Still processing is normal; only terminal certification failures should
-      // surface to the user, and never create a billing authorization.
-      if (/SD2/.test(String(error.message || ''))) {
+      // surface to the user, and never create a billing authorization.  A
+      // non-terminal recovery error used to be logged forever every five
+      // seconds, leaving a user permanently "generating".  Bound recovery
+      // time and make the next user action explicit instead.
+      const ageMs = Date.now() - Date.parse(job.created_at || job.updated_at || 0);
+      if (/SD2/.test(String(error.message || '')) || Number.isNaN(ageMs) || ageMs >= MAX_WAIT_MS) {
+        const status = /SD2/.test(String(error.message || '')) ? 'failed' : 'retryable';
+        const message = status === 'retryable'
+          ? `真人素材认证准备超过 10 分钟仍未恢复：${String(error.message || '未知错误').slice(0, 350)}。原请求未提交模型，可重新生成。`
+          : error.message;
         const now = new Date().toISOString();
-        db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run('failed', error.message, now, job.video_generation_id);
+        db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run(status, message, now, job.video_generation_id);
+        if (job.storyboard_id) {
+          try { db.prepare('UPDATE storyboards SET status=?, error_msg=?, updated_at=? WHERE id=? AND deleted_at IS NULL').run(status, message, now, job.storyboard_id); } catch (_) {}
+        }
         const task = db.prepare('SELECT task_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
-        if (task?.task_id) taskService.updateTaskError(db, task.task_id, error.message);
+        if (task?.task_id) taskService.updateTaskError(db, task.task_id, message);
+        log.warn('Marked SD2 waiting generation terminal', { video_generation_id: job.video_generation_id, status, error: error.message });
       } else log.warn('SD2 waiting generation resume failed', { video_generation_id: job.video_generation_id, error: error.message });
     }
   }
@@ -452,4 +597,4 @@ function startSd2WaitingGenerationRecovery(db, log) {
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, retry, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };

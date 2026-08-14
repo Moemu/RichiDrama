@@ -22,11 +22,11 @@
       </aside>
 
       <section class="center-stage" aria-label="当前镜头播放与时间线">
-        <div class="player-tools"><el-button text size="small" @click="selectRelative(-1)">上一镜</el-button><el-button text size="small" @click="selectRelative(1)">下一镜</el-button><span></span><el-tag :type="stageTagType" effect="dark">{{ stageLabel }}</el-tag></div>
-        <div class="video-stage" :class="{ rendering: ['processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status) }">
+        <div class="player-tools"><el-button text size="small" @click="selectRelative(-1)">上一镜</el-button><el-button text size="small" @click="selectRelative(1)">下一镜</el-button><span class="current-version">当前采用：{{ activeJob ? `版本 #${activeJob.video_generation_id || activeJob.id}` : '暂无版本' }}</span><el-tag :type="stageTagType" effect="dark">{{ stageLabel }}</el-tag></div>
+        <div class="video-stage" :class="{ rendering: ['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status) }">
           <template v-if="activeVideoUrl"><video :key="activeVideoUrl" :src="activeVideoUrl" controls playsinline preload="metadata" :autoplay="playOnSelection" class="main-video" /><div class="frame-actions"><el-button size="small" @click="downloadCurrentVideo">下载成片</el-button><template v-if="activeJob"><el-button size="small" type="primary" :disabled="savedResultJobId === activeJob.id" @click="saveResultAsAsset">{{ savedResultJobId === activeJob.id ? '已加入素材' : '作为视频素材继续创作' }}</el-button><el-button v-if="isProjectMode && savedResultJobId === activeJob.id" size="small" @click="$router.push(`/film/${projectDramaId}/canvas`)">在项目画布中打开</el-button><template v-if="canExtractFrames"><el-button size="small" :loading="extractingPosition === 'first'" :disabled="!!extractingPosition" @click="extractFrame('first')">提取首帧</el-button><el-button size="small" :loading="extractingPosition === 'last'" :disabled="!!extractingPosition" @click="extractFrame('last')">提取尾帧</el-button></template></template></div></template>
-          <template v-else-if="['processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status)"><div class="render-ring ring-one"></div><div class="render-ring ring-two"></div><div class="render-play">▶</div><b>{{ ['upscale_pending','upscaling'].includes(activeJob?.status) ? '正在进行 AI 超分' : activeJob?.status === 'interpolating' ? '正在进行智能插帧' : activeJob?.status === 'persisting' ? '正在持久化最终成片' : (stagePhase || '正在生成当前镜头') }}</b></template>
-          <template v-else-if="activeJob && ['failed','retryable','invalid','billing_reconciliation'].includes(activeJob.status)"><el-icon class="stage-warning"><WarningFilled /></el-icon><b>{{ activeJob.status === 'invalid' ? '当前历史任务无效' : activeJob.status === 'billing_reconciliation' ? '成片等待计费对账' : '当前镜头生成失败' }}</b><small>{{ activeJob.error_msg }}</small><el-button v-if="activeJob.status === 'retryable'" type="primary" @click="retry(activeJob)">重新生成</el-button></template>
+          <template v-else-if="['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status)"><div class="render-ring ring-one"></div><div class="render-ring ring-two"></div><div class="render-play">▶</div><b>{{ activeJob?.status === 'sd2_waiting' ? '真人素材认证准备中，完成后将自动生成' : ['upscale_pending','upscaling'].includes(activeJob?.status) ? '正在进行 AI 超分' : activeJob?.status === 'interpolating' ? '正在进行智能插帧' : activeJob?.status === 'persisting' ? '正在持久化最终成片' : (stagePhase || '正在生成当前镜头') }}</b></template>
+          <template v-else-if="activeJob && ['failed','retryable','invalid','billing_reconciliation'].includes(activeJob.status)"><el-icon class="stage-warning"><WarningFilled /></el-icon><b>{{ stageLabel }}</b><small>{{ failureHint(activeJob) }}</small><div class="failure-actions"><el-button v-if="canAdoptSource(activeJob)" type="primary" @click="adoptSource(activeJob)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(activeJob)" :type="canAdoptSource(activeJob) ? 'default' : 'primary'" @click="retryPostprocess(activeJob)">仅重试{{ activeJob.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-else-if="activeJob.status === 'retryable'" type="primary" @click="retry(activeJob)">重新生成</el-button></div></template>
           <template v-else><div class="empty-play">▶</div><b>尚未生成视频</b></template>
         </div>
         <div class="time-ruler"><span>0秒</span><div><i :style="{ width: `${Math.min(100, duration / maxDuration * 100)}%` }"></i></div><span>{{ duration }}秒 / {{ maxDuration }}秒</span></div>
@@ -89,8 +89,8 @@
           <div class="generation-history-head"><b>本镜生成记录</b><small>{{ shotHistory.length }} 个版本</small></div>
           <div class="generation-history-grid">
             <button v-for="job in shotHistory" :key="job.id" type="button" class="generation-history-item" :class="{ active: String(selectedHistoryJobId) === String(job.id) }" @click="selectHistoryJob(job)">
-              <img v-if="historyPoster(job)" :src="historyPoster(job)" alt="" class="history-poster"/><span v-else class="history-video-empty"><el-icon><VideoCamera /></el-icon>{{ job.videoUrl ? '点击切换成片' : (['processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(job.status) ? '处理中' : '暂无预览') }}</span>
-              <span class="history-card-meta"><b>{{ job.model_resolved || job.model || '视频版本' }}</b><small>{{ historyStatus(job.status) }} · {{ job.duration || duration }}秒</small><small>{{ postprocessSummary(job) }}</small></span>
+              <img v-if="historyPoster(job)" :src="historyPoster(job)" alt="" class="history-poster"/><span v-else class="history-video-empty"><el-icon><VideoCamera /></el-icon>{{ job.videoUrl ? '点击切换成片' : (['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(job.status) ? '处理中' : '暂无预览') }}</span>
+              <span class="history-card-meta"><b>{{ job.model_resolved || job.model || '视频版本' }}</b><small>{{ job.is_current ? '当前采用' : '未采用' }} · {{ historyStatus(job.status) }} · {{ job.duration || duration }}秒</small><small>{{ postprocessSummary(job) }}</small><el-button v-if="job.status === 'completed' && !job.is_current && isProjectMode" text size="small" @click.stop="adoptVersion(job)">设为当前成片</el-button><el-button v-if="canAdoptSource(job)" text type="primary" size="small" @click.stop="adoptSource(job)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(job)" text type="warning" size="small" @click.stop="retryPostprocess(job)">仅重试{{ job.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button></span>
               <span :class="['history-dot', job.status]"></span>
             </button>
           </div>
@@ -233,8 +233,12 @@ const chosenAssets = computed(() => selectedOrder.value.map((id) => assets.value
 const chosenImageAssets = computed(() => chosenAssets.value.filter((asset) => asset.type === 'image'))
 const visibleAssets = computed(() => assets.value.filter((asset) => assetScope.value === 'all' || (assetScope.value === 'project' ? Number(asset.drama_id) === projectDramaId.value : !asset.drama_id)))
 const activeJob = computed(() => {
+  const adopted = shotHistory.value.find((job) => job.is_current)
+  const bound = shotHistory.value.find((job) => String(job.id) === String(currentShot.value?.omni_job_id))
   const selected = shotHistory.value.find((job) => String(job.id) === String(selectedHistoryJobId.value))
-  return selected || shotHistory.value.find((job) => String(job.id) === String(currentShot.value?.omni_job_id)) || shotHistory.value[0] || null
+  // The central player is the delivery surface, so inspecting a history card
+  // must not replace the version currently adopted by the storyboard.
+  return adopted || bound || selected || shotHistory.value[0] || null
 })
 const activeVideoUrl = computed(() => activeJob.value?.videoUrl || currentShot.value?.video_url || '')
 const canExtractFrames = computed(() => Number(activeJob.value?.video_generation_id) > 0 && activeJob.value?.status === 'completed')
@@ -264,7 +268,72 @@ const canCreate = computed(() => !!model.value && !!currentCapability.value && p
 const nativeImageLimit = computed(() => Math.min(shotLimits.value.image, Number(currentCapability.value?.supports?.image_reference?.max || 0)))
 const limitSummary = computed(() => `单文件：图片 ${uploadLimits.value?.files?.image?.max_mb || 30}MB、视频 ${uploadLimits.value?.files?.video?.max_mb || 50}MB、音频 ${uploadLimits.value?.files?.audio?.max_mb || 15}MB；单镜头最多 ${shotLimits.value.total} 个素材。`)
 const selectionSummary = computed(() => `已选 ${chosenAssets.value.length}/${shotLimits.value.total}；图片 ${selectionCounts.value.image}/${shotLimits.value.image}，视频 ${selectionCounts.value.video}/${shotLimits.value.video}，音频 ${selectionCounts.value.audio}/${shotLimits.value.audio}${currentCapability.value ? `；当前模型原生图片参考 ${selectionCounts.value.image}/${nativeImageLimit.value}` : ''}`)
-const stageLabel = computed(() => ({ completed: '成片完成', processing: '生成中', upscale_pending: '等待超分', upscaling: 'AI 超分中', interpolation_pending: '等待插帧', interpolating: '智能插帧中', persisting: '成片持久化中', billing_reconciliation: '等待计费对账', failed: '生成失败', retryable: '可重试', invalid: '无效任务' })[activeJob.value?.status] || '镜头草稿')
+function failureLabel(job) {
+  const detail = String(job?.error_msg || '')
+  if (/PolicyViolation|policy|copyright|restriction|内容合规|版权限制/i.test(detail)) return '火山生成失败：内容合规/版权限制'
+  if (/sensitive information/i.test(detail)) return '火山生成失败：内容合规限制'
+  if (job?.upscale_status === 'failed') return '超分失败：原片已保留'
+  if (job?.interpolation_status === 'failed') return '智能插帧失败（上一阶段成片已保留）'
+  return '生成链路失败：请查看具体原因'
+}
+function failureHint(job) {
+  const detail = String(job?.error_msg || '').trim()
+  if (job?.upscale_status === 'failed') return detail || 'AI MediaKit 超分失败，原片已保留，可仅重试超分。'
+  if (job?.interpolation_status === 'failed') return detail || 'AI MediaKit 插帧失败，上一阶段视频已保留，可仅重试插帧。'
+  return detail || '请调整提示词或素材后重新生成。'
+}
+function canRetryPostprocess(job) { return job?.status === 'failed' && ((job.upscale_status === 'failed' && !!job.source_local_path) || (job.interpolation_status === 'failed' && !!(job.upscale_local_path || job.source_local_path))) }
+function canAdoptSource(job) {
+  if (job?.status !== 'failed' || !job.source_local_path) return false
+  const failedStages = ['failed', 'cancelled', 'reconciliation_required']
+  return failedStages.includes(String(job.upscale_status || '')) || failedStages.includes(String(job.interpolation_status || ''))
+}
+async function adoptSource(job) {
+  try {
+    const next = normalizeJob(await omniVideoAPI.adoptSource(job.id))
+    const replace = (items) => {
+      const index = items.findIndex((item) => String(item.id) === String(job.id))
+      if (index >= 0) items[index] = next
+    }
+    replace(shotHistory.value); replace(jobs.value)
+    selectedHistoryJobId.value = next.id
+    if (String(currentShot.value?.omni_job_id) === String(next.id)) {
+      currentShot.value.status = 'completed'
+      currentShot.value.video_url = next.video_url || next.videoUrl || currentShot.value.video_url
+      currentShot.value.local_path = next.local_path || currentShot.value.local_path
+    }
+    ElMessage.success('已采用已生成原片：不重发火山，不重试后处理')
+  } catch (error) { ElMessage.error(error.message || '采用原片失败') }
+}
+async function retryPostprocess(job) {
+  try {
+    const stage = job.upscale_status === 'failed' ? 'upscale' : 'interpolation'
+    const next = normalizeJob(await omniVideoAPI.retryPostprocess(job.id, stage))
+    const replace = (items) => {
+      const index = items.findIndex((item) => String(item.id) === String(job.id))
+      if (index >= 0) items[index] = next
+    }
+    replace(shotHistory.value); replace(jobs.value)
+    selectedHistoryJobId.value = next.id
+    if (String(currentShot.value?.omni_job_id) === String(next.id)) currentShot.value.status = next.status
+    ElMessage.success(stage === 'upscale' ? '已从超分阶段重新提交，未重发火山生成' : '已从插帧阶段重新提交，未重发火山生成')
+    poll(next.id)
+  } catch (error) { ElMessage.error(error.message || '阶段重试失败') }
+}
+async function adoptVersion(job) {
+  try {
+    const next = normalizeJob(await omniVideoAPI.adopt(job.id))
+    shotHistory.value.forEach((item) => { item.is_current = String(item.id) === String(next.id) })
+    const index = shotHistory.value.findIndex((item) => String(item.id) === String(next.id))
+    if (index >= 0) shotHistory.value[index] = next
+    currentShot.value.omni_job_id = next.id
+    currentShot.value.status = 'completed'
+    currentShot.value.video_url = next.videoUrl
+    selectedHistoryJobId.value = next.id
+    ElMessage.success('已设为当前成片')
+  } catch (error) { ElMessage.error(error.message || '设置当前成片失败') }
+}
+const stageLabel = computed(() => ({ completed: '成片完成', sd2_waiting: '真人素材认证准备中', processing: '生成中', upscale_pending: '等待超分', upscaling: 'AI 超分中', interpolation_pending: '等待插帧', interpolating: '智能插帧中', persisting: '成片持久化中', billing_reconciliation: '等待计费对账', failed: failureLabel(activeJob.value), retryable: '可重试', invalid: '无效任务' })[activeJob.value?.status] || '镜头草稿')
 const stageTagType = computed(() => ({ completed: 'success', failed: 'danger', retryable: 'warning', invalid: 'info' })[activeJob.value?.status] || 'info')
 const requestPreview = computed(() => ({ prompt: prompt.value, creation_mode: creationMode.value, model: currentCapability.value?.model || model.value, aspect_ratio: aspectRatio.value, duration_seconds: normalizeDuration(duration.value), resolution: resolution.value, upscale_resolution: upscaleResolution.value, target_fps: targetFps.value, audio_strategy: audioStrategy.value, assets: chosenAssets.value.map((asset, index) => ({ ordinal: index + 1, name: asset.alias || asset.name, type: asset.type, usage: asset.usage, routing: assetRouteHint(asset) })) }))
 
@@ -297,9 +366,14 @@ function assetRouteHint(asset) {
   if (asset.type === 'audio') return supports.audio_reference && audioStrategy.value !== 'post_mix' ? '发送给模型：音频参考' : '生成后处理：成片混音'
   return '按当前模型能力处理'
 }
-function shotState(shot) { return ({ completed:'已完成',processing:'生成中',upscale_pending:'等待超分',upscaling:'超分中',interpolation_pending:'等待插帧',interpolating:'插帧中',persisting:'持久化中',billing_reconciliation:'待对账',failed:'失败',retryable:'可重试',invalid:'无效',draft:'草稿' })[shot.status] || '草稿' }
-function historyStatus(status) { return ({ completed: '已完成', processing: '生成中', failed: '失败', retryable: '可重试', invalid: '无效' })[status] || '等待中' }
+function shotState(shot) { return ({ completed:'已完成',sd2_waiting:'真人素材认证中',processing:'生成中',upscale_pending:'等待超分',upscaling:'超分中',interpolation_pending:'等待插帧',interpolating:'插帧中',persisting:'持久化中',billing_reconciliation:'待对账',failed:'失败',retryable:'可重试',invalid:'无效',draft:'草稿' })[shot.status] || '草稿' }
+function historyStatus(status) { return ({ completed: '已完成', sd2_waiting: '真人素材认证中', processing: '生成中', upscale_pending: '等待超分', upscaling: 'AI 超分中', interpolation_pending: '等待插帧', interpolating: '智能插帧中', persisting: '成片持久化中', billing_reconciliation: '等待计费对账', failed: '失败', retryable: '可重试', invalid: '无效' })[status] || '状态未知' }
 function postprocessSummary(job) {
+  if (job?.upscale_status === 'source_fallback' || job?.interpolation_status === 'source_fallback') {
+    const resolution = job.output_resolution || job.resolution || '原始规格'
+    const fps = Number(job.output_fps || 0)
+    return `已采用原片 · ${resolution} · ${fps > 0 ? `${fps.toFixed(2).replace(/\.00$/, '')}fps` : '原帧率'}`
+  }
   const resolutionText = job.output_resolution || job.upscale_resolution || job.resolution || ''
   const fps = Number(job.output_fps || 0)
   const fpsText = fps > 0 ? `${fps.toFixed(2).replace(/\.00$/, '')}fps` : (job.target_fps ? `${job.target_fps}fps` : '原帧率')

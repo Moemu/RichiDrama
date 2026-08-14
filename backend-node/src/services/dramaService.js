@@ -757,7 +757,18 @@ function saveCanvasLayout(db, log, dramaId, req) {
  */
 function getVideoUrlForStoryboard(db, storyboardId, baseUrl) {
   // 1. 获取 storyboard 表中的视频信息（代表用户选定或上次同步的结果）
-  const sb = db.prepare('SELECT video_url, local_path, updated_at FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(storyboardId);
+  const sb = db.prepare('SELECT video_url, local_path, updated_at, active_video_generation_id FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(storyboardId);
+  if (sb?.active_video_generation_id != null) {
+    const adopted = db.prepare(
+      "SELECT video_url, local_path FROM video_generations WHERE id = ? AND status = 'completed' AND deleted_at IS NULL"
+    ).get(sb.active_video_generation_id);
+    // A selected non-completed version means this storyboard currently has no
+    // deliverable video; never fall back to an unrelated history version.
+    if (!adopted) return null;
+    const local = adopted.local_path && String(adopted.local_path).trim();
+    if (local && /\.(?:mp4|webm|mov|m4v|avi|mkv)(?:[?#].*)?$/i.test(local) && baseUrl) return `${String(baseUrl).replace(/\/$/, '')}/${local.replace(/^\//, '')}`;
+    return adopted.video_url || null;
+  }
   
   // 2. 获取 video_generations 表中最新完成的记录
   const vg = db.prepare(

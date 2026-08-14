@@ -137,8 +137,8 @@ test('generation master follows the same visual sort and duplicate-shot dedupe a
 
 test('episode merge ignores storyboard image local_path when selecting a video URL', () => {
   const db = new Database(':memory:');
-  db.exec(`CREATE TABLE storyboards (id INTEGER PRIMARY KEY, video_url TEXT, local_path TEXT, updated_at TEXT, deleted_at TEXT);
-    CREATE TABLE video_generations (storyboard_id INTEGER, video_url TEXT, local_path TEXT, completed_at TEXT, updated_at TEXT, created_at TEXT, status TEXT, deleted_at TEXT);`);
+  db.exec(`CREATE TABLE storyboards (id INTEGER PRIMARY KEY, video_url TEXT, local_path TEXT, active_video_generation_id INTEGER, updated_at TEXT, deleted_at TEXT);
+    CREATE TABLE video_generations (id INTEGER PRIMARY KEY, storyboard_id INTEGER, video_url TEXT, local_path TEXT, completed_at TEXT, updated_at TEXT, created_at TEXT, status TEXT, deleted_at TEXT);`);
   db.prepare('INSERT INTO storyboards (id, video_url, local_path, updated_at) VALUES (1, ?, ?, ?)').run(
     'https://provider.example/shot.mp4',
     'projects/demo/images/ig_cover.jpg',
@@ -147,5 +147,22 @@ test('episode merge ignores storyboard image local_path when selecting a video U
   assert.equal(
     dramaService.getVideoUrlForStoryboard(db, 1, 'http://localhost:5679/static'),
     'https://provider.example/shot.mp4'
+  );
+});
+
+test('episode merge uses the adopted version and never falls back when it is failed', () => {
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE storyboards (id INTEGER PRIMARY KEY, video_url TEXT, local_path TEXT, active_video_generation_id INTEGER, updated_at TEXT, deleted_at TEXT);
+    CREATE TABLE video_generations (id INTEGER PRIMARY KEY, storyboard_id INTEGER, video_url TEXT, local_path TEXT, completed_at TEXT, updated_at TEXT, created_at TEXT, status TEXT, deleted_at TEXT);`);
+  db.prepare('INSERT INTO storyboards (id, active_video_generation_id, updated_at) VALUES (1, 2, ?)').run('2026-08-14T00:00:00.000Z');
+  db.prepare(`INSERT INTO video_generations (id, storyboard_id, video_url, local_path, status, created_at)
+    VALUES (1, 1, 'https://old.example/old.mp4', 'projects/demo/videos/old.mp4', 'completed', ?),
+      (2, 1, NULL, NULL, 'failed', ?)`)
+    .run('2026-08-13T00:00:00.000Z', '2026-08-14T00:00:00.000Z');
+  assert.equal(dramaService.getVideoUrlForStoryboard(db, 1, 'http://localhost:5679/static'), null);
+  db.prepare(`UPDATE video_generations SET status='completed', local_path='projects/demo/videos/adopted.mp4' WHERE id=2`).run();
+  assert.equal(
+    dramaService.getVideoUrlForStoryboard(db, 1, 'http://localhost:5679/static'),
+    'http://localhost:5679/static/projects/demo/videos/adopted.mp4'
   );
 });

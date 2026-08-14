@@ -32,9 +32,20 @@ function setVideoGenFailed(db, videoGenId, errorMsg, now) {
     } else throw e;
   }
   try {
-    const row = db.prepare('SELECT owner_user_id, billing_authorization_id FROM video_generations WHERE id = ?').get(videoGenId);
+    const row = db.prepare('SELECT owner_user_id, billing_authorization_id, storyboard_id FROM video_generations WHERE id = ?').get(videoGenId);
     if (row?.owner_user_id && row?.billing_authorization_id) {
       require('./billingService').voidAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, errorMsg || '视频生成失败');
+    }
+    // Only the version explicitly selected by the storyboard can change its
+    // visible state. A late failure of an old history record must not replace
+    // a newer adopted completed video.
+    if (row?.storyboard_id) {
+      try {
+        db.prepare(`UPDATE storyboards SET active_video_generation_id=COALESCE(active_video_generation_id, ?),
+          status='failed', error_msg=?, updated_at=?
+          WHERE id=? AND deleted_at IS NULL AND (active_video_generation_id IS NULL OR active_video_generation_id=?)`)
+          .run(videoGenId, (errorMsg || '视频生成失败').slice(0, 500), now, row.storyboard_id, videoGenId);
+      } catch (_) {}
     }
     const interpolation = db.prepare('SELECT owner_user_id, billing_authorization_id FROM video_interpolation_jobs WHERE video_generation_id=?').get(videoGenId);
     if (interpolation?.billing_authorization_id) {
@@ -479,13 +490,18 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
       if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 78, `视频已生成，正在 AI 超分至 ${row.upscale_resolution}`);
       const upscaled = await require('./videoUpscaleService').process(db, log, videoGenId, storagePath);
       if (!upscaled?.local_path) {
-        const current = db.prepare('SELECT status FROM video_generations WHERE id=?').get(videoGenId);
+        const current = db.prepare('SELECT status, error_msg FROM video_generations WHERE id=?').get(videoGenId);
         if (current?.status === 'billing_reconciliation') {
           if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 99, '超分已完成，等待计费对账');
           return;
         }
-        setVideoGenFailed(db, videoGenId, '视频超分失败', new Date().toISOString());
-        if (row.task_id) taskService.updateTaskError(db, row.task_id, '视频超分失败');
+        // videoUpscaleService has already written the authoritative stage
+        // failure (for example, MediaKit upload HTTP 500).  Do not overwrite
+        // it with a generic message here, otherwise users cannot tell whether
+        // the original generation or the enhancement stage failed.
+        const message = current?.error_msg || 'AI 超分失败，原始视频已保留，可仅重试超分';
+        if (current?.status !== 'failed') setVideoGenFailed(db, videoGenId, message, new Date().toISOString());
+        if (row.task_id) taskService.updateTaskError(db, row.task_id, message);
         return;
       }
       localPath = upscaled.local_path;
@@ -501,13 +517,14 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
       if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 88, `${row.upscale_resolution ? '超分完成，' : ''}正在进行 ${Number(row.target_fps)}fps 智能插帧`);
       const interpolated = await require('./videoInterpolationService').process(db, log, videoGenId, storagePath);
       if (!interpolated?.local_path) {
-        const current = db.prepare('SELECT status FROM video_generations WHERE id=?').get(videoGenId);
+        const current = db.prepare('SELECT status, error_msg FROM video_generations WHERE id=?').get(videoGenId);
         if (current?.status === 'billing_reconciliation') {
           if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 99, '插帧已完成，等待计费对账');
           return;
         }
-        setVideoGenFailed(db, videoGenId, '视频插帧失败', new Date().toISOString());
-        if (row.task_id) taskService.updateTaskError(db, row.task_id, '视频插帧失败');
+        const message = current?.error_msg || '智能插帧失败，已保留上一阶段视频，可仅重试插帧';
+        if (current?.status !== 'failed') setVideoGenFailed(db, videoGenId, message, new Date().toISOString());
+        if (row.task_id) taskService.updateTaskError(db, row.task_id, message);
         return;
       }
       localPath = interpolated.local_path;
@@ -606,8 +623,10 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
   }
   if (row.storyboard_id) {
     try {
-      db.prepare('UPDATE storyboards SET video_url = ?, local_path = ?, updated_at = ? WHERE id = ?').run(
-        videoUrl, localPath, now, row.storyboard_id
+      db.prepare(`UPDATE storyboards SET active_video_generation_id=COALESCE(active_video_generation_id, ?), video_url=?, local_path=?,
+        status='completed', error_msg=NULL, updated_at=?
+        WHERE id=? AND deleted_at IS NULL AND (active_video_generation_id IS NULL OR active_video_generation_id=?)`).run(
+        videoGenId, videoUrl, localPath, now, row.storyboard_id, videoGenId
       );
       log.info('Updated storyboard video' + (logLabel ? ` (${logLabel})` : ''), {
         storyboard_id: row.storyboard_id,

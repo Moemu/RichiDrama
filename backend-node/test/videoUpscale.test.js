@@ -47,6 +47,27 @@ test('generative enhancement reservation persists before provider submission', (
   } finally { teardown(context.root); }
 });
 
+test('upscale retry releases the failed authorization before reserving the retry stage', () => {
+  const context = setup();
+  try {
+    const now = new Date().toISOString();
+    const source = 'projects/retry/videos/source.mp4';
+    const info = context.db.prepare(`INSERT INTO video_generations
+      (owner_user_id, provider, model, duration, resolution, upscale_resolution, source_local_path, status, created_at, updated_at)
+      VALUES (?, 'volces', 'seedance', 10, '480p', '720p', ?, 'failed', ?, ?)`)
+      .run(context.user.id, source, now, now);
+    const first = upscale.reserveForGeneration(context.db, info.lastInsertRowid, '720p');
+    context.db.prepare("UPDATE video_upscale_jobs SET status='cancelled' WHERE id=?").run(first.id);
+    context.db.prepare("UPDATE video_generations SET upscale_status='failed' WHERE id=?").run(info.lastInsertRowid);
+    const retried = upscale.retryFromSource(context.db, info.lastInsertRowid);
+    assert.notEqual(retried.billing_authorization_id, first.billing_authorization_id);
+    assert.equal(context.db.prepare("SELECT COUNT(*) AS total FROM billing_transactions WHERE authorization_id=? AND type='void'").get(first.billing_authorization_id).total, 1);
+    // The first frozen reservation is released before the retry reservation is
+    // made, so only one post-process amount remains frozen.
+    assert.equal(billing.account(context.db, context.user.id).frozen_micro, 916667);
+  } finally { teardown(context.root); }
+});
+
 test('enhancement submit preserves fps by omitting it and uses client_token', async () => {
   const context = setup();
   const originalFetch = global.fetch;

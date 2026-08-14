@@ -363,3 +363,32 @@ cd frontweb && npm run build
 - 前端：`27/27` 通过。
 - 前端 production build：通过；仅保留 Vite 既有大 chunk 提示。
 - 图片价格重启回归：`POST /api/v1/billing/quotes` 在重启后返回 `22` 积分/张。
+
+## 13. 线上故障补充：阶段状态和防卡死（2026-08-14）
+
+### 13.1 已确认的两类失败
+
+1. 火山原始视频已经生成并归档成功，但 AI MediaKit 在上传原片进行超分时返回 HTTP 500。该情形必须展示为“AI 超分失败，原片已保留”，不得误报成“视频生成失败”，也不能重新提交火山生成任务。
+2. 后续重新生成时，火山可能返回 `OutputVideoSensitiveContentDetected.PolicyViolation`。这是供应商输出内容合规限制，必须展示为“火山生成失败：内容合规/版权限制”；只有修改提示词或素材后才适合重新生成。
+
+### 13.2 状态约定
+
+`sd2_waiting -> processing -> upscale_pending -> upscaling -> interpolation_pending -> interpolating -> persisting -> completed`
+
+- `failed` 必须结合 `upscale_status` / `interpolation_status` 区分为生成、超分或插帧失败，并保留该阶段的原始错误文本。
+- `retryable` 表示原请求没有提交到生成模型或服务重启前没有保存供应商任务 ID，用户可重新提交；不能把它伪装成仍在“生成中”。
+- `billing_reconciliation` 为已完成媒体但计费待管理员对账，不能标成失败，也不能自动重试供应商。
+- 分镜状态在提交时写入 `sd2_waiting` 或 `processing`；最终本地成片完成时写入 `completed`、本地播放路径并清空错误。历史版本始终由 `video_generations` 作为事实来源。
+
+### 13.3 防止无限“生成中”
+
+- SD2 真人素材认证等待任务缺少请求快照时，立即标记为 `invalid`，而不是每 5 秒静默循环。
+- 可恢复但连续 10 分钟无法继续的认证等待任务改为 `retryable`，提示“原请求未提交模型，可重新生成”；已确认的 SD2 终态错误直接标记 `failed`。
+- 该保护只改变发布后遇到的新状态推进和明显不可恢复的等待记录；不批量重写线上历史记录、不重提供应商任务、不重复扣费。
+
+### 13.4 本次代码落点与验证
+
+- `videoService` 保留超分/插帧 worker 写入的准确错误，不再由外层覆盖为泛化文案；成功时同步分镜完成状态。
+- `omniVideoService` 持久化分镜的等待/生成阶段，并将无法恢复的 SD2 等待任务转为可见终态。
+- `FreeCreate.vue` 明确展示真人认证、超分、插帧、持久化、对账及阶段失败；历史卡片不再将所有未知中间态写成“等待中”。
+- 验证：后端 `node --test test/*.test.js` 155/155 通过；前端 `node --test test/*.test.js` 27/27 通过，`npm run build` 通过。

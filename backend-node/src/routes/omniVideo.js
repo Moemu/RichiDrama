@@ -26,6 +26,9 @@ module.exports = function routes(db, log, cfg) { return {
     } catch (err) { response.badRequest(res, err.message || '提示词润色失败'); }
   },
   retry(req, res) { try { response.created(res, omniVideoService.retry(db, log, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
+  retryPostprocess(req, res) { try { response.created(res, omniVideoService.retryPostprocess(db, log, req.params.id, req.auth, req.body?.stage)); } catch (err) { response.badRequest(res, err.message); } },
+  adoptSource(req, res) { try { response.success(res, omniVideoService.adoptSourceVideo(db, log, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
+  adopt(req, res) { try { response.success(res, omniVideoService.adoptCompletedVersion(db, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
   extractFrame(req, res) { try { response.created(res, require('../services/omniFrameService').extract(db, cfg, log, req.params.id, req.body?.position)); } catch (err) { response.badRequest(res, err.message); } },
   extractVideoFrame(req, res) { try { response.created(res, require('../services/omniFrameService').extractVideoGeneration(db, cfg, log, req.params.id, req.body?.position)); } catch (err) { response.badRequest(res, err.message); } },
   get(req, res) { try { const job = omniVideoService.get(db, req.params.id); if (!job) return response.notFound(res, '全能视频任务不存在'); response.success(res, job); } catch (err) { response.internalError(res, err.message); } },

@@ -17,16 +17,39 @@ function targetResolution(db, row) {
   return value;
 }
 
-function createAuthorization(db, row, resolution) {
+function createAuthorization(db, row, resolution, retryNonce = '') {
   const durationMs = Math.max(1000, Math.ceil((Number(row.duration || 15) + 1) * 1000));
   const reserveFps = Math.min(120, Math.max(30, Number(client.config(db).settings.upscale_reserve_fps || 60)));
   return billing.createAuthorization(db, { id: row.owner_user_id, role: 'admin' }, {
-    idempotency_key: `video-upscale:${row.id}`,
+    idempotency_key: `video-upscale:${row.id}${retryNonce ? `:retry:${retryNonce}` : ''}`,
     service_type: 'video_postprocess', model: BILLING_MODEL,
     usage: { millisecond: durationMs },
     pricing_context: { resolution_tier: resolution, fps_tier: fpsTier(reserveFps) },
     reference_type: 'video_upscale', reference_id: row.id,
   });
+}
+
+function retryFromSource(db, videoGenerationId) {
+  const row = db.prepare('SELECT * FROM video_generations WHERE id=? AND deleted_at IS NULL').get(Number(videoGenerationId));
+  if (!row?.source_local_path) throw new Error('超分重试缺少已归档的原始视频');
+  const job = db.prepare('SELECT * FROM video_upscale_jobs WHERE video_generation_id=?').get(row.id);
+  if (!job) return reserveForGeneration(db, row.id, row.upscale_resolution);
+  if (!['failed', 'cancelled'].includes(job.status)) throw new Error('当前超分任务不可重试');
+  // A failed attempt must never leave a frozen authorization behind before a
+  // retry gets its own idempotency key. voidAuthorization is idempotent, so it
+  // also safely repairs historical cancelled jobs that missed this cleanup.
+  billing.voidAuthorization(db, { id: job.owner_user_id, role: 'admin' }, job.billing_authorization_id, '超分阶段重试前释放失败尝试预授权');
+  const authorization = createAuthorization(db, row, job.target_resolution || targetResolution(db, row), `${Number(job.attempts || 0) + 1}:${Date.now()}`);
+  const now = new Date().toISOString();
+  db.prepare(`UPDATE video_upscale_jobs SET billing_authorization_id=?, source_local_path=?, provider_task_id=NULL,
+    provider_request_id=NULL, input_video_url=NULL, output_local_path=NULL, output_width=NULL, output_height=NULL,
+    output_duration_ms=NULL, output_resolution=NULL, output_fps=NULL, status='pending', error_msg=NULL,
+    completed_at=NULL, updated_at=? WHERE id=?`)
+    .run(authorization.authorization_id, row.source_local_path, now, job.id);
+  db.prepare(`UPDATE video_generations SET status='upscale_pending', upscale_status='pending', upscale_local_path=NULL,
+    upscale_billing_authorization_id=?, error_msg=NULL, updated_at=? WHERE id=?`)
+    .run(authorization.authorization_id, now, row.id);
+  return db.prepare('SELECT * FROM video_upscale_jobs WHERE id=?').get(job.id);
 }
 
 function reserveForGeneration(db, videoGenerationId, requestedResolution) {
@@ -180,4 +203,4 @@ function resumePending(db, log, storagePath) {
   return { queued: rows.length };
 }
 
-module.exports = { process, resumePending, reserveForGeneration, ensureJob, createAuthorization, targetResolution, targetSatisfied, BILLING_MODEL };
+module.exports = { process, resumePending, reserveForGeneration, retryFromSource, ensureJob, createAuthorization, targetResolution, targetSatisfied, BILLING_MODEL };

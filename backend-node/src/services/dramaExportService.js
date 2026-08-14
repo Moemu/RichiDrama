@@ -110,9 +110,12 @@ async function exportDrama(db, cfg, log, dramaId) {
     ).all(sbId);
     allImagesBySb[sbId] = igs.filter(ig => ig && ig.local_path);
 
-    const vg = db.prepare(
-      "SELECT video_url, local_path FROM video_generations WHERE storyboard_id = ? AND status = 'completed' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1"
-    ).get(sbId);
+    // An explicitly adopted version is authoritative. If it is failed or
+    // processing, do not silently export another historical completed video.
+    const active = db.prepare('SELECT active_video_generation_id FROM storyboards WHERE id=? AND deleted_at IS NULL').get(sbId);
+    const vg = active?.active_video_generation_id != null
+      ? db.prepare("SELECT video_url, local_path FROM video_generations WHERE id=? AND status = 'completed' AND deleted_at IS NULL").get(active.active_video_generation_id)
+      : db.prepare("SELECT video_url, local_path FROM video_generations WHERE storyboard_id = ? AND status = 'completed' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1").get(sbId);
     if (vg) videosBySb[sbId] = vg;
   }
 

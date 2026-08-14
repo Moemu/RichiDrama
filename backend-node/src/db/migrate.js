@@ -455,6 +455,10 @@ function ensureAllColumns(database) {
     { name: 'deleted_at',           type: 'TEXT' },
   ]);
 
+  ensureColumns(database, 'storyboards', [
+    { name: 'active_video_generation_id', type: 'INTEGER' },
+  ]);
+
   ensureColumns(database, 'video_interpolation_jobs', [
     { name: 'output_width',  type: 'INTEGER' },
     { name: 'output_height', type: 'INTEGER' },
