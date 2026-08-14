@@ -23,7 +23,7 @@ test('storyboard navigation uses real video, including retained source after pos
 
 test('embedded storyboard confines wheel scrolling to its side panels', () => {
   assert.match(freeCreate, /\.project-storyboard-page \.shot-list\{flex:1 1 auto;min-height:0\}/)
-  assert.match(freeCreate, /\.project-storyboard-page \.shot-script\{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior-y:contain\}/)
+  assert.match(freeCreate, /@media\(min-width:761px\)\{\.center-stage\{min-height:0;overflow:hidden\}\.shot-script\{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior-y:contain\}/)
   assert.match(freeCreate, /\.omni-page\.embedded\.project-storyboard-page\{position:sticky!important;top:58px;z-index:20;height:calc\(100dvh - 58px\)!important/)
   assert.match(filmCreate, /\.storyboard-stage-active \.omni-page\.embedded\.project-storyboard-page\{position:static!important;top:auto;height:auto!important;min-height:0!important;overflow:hidden!important;flex:1/)
 })
