@@ -1,5 +1,5 @@
 <template>
-  <section class="omni-page" :class="{ 'project-storyboard-page': isProjectMode, embedded: embedded }" @wheel.capture="containEmbeddedScroll">
+  <section class="omni-page" :class="{ 'project-storyboard-page': isProjectMode, embedded: embedded }" @wheel.capture="containWorkbenchScroll">
     <header v-if="!embedded" class="topbar">
       <div class="topbar-left">
         <el-button text @click="backToProject"><el-icon><ArrowLeft /></el-icon>返回项目</el-button>
@@ -390,10 +390,15 @@ function historyPoster(job) {
   if (!image || image.startsWith('asset://')) return '/images/video-poster-placeholder.svg'
   return /^https?:\/\//.test(image) || image.startsWith('/static/') ? image : `/static/${image.replace(/^\/+/, '')}`
 }
-function containEmbeddedScroll(event) {
-  if (!embedded.value || !event.deltaY || !(event.target instanceof Element)) return
+function containWorkbenchScroll(event) {
+  if (!event.deltaY || !(event.target instanceof Element)) return
   const panel = event.target.closest('.shot-list, .creation-panel, .material-pool, .selected-assets, .frame-picker-grid')
-  if (!panel || panel.scrollHeight <= panel.clientHeight) return
+  // The player area itself must never become a wheel-scrolling surface. This
+  // also prevents a list at its boundary from chaining the page underneath it.
+  if (!panel || panel.scrollHeight <= panel.clientHeight) {
+    event.preventDefault()
+    return
+  }
   const atTop = panel.scrollTop <= 0
   const atBottom = panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 1
   if ((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) event.preventDefault()
@@ -910,6 +915,10 @@ onMounted(() => {
 /* At short desktop heights, the prompt must shrink and scroll inside the stage.
    It must never push the player above the visible workbench. */
 @media(min-width:761px){.center-stage{min-height:0;overflow:hidden}.shot-script{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior-y:contain}.project-storyboard-page .center-stage{height:100%}}
+/* Desktop free-create uses a fixed-height workbench too.  Without these
+   shrink constraints, a long shot list expands the grid row and makes the
+   page itself scroll, carrying the player away while switching later shots. */
+@media(min-width:761px){.workbench{min-height:0}.shot-panel,.creation-panel,.center-stage{min-height:0}.shot-panel{overflow:hidden}.shot-list{flex:1 1 auto;min-height:0}}
 .omni-page{font-size:14px;line-height:1.5}
 .shot-list:focus-visible{outline:1px solid var(--focus-ring,#c7d2dc);outline-offset:3px}
 .shot-video-placeholder{display:flex!important;height:100%;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 42%,#704cff 0,#39218f 38%,#171125 75%)}.shot-play{display:grid;place-items:center;width:44px;height:44px;padding-left:3px;border:1px solid #ffffff55;border-radius:50%;background:#7b5cff;color:#fff;font-size:20px;box-shadow:0 10px 26px #6c4bff66}.shot-video-placeholder small{font-size:12px!important;color:#c4c1ba!important}
