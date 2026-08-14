@@ -1,6 +1,7 @@
 <template>
   <main class="media-tool">
     <header class="media-header">
+      <AccountBalanceBadge />
       <div><el-button text @click="router.push('/ai-tools')">← AI 工具箱</el-button><p>独立生成记录 · 可导入素材库</p></div>
       <div class="title-wrap"><span>{{ media === 'image' ? '▣' : '▶' }}</span><div><h1>{{ media === 'image' ? '图片生成' : '视频生成' }}</h1><p>{{ media === 'image' ? '定义角色、场景与关键画面。' : '以镜头为单位生成、复核并进入全能创作。' }}</p></div></div>
     </header>
@@ -53,6 +54,7 @@ import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
 import ToolAssetSelector from '@/components/ToolAssetSelector.vue'
 import GenerationSettings from '@/components/GenerationSettings.vue'
+import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import { formatChinaDateTime } from '@/utils/time'
 const props = defineProps({ media: { type: String, required: true } })
 const router = useRouter(), prompt = ref(''), model = ref(''), reference = ref(''), selectedAssetId = ref(null), firstFrameAssetId = ref(null), lastFrameAssetId = ref(null), firstFrameAssetUrl = ref(''), lastFrameAssetUrl = ref(''), videoSettings = ref({ video_model: 'auto', duration: 15, resolution: '720p', aspect_ratio: '16:9' }), running = ref(false), importing = ref(false), items = ref([]), mode = ref('text'), featured = ref(null)

@@ -2,7 +2,7 @@
   <main class="tools-page">
     <header class="tools-hero">
       <div class="crumb"><el-button text @click="$router.push('/')">← 返回项目</el-button><span>AI 工具箱</span></div>
-      <div class="hero-content"><div><p class="eyebrow">LOCAL MINI DRAMA · WORKBENCH</p><h1>从灵感到镜头的独立工作台</h1><p class="hero-copy">工具运行独立保存；确认满意后，再导入短剧项目或素材库。</p></div><div class="hero-actions"><el-button @click="$router.push('/media-library')">素材库</el-button><el-button type="primary" @click="$router.push('/free-create')">进入全能创作</el-button></div></div>
+      <div class="hero-content"><div><p class="eyebrow">LOCAL MINI DRAMA · WORKBENCH</p><h1>从灵感到镜头的独立工作台</h1><p class="hero-copy">工具运行独立保存；确认满意后，再导入短剧项目或素材库。</p></div><div class="hero-actions"><AccountBalanceBadge /><el-button @click="$router.push('/media-library')">素材库</el-button><el-button type="primary" @click="$router.push('/free-create')">进入全能创作</el-button></div></div>
       <div class="workflow"><span><b>1</b> 输入创意或素材</span><i></i><span><b>2</b> 生成与复核</span><i></i><span><b>3</b> 按需导入项目</span></div>
     </header>
     <section v-for="group in groups" :key="group.title" class="tool-group">
@@ -12,6 +12,7 @@
   </main>
 </template>
 <script setup>
+import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 const tools = [
   { title: '剧本分析', icon: '◎', tone: 'blue', label: '文本策划', input: '剧本与项目设定', output: '角色、场景、镜头建议', description: '将剧本拆解为可以直接进入制作流程的结构化信息。', to: '/ai-tools/script-analysis', group: 'writing' },
   { title: '剧本分析（流式）', icon: '≋', tone: 'copper', label: '批量处理', input: '多个 TXT / 剧本', output: '可续写的分析记录', description: '适合长剧本与批量拆解，运行过程持续保存。', to: '/ai-tools/script-analysis-stream', group: 'writing' },

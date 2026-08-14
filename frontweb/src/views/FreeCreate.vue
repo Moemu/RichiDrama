@@ -5,7 +5,7 @@
         <el-button text @click="backToProject"><el-icon><ArrowLeft /></el-icon>返回项目</el-button>
         <span class="divider"></span><span>{{ isProjectMode ? '项目剧集：' : '剧集：' }}</span><el-input v-if="sequence" v-model="sequence.name" size="small" class="sequence-name" :readonly="isProjectMode" @change="saveCurrentShot" />
       </div>
-      <div class="topbar-actions"><el-button text @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" :disabled="!currentShot" @click="copyCurrentShot">复制当前镜头</el-button><el-button type="primary" plain size="small" @click="saveCurrentShot">保存整集</el-button></div>
+      <div class="topbar-actions"><AccountBalanceBadge /><el-button text @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" :disabled="!currentShot" @click="copyCurrentShot">复制当前镜头</el-button><el-button type="primary" plain size="small" @click="saveCurrentShot">保存整集</el-button></div>
     </header>
 
     <section class="workbench">
@@ -129,6 +129,7 @@ import OmniAssetPromptEditor from '@/components/OmniAssetPromptEditor.vue'
 import GenerationSettings from '@/components/GenerationSettings.vue'
 import { clearPromptDraft, currentDraftUserId, readPromptDraft, shouldRestorePromptDraft, writePromptDraft } from '@/utils/promptDraft'
 import { formatChinaDateTime } from '@/utils/time'
+import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import { beginAssetPointerDrag, shouldSuppressAssetClick } from '@/utils/assetPointerDrag'
 
 const componentProps = defineProps({ projectEpisodeId: { type: [Number, String], default: null }, projectDramaId: { type: [Number, String], default: null }, embedded: { type: Boolean, default: false } })

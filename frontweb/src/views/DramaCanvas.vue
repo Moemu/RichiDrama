@@ -30,6 +30,7 @@
         <span v-else-if="layoutSaveState === 'error'" class="layout-status error">保存失败</span>
 
         <div class="header-actions">
+          <AccountBalanceBadge />
           <el-button size="small" type="warning" plain @click="focusScriptNode">
             剧本
           </el-button>
@@ -267,6 +268,7 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import { List, Moon, Plus, Sunny, Grid } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'

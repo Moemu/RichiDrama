@@ -7,6 +7,7 @@
           <span class="richi-brand-copy"><span class="logo-main">瑞池传媒短剧平台</span><span class="logo-sub">RICH MEDIA</span></span>
         </h1>
         <span class="page-title">AI 配置</span>
+        <AccountBalanceBadge />
         <el-button class="btn-back" @click="goList">
           <el-icon><ArrowLeft /></el-icon>
           返回
@@ -24,6 +25,7 @@
 import { useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import AIConfigContent from '@/components/AIConfigContent.vue'
+import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 
 const router = useRouter()
 

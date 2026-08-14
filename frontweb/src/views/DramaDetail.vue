@@ -12,6 +12,7 @@
           <el-icon><ArrowLeft /></el-icon>返回列表
         </el-button>
         <div class="header-actions">
+          <AccountBalanceBadge />
           <el-button type="primary" @click="goCreate">
             <el-icon><VideoPlay /></el-icon>进入制作
           </el-button>
@@ -560,6 +561,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, VideoPlay, Plus, Delete, PictureFilled, Grid } from '@element-plus/icons-vue'
+import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import EpisodeBatchImportDialog from '@/components/EpisodeBatchImportDialog.vue'
 import { dramaAPI } from '@/api/drama'
 import { characterLibraryAPI } from '@/api/characterLibrary'

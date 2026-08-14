@@ -3,6 +3,7 @@
     <header>
       <div><p class="eyebrow">ACCOUNT</p><h1>账户中心</h1></div>
       <div class="header-actions">
+        <AccountBalanceBadge />
         <el-button @click="$router.push('/')">返回创作台</el-button>
         <el-button v-if="isAdmin" type="primary" @click="$router.push('/admin')">后台管理</el-button>
       </div>
@@ -33,6 +34,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { accountAPI } from '@/api/account'
 import BillingTransactionTable from '@/components/BillingTransactionTable.vue'
+import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 
 const account = ref({})
 const transactions = ref([])

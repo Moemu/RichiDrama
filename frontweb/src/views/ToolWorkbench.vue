@@ -1,6 +1,6 @@
 <template>
   <main class="tool-workbench">
-    <header class="workbench-header"><div><el-button text @click="$router.push('/ai-tools')">← AI 工具箱</el-button><p class="breadcrumb">独立运行 · 自动保存 · 按需导入项目</p></div><div class="workbench-title"><span class="title-mark">{{ config.symbol }}</span><div><h1>{{ config.title }}</h1><p>{{ config.description }}</p></div></div></header>
+    <header class="workbench-header"><div><el-button text @click="$router.push('/ai-tools')">← AI 工具箱</el-button><p class="breadcrumb">独立运行 · 自动保存 · 按需导入项目</p></div><div class="workbench-title"><span class="title-mark">{{ config.symbol }}</span><div><h1>{{ config.title }}</h1><p>{{ config.description }}</p></div></div><AccountBalanceBadge /></header>
     <section class="tool-layout">
       <form class="tool-form" @submit.prevent="run"><div class="panel-kicker"><span>01</span><div><b>创作输入</b><small>运行参数会随历史记录保存</small></div></div>
         <label>运行标题<el-input v-model="title" :placeholder="`${config.title} · ${formatChinaDate(new Date())}`" /></label>
@@ -24,6 +24,7 @@ import { ElMessage } from 'element-plus'
 import { toolsAPI } from '@/api/tools'
 import ToolAssetSelector from '@/components/ToolAssetSelector.vue'
 import ToolResultRenderer from '@/components/ToolResultRenderer.vue'
+import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import { formatChinaDate, formatChinaDateTime } from '@/utils/time'
 const props=defineProps({ kind:{type:String,required:true} })
 const configs={script_analysis:{symbol:'◎',title:'剧本分析',description:'将剧本拆解为项目、角色、场景、道具与镜头建议。',action:'开始分析'},script_analysis_stream:{symbol:'≋',title:'剧本分析（流式）',description:'持续保存增量输出；断线后可从历史继续查看。',action:'开始流式分析'},script_writing:{symbol:'✦',title:'剧本创作',description:'从创意生成分集短剧正文，可再导入项目。',action:'生成剧本'},reverse_prompt:{symbol:'◌',title:'反推提示词',description:'分析图片的主体、构图、镜头、光影与完整提示词。',action:'开始反推'}}

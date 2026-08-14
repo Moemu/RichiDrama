@@ -10,6 +10,7 @@
         <h2 class="page-title">媒体素材库</h2>
       </div>
       <div class="header-actions">
+        <AccountBalanceBadge />
         <el-button type="danger" plain :disabled="!total" @click="clearLibrary">一键清空素材库</el-button>
         <el-button type="primary" plain @click="triggerUpload">
           <el-icon><Upload /></el-icon>
@@ -167,6 +168,7 @@ import { omniVideoAPI } from '@/api/omniVideo'
 import { useRouter } from 'vue-router'
 import request from '@/utils/request'
 import AudioWaveform from '@/components/AudioWaveform.vue'
+import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 
 const loading = ref(false)
 const uploading = ref(false)

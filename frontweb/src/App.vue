@@ -1,13 +1,8 @@
 <template>
   <div class="app">
-    <AccountBalanceBadge />
     <router-view />
   </div>
 </template>
-
-<script setup>
-import AccountBalanceBadge from './components/AccountBalanceBadge.vue'
-</script>
 
 <style>
 * {

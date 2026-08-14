@@ -21,6 +21,7 @@
         </nav>
         <!-- 右侧操作区 -->
         <div class="header-actions">
+          <AccountBalanceBadge />
           <el-button class="btn-library" title="全能视频" @click="createOmniProject">
             <el-icon><MagicStick /></el-icon>全能视频
           </el-button>
@@ -397,6 +398,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Edit, Delete, Setting, Plus, User, PictureFilled, Box, Sunny, Moon, Download, Upload, QuestionFilled, FolderOpened, MagicStick, Files } from '@element-plus/icons-vue'
 import { useTheme } from '@/composables/useTheme'
+import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import { dramaAPI } from '@/api/drama'
 import { characterLibraryAPI } from '@/api/characterLibrary'
 import { sceneLibraryAPI } from '@/api/sceneLibrary'

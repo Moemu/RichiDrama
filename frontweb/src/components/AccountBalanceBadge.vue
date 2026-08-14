@@ -1,11 +1,9 @@
 <template>
-  <div v-if="visible" class="account-balance-bar">
-    <button class="account-balance" type="button" title="打开账户中心" @click="router.push('/account')">
-      <span>可用余额</span>
-      <strong>{{ displayCredits }}</strong>
-      <small v-if="frozen > 0">冻结 {{ frozen }}</small>
-    </button>
-  </div>
+  <button v-if="visible" class="account-balance" type="button" title="打开账户中心" @click="router.push('/account')">
+    <span>可用余额</span>
+    <strong>{{ displayCredits }}</strong>
+    <small v-if="frozen > 0">冻结 {{ frozen }}</small>
+  </button>
 </template>
 
 <script setup>
@@ -58,10 +56,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.account-balance-bar { position:sticky; z-index:1000; top:0; display:flex; justify-content:flex-end; align-items:center; min-height:48px; padding:7px 20px; border-bottom:1px solid var(--border-color); background:var(--bg-page); }
-.account-balance { display:flex; align-items:baseline; gap:7px; min-height:34px; padding:6px 11px; border:1px solid var(--border-color); border-radius:9px; background:var(--bg-card); color:var(--text-primary); box-shadow:0 8px 24px rgba(0,0,0,.16); cursor:pointer; font:inherit; }
+.account-balance { display:inline-flex; flex:0 0 auto; align-items:baseline; gap:7px; min-height:34px; padding:6px 11px; border:1px solid var(--border-color); border-radius:9px; background:var(--bg-card); color:var(--text-primary); box-shadow:0 4px 12px rgba(0,0,0,.12); cursor:pointer; font:inherit; white-space:nowrap; }
 .account-balance:hover { border-color:var(--primary-color); }
 .account-balance span,.account-balance small { color:var(--text-muted); font-size:12px; white-space:nowrap; }
 .account-balance strong { color:var(--primary-color); font-size:15px; font-variant-numeric:tabular-nums; white-space:nowrap; }
-@media (max-width: 720px) { .account-balance-bar { min-height:44px; padding:5px 10px; } .account-balance small { display:none; } }
+@media (max-width: 720px) { .account-balance span,.account-balance small { display:none; } }
 </style>
