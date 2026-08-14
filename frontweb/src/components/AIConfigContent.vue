@@ -278,7 +278,7 @@
             <el-option label="文本生成图片" value="image" />
             <el-option label="分镜图片生成" value="storyboard_image" />
             <el-option label="视频生成" value="video" />
-            <el-option label="视频插帧（AI MediaKit）" value="video_postprocess" />
+            <el-option label="视频后处理（超分 / 插帧，AI MediaKit）" value="video_postprocess" />
             <el-option label="语音合成 TTS" value="tts" />
             <el-option label="即梦2角色认证" value="jimeng2_character_auth" />
           </el-select>
@@ -840,7 +840,7 @@ input_reference = (图片文件，可选)</pre>
         </el-form-item>
         <el-form-item>
           <template #label>
-            <span class="form-label-tip">默认模型
+            <span class="form-label-tip">{{ form.service_type === 'video_postprocess' ? '默认后处理能力（不决定镜头链路）' : '默认模型' }}
               <el-tooltip content="有多个模型时，实际调用哪个进行生成。建议选响应快、效果好的那个。" placement="top" popper-class="cfg-tip-popper">
                 <el-icon class="tip-icon"><QuestionFilled /></el-icon>
               </el-tooltip>
@@ -854,9 +854,9 @@ input_reference = (图片文件，可选)</pre>
           >
             <el-option v-for="m in formModelList" :key="m" :label="m" :value="m" />
           </el-select>
-          <p class="field-tip">该配置被选为「默认」时，生成故事/图片/视频将使用此处指定的模型。</p>
+          <p class="field-tip">{{ form.service_type === 'video_postprocess' ? 'AI MediaKit 的超分与插帧共用此连接。新镜头是否超分、是否插帧由项目/分镜设置决定；此项只用于连接配置展示。' : '该配置被选为「默认」时，生成故事/图片/视频将使用此处指定的模型。' }}</p>
         </el-form-item>
-        <el-form-item>
+        <el-form-item v-if="form.service_type !== 'video_postprocess'">
           <template #label><span class="form-label-tip">计费键</span></template>
           <el-input v-model="form.billing_key" placeholder="可选；自定义 API 建议填写独立 SKU，如 custom-video-pro" />
           <p class="field-tip">仅用于匹配价目表，不会发送给供应商。留空时沿用模型名；同名模型走不同渠道时必须填写不同计费键。</p>
@@ -870,9 +870,9 @@ input_reference = (图片文件，可选)</pre>
           <p class="field-tip">新镜头默认勾选 1080p 超分，创作时可取消；超分保持原画幅与原帧率，不再固定放大到 2K。插帧默认关闭，仅在镜头中显式选择后调用。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video_postprocess'">
-          <template #label><span class="form-label-tip">目标帧率</span></template>
+          <template #label><span class="form-label-tip">插帧供应商兜底帧率</span></template>
           <el-input-number v-model="form.interpolation_target_fps" :min="15" :max="120" :step="1" :precision="0" controls-position="right" style="width: 240px" />
-          <p class="field-tip">所有视频生成完成并本地归档后，默认通过火山 AI MediaKit 插帧到该帧率；建议不超过源视频帧率的 4 倍。</p>
+          <p class="field-tip">只有镜头显式选择插帧时才会使用；新镜头默认关闭插帧。镜头指定帧率时优先使用镜头值，建议不超过源视频帧率的 4 倍。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video'">
           <template #label><span class="form-label-tip">视频单次冻结上限（token）</span></template>
@@ -1326,7 +1326,7 @@ function onServiceTypeChange() {
   if (st === 'video_postprocess') {
     form.value.interpolation_target_fps = 60
     form.value.upscale_resolution = '1080p'
-    form.value.billing_key = 'volcengine-video-frame-interpolation'
+    form.value.billing_key = ''
   }
   if (st === 'jimeng2_character_auth') {
     if (!form.value.provider || form.value.provider === CUSTOM_PROVIDER_SENTINEL) {
@@ -1492,7 +1492,7 @@ const providerConfigs = {
     { id: 'agnes', name: 'Agnes AI', models: ['agnes-video-v2.0'] },
   ],
   video_postprocess: [
-    { id: 'volcengine_mediakit', name: '火山引擎 AI MediaKit', models: ['volcengine-video-frame-interpolation'] },
+    { id: 'volcengine_mediakit', name: '火山引擎 AI MediaKit', models: ['volcengine-video-generative-enhancement', 'volcengine-video-frame-interpolation'] },
   ],
   tts: [
     { id: 'doubao', name: '火山引擎 豆包语音', models: VOLC_TTS_MODELS },
@@ -1627,8 +1627,8 @@ const endpointPreviewInfo = computed(() => {
   if (service_type === 'video_postprocess') {
     const root = base || 'https://mediakit.cn-beijing.volces.com'
     return {
-      submit: `${root}/api/v1/tools/video-frame-interpolation`,
-      query: `${root}/api/v1/tasks/{taskId}`,
+      submit: `${root}/api/v1/tools/enhance-video-generative 或 /api/v1/tools/video-frame-interpolation`,
+      query: `${root}/api/v1/tasks/{taskId}（两种后处理共用）`,
       isAuto: true,
     }
   }
@@ -1786,7 +1786,7 @@ function onProviderChange(providerId) {
   form.value.base_url = getBaseUrlForProvider(providerId)
   form.value.modelText = (p.models || []).join('\n')
   form.value.default_model = (p.models && p.models[0]) || ''
-  if (st === 'video_postprocess') form.value.billing_key = 'volcengine-video-frame-interpolation'
+  if (st === 'video_postprocess') form.value.billing_key = ''
   if (providerId === 'deepseek') {
     form.value.deepseek_thinking = 'disabled'
     form.value.deepseek_reasoning_effort = 'high'
@@ -1847,7 +1847,7 @@ function serviceTypeLabel(t) {
     image: '文本生成图片',
     storyboard_image: '分镜图片生成',
     video: '视频',
-    video_postprocess: '视频插帧',
+    video_postprocess: '视频后处理（超分 / 插帧）',
     tts: '语音合成 TTS',
     jimeng2_character_auth: '即梦2角色认证',
     model_ark_asset: 'SD2 资产库',
