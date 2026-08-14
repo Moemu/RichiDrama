@@ -9,12 +9,14 @@ const filmCreate = readFileSync(new URL('../src/views/FilmCreate.vue', import.me
 const dragPreview = readFileSync(new URL('../src/utils/dragPreview.js', import.meta.url), 'utf8')
 const pointerDrag = readFileSync(new URL('../src/utils/assetPointerDrag.js', import.meta.url), 'utf8')
 
-test('storyboard navigation uses real video for completed shots and a purple play card otherwise', () => {
+test('storyboard navigation uses real video, including retained source after post-processing failure', () => {
   assert.match(freeCreate, /<video v-if="shot\.video_url"/)
   assert.match(freeCreate, /v-else class="shot-video-placeholder"/)
   assert.match(freeCreate, /class="shot-play">▶/)
   assert.match(freeCreate, /const preservedVideo = currentShot\.value\.video_url/)
-  assert.match(freeCreate, /currentShot\.value\.video_url = localVideoUrl\(completedVideo\)/)
+  assert.match(freeCreate, /source_local_path/)
+  assert.match(freeCreate, /function bestPlayableVideo/)
+  assert.match(freeCreate, /currentShot\.value\.video_url = localVideoUrl\(playableVideo\)/)
   assert.match(freeCreate, /storyboard_number: storyboard\.storyboard_number/)
   assert.doesNotMatch(freeCreate, /storyboard-placeholder\.svg|shotCover\(/)
 })

@@ -408,10 +408,19 @@ function sd2ActionLabel(asset) {
   return '认证'
 }
 function localVideoUrl(video) {
-  const localPath = String(video?.local_path || '').replace(/^\/+/, '')
-  if (!localPath) return video?.video_url || ''
+  // A post-processing failure can still leave a valid original/upscaled file.
+  // Prefer the final file, then the best retained source so storyboard cards
+  // never hide a playable result merely because enhancement did not finish.
+  const localPath = String(video?.local_path || video?.upscale_local_path || video?.source_local_path || '').replace(/^\/+/, '')
+  if (!localPath) return video?.video_url || video?.upscale_video_url || video?.source_video_url || ''
   const version = video.updated_at || video.completed_at || video.id || ''
   return `/static/${localPath}${version ? `?v=${encodeURIComponent(version)}` : ''}`
+}
+function bestPlayableVideo(items) {
+  const videos = items || []
+  return videos.find((video) => video.status === 'completed' && !!localVideoUrl(video))
+    || videos.find((video) => !!localVideoUrl(video))
+    || null
 }
 function normalizeJob(data) { const generation = data.generation || {}; return { ...data, ...generation, omni_job_id: data.id, status: generation.status || data.status || 'processing', error_msg: generation.error_msg || data.error_msg, videoUrl: localVideoUrl(generation) || data.video_url, local_path: generation.local_path || data.local_path, duration: generation.duration || data.duration } }
 function legacyVideoHistoryItem(video) { return { ...video, id: `video-${video.id}`, omni_job_id: null, video_generation_id: video.id, status: video.status || 'completed', videoUrl: localVideoUrl(video), duration: video.duration } }
@@ -485,7 +494,7 @@ async function loadProjectVideos(storyboards) {
       storyboard_number: storyboard.storyboard_number,
       page_size: 20,
     })
-    return [Number(storyboard.id), (result?.items || []).find((item) => item.status === 'completed' && (item.local_path || item.video_url)) || null]
+    return [Number(storyboard.id), bestPlayableVideo(result?.items)]
   }))
   return new Map(groups)
 }
@@ -569,10 +578,10 @@ async function loadShotHistory(shot) {
     ])
     if (Number(currentShot.value?.id) !== shotId) return
     const jobs = (result || []).map(normalizeJob)
-    const completedVideo = (videoResult?.items || []).find((video) => video.status === 'completed' && (video.local_path || video.video_url))
-    if (completedVideo) {
-      currentShot.value.video_url = localVideoUrl(completedVideo)
-      currentShot.value.poster_local_path = completedVideo.poster_local_path || currentShot.value.poster_local_path || null
+    const playableVideo = bestPlayableVideo(videoResult?.items)
+    if (playableVideo) {
+      currentShot.value.video_url = localVideoUrl(playableVideo)
+      currentShot.value.poster_local_path = playableVideo.poster_local_path || currentShot.value.poster_local_path || null
     }
     const jobGenerationIds = new Set(jobs.map((job) => Number(job.video_generation_id)))
     const legacy = (videoResult?.items || []).filter((video) => !jobGenerationIds.has(Number(video.id))).map(legacyVideoHistoryItem)
