@@ -202,6 +202,7 @@ const KLING_OMNI_OFFICIAL_QUERY = '/v1/videos/omni-video/{taskId}';
 
 /** Omni-Video 文档支持的 aspect_ratio；有参考图时也必须传，否则接口易默认 16:9 */
 const KLING_OMNI_ASPECT_RATIOS = new Set(['9:16', '16:9', '1:1', '4:3', '3:4', '3:2', '2:3']);
+const VIDEO_ASPECT_RATIOS = new Set([...KLING_OMNI_ASPECT_RATIOS, '21:9']);
 
 /**
  * 归一化前端/元数据里的画幅字符串，便于命中可灵枚举（全角冒号、别名等）
@@ -224,12 +225,12 @@ function normalizeAspectRatioForApi(raw) {
     horizontal: '16:9',
   };
   if (aliases[lower]) s = aliases[lower];
-  return KLING_OMNI_ASPECT_RATIOS.has(s) ? s : null;
+  return VIDEO_ASPECT_RATIOS.has(s) ? s : null;
 }
 
 function resolveKlingOmniAspectRatio(aspect_ratio, log, video_gen_id) {
   const normalized = normalizeAspectRatioForApi(aspect_ratio);
-  if (normalized) return normalized;
+  if (normalized && KLING_OMNI_ASPECT_RATIOS.has(normalized)) return normalized;
   const raw = aspect_ratio != null ? String(aspect_ratio).trim() : '';
   if (raw) {
     log.warn('[KlingOmni] aspect_ratio 不在可灵支持列表，回退 16:9', {
@@ -586,7 +587,12 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
   };
   if (resolution) body.resolution = resolution;
   if (seed != null) body.seed = Number(seed);
-  if (camera_fixed != null) body.camera_fixed = Boolean(camera_fixed);
+  // Seedance 2.0 Mini rejects camera_fixed for text-to-video. Omitting the
+  // unsupported field is different from sending false; the latter is still
+  // rejected by Ark parameter validation.
+  if (camera_fixed != null && !(/seedance[-_]?2[-_]?0[-_]?mini/i.test(finalModel) && urls.length === 0)) {
+    body.camera_fixed = Boolean(camera_fixed);
+  }
 
   if (urls.length) {
     for (let i = 0; i < urls.length; i++) {
@@ -3835,7 +3841,9 @@ async function callVideoApi(db, log, opts) {
   };
   if (resolution) body.resolution = resolution;
   if (seed != null) body.seed = Number(seed);
-  if (camera_fixed != null) body.camera_fixed = Boolean(camera_fixed);
+  if (camera_fixed != null && !(/seedance[-_]?2[-_]?0[-_]?mini/i.test(finalModel) && volcTaskType === 't2v')) {
+    body.camera_fixed = Boolean(camera_fixed);
+  }
   if (volcTaskType) body.task_type = volcTaskType;
 
   // 按官方要求：first_frame 必须在 last_frame 之前；role 严格区分

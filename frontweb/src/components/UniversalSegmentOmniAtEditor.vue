@@ -10,10 +10,19 @@
       @blur="onBlur"
       @keydown="onKeydown"
       @paste="onPaste"
-      @dragover.prevent
+      @dragenter.prevent="onAssetDragOver"
+      @dragover.prevent="onAssetDragOver"
+      @dragleave="onAssetDragLeave"
       @drop.prevent="onDropAsset"
       @compositionstart="composing = true"
       @compositionend="composing = false"
+    />
+    <span
+      v-if="dropIndicator.visible"
+      class="omni-drop-indicator"
+      :class="{ 'blank-line': dropIndicator.blankLine }"
+      :style="{ left: `${dropIndicator.x}px`, top: `${dropIndicator.y}px`, height: `${dropIndicator.height}px`, width: `${dropIndicator.width}px` }"
+      aria-hidden="true"
     />
     <teleport to="body">
       <div
@@ -75,6 +84,8 @@ const editorRef = ref(null)
 const menuOpen = ref(false)
 const menuStyle = ref({ top: '0px', left: '0px' })
 const composing = ref(false)
+const dropIndicator = ref({ visible: false, offset: 0, x: 0, y: 0, height: 18, width: 3, blankLine: false })
+let dragDepth = 0
 
 /** 'insert' at lone @ | 'replace' chip */
 let menuMode = 'insert'
@@ -250,14 +261,14 @@ function setCaretCanonicalOffset(el, target) {
 
 function positionMenuNearRect(rect) {
   const pad = 4
-  const w = 280
-  const maxH = 320
-  let top = rect.bottom + pad + window.scrollY
+  const w = Math.min(680, Math.max(440, editorRef.value?.getBoundingClientRect().width || 520))
+  const maxH = Math.min(260, Math.max(180, window.innerHeight - 24))
+  let top = rect.top + window.scrollY - maxH - pad
   let left = rect.left + window.scrollX
   const vw = window.innerWidth
   if (left + w > vw - 8) left = Math.max(8, vw - w - 8)
-  if (top + maxH > window.innerHeight + window.scrollY - 8) {
-    top = rect.top + window.scrollY - maxH - pad
+  if (top < window.scrollY + 8) {
+    top = rect.bottom + pad + window.scrollY
   }
   menuStyle.value = {
     top: `${top}px`,
@@ -373,6 +384,8 @@ function onChipClick(e) {
 function dropCanonicalOffset(event) {
   const el = editorRef.value
   if (!el) return 0
+  const blank = blankLineDropMeta(event)
+  if (blank) return blank.offset
   const doc = el.ownerDocument
   let range = null
   if (typeof doc.caretPositionFromPoint === 'function') {
@@ -390,6 +403,59 @@ function dropCanonicalOffset(event) {
   return canonicalOffsetForRange(el, range)
 }
 
+function blankLineDropMeta(event) {
+  const el = editorRef.value
+  if (!el || !Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return null
+  const source = serializeEditor(el)
+  const lines = source.split('\n')
+  const rect = el.getBoundingClientRect()
+  const style = getComputedStyle(el)
+  const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.55 || 20
+  const paddingTop = Number.parseFloat(style.paddingTop) || 0
+  const paddingLeft = Number.parseFloat(style.paddingLeft) || 0
+  const row = Math.max(0, Math.min(lines.length - 1, Math.floor((event.clientY - rect.top - paddingTop + el.scrollTop) / lineHeight)))
+  const line = lines[row] || ''
+  if (line.trim()) return null
+  const start = lines.slice(0, row).reduce((sum, item) => sum + item.length + 1, 0)
+  const charWidth = Math.max(6, Number.parseFloat(style.fontSize || 13) * .56)
+  const within = Math.max(0, Math.min(line.length, Math.round((event.clientX - rect.left - paddingLeft + el.scrollLeft) / charWidth)))
+  return {
+    offset: start + within,
+    x: paddingLeft,
+    y: paddingTop + row * lineHeight - el.scrollTop,
+    height: 2,
+    width: Math.max(40, rect.width - paddingLeft * 2),
+    blankLine: true,
+  }
+}
+
+function onAssetDragOver(event) {
+  const el = editorRef.value
+  if (!el) return
+  if (event.type === 'dragenter') dragDepth += 1
+  const blank = blankLineDropMeta(event)
+  if (blank) {
+    dropIndicator.value = { visible: true, ...blank }
+    return
+  }
+  const offset = dropCanonicalOffset(event)
+  const rect = el.getBoundingClientRect()
+  dropIndicator.value = {
+    visible: true,
+    offset,
+    x: Math.max(8, Math.min(rect.width - 8, event.clientX - rect.left)),
+    y: Math.max(8, Math.min(rect.height - 24, event.clientY - rect.top)),
+    height: Number.parseFloat(getComputedStyle(el).lineHeight) || 20,
+    width: 3,
+    blankLine: false,
+  }
+}
+
+function onAssetDragLeave() {
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (!dragDepth) dropIndicator.value.visible = false
+}
+
 /** 素材库卡片拖入编辑区：透传素材和准确落点，由父组件加入已选并插入 @图片N。 */
 function onDropAsset(e) {
   const raw = e.dataTransfer?.getData('application/json') || e.dataTransfer?.getData('text/plain')
@@ -397,7 +463,9 @@ function onDropAsset(e) {
   let data = null
   try { data = JSON.parse(raw) } catch (_) { data = null }
   if (data && (data.assetId != null || data.entity)) {
-    pendingDropOffset = dropCanonicalOffset(e)
+    pendingDropOffset = dropIndicator.value.visible ? dropIndicator.value.offset : dropCanonicalOffset(e)
+    dropIndicator.value.visible = false
+    dragDepth = 0
     emit('drop-asset', {
       assetId: data.assetId != null ? Number(data.assetId) : null,
       entity: data.entity || null,
@@ -579,6 +647,10 @@ html.light .omni-at-copy-btn {
   white-space: pre-wrap;
   word-break: break-word;
 }
+.omni-drop-indicator { position: absolute; z-index: 8; pointer-events: none; border-radius: 3px; background: var(--accent); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 58%, transparent); animation: omni-drop-breathe .8s ease-in-out infinite alternate; }
+.omni-drop-indicator.blank-line { transform: translateY(.72em); }
+.omni-drop-indicator.blank-line::before { content: ''; position: absolute; inset-inline-start: -3px; inset-block-start: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+@keyframes omni-drop-breathe { to { opacity: .48; } }
 .omni-at-editor:focus {
   border-color: #a78bfa;
   box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.25) inset;
@@ -633,12 +705,17 @@ html.light :deep(.omni-at-chip:hover) {
   overflow-y: auto;
   padding: 8px;
   border-radius: 8px;
-  background: #1e293b;
-  border: 1px solid rgba(248, 250, 252, 0.18);
+  background: rgba(20, 31, 45, 0.74);
+  border: 1px solid rgba(248, 250, 252, 0.24);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px) saturate(.82);
+  -webkit-backdrop-filter: blur(14px) saturate(.82);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 6px;
 }
 html.light .omni-at-menu {
-  background: #fff;
+  background: rgba(255,255,255,.76);
   border-color: #e2e8f0;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
 }
@@ -657,7 +734,7 @@ html.light .omni-at-menu-empty {
   align-items: center;
   gap: 10px;
   width: 100%;
-  margin: 0 0 6px;
+  margin: 0;
   padding: 6px 8px;
   border: none;
   border-radius: 6px;
@@ -793,7 +870,7 @@ html.light .omni-at-menu-at-sub {
 
 /* This overlay is teleported outside the page shell, so make its palette
    explicit rather than relying on a page-local light/dark branch. */
-.omni-at-menu { background: var(--bg-elevated); border-color: var(--border-color); box-shadow: var(--shadow-md); }
+.omni-at-menu { background:color-mix(in srgb,var(--bg-elevated) 74%,transparent); border-color:color-mix(in srgb,var(--border-color) 72%,transparent); box-shadow: var(--shadow-md); }
 .omni-at-menu-empty,.omni-at-menu-thumb-ph,.omni-at-menu-at-sub { color: var(--text-muted); }
 .omni-at-menu-item { color: var(--text-primary); }
 .omni-at-menu-item:hover { background: var(--bg-hover); }

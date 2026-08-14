@@ -2,6 +2,16 @@
 
 function parse(raw, fallback) { try { return raw ? JSON.parse(raw) : fallback; } catch (_) { return fallback; } }
 function now() { return new Date().toISOString(); }
+const DEFAULT_SHOT_SETTINGS = Object.freeze({ model: '', aspect_ratio: '16:9', duration: 15, resolution: '720p', upscale_resolution: '1080p', target_fps: null, audio_strategy: 'reference_only' });
+
+function normalizedShotSettings(raw) {
+  const parsed = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
+  const settings = { ...DEFAULT_SHOT_SETTINGS, ...parsed };
+  const resolution = String(settings.resolution || '720p').toLowerCase();
+  if (resolution === '1080p' || settings.upscale_resolution === resolution) settings.upscale_resolution = null;
+  const policy = require('./videoPostprocessPolicy').normalize(settings);
+  return { ...settings, resolution: policy.resolution || '720p', upscale_resolution: policy.upscale_resolution, target_fps: policy.target_fps };
+}
 // Some unit tests and pre-migration local databases use the original sequence
 // table. Production always has this column after migration 34.
 function hasOwnerColumn(db) {
@@ -24,7 +34,7 @@ function ensureDefault(db, ownerUserId) {
 }
 
 function shotRow(row) {
-  return { ...row, assets: parse(row.assets_json, []), prompt_document: parse(row.prompt_document_json, null), settings: parse(row.settings_json, {}),
+  return { ...row, assets: parse(row.assets_json, []), prompt_document: parse(row.prompt_document_json, null), settings: normalizedShotSettings(parse(row.settings_json, {})),
     status: row.generation_status || (row.omni_job_id ? 'processing' : 'draft'),
     video_url: row.generation_local_path ? `/static/${row.generation_local_path}` : row.generation_video_url || null };
 }
@@ -89,9 +99,10 @@ function createShot(db, sequenceId, body) {
     if (after) { order = Number(after.sort_order) + 5; }
   }
   const stamp = now();
+  const masterSettings = current[0]?.settings || { ...DEFAULT_SHOT_SETTINGS };
   const out = db.prepare(`INSERT INTO omni_video_sequence_shots
     (sequence_id, title, sort_order, prompt, assets_json, settings_json, created_at, updated_at)
-    VALUES (?, ?, ?, '', '[]', ?, ?, ?)`).run(Number(sequenceId), body.title || '未命名镜头', order, JSON.stringify({ model: '', aspect_ratio: '16:9', duration: 15, resolution: '720p', audio_strategy: 'reference_only' }), stamp, stamp);
+    VALUES (?, ?, ?, '', '[]', ?, ?, ?)`).run(Number(sequenceId), body.title || '未命名镜头', order, JSON.stringify(masterSettings), stamp, stamp);
   normalizeOrder(db, sequenceId);
   return listShots(db, sequenceId).find((s) => s.id === Number(out.lastInsertRowid));
 }
@@ -99,7 +110,7 @@ function createShot(db, sequenceId, body) {
 function updateShot(db, sequenceId, shotId, body) {
   const shot = db.prepare('SELECT * FROM omni_video_sequence_shots WHERE id = ? AND sequence_id = ? AND deleted_at IS NULL').get(Number(shotId), Number(sequenceId));
   if (!shot) throw new Error('镜头不存在');
-  const settings = body.settings !== undefined ? { ...parse(shot.settings_json, {}), ...body.settings } : parse(shot.settings_json, {});
+  const settings = normalizedShotSettings(body.settings !== undefined ? { ...parse(shot.settings_json, {}), ...body.settings } : parse(shot.settings_json, {}));
   // Persisted drafts may target Seedance 2.5 (4–30s). The actual generation
   // route applies the selected model's capability limit before submission.
   if (settings.duration != null) settings.duration = Math.min(30, Math.max(4, Math.round(Number(settings.duration) || 15)));

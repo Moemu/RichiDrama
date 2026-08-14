@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { safeRedirectPath } from '@/utils/routeRecovery'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -85,7 +86,9 @@ router.beforeEach((to) => {
   const user = JSON.parse(localStorage.getItem('lmd_auth_user') || 'null')
   if (!to.meta.public && !localStorage.getItem('lmd_auth_token')) return { path: '/login', query: { redirect: to.fullPath } }
   if (to.meta.admin && user?.role !== 'admin') return '/'
-  if (to.path === '/login' && localStorage.getItem('lmd_auth_token')) return '/'
+  if (to.path === '/login' && localStorage.getItem('lmd_auth_token')) {
+    return safeRedirectPath(to.query.redirect, '/')
+  }
   return true
 })
 

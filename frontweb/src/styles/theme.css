@@ -34,6 +34,18 @@ html.dark {
   --accent-contrast: #ffffff;
   --accent-teal: #42d3c7;
   --accent-warm: #ffb86b;
+  --text-on-accent: #ffffff;
+  --status-success: #4fd1a1;
+  --status-warning: #f7b955;
+  --status-danger: #ff7b88;
+  --status-info: #79b8ff;
+  --status-success-bg: rgba(79, 209, 161, .13);
+  --status-warning-bg: rgba(247, 185, 85, .13);
+  --status-danger-bg: rgba(255, 123, 136, .13);
+  --status-info-bg: rgba(121, 184, 255, .13);
+  --stage-bg: #05070c;
+  --stage-border: #263349;
+  --overlay-scrim: rgba(3, 7, 18, .64);
   --shadow-sm: 0 8px 22px rgba(0, 0, 0, .18);
   --shadow-md: 0 18px 46px rgba(0, 0, 0, .28);
   --radius-sm: 6px;
@@ -73,34 +85,46 @@ html.dark {
 }
 
 html.light {
-  --bg-page: #f4f1eb;
-  --bg-surface: rgba(255, 255, 255, .78);
-  --bg-raised: #ffffff;
+  --bg-page: #f2f3f7;
+  --bg-surface: #ffffff;
+  --bg-raised: #f7f8fa;
   --bg-elevated: #ffffff;
-  --bg-card: rgba(255, 255, 255, .78);
-  --bg-inner: #f9f7f3;
-  --bg-hover: #eee9e1;
-  --bg-active: #e5dfd5;
-  --border-color: #ded8cf;
-  --border-strong: #c6beb1;
-  --border-subtle: #e9e4dc;
-  --border-muted: #ded8cf;
-  --text-primary: #192033;
-  --text-main: #192033;
-  --text-regular: #475167;
-  --text-muted: #667085;
-  --text-faint: #9299a8;
-  --text-bright: #101625;
-  --text-secondary: #667085;
-  --text-subtle: #9299a8;
-  --focus-ring: #6757d9;
-  --accent: #6757d9;
-  --accent-hover: #5545c5;
+  --bg-card: #ffffff;
+  --bg-inner: #f3f4f6;
+  --bg-hover: #eef0f3;
+  --bg-active: #e5e7eb;
+  --border-color: #d8dbe0;
+  --border-strong: #a9afb8;
+  --border-subtle: #e7e9ec;
+  --border-muted: #d8dbe0;
+  --text-primary: #171a26;
+  --text-main: #171a26;
+  --text-regular: #41485a;
+  --text-muted: #626a7d;
+  --text-faint: #858c9e;
+  --text-bright: #11141f;
+  --text-secondary: #626a7d;
+  --text-subtle: #858c9e;
+  --focus-ring: #5b4bd4;
+  --accent: #5b4bd4;
+  --accent-hover: #493ab9;
   --accent-contrast: #ffffff;
   --accent-teal: #087f78;
   --accent-warm: #b65d19;
-  --shadow-sm: 0 8px 24px rgba(55, 45, 35, .07);
-  --shadow-md: 0 22px 56px rgba(55, 45, 35, .12);
+  --text-on-accent: #ffffff;
+  --status-success: #087a55;
+  --status-warning: #98530b;
+  --status-danger: #bd3345;
+  --status-info: #2369b0;
+  --status-success-bg: #e4f5ee;
+  --status-warning-bg: #fff1db;
+  --status-danger-bg: #fde8eb;
+  --status-info-bg: #e5f1fc;
+  --stage-bg: #11131a;
+  --stage-border: #c9ccd7;
+  --overlay-scrim: rgba(25, 30, 45, .32);
+  --shadow-sm: 0 2px 8px rgba(31, 35, 48, .06), 0 12px 30px rgba(31, 35, 48, .05);
+  --shadow-md: 0 8px 24px rgba(31, 35, 48, .09), 0 24px 54px rgba(31, 35, 48, .08);
   --el-bg-color: var(--bg-surface);
   --el-bg-color-page: var(--bg-page);
   --el-bg-color-overlay: var(--bg-surface);
@@ -124,9 +148,10 @@ html.light {
 
 html, body, #app, .app { min-height: 100%; min-height: 100dvh; background: var(--bg-page) !important; color: var(--text-primary) !important; }
 html body #app .page { min-height: 100dvh; }
-html { background: #080b12; color-scheme: dark; }
-html.light { color-scheme: light; }
-body { background-color: #080b12 !important; }
+html { background: #080b12; }
+html.dark { color-scheme: dark !important; }
+html.light { color-scheme: light !important; background: #f2f3f7; }
+body { background-color: var(--bg-page) !important; }
 body, button, input, textarea, select { font-family: var(--font-sans); }
 body { margin: 0; font-size: var(--app-font-size); -webkit-font-smoothing: antialiased; }
 h1, h2, h3, h4, h5, h6 { margin-top: 0; line-height: 1.3; font-weight: 600; }
@@ -135,7 +160,9 @@ h2 { font-size: 22px; letter-spacing: -.015em; }
 h3 { font-size: 19px; letter-spacing: -.01em; }
 p { line-height: 1.7; }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible,
-.el-button:focus-visible, .el-radio-button__inner:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; }
+[tabindex]:not([tabindex="-1"]):focus-visible, .el-button:focus-visible, .el-radio-button__inner:focus-visible {
+  outline: 2px solid var(--focus-ring) !important; outline-offset: 2px;
+}
 
 /* Element Plus primitives */
 .el-button, .el-input__wrapper, .el-textarea__wrapper, .el-select__wrapper, .el-card, .el-tag { border-radius: var(--radius-sm) !important; }
@@ -489,4 +516,316 @@ html.light body #app .omni-page .frame-tag {
 html.light body #app .omni-page .frame-tag.req {
   background: #dbc49e !important;
   color: #6d4c1e !important;
+}
+
+/* --------------------------------------------------------------------------
+ * Apple-like full-route compatibility layer
+ *
+ * Legacy views still contain scoped graphite values. This final cascade maps
+ * their visual surfaces back to the semantic contract without changing their
+ * layout or domain-specific media colours.
+ * ----------------------------------------------------------------------- */
+::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); color: var(--text-primary); }
+
+html body .el-overlay { background: var(--overlay-scrim) !important; }
+html body .el-dialog,
+html body .el-drawer,
+html body .el-message-box,
+html body .el-popper,
+html body .el-select-dropdown,
+html body .el-dropdown-menu {
+  background: var(--bg-surface) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+html body .el-table,
+html body .el-table tr,
+html body .el-table th.el-table__cell,
+html body .el-table td.el-table__cell { background: var(--bg-surface) !important; color: var(--text-regular) !important; border-color: var(--border-subtle) !important; }
+html body .el-table th.el-table__cell { background: var(--bg-raised) !important; color: var(--text-primary) !important; }
+html body .el-table__body tr:hover > td.el-table__cell { background: var(--bg-hover) !important; }
+html body .el-switch__core { border-color: var(--border-strong) !important; background: var(--bg-active) !important; }
+html body .el-switch.is-checked .el-switch__core { border-color: var(--accent) !important; background: var(--accent) !important; }
+html body .el-checkbox__inner { background: var(--bg-surface) !important; border-color: var(--border-strong) !important; }
+html body .el-checkbox__input.is-checked .el-checkbox__inner { background: var(--accent) !important; border-color: var(--accent) !important; }
+
+/* AI tool directory: restore hierarchy hidden by the former graphite palette. */
+html body #app .tools-page { background: var(--bg-page) !important; color: var(--text-primary) !important; }
+html body #app .tools-page .crumb,
+html body #app .tools-page .hero-copy,
+html body #app .tools-page .group-heading > p,
+html body #app .tools-page .tool-card > p,
+html body #app .tools-page .tool-card dt,
+html body #app .tools-page .type-label { color: var(--text-muted) !important; }
+html body #app .tools-page .workflow,
+html body #app .tools-page .tool-card {
+  background: var(--bg-surface) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-regular) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+html body #app .tools-page .tool-card:hover,
+html body #app .tools-page .tool-card:focus-visible { background: var(--bg-elevated) !important; border-color: var(--accent) !important; box-shadow: var(--shadow-md) !important; }
+html body #app .tools-page .workflow b,
+html body #app .tools-page .tool-icon { background: var(--bg-active) !important; color: var(--accent) !important; }
+html body #app .tools-page .workflow i { background: var(--border-strong) !important; }
+html body #app .tools-page .tool-card dl div { border-color: var(--border-strong) !important; }
+html body #app .tools-page .tool-card dd,
+html body #app .tools-page .tool-card h3 { color: var(--text-primary) !important; }
+html body #app .tools-page .tool-card footer { border-color: var(--border-subtle) !important; color: var(--accent) !important; }
+
+/* Tool workbenches use readable supporting text; faint is reserved for disabled UI. */
+html body #app .tool-workbench,
+html body #app .media-tool { background: var(--bg-page) !important; color: var(--text-primary) !important; }
+html body #app .tool-workbench .tool-form,
+html body #app .tool-workbench .run-history,
+html body #app .tool-workbench .result,
+html body #app .media-tool .control-panel,
+html body #app .media-tool .history-panel,
+html body #app .media-tool .result-panel { background: var(--bg-surface) !important; border-color: var(--border-color) !important; box-shadow: var(--shadow-sm) !important; }
+html body #app .tool-workbench .tool-form label,
+html body #app .tool-workbench small,
+html body #app .tool-workbench .breadcrumb,
+html body #app .tool-workbench .history-empty,
+html body #app .tool-workbench .empty,
+html body #app .tool-workbench .empty p,
+html body #app .media-tool label,
+html body #app .media-tool small { color: var(--text-muted) !important; opacity: 1 !important; }
+html body #app .tool-workbench .panel-kicker b,
+html body #app .tool-workbench .empty b,
+html body #app .media-tool .panel-kicker b { color: var(--text-primary) !important; }
+html body #app .tool-workbench .run-item,
+html body #app .media-tool .run-item { background: var(--bg-raised) !important; border-color: var(--border-color) !important; color: var(--text-regular) !important; }
+html body #app .tool-workbench .run-item.active,
+html body #app .media-tool .run-item.active { background: var(--bg-active) !important; border-color: var(--accent) !important; }
+html body #app .tool-workbench :is(.title-mark, .panel-kicker > span, .empty > span),
+html body #app .media-tool :is(.title-mark, .panel-kicker > span, .empty > span) { background: var(--bg-active) !important; color: var(--accent) !important; }
+
+/* Media library: solid cards retain visual stability while thumbnails load. */
+html body #app .media-library-page { background: var(--bg-page) !important; color: var(--text-primary) !important; }
+html body #app .media-library-page .filter-bar,
+html body #app .media-library-page .media-card,
+html body #app .media-library-page .batch-bar {
+  background: var(--bg-surface) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+html body #app .media-library-page .media-card:hover,
+html body #app .media-library-page .media-card:focus-within { border-color: color-mix(in srgb, var(--accent) 65%, var(--border-color)) !important; box-shadow: var(--shadow-md) !important; }
+html body #app .media-library-page .media-card.selected { border-color: var(--accent) !important; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent), var(--shadow-sm) !important; }
+html body #app .media-library-page .media-thumb,
+html body #app .media-library-page .thumb-video-placeholder { background: var(--bg-inner) !important; color: var(--text-muted) !important; }
+html body #app .media-library-page .media-name { color: var(--text-primary) !important; }
+html body #app .media-library-page .media-meta,
+html body #app .media-library-page .upload-limits { color: var(--text-muted) !important; }
+
+/* Visual canvas: light mode uses a drafting desk, dark mode an editing bay. */
+html body #app .drama-canvas-page {
+  --canvas-grid-bg: #0b0f18;
+  --canvas-node: var(--bg-surface);
+  --canvas-node-raised: var(--bg-raised);
+  background: var(--bg-page) !important;
+  color: var(--text-primary) !important;
+}
+html.light body #app .drama-canvas-page { --canvas-grid-bg: #eef0f6; }
+html body #app .drama-canvas-page .header,
+html body #app .drama-canvas-page .canvas-sidebar { background: var(--bg-surface) !important; border-color: var(--border-color) !important; }
+html body #app .drama-canvas-page .vue-flow-canvas { background: var(--canvas-grid-bg) !important; }
+html body #app .drama-canvas-page .wf-hint,
+html body #app .drama-canvas-page .gen-hint,
+html body #app .drama-canvas-page .sec-label,
+html body #app .drama-canvas-page .sidebar-script-tip,
+html body #app .drama-canvas-page .sidebar-tip,
+html body #app .drama-canvas-page .sidebar-empty,
+html body #app .drama-canvas-page .wf-item-meta { color: var(--text-muted) !important; }
+html body #app .drama-canvas-page .gen-label,
+html body #app .drama-canvas-page .sidebar-title,
+html body #app .drama-canvas-page .sidebar-item { color: var(--text-primary) !important; }
+html body #app .drama-canvas-page .sidebar-item:hover { background: var(--bg-hover) !important; }
+html body #app .drama-canvas-page .sidebar-item.active { background: var(--bg-active) !important; color: var(--accent) !important; }
+html body #app .drama-canvas-page .vue-flow__minimap,
+html body #app .drama-canvas-page .vue-flow__controls { background: color-mix(in srgb, var(--bg-surface) 90%, transparent) !important; border-color: var(--border-color) !important; box-shadow: var(--shadow-sm) !important; backdrop-filter: blur(18px) saturate(120%); }
+html body #app .drama-canvas-page .vue-flow__controls button { background: var(--bg-surface) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; }
+html body #app .drama-canvas-page .vue-flow__controls button:hover { background: var(--bg-hover) !important; }
+
+html body #app .canvas-asset-node,
+html body #app .canvas-sb-node,
+html body #app .canvas-script-node,
+html body #app .canvas-media-node,
+html body #app .canvas-episode-node,
+html body #app .canvas-drama-header,
+html body #app .canvas-label-node,
+html body #app .asset-panel,
+html body #app .sb-panel,
+html body #app .script-panel,
+html body #app .media-panel,
+html body #app .canvas-context-menu {
+  background: var(--bg-surface) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+html body #app .canvas-asset-node:hover,
+html body #app .canvas-sb-node:hover,
+html body #app .canvas-script-node:hover,
+html body #app .canvas-media-node:hover { box-shadow: var(--shadow-md) !important; }
+html body #app .canvas-floating-toolbar {
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-md) !important;
+  backdrop-filter: blur(20px) saturate(125%);
+}
+html body #app .canvas-context-menu .ctx-item:hover { background: var(--bg-hover) !important; }
+html body #app .canvas-context-menu .ctx-title,
+html body #app .canvas-context-menu .ctx-divider { border-color: var(--border-subtle) !important; color: var(--text-muted) !important; }
+html body #app .canvas-asset-node .cover,
+html body #app .canvas-sb-node .chips span,
+html body #app .canvas-script-node .meta span,
+html body #app .canvas-media-node .empty,
+html body #app .asset-panel .preview-box,
+html body #app .media-panel .preview-wrap { background: var(--bg-inner) !important; color: var(--text-muted) !important; border-color: var(--border-subtle) !important; }
+html body #app .canvas-asset-node .name,
+html body #app .canvas-sb-node .title,
+html body #app .canvas-script-node .preview,
+html body #app .canvas-episode-node .title,
+html body #app .canvas-drama-header .title { color: var(--text-primary) !important; }
+html body #app .canvas-asset-node .kind,
+html body #app .canvas-sb-node .seg,
+html body #app .canvas-sb-node .hint,
+html body #app .canvas-script-node .meta,
+html body #app .canvas-script-node .hint,
+html body #app .canvas-media-node .tag,
+html body #app .canvas-drama-header .meta { color: var(--text-muted) !important; }
+
+/* Creation workbench: keep the actual playback stage cinematic in both modes. */
+html body #app .omni-page .video-stage {
+  background: radial-gradient(circle at 50% 42%, #181b25 0, var(--stage-bg) 48%, #04050a 100%) !important;
+  border-color: var(--stage-border) !important;
+  box-shadow: inset 0 0 52px rgba(0, 0, 0, .24), var(--shadow-md) !important;
+}
+html body #app .omni-page .video-stage b { color: #f5f6fb !important; }
+html body #app .omni-page .video-stage small { color: #aeb5c4 !important; }
+html body #app .omni-page .generation-settings,
+html body #app .omni-page .el-input__wrapper,
+html body #app .omni-page .el-select__wrapper,
+html body #app .omni-page .el-textarea__inner,
+html body #app .omni-page .advanced-settings,
+html body #app .omni-page .identity-options,
+html body #app .omni-page .selected-assets article,
+html body #app .omni-page .material-card { background: var(--bg-surface) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; }
+html body #app .omni-page .el-radio-button__inner { background: var(--bg-raised) !important; border-color: var(--border-color) !important; color: var(--text-regular) !important; }
+html body #app .omni-page .el-radio-button__original-radio:checked + .el-radio-button__inner {
+  background: var(--bg-active) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  box-shadow: -1px 0 0 0 var(--accent) !important;
+}
+html.light body #app .omni-page .generation-settings { background: var(--bg-raised) !important; }
+html.light body #app .omni-page .el-input__wrapper,
+html.light body #app .omni-page .el-select__wrapper,
+html.light body #app .omni-page .el-textarea__inner,
+html.light body #app .omni-page .advanced-settings,
+html.light body #app .omni-page .identity-options,
+html.light body #app .omni-page .selected-assets article,
+html.light body #app .omni-page .material-card { background: var(--bg-surface) !important; }
+html.light body #app .omni-page .creation-generate-summary b,
+html.light body #app .omni-page .panel-title b,
+html.light body #app .omni-page .materials-title b,
+html.light body #app .omni-page .t0-settings-heading b,
+html.light body #app .omni-page .asset-name b,
+html.light body #app .omni-page .identity-heading b,
+html.light body #app .omni-page .generation-history-head b { color: var(--text-primary) !important; }
+
+@media (hover: hover) {
+  html body #app :is(.project-card, .episode-card, .library-item, .tool-card, .media-card):hover { transform: translateY(-2px) !important; }
+}
+
+@media (forced-colors: active) {
+  html body #app *, html body .el-popper { box-shadow: none !important; }
+  html body #app .video-stage,
+  html body #app .vue-flow-canvas { background: Canvas !important; color: CanvasText !important; }
+  html body #app :focus-visible { outline: 3px solid Highlight !important; }
+}
+
+/* Neutral light mode: colour is a control signal, never a page-sized wash. */
+html.light body {
+  background: var(--bg-page) !important;
+  background-image: none !important;
+}
+html.light body #app :is(.film-list, .drama-detail, .film-create, .tools-page, .media-library-page, .tool-workbench, .media-tool) {
+  background-color: #f2f3f5 !important;
+  background-image: none !important;
+}
+html.light body #app :is(.film-list, .drama-detail, .film-create) :is(.header, .quick-nav) {
+  background: color-mix(in srgb, #fff 94%, transparent) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, .04), 0 8px 24px rgba(15, 23, 42, .035) !important;
+}
+html.light body #app .film-list .projects-heading::after,
+html.light body #app .film-list .project-card::before { display: none !important; }
+html.light body #app .film-list :is(.project-card, .action-card, .omni-project-card),
+html.light body #app .drama-detail :is(.section.card, .episode-card, .library-item),
+html.light body #app .film-create :is(.card, .storyboard-row, .asset-item) {
+  background: #fff !important;
+  background-image: none !important;
+  border-color: var(--border-color) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+html.light body #app .film-list :is(.project-card, .action-card, .omni-project-card):hover,
+html.light body #app .drama-detail :is(.section.card, .episode-card, .library-item):hover,
+html.light body #app .film-create :is(.card, .storyboard-row, .asset-item):hover {
+  background: #fff !important;
+  border-color: var(--border-strong) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+html.light body #app .film-create :is(.nav-sub-list, .sb-ctrl-bar--active, .nav-sub-item:hover, .segment-header-inner) {
+  background: var(--bg-hover) !important;
+  background-image: none !important;
+}
+html.light body #app .film-create :is(.sb-image-area, .sb-video-area, .cover-placeholder, .asset-cover) {
+  background: #f1f2f4 !important;
+  background-image: none !important;
+  border-color: var(--border-color) !important;
+}
+html.light body #app .drama-detail .episode-card::before { display: none !important; }
+html.light body #app .omni-page :is(.shot-card.active, .material-card.selected, .generation-settings) {
+  background: var(--bg-raised) !important;
+  background-image: none !important;
+}
+html.light body #app .project-storyboard-page .t0-generation-settings {
+  background: var(--bg-raised) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: none !important;
+}
+html.light body #app .project-storyboard-page .t0-settings-heading :is(b, small) {
+  color: var(--text-primary) !important;
+}
+
+/* Small, composited feedback makes the product feel responsive without noise. */
+:root { --motion-instant: 80ms; --motion-fast: 160ms; --motion-standard: 210ms; --motion-ease: cubic-bezier(.2, .8, .2, 1); }
+html { scroll-behavior: smooth; }
+html body #app :is(button, .el-button, .project-card, .episode-card, .tool-card, .media-card, .shot-card, .sidebar-item, .run-item) {
+  transition-duration: var(--motion-fast) !important;
+  transition-timing-function: var(--motion-ease) !important;
+}
+html body #app :is(button, .el-button):not(:disabled):active { transform: scale(.98); transition-duration: var(--motion-instant) !important; }
+html body #app :is(.page > main, .film-list main, .tools-page > *, .media-library-page > *, .tool-layout, .drama-detail .main) {
+  animation: surface-reveal var(--motion-standard) var(--motion-ease) both;
+}
+html body #app :is(input, textarea, .el-input__wrapper, .el-select__wrapper) { transition: border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease) !important; }
+@keyframes surface-reveal { from { opacity: .72; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text-faint) 58%, transparent) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-faint) 48%, transparent); border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--text-muted) 64%, transparent); }
+
+html.asset-pointer-dragging,
+html.asset-pointer-dragging * { cursor: grabbing !important; user-select: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  html body #app :is(.page > main, .film-list main, .tools-page > *, .media-library-page > *, .tool-layout, .drama-detail .main) { animation: none !important; }
 }

@@ -21,6 +21,8 @@ export const omniVideoAPI = {
   /** 创建素材记录（如把场景/角色/道具图导入素材池统一管理） */
   createAsset(body) { return request.post('/assets', body || {}) },
   linkProjectResource(body) { return request.post('/assets/project-resource-link', body || {}) },
+  listResourceLinks(params) { return request.get('/asset-resource-links', { params: params || {} }) },
+  restoreResourceLink(id) { return request.post(`/asset-resource-links/${id}/restore`) },
   updateAsset(id, body) { return request.put(`/assets/${id}`, body) },
   deleteAsset(id) { return request.delete(`/assets/${id}`) },
   assetLineage(id) { return request.get(`/assets/${id}/lineage`) },

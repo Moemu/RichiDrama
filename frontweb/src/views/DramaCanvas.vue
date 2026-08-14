@@ -889,7 +889,7 @@ watch(filterEpisodeId, async (val) => {
   const query = { ...route.query }
   if (val != null) query.episode = String(val)
   else delete query.episode
-  router.replace({ query }).catch(() => {})
+  router.replace({ query, hash: route.hash }).catch(() => {})
 })
 
 watch(() => route.params.id, () => {

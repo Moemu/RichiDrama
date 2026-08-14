@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { loginRouteForCurrentLocation } from './routeRecovery'
 
 const request = axios.create({
   baseURL: '/api/v1',
@@ -37,7 +38,7 @@ request.interceptors.response.use(
     if (status === 401 && !error.config?.url?.includes('/auth/login')) {
       localStorage.removeItem('lmd_auth_token')
       localStorage.removeItem('lmd_auth_user')
-      if (window.location.pathname !== '/login') window.location.assign('/login')
+      if (window.location.pathname !== '/login') window.location.replace(loginRouteForCurrentLocation(window.location))
     }
     // 413 通常由 nginx 反代层返回（HTML 响应体，非 JSON），需单独给出可读提示
     const backendMsg = error.response?.data?.error?.message

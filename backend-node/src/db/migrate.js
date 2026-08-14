@@ -173,6 +173,7 @@ function ensureAllColumns(database) {
     { name: 'created_at',     type: 'TEXT' },
     { name: 'updated_at',     type: 'TEXT' },
     { name: 'deleted_at',     type: 'TEXT' },
+    { name: 'generation_defaults_json', type: 'TEXT' },
   ]);
 
   // --- storyboards ---
@@ -196,6 +197,9 @@ function ensureAllColumns(database) {
     { name: 'video_model',       type: 'TEXT' },
     { name: 'video_resolution',  type: 'TEXT' },
     { name: 'video_aspect_ratio', type: 'TEXT' },
+    { name: 'video_upscale_resolution', type: 'TEXT' },
+    { name: 'video_target_fps', type: 'INTEGER' },
+    { name: 'generation_overrides_json', type: 'TEXT' },
     { name: 'characters',        type: 'TEXT' },
     { name: 'shot_type',         type: 'TEXT' },
     { name: 'angle',             type: 'TEXT' },
@@ -417,6 +421,23 @@ function ensureAllColumns(database) {
     { name: 'reference_image_urls', type: 'TEXT' },
     { name: 'video_url',            type: 'TEXT' },
     { name: 'local_path',           type: 'TEXT' },
+    { name: 'source_local_path',    type: 'TEXT' },
+    { name: 'intermediate_cleanup_enabled', type: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'upscale_resolution',   type: 'TEXT' },
+    { name: 'upscale_job_id',       type: 'INTEGER' },
+    { name: 'upscale_status',       type: 'TEXT' },
+    { name: 'upscale_local_path',   type: 'TEXT' },
+    { name: 'upscale_billing_authorization_id', type: 'TEXT' },
+    { name: 'interpolation_job_id', type: 'INTEGER' },
+    { name: 'interpolation_status', type: 'TEXT' },
+    { name: 'target_fps',           type: 'INTEGER' },
+    { name: 'interpolation_billing_authorization_id', type: 'TEXT' },
+    { name: 'output_width',         type: 'INTEGER' },
+    { name: 'output_height',        type: 'INTEGER' },
+    { name: 'output_resolution',    type: 'TEXT' },
+    { name: 'output_fps',           type: 'REAL' },
+    { name: 'output_duration_ms',   type: 'INTEGER' },
+    { name: 'poster_local_path',    type: 'TEXT' },
     { name: 'status',               type: 'TEXT' },
     { name: 'task_id',              type: 'TEXT' },
     { name: 'provider_task_id',     type: 'TEXT' },
@@ -432,6 +453,19 @@ function ensureAllColumns(database) {
     { name: 'created_at',           type: 'TEXT' },
     { name: 'updated_at',           type: 'TEXT' },
     { name: 'deleted_at',           type: 'TEXT' },
+  ]);
+
+  ensureColumns(database, 'video_interpolation_jobs', [
+    { name: 'output_width',  type: 'INTEGER' },
+    { name: 'output_height', type: 'INTEGER' },
+  ]);
+
+  ensureColumns(database, 'video_upscale_jobs', [
+    { name: 'output_width',       type: 'INTEGER' },
+    { name: 'output_height',      type: 'INTEGER' },
+    { name: 'output_duration_ms', type: 'INTEGER' },
+    { name: 'output_resolution',  type: 'TEXT' },
+    { name: 'output_fps',         type: 'REAL' },
   ]);
 
   // --- video_merges ---
@@ -623,7 +657,39 @@ function ensureAllColumns(database) {
 }
 
 /** 对已打开的 database 执行迁移与兜底补列（供 app 启动时调用） */
+// SQLite cannot widen a CHECK constraint with ALTER COLUMN. Upgrade existing
+// ledgers once before migration 52 publishes the millisecond MediaKit meter.
+function ensureMillisecondBillingMeter(database) {
+  const row = database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='billing_price_book_items'").get();
+  if (!row?.sql || row.sql.includes("'millisecond'")) return;
+  database.transaction(() => {
+    database.exec(`ALTER TABLE billing_price_book_items RENAME TO billing_price_book_items_legacy_meter;
+      CREATE TABLE billing_price_book_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        price_book_id INTEGER NOT NULL,
+        service_type TEXT NOT NULL,
+        model TEXT NOT NULL,
+        meter TEXT NOT NULL CHECK(meter IN ('request', 'image', 'second', 'millisecond', 'character', 'input_token', 'output_token')),
+        unit_price_micro INTEGER NOT NULL DEFAULT 0 CHECK(unit_price_micro >= 0),
+        is_free INTEGER NOT NULL DEFAULT 0,
+        conditions_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(price_book_id, service_type, model, meter)
+      );
+      INSERT INTO billing_price_book_items
+        (id, price_book_id, service_type, model, meter, unit_price_micro, is_free, conditions_json, created_at, updated_at)
+      SELECT id, price_book_id, service_type, model, meter, unit_price_micro, is_free, conditions_json, created_at, updated_at
+      FROM billing_price_book_items_legacy_meter;
+      DROP TABLE billing_price_book_items_legacy_meter;
+      CREATE INDEX IF NOT EXISTS idx_billing_price_items_lookup
+        ON billing_price_book_items(service_type, model, meter, price_book_id);`);
+  })();
+  console.log('Expanded billing meter schema for millisecond usage.');
+}
+
 function runMigrationsAndEnsure(database) {
+  ensureMillisecondBillingMeter(database);
   runMigrations(database);
   migrateBillingPrecision(database);
   ensureAllColumns(database);

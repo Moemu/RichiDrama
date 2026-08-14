@@ -41,7 +41,7 @@
 
       <template v-else-if="kind === 'video'">
         <div class="preview-wrap">
-          <video v-if="url && !busy" :src="url" class="preview-vid" controls playsinline />
+          <video v-if="url && !busy" :src="url" class="preview-vid" controls playsinline autoplay />
           <div v-else-if="!busy" class="preview-empty">无视频</div>
           <div v-if="busy" class="preview-loading"><span class="spinner" />生视频中…</div>
         </div>

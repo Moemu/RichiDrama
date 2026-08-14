@@ -15,7 +15,10 @@ WHERE NOT EXISTS (SELECT 1 FROM billing_settings WHERE key = 'points_ratio_v1');
 INSERT OR IGNORE INTO billing_settings (key, value, updated_at) VALUES ('points_ratio_v1', '100', '2026-08-10T00:00:00.000Z');
 
 UPDATE billing_price_book_items
-SET unit_price_micro = 22,
+SET unit_price_micro = CASE
+      WHEN EXISTS (SELECT 1 FROM billing_settings WHERE key = 'billing_precision_scale_v2') THEN 220000
+      ELSE 22
+    END,
     conditions_json = '{"currency":"CNY","unit_size":1,"source":"https://www.volcengine.com/docs/82379/1544106?lang=zh","verified_on":"2026-08-10","provider":"volcengine","pricing_note":"Official public pay-as-you-go base price (100 points = CNY 1)"}'
 WHERE model = 'doubao-seedream-5-0-260128' AND service_type IN ('image','storyboard_image') AND meter = 'image';
 

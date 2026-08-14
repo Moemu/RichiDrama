@@ -2,6 +2,7 @@ const response = require('../response');
 const videoService = require('../services/videoService');
 const taskService = require('../services/taskService');
 const { normalizeAspectRatioForApi } = require('../services/videoClient');
+const postprocessPolicy = require('../services/videoPostprocessPolicy');
 
 function routes(db, log) {
   return {
@@ -18,6 +19,9 @@ function routes(db, log) {
     create: (req, res) => {
       try {
         const body = req.body || {};
+        let policy;
+        try { policy = postprocessPolicy.normalize(body); }
+        catch (error) { return response.badRequest(res, error.message); }
         if (body.drama_id) {
           const own = db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id);
           if (!own) return response.notFound(res, '项目不存在');
@@ -79,7 +83,9 @@ function routes(db, log) {
             }
           } catch (_) {}
         }
-        const resolution = body.resolution ?? null;
+        const resolution = policy.resolution;
+        const upscaleResolution = policy.upscale_resolution;
+        const targetFps = policy.target_fps;
         const seed = body.seed != null ? Number(body.seed) : null;
         const cameraFixed = body.camera_fixed != null ? (body.camera_fixed ? 1 : 0) : null;
         const watermark = body.watermark != null ? (body.watermark ? 1 : 0) : 0;
@@ -93,10 +99,18 @@ function routes(db, log) {
             ? JSON.stringify(body.reference_image_urls.slice(0, 10))
             : null;
         db.prepare(
-          `INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, status, task_id, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)`
-        ).run(dramaId, storyboardId, req.auth.id, authorization.authorization_id, provider, prompt, model, duration, aspectRatio, resolution, seed, cameraFixed, watermark, imageUrl, firstFrameUrl, lastFrameUrl, refImagesJson, task.id, now, now);
+          `INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, status, task_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'processing', ?, ?, ?)`
+        ).run(dramaId, storyboardId, req.auth.id, authorization.authorization_id, provider, prompt, model, duration, aspectRatio, resolution, upscaleResolution, targetFps, seed, cameraFixed, watermark, imageUrl, firstFrameUrl, lastFrameUrl, refImagesJson, task.id, now, now);
         const videoGenId = db.prepare('SELECT last_insert_rowid() as id').get().id;
+        try {
+          if (upscaleResolution) require('../services/videoUpscaleService').reserveForGeneration(db, videoGenId, upscaleResolution);
+          if (targetFps) require('../services/videoInterpolationService').reserveForGeneration(db, videoGenId, targetFps);
+        } catch (error) {
+          videoService.setVideoGenFailed(db, videoGenId, error.message, new Date().toISOString());
+          taskService.updateTaskError(db, task.id, error.message);
+          throw error;
+        }
         setImmediate(() => {
           videoService.processVideoGeneration(db, log, videoGenId);
         });
@@ -106,6 +120,31 @@ function routes(db, log) {
         log.error('videos create', { error: err.message });
         response.internalError(res, err.message);
       }
+    },
+    postprocessQuote: (req, res) => {
+      try {
+        let policy;
+        try { policy = postprocessPolicy.normalize(req.body || {}); }
+        catch (error) { return response.badRequest(res, error.message); }
+        const durationMs = Math.max(1000, Math.ceil(Number(req.body?.duration || 15) * 1000));
+        const billing = require('../services/billingService');
+        const { fpsTier, resolutionTier } = require('../services/videoInterpolationService');
+        const stages = [];
+        if (policy.upscale_resolution) {
+          const sourceFps = Math.min(120, Math.max(15, Number(req.body?.source_fps || 30)));
+          const estimated = billing.quote(db, req.auth, { service_type: 'video_postprocess', model: 'volcengine-video-generative-enhancement', usage: { millisecond: durationMs }, pricing_context: { resolution_tier: policy.upscale_resolution, fps_tier: fpsTier(sourceFps) } });
+          stages.push({ stage: 'upscale', target: policy.upscale_resolution, estimated_points: estimated.amount, pricing_fps: sourceFps });
+        }
+        if (policy.target_fps) {
+          const estimated = billing.quote(db, req.auth, { service_type: 'video_postprocess', model: 'volcengine-video-frame-interpolation', usage: { millisecond: durationMs }, pricing_context: { resolution_tier: resolutionTier(policy.upscale_resolution || policy.resolution), fps_tier: fpsTier(policy.target_fps) } });
+          stages.push({ stage: 'interpolation', target: `${policy.target_fps}fps`, estimated_points: estimated.amount, pricing_fps: policy.target_fps });
+        }
+        response.success(res, {
+          policy, chain: `${postprocessPolicy.describe(policy)} → 本地规范 ${normalizeAspectRatioForApi(req.body?.aspect_ratio) || '16:9'}`,
+          estimated_total_points: stages.reduce((sum, item) => sum + Number(item.estimated_points || 0), 0),
+          note: '按请求时长估算；实际按本地探测的输出毫秒、分辨率和帧率结算；最终画幅规范化不额外收费',
+        });
+      } catch (error) { response.badRequest(res, error.message); }
     },
     get: (req, res) => {
       try {

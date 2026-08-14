@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS billing_price_book_items (
   price_book_id INTEGER NOT NULL,
   service_type TEXT NOT NULL,
   model TEXT NOT NULL,
-  meter TEXT NOT NULL CHECK(meter IN ('request', 'image', 'second', 'character', 'input_token', 'output_token')),
+  meter TEXT NOT NULL CHECK(meter IN ('request', 'image', 'second', 'millisecond', 'character', 'input_token', 'output_token')),
   unit_price_micro INTEGER NOT NULL DEFAULT 0 CHECK(unit_price_micro >= 0),
   is_free INTEGER NOT NULL DEFAULT 0,
   conditions_json TEXT,

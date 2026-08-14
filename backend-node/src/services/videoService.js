@@ -36,6 +36,18 @@ function setVideoGenFailed(db, videoGenId, errorMsg, now) {
     if (row?.owner_user_id && row?.billing_authorization_id) {
       require('./billingService').voidAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, errorMsg || '视频生成失败');
     }
+    const interpolation = db.prepare('SELECT owner_user_id, billing_authorization_id FROM video_interpolation_jobs WHERE video_generation_id=?').get(videoGenId);
+    if (interpolation?.billing_authorization_id) {
+      require('./billingService').voidAuthorization(db, { id: interpolation.owner_user_id, role: 'admin' }, interpolation.billing_authorization_id, '视频生成失败，插帧未调用');
+      db.prepare("UPDATE video_interpolation_jobs SET status='cancelled', error_msg=?, updated_at=? WHERE video_generation_id=?")
+        .run(String(errorMsg || '视频生成失败').slice(0, 500), now, videoGenId);
+    }
+    const upscale = db.prepare('SELECT owner_user_id, billing_authorization_id FROM video_upscale_jobs WHERE video_generation_id=?').get(videoGenId);
+    if (upscale?.billing_authorization_id) {
+      require('./billingService').voidAuthorization(db, { id: upscale.owner_user_id, role: 'admin' }, upscale.billing_authorization_id, '视频生成失败，超分未调用');
+      db.prepare("UPDATE video_upscale_jobs SET status='cancelled', error_msg=?, updated_at=? WHERE video_generation_id=?")
+        .run(String(errorMsg || '视频生成失败').slice(0, 500), now, videoGenId);
+    }
   } catch (_) {}
 }
 
@@ -66,7 +78,7 @@ function list(db, query) {
   // 与 Go 前端行为对齐：请求 status=processing 时，同时包含“刚结束”的记录（5 分钟内变为 completed/failed），
   // 这样轮询刷新后任务不会从列表消失，无需改 Vue
   if (query.status === 'processing') {
-    sql += " AND (status = 'processing' OR (status IN ('completed','failed') AND updated_at >= datetime('now', '-5 minutes')))";
+    sql += " AND (status IN ('processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting') OR (status IN ('completed','failed') AND updated_at >= datetime('now', '-5 minutes')))";
   } else if (query.status) {
     sql += ' AND status = ?';
     params.push(query.status);
@@ -88,10 +100,33 @@ function rowToItem(r) {
     provider: r.provider,
     prompt: r.prompt,
     model: r.model,
+    duration: r.duration,
+    aspect_ratio: r.aspect_ratio,
+    resolution: r.resolution || null,
+    requested_resolution: r.resolution || null,
     image_gen_id: r.image_gen_id,
     image_url: r.image_url,
     video_url: publicVideoUrl(r.video_url, r.local_path),
     local_path: r.local_path,
+    source_local_path: r.source_local_path || null,
+    upscale_resolution: r.upscale_resolution || null,
+    upscale_status: r.upscale_status || null,
+    upscale_job_id: r.upscale_job_id || null,
+    upscale_local_path: r.upscale_local_path || null,
+    interpolation_status: r.interpolation_status || null,
+    interpolation_job_id: r.interpolation_job_id || null,
+    target_fps: r.target_fps || null,
+    output_width: r.output_width || null,
+    output_height: r.output_height || null,
+    output_resolution: r.output_resolution || null,
+    output_fps: r.output_fps || null,
+    output_duration_ms: r.output_duration_ms || null,
+    postprocess_chain: `${require('./videoPostprocessPolicy').describe({
+      resolution: r.resolution || null,
+      upscale_resolution: r.upscale_resolution || null,
+      target_fps: r.target_fps || null,
+    })} → 本地规范 ${r.aspect_ratio || '原画幅'}`,
+    poster_local_path: r.poster_local_path || null,
     status: r.status,
     task_id: r.task_id,
     error_msg: r.error_msg,
@@ -187,36 +222,21 @@ async function archiveCompletedVideo(db, log, videoGenId, cfg = null) {
   }
 }
 
-/** 与图生 aspectRatioToSize 对齐的归一化分辨率（偶数像素，便于 H.264） */
-function targetVideoPixelsForAspect(aspectRatio) {
-  const r = String(aspectRatio || '16:9').trim();
-  const map = {
-    '16:9': { w: 2560, h: 1440 },
-    '9:16': { w: 1440, h: 2560 },
-    '1:1': { w: 1920, h: 1920 },
-    '4:3': { w: 1920, h: 1440 },
-    '3:4': { w: 1440, h: 1920 },
-    '3:2': { w: 2560, h: 1708 },
-    '2:3': { w: 1708, h: 2560 },
-    '21:9': { w: 2560, h: 1080 },
-  };
-  if (map[r]) return map[r];
-  const m = r.match(/^(\d+)\s*:\s*(\d+)$/);
-  if (m) {
-    const a = parseInt(m[1], 10);
-    const b = parseInt(m[2], 10);
-    if (a > 0 && b > 0 && a !== b) {
-      if (a > b) {
-        const w = 2560;
-        const h = Math.max(2, Math.round((w * b) / a / 2) * 2);
-        return { w, h };
-      }
-      const h = 2560;
-      const w = Math.max(2, Math.round((h * a) / b / 2) * 2);
-      return { w, h };
-    }
-  }
-  return { w: 1280, h: 720 };
+/** Resolve an exact aspect canvas from the requested short-edge tier. This
+ * preserves 16:9/9:16/etc. without the former unconditional 2K enlargement. */
+function targetVideoPixelsForAspect(aspectRatio, resolution, sourceProbe = null) {
+  const normalized = videoClient.normalizeAspectRatioForApi(aspectRatio) || '16:9';
+  const match = normalized.match(/^(\d+)\s*:\s*(\d+)$/);
+  const a = Number(match?.[1] || 16);
+  const b = Number(match?.[2] || 9);
+  const requested = String(resolution || '').toLowerCase();
+  const shortEdge = requested.includes('1080') ? 1080
+    : requested.includes('720') ? 720
+      : requested.includes('480') ? 480
+        : Math.max(2, Math.round(Math.min(Number(sourceProbe?.width || 720), Number(sourceProbe?.height || 720)) / 2) * 2);
+  const even = (value) => Math.max(2, Math.round(Number(value) / 2) * 2);
+  if (a >= b) return { w: even(shortEdge * a / b), h: even(shortEdge), aspect_ratio: normalized, short_edge: shortEdge };
+  return { w: even(shortEdge), h: even(shortEdge * b / a), aspect_ratio: normalized, short_edge: shortEdge };
 }
 
 /**
@@ -261,10 +281,112 @@ function normalizeVideoFileToTargetPixels(absPath, tw, th, log, videoGenId) {
 }
 
 function maybeNormalizeVideoAfterDownload(storagePath, localPath, row, videoGenId, log) {
-  if (!localPath) return;
-  const abs = path.join(storagePath, localPath);
-  const dim = targetVideoPixelsForAspect(row.aspect_ratio);
-  normalizeVideoFileToTargetPixels(abs, dim.w, dim.h, log, videoGenId);
+  // Preserve the supplier's original pixels. Aspect ratio is a composition
+  // contract, not permission to upscale a 480p/720p result to a fixed 2K
+  // canvas. Explicit, separately billed enhancement must create a new file.
+  return false;
+}
+
+function normalizeFinalVideoToContract(storagePath, localPath, row, videoGenId, log) {
+  const probe = require('./videoMediaProbeService').probeVideoMedia(path.join(storagePath, localPath));
+  const target = targetVideoPixelsForAspect(row.aspect_ratio, row.upscale_resolution || row.resolution, probe);
+  if (probe.width === target.w && probe.height === target.h) return { local_path: localPath, probe, target, normalized: false };
+  const sourceRatio = probe.width / probe.height;
+  const targetRatio = target.w / target.h;
+  if (Math.abs(sourceRatio / targetRatio - 1) > 0.08) {
+    throw new Error(`供应商成片画幅 ${probe.width}x${probe.height} 与请求 ${target.aspect_ratio} 偏差超过 8%，拒绝大幅裁切`);
+  }
+  if (!hasLocalFfmpeg()) throw new Error(`最终成片 ${probe.width}x${probe.height} 未满足 ${target.aspect_ratio} / ${target.w}x${target.h}，且本机缺少 ffmpeg`);
+  const source = path.join(storagePath, localPath);
+  // With no paid post-process stage, normalize in place so the original
+  // output remains the single retained artifact. Paid stages retain their
+  // output until the new final canvas has passed validation.
+  const replaceInput = !row.upscale_resolution && !row.target_fps;
+  const relative = replaceInput
+    ? localPath
+    : path.join(path.dirname(localPath), `vg_${videoGenId}_final_${target.w}x${target.h}.mp4`).replace(/\\/g, '/');
+  const output = path.join(storagePath, relative);
+  const tempOutput = replaceInput
+    ? output + `.norm-${randomUUID().slice(0, 8)}${path.extname(output) || '.mp4'}`
+    : output;
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  const filter = `scale=${target.w}:${target.h}:force_original_aspect_ratio=increase,crop=${target.w}:${target.h}`;
+  const base = ['-y', '-i', source, '-vf', filter, '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart'];
+  let result = spawnSync(getFfmpegPath(), [...base, '-c:a', 'copy', tempOutput], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  if (result.status !== 0) result = spawnSync(getFfmpegPath(), [...base, '-c:a', 'aac', '-b:a', '192k', tempOutput], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  if (result.status !== 0 || !fs.existsSync(tempOutput) || fs.statSync(tempOutput).size === 0) {
+    try { fs.unlinkSync(tempOutput); } catch (_) {}
+    throw new Error(`最终成片画幅规范化失败：${String(result.stderr || '').slice(-300)}`);
+  }
+  const finalProbe = require('./videoMediaProbeService').probeVideoMedia(tempOutput);
+  const durationTolerance = Math.max(250, probe.duration_ms * 0.02);
+  if (finalProbe.width !== target.w || finalProbe.height !== target.h
+    || Math.abs(finalProbe.fps - probe.fps) > 1
+    || Math.abs(finalProbe.duration_ms - probe.duration_ms) > durationTolerance) {
+    try { fs.unlinkSync(tempOutput); } catch (_) {}
+    throw new Error(`最终成片规范验收失败：期望 ${target.w}x${target.h}/${probe.fps}fps，实际 ${finalProbe.width}x${finalProbe.height}/${finalProbe.fps}fps`);
+  }
+  if (replaceInput) {
+    try { fs.renameSync(tempOutput, output); } catch (error) {
+      try { fs.unlinkSync(tempOutput); } catch (_) {}
+      throw new Error(`最终成片规范化替换失败：${error.message}`);
+    }
+  }
+  log.info('Final video normalized to requested aspect contract', { video_generation_id: videoGenId, from: `${probe.width}x${probe.height}`, to: `${target.w}x${target.h}`, aspect_ratio: target.aspect_ratio });
+  return { local_path: relative, probe: finalProbe, target, normalized: true };
+}
+
+/**
+ * New generations opt in to keeping exactly one video artifact. This function
+ * only runs after final validation and the completed row are durable; legacy
+ * rows keep their historical source paths and bytes unchanged.
+ */
+function pruneSupersededVideoArtifacts(db, storagePath, videoGenId, finalLocalPath, log) {
+  const row = db.prepare('SELECT source_local_path, upscale_local_path, intermediate_cleanup_enabled FROM video_generations WHERE id=?').get(Number(videoGenId));
+  if (!row || Number(row.intermediate_cleanup_enabled) !== 1) return { skipped: 'legacy_or_disabled' };
+  const root = path.resolve(storagePath);
+  const finalKey = String(finalLocalPath || '').replace(/\\/g, '/');
+  const candidates = [...new Set([row.source_local_path, row.upscale_local_path].filter(Boolean).map((item) => String(item).replace(/\\/g, '/')))]
+    .filter((item) => item !== finalKey);
+  const removed = [];
+  for (const relative of candidates) {
+    const absolute = path.resolve(root, relative);
+    if (!absolute.startsWith(root + path.sep)) {
+      log.warn('Refused to remove video artifact outside storage root', { video_generation_id: videoGenId, local_path: relative });
+      continue;
+    }
+    try {
+      if (fs.existsSync(absolute)) fs.unlinkSync(absolute);
+      removed.push(relative);
+    } catch (error) {
+      log.warn('Could not remove superseded local video artifact', { video_generation_id: videoGenId, local_path: relative, error: error.message });
+    }
+  }
+  if (removed.length) {
+    const sourceRemoved = row.source_local_path && removed.includes(String(row.source_local_path).replace(/\\/g, '/'));
+    const upscaleRemoved = row.upscale_local_path && removed.includes(String(row.upscale_local_path).replace(/\\/g, '/'));
+    db.prepare('UPDATE video_generations SET source_local_path=?, upscale_local_path=?, updated_at=? WHERE id=?').run(
+      sourceRemoved ? null : row.source_local_path,
+      upscaleRemoved ? null : row.upscale_local_path,
+      new Date().toISOString(), Number(videoGenId));
+  }
+  return { removed };
+}
+
+function createVideoPoster(storagePath, localPath, videoGenId, log) {
+  if (!localPath || !hasLocalFfmpeg()) return null;
+  try {
+    const source = path.join(storagePath, localPath);
+    const relativeDir = path.join(path.dirname(localPath), 'posters');
+    const outputDir = path.join(storagePath, relativeDir);
+    fs.mkdirSync(outputDir, { recursive: true });
+    const fileName = `vg_${videoGenId}.jpg`;
+    const output = path.join(outputDir, fileName);
+    const result = spawnSync(getFfmpegPath(), ['-y', '-ss', '0.12', '-i', source, '-frames:v', '1', '-vf', 'thumbnail,scale=640:-2', '-q:v', '3', output], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
+    if (result.status === 0 && fs.existsSync(output)) return path.join(relativeDir, fileName).replace(/\\/g, '/');
+    log.warn('视频海报提取失败', { video_gen_id: videoGenId, status: result.status });
+  } catch (error) { log.warn('视频海报提取失败', { video_gen_id: videoGenId, error: error.message }); }
+  return null;
 }
 
 /** 防止同一 videoGenId 重复发起 poll（含重启恢复） */
@@ -276,14 +398,40 @@ function resolveStoragePath(cfg) {
     : path.join(process.cwd(), cfg.storage?.local_path || './data/storage');
 }
 
+function settleGenerationBeforePostProcess(db, log, row, videoGenId, providerUsage, providerRequestId) {
+  if (!row?.owner_user_id || !row?.billing_authorization_id) return;
+  try {
+    const billing = require('./billingService');
+    const auth = billing.getAuthorization(db, row.billing_authorization_id);
+    const usage = require('./billingUsageService').textUsage(providerUsage);
+    if (require('./billingUsageService').hasTokenMeter(auth?.snapshot) && !usage) {
+      billing.markPendingReconciliation(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, {
+        provider_request_id: providerRequestId || `video-generation:${videoGenId}`,
+        reason: '视频供应商成功响应但未返回实际 token 用量',
+      });
+    } else {
+      billing.settleAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, {
+        usage: usage || auth?.snapshot?.usage, provider_request_id: providerRequestId || `video-generation:${videoGenId}`,
+      });
+    }
+  } catch (error) {
+    log.error('[billing] generation settlement before interpolation failed', { video_gen_id: videoGenId, error: error.message });
+  }
+}
+
 async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, videoUrl, logLabel, providerUsage = null, providerRequestId = null, providerResponseSnapshot = null) {
   const now = new Date().toISOString();
   let localPath = null;
+  let storagePath = null;
   try {
     const cfg = require('../config').loadConfig();
-    const storagePath = resolveStoragePath(cfg);
+    storagePath = resolveStoragePath(cfg);
     const projectSubdir = storageLayout.getProjectStorageSubdir(db, row.drama_id);
-    localPath = await downloadVideoToLocal(storagePath, videoUrl, videoGenId, log, projectSubdir);
+    const localStaticPath = String(videoUrl || '').startsWith('/static/')
+      ? decodeURIComponent(String(videoUrl).slice('/static/'.length).split(/[?#]/)[0]).replace(/^\/+/, '')
+      : null;
+    if (localStaticPath && fs.existsSync(path.join(storagePath, localStaticPath))) localPath = localStaticPath;
+    else localPath = await downloadVideoToLocal(storagePath, videoUrl, videoGenId, log, projectSubdir);
     maybeNormalizeVideoAfterDownload(storagePath, localPath, rowForAspect, videoGenId, log);
     // 全能工作台选择“成片后混音”时，生成完成后创建新成片，不覆盖原供应商结果。
     const postMix = db.prepare(`SELECT a.snapshot_json, j.request_snapshot_json FROM omni_video_jobs j
@@ -312,13 +460,89 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
     if (row?.task_id) taskService.updateTaskError(db, row.task_id, '视频下载失败');
     return;
   }
+  // Generation and interpolation are independent billable supplier calls.
+  // Settle the first call once its bytes exist even if post-processing fails.
+  settleGenerationBeforePostProcess(db, log, row, videoGenId, providerUsage, providerRequestId);
+  // Persist the supplier output before any optional post-processing. Each
+  // selected stage owns its own authorization and creates a new local file.
+  try {
+    const sourceSavedAt = new Date().toISOString();
+    db.prepare(`UPDATE video_generations SET source_local_path=?, upscale_status=?, interpolation_status=?, updated_at=? WHERE id=?`)
+      .run(localPath,
+        row.upscale_resolution ? (row.upscale_status === 'completed' ? 'completed' : 'awaiting_source') : 'skipped',
+        row.target_fps ? (['completed', 'skipped'].includes(row.interpolation_status) ? row.interpolation_status : 'awaiting_source') : 'skipped',
+        sourceSavedAt, videoGenId);
+
+    if (row.upscale_resolution) {
+      db.prepare("UPDATE video_generations SET status='upscale_pending', upscale_status='pending', updated_at=? WHERE id=?")
+        .run(new Date().toISOString(), videoGenId);
+      if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 78, `视频已生成，正在 AI 超分至 ${row.upscale_resolution}`);
+      const upscaled = await require('./videoUpscaleService').process(db, log, videoGenId, storagePath);
+      if (!upscaled?.local_path) {
+        const current = db.prepare('SELECT status FROM video_generations WHERE id=?').get(videoGenId);
+        if (current?.status === 'billing_reconciliation') {
+          if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 99, '超分已完成，等待计费对账');
+          return;
+        }
+        setVideoGenFailed(db, videoGenId, '视频超分失败', new Date().toISOString());
+        if (row.task_id) taskService.updateTaskError(db, row.task_id, '视频超分失败');
+        return;
+      }
+      localPath = upscaled.local_path;
+      providerResponseSnapshot = {
+        ...(providerResponseSnapshot || {}),
+        upscale: { request_id: upscaled.provider_request_id, duration_ms: upscaled.duration_ms, resolution: upscaled.resolution, fps: upscaled.fps },
+      };
+    }
+
+    if (row.target_fps) {
+      db.prepare("UPDATE video_generations SET status='interpolation_pending', interpolation_status='pending', updated_at=? WHERE id=?")
+        .run(new Date().toISOString(), videoGenId);
+      if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 88, `${row.upscale_resolution ? '超分完成，' : ''}正在进行 ${Number(row.target_fps)}fps 智能插帧`);
+      const interpolated = await require('./videoInterpolationService').process(db, log, videoGenId, storagePath);
+      if (!interpolated?.local_path) {
+        const current = db.prepare('SELECT status FROM video_generations WHERE id=?').get(videoGenId);
+        if (current?.status === 'billing_reconciliation') {
+          if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 99, '插帧已完成，等待计费对账');
+          return;
+        }
+        setVideoGenFailed(db, videoGenId, '视频插帧失败', new Date().toISOString());
+        if (row.task_id) taskService.updateTaskError(db, row.task_id, '视频插帧失败');
+        return;
+      }
+      localPath = interpolated.local_path;
+      providerResponseSnapshot = {
+        ...(providerResponseSnapshot || {}),
+        interpolation: interpolated.skipped
+          ? { skipped: true, duration_ms: interpolated.duration_ms, resolution: interpolated.resolution, fps: interpolated.fps }
+          : { request_id: interpolated.provider_request_id, duration_ms: interpolated.duration_ms, resolution: interpolated.resolution, fps: interpolated.fps },
+      };
+    }
+  } catch (error) {
+    setVideoGenFailed(db, videoGenId, '视频后处理失败：' + error.message, new Date().toISOString());
+    if (row.task_id) taskService.updateTaskError(db, row.task_id, '视频后处理失败');
+    return;
+  }
   // Never persist a provider's signed delivery URL as the application's
   // completed-media URL. TOS links normally expire after 24 hours.
+  db.prepare("UPDATE video_generations SET status='persisting', updated_at=? WHERE id=?").run(new Date().toISOString(), videoGenId);
+  if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 95, '正在规范画幅并持久化最终成片');
+  let finalProbe;
+  try {
+    const normalized = normalizeFinalVideoToContract(storagePath, localPath, rowForAspect || row, videoGenId, log);
+    localPath = normalized.local_path;
+    finalProbe = normalized.probe;
+  } catch (error) {
+    setVideoGenFailed(db, videoGenId, '最终成片画幅规范化失败：' + error.message, new Date().toISOString());
+    if (row.task_id) taskService.updateTaskError(db, row.task_id, '最终成片画幅规范化失败');
+    return;
+  }
   videoUrl = `/static/${String(localPath).replace(/^\/+/, '')}`;
+  const posterLocalPath = createVideoPoster(resolveStoragePath(require('../config').loadConfig()), localPath, videoGenId, log);
   try {
     db.prepare(
-      'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, archive_status = ?, archive_error = NULL, completed_at = ?, updated_at = ? WHERE id = ?'
-    ).run('completed', videoUrl, localPath, require('./mediaStorageService').isOss(require('../config').loadConfig()) ? 'pending' : 'local', now, now, videoGenId);
+      'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, output_width=?, output_height=?, output_resolution=?, output_fps=?, output_duration_ms=?, archive_status = ?, archive_error = NULL, completed_at = ?, updated_at = ? WHERE id = ?'
+    ).run('completed', videoUrl, localPath, finalProbe.width, finalProbe.height, finalProbe.resolution, finalProbe.fps, finalProbe.duration_ms, require('./mediaStorageService').isOss(require('../config').loadConfig()) ? 'pending' : 'local', new Date().toISOString(), new Date().toISOString(), videoGenId);
   } catch (e) {
     if ((e.message || '').includes('archive_')) {
       try {
@@ -336,10 +560,17 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
       ).run('completed', videoUrl, localPath, now, videoGenId);
     } else throw e;
   }
+  if (posterLocalPath) {
+    try { db.prepare('UPDATE video_generations SET poster_local_path=? WHERE id=?').run(posterLocalPath, videoGenId); } catch (_) {}
+  }
   if (providerResponseSnapshot) {
     try { db.prepare('UPDATE video_generations SET provider_response_snapshot_json = ? WHERE id = ?').run(JSON.stringify(providerResponseSnapshot), videoGenId); }
     catch (error) { log.warn('[billing] could not persist sanitized provider completion response', { video_gen_id: videoGenId, error: error.message }); }
   }
+  // Only rows created after migration 55 opt in. Historical online records
+  // retain both their database pointers and their local files.
+  try { pruneSupersededVideoArtifacts(db, storagePath, videoGenId, localPath, log); }
+  catch (error) { log.warn('Superseded video artifact cleanup failed', { video_generation_id: videoGenId, error: error.message }); }
   try {
     if (row?.owner_user_id && row?.billing_authorization_id) {
       const billing = require('./billingService');
@@ -388,6 +619,7 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
     taskService.updateTaskResult(db, row.task_id, {
       video_generation_id: videoGenId,
       video_url: videoUrl,
+      poster_local_path: posterLocalPath,
       status: 'completed',
     });
   }
@@ -568,6 +800,33 @@ function resumePendingVideoArchives(db, log) {
   for (const row of rows) setImmediate(() => archiveCompletedVideo(db, log, row.id).catch((error) => log.warn('Video archive retry failed', { id: row.id, error: error.message })));
 }
 
+// Historical completed rows predate poster extraction. Backfill a small batch
+// after startup and yield between files so FFmpeg work never blocks request
+// handling for an entire media library at once.
+function resumeMissingVideoPosters(db, log) {
+  let rows = [];
+  try {
+    rows = db.prepare(`SELECT id, local_path FROM video_generations
+      WHERE status = 'completed' AND deleted_at IS NULL
+        AND local_path IS NOT NULL AND TRIM(local_path) != ''
+        AND (poster_local_path IS NULL OR TRIM(poster_local_path) = '')
+      ORDER BY id DESC LIMIT 50`).all();
+  } catch (_) { return { queued: 0 }; }
+  if (!rows.length) return { queued: 0 };
+  const storagePath = resolveStoragePath(require('../config').loadConfig());
+  const processNext = () => {
+    const row = rows.shift();
+    if (!row) return;
+    const poster = createVideoPoster(storagePath, row.local_path, row.id, log);
+    if (poster) {
+      try { db.prepare('UPDATE video_generations SET poster_local_path=?, updated_at=? WHERE id=?').run(poster, new Date().toISOString(), row.id); } catch (_) {}
+    }
+    if (rows.length) setTimeout(processNext, 120);
+  };
+  setImmediate(processNext);
+  return { queued: rows.length };
+}
+
 function startPendingVideoArchiveRetry(db, log) {
   const run = () => resumePendingVideoArchives(db, log);
   const timer = setInterval(run, 60_000);
@@ -718,6 +977,25 @@ async function processVideoGeneration(db, log, videoGenId) {
   }
 }
 
+/** Continue the persisted post-processing pipeline after a service restart.
+ * The supplier-generation bytes were already archived and billed before any
+ * optional stage started, so this re-enters with the local source and never
+ * submits the video-generation request a second time. */
+async function resumePostprocessVideoGeneration(db, log, videoGenId) {
+  const row = db.prepare('SELECT * FROM video_generations WHERE id=? AND deleted_at IS NULL').get(Number(videoGenId));
+  if (!row?.source_local_path || row.status === 'completed' || row.status === 'billing_reconciliation') return;
+  try {
+    await finalizeSuccessfulVideo(
+      db, log, Number(videoGenId),
+      { ...row, billing_authorization_id: null }, row,
+      `/static/${String(row.source_local_path).replace(/^\/+/, '')}`,
+      'restart-resume'
+    );
+  } catch (error) {
+    log.error('Post-processing pipeline resume failed', { video_generation_id: Number(videoGenId), error: error.message });
+  }
+}
+
 function deleteById(db, log, id) {
   const now = new Date().toISOString();
   const result = db.prepare('UPDATE video_generations SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').run(now, Number(id));
@@ -725,14 +1003,20 @@ function deleteById(db, log, id) {
 }
 
 module.exports = {
+  setVideoGenFailed,
   list,
   getById,
   deleteById,
   processVideoGeneration,
   archiveCompletedVideo,
   resumePendingVideoArchives,
+  resumeMissingVideoPosters,
   startPendingVideoArchiveRetry,
   resumeProcessingVideoGenerations,
   reconcileUnarchivedCompletedVideos,
+  resumePostprocessVideoGeneration,
+  targetVideoPixelsForAspect,
+  normalizeFinalVideoToContract,
+  pruneSupersededVideoArtifacts,
   publicVideoUrl,
 };

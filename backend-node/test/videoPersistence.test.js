@@ -1,11 +1,20 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
-const { publicVideoUrl, reconcileUnarchivedCompletedVideos, archiveCompletedVideo } = require('../src/services/videoService');
+const { publicVideoUrl, reconcileUnarchivedCompletedVideos, archiveCompletedVideo, list } = require('../src/services/videoService');
 
 test('completed-video output never falls back to a supplier signed URL', () => {
   assert.equal(publicVideoUrl('https://tos.example/a.mp4?signature=temporary', null), null);
   assert.equal(publicVideoUrl('https://tos.example/a.mp4?signature=temporary', 'projects/1/videos/a.mp4'), '/static/projects/1/videos/a.mp4');
+});
+
+test('video list exposes a durable local poster path without mounting video bytes', () => {
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE video_generations (id INTEGER PRIMARY KEY, storyboard_id INTEGER, drama_id INTEGER, provider TEXT, prompt TEXT, model TEXT, image_gen_id INTEGER, image_url TEXT, video_url TEXT, local_path TEXT, poster_local_path TEXT, status TEXT, task_id TEXT, error_msg TEXT, created_at TEXT, updated_at TEXT, completed_at TEXT, deleted_at TEXT);`);
+  db.prepare(`INSERT INTO video_generations (id, video_url, local_path, poster_local_path, status, created_at) VALUES (1, '/static/videos/a.mp4', 'videos/a.mp4', 'videos/posters/a.jpg', 'completed', '2026-08-13T00:00:00Z')`).run();
+  const item = list(db, {}).items[0];
+  assert.equal(item.video_url, '/static/videos/a.mp4');
+  assert.equal(item.poster_local_path, 'videos/posters/a.jpg');
 });
 
 test('a completed local video remains completed when OSS archival is temporarily unavailable', async () => {

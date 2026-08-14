@@ -14,6 +14,7 @@ export const adminAPI = {
   createUser: (data) => request.post('/admin/users', data),
   updateUser: (id, data) => request.patch(`/admin/users/${id}`, data),
   adjustBalance: (id, data) => request.post(`/admin/users/${id}/balance-adjustments`, data),
+  correctBalance: (id, data) => request.post(`/admin/users/${id}/balance-corrections`, data),
   priceBooks: () => request.get('/admin/price-books'),
   createPriceBook: (data) => request.post('/admin/price-books', data),
   updatePriceBook: (id, data) => request.patch(`/admin/price-books/${id}`, data),

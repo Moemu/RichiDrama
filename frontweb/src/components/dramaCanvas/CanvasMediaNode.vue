@@ -16,8 +16,7 @@
         <div v-else class="empty">无分镜图</div>
       </template>
       <template v-else-if="data.kind === 'video'">
-        <video v-if="data.url" :src="data.url" class="media-vid" muted playsinline />
-        <div v-else class="empty">无视频</div>
+        <img :src="videoPoster" alt="" class="media-vid" loading="lazy" decoding="async" />
       </template>
       <template v-else-if="data.kind === 'audio'">
         <div class="audio-wrap">
@@ -52,6 +51,11 @@ const props = defineProps({
 
 const ctx = useCanvasContext()
 const showPanel = computed(() => ctx?.focusedNodeId?.value === props.id)
+const videoPoster = computed(() => {
+  const raw = props.data.posterUrl || props.data.poster_local_path || props.data.storyboard?.local_path || props.data.storyboard?.image_url || ''
+  if (!raw) return '/images/video-poster-placeholder.svg'
+  return /^https?:/i.test(raw) || String(raw).startsWith('/static/') ? raw : `/static/${String(raw).replace(/^\/+/, '')}`
+})
 
 const isNodeBusy = computed(() => {
   const map = ctx?.nodeStatus?.map

@@ -9,6 +9,7 @@ const promptI18n = require('../services/promptI18n');
 const angleService = require('../services/angleService');
 const { buildUniversalSegmentUserPromptBundle } = require('../services/universalSegmentPromptBundle');
 const { normalizeUniversalSegmentShotDurations } = require('../services/universalSegmentDurationNormalize');
+const generationSettingsService = require('../services/generationSettingsService');
 
 /** 润色接口：邻镜结构化摘要（含全能片段与其它提示词字段） */
 function formatNeighborShotPolishContext(row) {
@@ -239,6 +240,36 @@ function normalizeUniversalSegmentAtImageSpacing(text) {
 
 function routes(db, log) {
   return {
+    episodeGenerationSettingsGet: (req, res) => {
+      try {
+        const result = generationSettingsService.getEpisodeSettings(db, req.params.episode_id);
+        if (!result) return response.notFound(res, '剧集不存在');
+        response.success(res, result);
+      } catch (err) { response.internalError(res, err.message); }
+    },
+    episodeGenerationSettingsUpdate: (req, res) => {
+      try {
+        const body = req.body || {};
+        const result = generationSettingsService.setEpisodeDefaults(db, req.params.episode_id, body.defaults || body, body.override_policy);
+        if (!result) return response.notFound(res, '剧集不存在');
+        response.success(res, result);
+      } catch (err) { response.badRequest(res, err.message); }
+    },
+    storyboardGenerationSettingsUpdate: (req, res) => {
+      try {
+        const body = req.body || {};
+        const result = generationSettingsService.setStoryboardSettings(db, req.params.id, body.settings || body, body.scope);
+        if (!result) return response.notFound(res, '分镜不存在');
+        response.success(res, result);
+      } catch (err) { response.badRequest(res, err.message); }
+    },
+    storyboardGenerationSettingsClear: (req, res) => {
+      try {
+        const result = generationSettingsService.clearStoryboardOverrides(db, req.params.id);
+        if (!result) return response.notFound(res, '分镜不存在');
+        response.success(res, result);
+      } catch (err) { response.badRequest(res, err.message); }
+    },
     create: (req, res) => {
       try {
         const sb = storyboardService.createStoryboard(db, log, req.body || {});

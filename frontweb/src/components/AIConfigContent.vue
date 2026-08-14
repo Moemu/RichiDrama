@@ -278,6 +278,7 @@
             <el-option label="文本生成图片" value="image" />
             <el-option label="分镜图片生成" value="storyboard_image" />
             <el-option label="视频生成" value="video" />
+            <el-option label="视频插帧（AI MediaKit）" value="video_postprocess" />
             <el-option label="语音合成 TTS" value="tts" />
             <el-option label="即梦2角色认证" value="jimeng2_character_auth" />
           </el-select>
@@ -317,7 +318,7 @@
           </el-select>
         </el-form-item>
         <!-- 接口规范：仅图片/分镜/视频类型显示，预设厂商自动填充；自定义厂商必选 -->
-        <el-form-item v-if="form.service_type !== 'text' && form.service_type !== 'tts' && form.service_type !== 'jimeng2_character_auth'">
+        <el-form-item v-if="form.service_type !== 'text' && form.service_type !== 'tts' && form.service_type !== 'jimeng2_character_auth' && form.service_type !== 'video_postprocess'">
           <template #label>
             <span class="form-label-tip">接口规范
               <el-icon class="tip-icon" style="cursor:pointer;color:#409eff" @click="showProtocolHelp = true"><QuestionFilled /></el-icon>
@@ -860,6 +861,19 @@ input_reference = (图片文件，可选)</pre>
           <el-input v-model="form.billing_key" placeholder="可选；自定义 API 建议填写独立 SKU，如 custom-video-pro" />
           <p class="field-tip">仅用于匹配价目表，不会发送给供应商。留空时沿用模型名；同名模型走不同渠道时必须填写不同计费键。</p>
         </el-form-item>
+        <el-form-item v-if="form.service_type === 'video_postprocess'">
+          <template #label><span class="form-label-tip">新镜头默认超分目标</span></template>
+          <el-select v-model="form.upscale_resolution" style="width: 240px">
+            <el-option label="720p" value="720p" />
+            <el-option label="1080p（推荐）" value="1080p" />
+          </el-select>
+          <p class="field-tip">新镜头默认勾选 1080p 超分，创作时可取消；超分保持原画幅与原帧率，不再固定放大到 2K。插帧默认关闭，仅在镜头中显式选择后调用。</p>
+        </el-form-item>
+        <el-form-item v-if="form.service_type === 'video_postprocess'">
+          <template #label><span class="form-label-tip">目标帧率</span></template>
+          <el-input-number v-model="form.interpolation_target_fps" :min="15" :max="120" :step="1" :precision="0" controls-position="right" style="width: 240px" />
+          <p class="field-tip">所有视频生成完成并本地归档后，默认通过火山 AI MediaKit 插帧到该帧率；建议不超过源视频帧率的 4 倍。</p>
+        </el-form-item>
         <el-form-item v-if="form.service_type === 'video'">
           <template #label><span class="form-label-tip">视频单次冻结上限（token）</span></template>
           <el-input-number v-model="form.billing_reserve_output_tokens" :min="1" :step="1000" :precision="0" controls-position="right" style="width: 240px" placeholder="例如 216216" />
@@ -1262,6 +1276,8 @@ const form = ref({
   modelText: '',
   default_model: '',
   billing_key: '',
+  interpolation_target_fps: 60,
+  upscale_resolution: '1080p',
   deepseek_thinking: 'disabled',
   deepseek_reasoning_effort: 'high',
   priority: 0,
@@ -1307,6 +1323,11 @@ watch(
 
 function onServiceTypeChange() {
   const st = form.value.service_type || 'text'
+  if (st === 'video_postprocess') {
+    form.value.interpolation_target_fps = 60
+    form.value.upscale_resolution = '1080p'
+    form.value.billing_key = 'volcengine-video-frame-interpolation'
+  }
   if (st === 'jimeng2_character_auth') {
     if (!form.value.provider || form.value.provider === CUSTOM_PROVIDER_SENTINEL) {
       form.value.provider = 'jimeng_material_api'
@@ -1470,6 +1491,9 @@ const providerConfigs = {
     { id: 'xai', name: 'xAI Grok Imagine', models: ['grok-imagine-video'] },
     { id: 'agnes', name: 'Agnes AI', models: ['agnes-video-v2.0'] },
   ],
+  video_postprocess: [
+    { id: 'volcengine_mediakit', name: '火山引擎 AI MediaKit', models: ['volcengine-video-frame-interpolation'] },
+  ],
   tts: [
     { id: 'doubao', name: '火山引擎 豆包语音', models: VOLC_TTS_MODELS },
     { id: 'minimax', name: 'MiniMax T2A', models: ['speech-02-hd', 'speech-02-turbo'] },
@@ -1505,6 +1529,7 @@ const providerProtocolMap = {
   agnes: 'openai',
   jimeng_ai_api: 'jimeng_ai_api',
   jimeng_material_api: '',
+  volcengine_mediakit: '',
 }
 
 /** 厂商 id → 默认 Base URL（与参考前端 AIConfigDialog 757-775 一致） */
@@ -1514,6 +1539,7 @@ function getBaseUrlForProvider(provider) {
   if (p === 'gemini' || p === 'google') return 'https://generativelanguage.googleapis.com'
   if (p === 'minimax') return 'https://api.minimaxi.com/v1'
   if (p === 'volces' || p === 'volcengine') return 'https://ark.cn-beijing.volces.com/api/v3'
+  if (p === 'volcengine_mediakit') return 'https://mediakit.cn-beijing.volces.com'
   if (p === 'openai') return 'https://api.openai.com/v1'
   if (p === 'deepseek') return 'https://api.deepseek.com'
   if (p === 'dashscope') return 'https://dashscope.aliyuncs.com'
@@ -1597,6 +1623,15 @@ const endpointPreviewInfo = computed(() => {
   const p = String(provider || '').toLowerCase()
   const proto = api_protocol || providerProtocolMap[p] || ''
   const base = (base_url || '').replace(/\/$/, '')
+
+  if (service_type === 'video_postprocess') {
+    const root = base || 'https://mediakit.cn-beijing.volces.com'
+    return {
+      submit: `${root}/api/v1/tools/video-frame-interpolation`,
+      query: `${root}/api/v1/tasks/{taskId}`,
+      isAuto: true,
+    }
+  }
 
   if (service_type === 'jimeng2_character_auth') {
     const root = base || '(请填写网关 URL)'
@@ -1751,12 +1786,13 @@ function onProviderChange(providerId) {
   form.value.base_url = getBaseUrlForProvider(providerId)
   form.value.modelText = (p.models || []).join('\n')
   form.value.default_model = (p.models && p.models[0]) || ''
+  if (st === 'video_postprocess') form.value.billing_key = 'volcengine-video-frame-interpolation'
   if (providerId === 'deepseek') {
     form.value.deepseek_thinking = 'disabled'
     form.value.deepseek_reasoning_effort = 'high'
   }
   // 自动填充接口规范
-  form.value.api_protocol = providerProtocolMap[providerId] || (st === 'text' ? '' : 'openai')
+  form.value.api_protocol = providerProtocolMap[providerId] || (st === 'text' || st === 'video_postprocess' ? '' : 'openai')
   if (st === 'video' && providerId === 'jimeng_ai_api') {
     form.value.endpoint = ''
     form.value.query_endpoint = ''
@@ -1811,6 +1847,7 @@ function serviceTypeLabel(t) {
     image: '文本生成图片',
     storyboard_image: '分镜图片生成',
     video: '视频',
+    video_postprocess: '视频插帧',
     tts: '语音合成 TTS',
     jimeng2_character_auth: '即梦2角色认证',
     model_ark_asset: 'SD2 资产库',
@@ -1861,6 +1898,8 @@ function resetForm() {
     modelText: '',
     default_model: '',
     billing_key: '',
+    interpolation_target_fps: 60,
+    upscale_resolution: '1080p',
     deepseek_thinking: 'disabled',
     deepseek_reasoning_effort: 'high',
     priority: 0,
@@ -1900,6 +1939,8 @@ function openEdit(row) {
   let kling_secret_key_base64 = false
   let billing_reserve_output_tokens = null
   let video_capabilities = ''
+  let interpolation_target_fps = 60
+  let upscale_resolution = '1080p'
   const deepseekSettings = resolveDeepSeekFormSettings(row)
   if (row.settings) {
     try {
@@ -1918,6 +1959,8 @@ function openEdit(row) {
       }
       if (row.service_type === 'video' && Number.isSafeInteger(Number(s.billing_reserve_output_tokens)) && Number(s.billing_reserve_output_tokens) > 0) billing_reserve_output_tokens = Number(s.billing_reserve_output_tokens)
       if (row.service_type === 'video' && s.video_capabilities) video_capabilities = JSON.stringify(s.video_capabilities, null, 2)
+      if (row.service_type === 'video_postprocess' && Number(s.target_fps) >= 15) interpolation_target_fps = Number(s.target_fps)
+      if (row.service_type === 'video_postprocess' && ['720p', '1080p'].includes(s.upscale_resolution)) upscale_resolution = s.upscale_resolution
     } catch (_) {}
   }
   form.value = {
@@ -1946,6 +1989,8 @@ function openEdit(row) {
     kling_secret_key_base64,
     billing_reserve_output_tokens,
     video_capabilities,
+    interpolation_target_fps,
+    upscale_resolution,
   }
   dialogVisible.value = true
 }
@@ -2001,6 +2046,14 @@ async function submit() {
         delete baseS.deepseek_reasoning_effort
       }
       settings = Object.keys(baseS).length ? JSON.stringify(baseS) : null
+    }
+    if (form.value.service_type === 'video_postprocess') {
+      const targetFps = Number(form.value.interpolation_target_fps || 60)
+      if (!Number.isInteger(targetFps) || targetFps < 15 || targetFps > 120) throw new Error('插帧目标帧率必须是 15–120 的整数')
+      const upscaleResolution = String(form.value.upscale_resolution || '1080p').toLowerCase()
+      if (!['720p', '1080p'].includes(upscaleResolution)) throw new Error('超分目标仅支持 720p 或 1080p')
+      const previous = editingId.value ? list.value.find((r) => r.id === editingId.value) : null
+      settings = JSON.stringify({ ...parseSettings(previous?.settings), target_fps: targetFps, upscale_resolution: upscaleResolution })
     }
     if (form.value.service_type === 'video') {
       const previous = editingId.value ? list.value.find((r) => r.id === editingId.value) : null

@@ -231,6 +231,7 @@ async function loadMedia() {
     const params = {
       page: page.value,
       page_size: pageSize.value,
+      scope: 'global',
     }
     if (mediaType.value !== 'all') params.type = mediaType.value
     if (keyword.value) params.keyword = keyword.value

@@ -411,8 +411,10 @@ function _doImport(db, storagePath, files, data, d, title, metaStr, now, log, ow
         const videoLocalPath = saveMediaFile(storagePath, projectDir, 'videos', files, sb.video_file, 'vid_imp');
         if (videoLocalPath) {
           db.prepare(
-            `INSERT INTO video_generations (drama_id, storyboard_id, provider, prompt, status, local_path, owner_user_id, created_at, updated_at)
-             VALUES (?, ?, 'imported', ?, 'completed', ?, ?, ?, ?)`
+            `INSERT INTO video_generations (drama_id, storyboard_id, provider, prompt, status, local_path,
+              upscale_resolution, target_fps, upscale_status, interpolation_status,
+              owner_user_id, created_at, updated_at)
+             VALUES (?, ?, 'imported', ?, 'completed', ?, NULL, NULL, 'skipped', 'skipped', ?, ?, ?)`
           ).run(dramaId, sbId, sb.video_prompt || '', videoLocalPath, ownerUserId, now, now);
         }
       }
