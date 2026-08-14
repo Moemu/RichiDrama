@@ -907,6 +907,9 @@ onMounted(() => {
 /* 2026-08 usability pass: readable T0 controls, wheel navigation, and media-light lists. */
 /* Keep the right-hand shot list as the only scrolling surface in the desktop storyboard workspace. */
 .project-storyboard-page .shot-list{flex:1 1 auto;min-height:0}
+/* At short desktop heights, the prompt must shrink and scroll inside the stage.
+   It must never push the player above the visible workbench. */
+@media(min-width:761px){.project-storyboard-page .center-stage{height:100%;min-height:0;overflow:hidden}.project-storyboard-page .shot-script{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior-y:contain}}
 .omni-page{font-size:14px;line-height:1.5}
 .shot-list:focus-visible{outline:1px solid var(--focus-ring,#c7d2dc);outline-offset:3px}
 .shot-video-placeholder{display:flex!important;height:100%;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 42%,#704cff 0,#39218f 38%,#171125 75%)}.shot-play{display:grid;place-items:center;width:44px;height:44px;padding-left:3px;border:1px solid #ffffff55;border-radius:50%;background:#7b5cff;color:#fff;font-size:20px;box-shadow:0 10px 26px #6c4bff66}.shot-video-placeholder small{font-size:12px!important;color:#c4c1ba!important}
