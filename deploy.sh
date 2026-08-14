@@ -70,9 +70,10 @@ if [[ ! -f "${DATA_DIR}/drama_generator.db" && -f "${LEGACY_DATA_DIR}/drama_gene
   log "旧数据迁移完成"
 fi
 
-# 备份放在代码目录之外；即使仓库重新克隆或回滚，SQLite 和上传素材都可恢复。
-log "[3/6] 备份现有数据..."
-bash "${PROJECT_DIR}/deploy/backup-data.sh" --quiet || fail "数据备份失败，已取消部署"
+# 发布只保留一致的 SQLite 快照；全部媒体必须已在 OSS 持久化。
+# 本地热副本的全量归档由离峰定时任务负责，避免小改动被数 GB 媒体拖慢。
+log "[3/6] 创建发布级账本快照并校验 OSS 归档..."
+bash "${PROJECT_DIR}/deploy/backup-data.sh" --release --quiet || fail "发布级备份或 OSS 归档校验失败，已取消部署"
 
 # ---------- 3. 重新构建 ----------
 log "[4/6] 重新构建镜像..."
@@ -105,6 +106,17 @@ if docker ps --format '{{.Names}}' | grep -q "^${NGINX_CONTAINER}$"; then
   fi
 else
   log "[6/6] 跳过 nginx 配置同步：未找到容器 ${NGINX_CONTAINER}"
+fi
+
+# Full local-media archives are disaster-recovery work, not a dependency of
+# every code release. The persistent off-peak timer keeps the full-backup
+# policy without delaying deployments.
+if command -v systemctl >/dev/null 2>&1; then
+  install -m 0644 "${PROJECT_DIR}/deploy/minidrama-full-backup.service" /etc/systemd/system/minidrama-full-backup.service
+  install -m 0644 "${PROJECT_DIR}/deploy/minidrama-full-backup.timer" /etc/systemd/system/minidrama-full-backup.timer
+  systemctl daemon-reload
+  systemctl enable --now minidrama-full-backup.timer
+  log "全量灾备定时器已启用"
 fi
 
 # ---------- 健康检查 ----------

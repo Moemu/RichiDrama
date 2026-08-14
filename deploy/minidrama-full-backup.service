@@ -1,0 +1,12 @@
+[Unit]
+Description=LocalMiniDrama full local media disaster-recovery backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=PROJECT_DIR=/data/apps/LocalMiniDrama
+Environment=MINIDRAMA_DATA_DIR=/data/minidrama-data
+Environment=MINIDRAMA_BACKUP_DIR=/data/minidrama-backups
+Environment=FULL_BACKUP_RETAIN_COUNT=14
+ExecStart=/usr/bin/env bash /data/apps/LocalMiniDrama/deploy/backup-data.sh --full --quiet

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run LocalMiniDrama full backup daily during off-peak hours
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=10m
+Unit=minidrama-full-backup.service
+
+[Install]
+WantedBy=timers.target
