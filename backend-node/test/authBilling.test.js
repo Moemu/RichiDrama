@@ -57,13 +57,32 @@ test('setting a balance targets the requested amount instead of adding to it', (
   try {
     const user = auth.createUser(db, { username: 'set-balance-user', password: '1' }, admin.id);
     billing.adjustBalance(db, admin.id, user.id, 200, 'initial credit');
-    billing.setBalance(db, admin.id, user.id, 75, 'set target');
+    billing.setBalance(db, admin.id, user.id, 75, 'set target', { idempotency_key: 'correction-1' });
+    billing.setBalance(db, admin.id, user.id, 75, 'retry target', { idempotency_key: 'correction-1' });
     assert.equal(billing.account(db, user.id).balance_micro, 750000);
     assert.equal(billing.account(db, user.id).total_recharged_micro, 2000000);
     const transaction = billing.listTransactions(db, { user_id: user.id })[0];
     assert.equal(transaction.type, 'adjustment');
     assert.equal(transaction.amount_micro, -1250000);
     assert.equal(transaction.snapshot.operation, 'set_balance');
+    assert.equal(billing.listTransactions(db, { user_id: user.id }).filter((row) => row.idempotency_key === 'correction-1').length, 1);
+  } finally { teardown(dbPath); }
+});
+
+test('admin grants are additive and idempotent while lifetime consumption remains independent', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'grant-idempotent-user', password: '1' }, admin.id);
+    billing.adjustBalance(db, admin.id, user.id, 100, 'first grant', { operation: 'grant', idempotency_key: 'grant-1' });
+    billing.adjustBalance(db, admin.id, user.id, 100, 'retry grant', { operation: 'grant', idempotency_key: 'grant-1' });
+    const listed = billing.listUsers(db).find((row) => row.id === user.id);
+    assert.equal(listed.balance, 100);
+    assert.equal(listed.total_granted, 100);
+    assert.equal(listed.total_consumed, 0);
+    assert.throws(() => billing.adjustBalance(db, admin.id, user.id, 10, 'invalid debit', { operation: 'debit' }), /必须为负数/);
+    billing.adjustBalance(db, admin.id, user.id, 5, '', { operation: 'grant', idempotency_key: 'blank-reason' });
+    const blankReasonTransaction = billing.listTransactions(db, { user_id: user.id }).find((row) => row.idempotency_key === 'blank-reason');
+    assert.equal(blankReasonTransaction.reason, '管理员余额调整');
   } finally { teardown(dbPath); }
 });
 
@@ -285,6 +304,26 @@ test('billing precision migration is idempotent after the ledger is converted', 
     runMigrationsAndEnsure(db);
     assert.equal(billing.account(db, user.id).balance_micro, before);
     assert.equal(billing.publicAccount(billing.account(db, user.id)).balance, 12.3456);
+    const seedream = db.prepare(`SELECT unit_price_micro FROM billing_price_book_items
+      WHERE service_type='image' AND model='doubao-seedream-5-0-260128' AND meter='image' LIMIT 1`).get();
+    assert.equal(seedream.unit_price_micro, 220000);
+    assert.equal(billing.quote(db, user, {
+      service_type: 'image', model: 'doubao-seedream-5-0-260128', usage: { image: 1 },
+    }).amount, 22);
+    const interpolation = db.prepare(`SELECT unit_price_micro FROM billing_price_book_items
+      WHERE service_type='video_postprocess' AND model='volcengine-video-frame-interpolation' AND meter='millisecond' LIMIT 1`).get();
+    const enhancement = db.prepare(`SELECT unit_price_micro FROM billing_price_book_items
+      WHERE service_type='video_postprocess' AND model='volcengine-video-generative-enhancement' AND meter='millisecond' LIMIT 1`).get();
+    assert.equal(interpolation.unit_price_micro, 1200000);
+    assert.equal(enhancement.unit_price_micro, 10000000);
+    assert.equal(billing.quote(db, user, {
+      service_type: 'video_postprocess', model: 'volcengine-video-frame-interpolation', usage: { millisecond: 60000 },
+      pricing_context: { resolution_tier: '1080p', fps_tier: 'lte60' },
+    }).amount, 240);
+    assert.equal(billing.quote(db, user, {
+      service_type: 'video_postprocess', model: 'volcengine-video-generative-enhancement', usage: { millisecond: 60000 },
+      pricing_context: { resolution_tier: '1080p', fps_tier: 'lte30' },
+    }).amount, 500);
   } finally { teardown(dbPath); }
 });
 

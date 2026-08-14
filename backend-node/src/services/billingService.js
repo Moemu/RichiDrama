@@ -56,7 +56,7 @@ function activeMeters(db, user, serviceType, model) {
 }
 
 function normalizeUsage(usage) {
-  const allowed = ['request', 'image', 'second', 'character', 'input_token', 'output_token'];
+  const allowed = ['request', 'image', 'second', 'millisecond', 'character', 'input_token', 'output_token'];
   const clean = {};
   for (const meter of allowed) {
     const v = Number(usage?.[meter] || 0);
@@ -371,45 +371,64 @@ function expireReconciliationCases(db, actorId = 1, at = now()) {
   return { expired };
 }
 
-function adjustBalance(db, actorId, userId, credits, reason) {
+function adjustBalance(db, actorId, userId, credits, reason, options = {}) {
   const amount = creditsToMicro(credits); if (!amount) throw new Error('调整金额不能为 0');
+  const operation = ['grant', 'debit', 'refund'].includes(options.operation) ? options.operation : (amount > 0 ? 'grant' : 'debit');
+  if ((operation === 'grant' || operation === 'refund') && amount < 0) throw new Error('发放或退款金额必须为正数');
+  if (operation === 'debit' && amount > 0) throw new Error('扣减金额必须为负数');
+  const idempotencyKey = String(options.idempotency_key || '').trim() || null;
+  if (idempotencyKey) {
+    const existing = db.prepare('SELECT id FROM billing_transactions WHERE user_id=? AND idempotency_key=?').get(userId, idempotencyKey);
+    if (existing) return account(db, userId);
+  }
   const at = now(); const id = uuid();
   db.transaction(() => {
     const acct = account(db, userId); const after = acct.balance_micro + amount;
     if (after < acct.frozen_micro || after < 0) throw new Error('调整后余额不能小于已冻结金额');
+    const granted = operation === 'grant' && amount > 0 ? amount : 0;
     db.prepare(`UPDATE billing_accounts SET balance_micro = ?, total_recharged_micro = total_recharged_micro + ?, updated_at = ? WHERE user_id = ?`)
-      .run(after, amount > 0 ? amount : 0, at, userId);
-    db.prepare(`INSERT INTO billing_transactions (id, user_id, type, amount_micro, balance_after_micro, frozen_after_micro, reason, created_by, snapshot_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, userId, amount > 0 ? 'recharge' : 'adjustment', amount, after, acct.frozen_micro, String(reason || '').trim() || '管理员余额调整', actorId, json({}), at);
+      .run(after, granted, at, userId);
+    db.prepare(`INSERT INTO billing_transactions (id, user_id, type, amount_micro, balance_after_micro, frozen_after_micro, idempotency_key, reason, created_by, snapshot_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, userId, operation === 'grant' ? 'recharge' : 'adjustment', amount, after, acct.frozen_micro, idempotencyKey, String(reason || '').trim() || '管理员余额调整', actorId, json({ operation }), at);
   })();
-  audit(db, actorId, 'billing.balance.adjust', 'user', userId, { amount_micro: amount, reason });
+  audit(db, actorId, 'billing.balance.adjust', 'user', userId, { amount_micro: amount, operation, idempotency_key: idempotencyKey, reason });
   return account(db, userId);
 }
 
 // A balance "set" is deliberately distinct from a recharge: it records the
 // delta for auditability but makes the supplied value the final balance.
-function setBalance(db, actorId, userId, targetCredits, reason) {
+function setBalance(db, actorId, userId, targetCredits, reason, options = {}) {
   const target = creditsToMicro(targetCredits);
   if (target < 0) throw new Error('目标余额不能小于 0');
+  const idempotencyKey = String(options.idempotency_key || '').trim() || null;
+  if (idempotencyKey) {
+    const existing = db.prepare('SELECT id FROM billing_transactions WHERE user_id=? AND idempotency_key=?').get(userId, idempotencyKey);
+    if (existing) return account(db, userId);
+  }
   const at = now(); const id = uuid(); let before = 0;
   db.transaction(() => {
     const acct = account(db, userId); before = acct.balance_micro;
     if (target < acct.frozen_micro) throw new Error('目标余额不能小于已冻结金额');
-    if (target === before) return;
-    db.prepare('UPDATE billing_accounts SET balance_micro = ?, updated_at = ? WHERE user_id = ?').run(target, at, userId);
-    db.prepare(`INSERT INTO billing_transactions (id, user_id, type, amount_micro, balance_after_micro, frozen_after_micro, reason, created_by, snapshot_json, created_at)
-      VALUES (?, ?, 'adjustment', ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, userId, target - before, target, acct.frozen_micro, String(reason || '').trim() || '管理员设置余额', actorId, json({ operation: 'set_balance', balance_before_micro: before, balance_target_micro: target }), at);
+    if (target !== before) db.prepare('UPDATE billing_accounts SET balance_micro = ?, updated_at = ? WHERE user_id = ?').run(target, at, userId);
+    db.prepare(`INSERT INTO billing_transactions (id, user_id, type, amount_micro, balance_after_micro, frozen_after_micro, idempotency_key, reason, created_by, snapshot_json, created_at)
+      VALUES (?, ?, 'adjustment', ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, userId, target - before, target, acct.frozen_micro, idempotencyKey, String(reason || '').trim() || '管理员设置余额', actorId, json({ operation: 'set_balance', balance_before_micro: before, balance_target_micro: target }), at);
   })();
-  audit(db, actorId, 'billing.balance.set', 'user', userId, { balance_before_micro: before, balance_target_micro: target, reason });
+  audit(db, actorId, 'billing.balance.set', 'user', userId, { balance_before_micro: before, balance_target_micro: target, idempotency_key: idempotencyKey, reason });
   return account(db, userId);
 }
 
 function listUsers(db) {
   return db.prepare(`SELECT u.id, u.username, u.display_name, u.role, u.is_active, u.created_at, u.last_login_at,
-    COALESCE(a.balance_micro, 0) balance_micro, COALESCE(a.frozen_micro, 0) frozen_micro
-    FROM users u LEFT JOIN billing_accounts a ON a.user_id = u.id ORDER BY u.id`).all().map((r) => ({ ...r, is_active: !!r.is_active, balance: microToCredits(r.balance_micro), frozen: microToCredits(r.frozen_micro) }));
+    COALESCE(a.balance_micro, 0) balance_micro, COALESCE(a.frozen_micro, 0) frozen_micro,
+    COALESCE(a.total_recharged_micro, 0) total_recharged_micro, COALESCE(a.total_consumed_micro, 0) total_consumed_micro,
+    COALESCE((SELECT SUM(t.amount_micro) FROM billing_transactions t WHERE t.user_id=u.id AND t.amount_micro>0 AND t.snapshot_json LIKE '%\"operation\":\"refund\"%'), 0) total_refunded_micro
+    FROM users u LEFT JOIN billing_accounts a ON a.user_id = u.id ORDER BY u.id`).all().map((r) => ({
+      ...r, is_active: !!r.is_active, balance: microToCredits(r.balance_micro), frozen: microToCredits(r.frozen_micro),
+      available: microToCredits(r.balance_micro - r.frozen_micro), total_granted: microToCredits(r.total_recharged_micro),
+      total_consumed: microToCredits(r.total_consumed_micro), total_refunded: microToCredits(r.total_refunded_micro),
+    }));
 }
 
 function listPriceBooks(db) {
@@ -422,7 +441,7 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
   if (effectiveFrom && effectiveTo && new Date(effectiveFrom) >= new Date(effectiveTo)) {
     throw new Error('生效结束时间必须晚于生效开始时间');
   }
-  const supportedMeters = new Set(['request','image','second','character','input_token','output_token']);
+  const supportedMeters = new Set(['request','image','second','millisecond','character','input_token','output_token']);
   if (status === 'published' && !items.length) throw new Error('发布价目表至少需要一个价目');
   const seen = new Set();
   for (const item of items) {
@@ -517,7 +536,7 @@ function savePriceBook(db, actorId, input, id) {
     const stmt = db.prepare(`INSERT INTO billing_price_book_items (price_book_id, service_type, model, meter, unit_price_micro, is_free, conditions_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const item of items) {
-      const meter = String(item.meter || '').trim(); if (!['request','image','second','character','input_token','output_token'].includes(meter)) throw new Error('不支持的计量器');
+      const meter = String(item.meter || '').trim(); if (!['request','image','second','millisecond','character','input_token','output_token'].includes(meter)) throw new Error('不支持的计量器');
       const serviceType = String(item.service_type || '').trim(); const model = String(item.model || '').trim(); if (!serviceType || !model) throw new Error('价目项需要 service_type 和 model');
       stmt.run(bookId, serviceType, model, meter, creditsToMicro(item.unit_price ?? microToCredits(item.unit_price_micro || 0)), item.is_free ? 1 : 0, item.conditions_json ? json(item.conditions_json) : null, at, at);
     }

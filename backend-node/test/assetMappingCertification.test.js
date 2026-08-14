@@ -23,6 +23,19 @@ function dbWithProjectResource() {
   return db;
 }
 
+function addExplicitLinks(db) {
+  db.exec(`
+    CREATE TABLE dramas (id INTEGER PRIMARY KEY, owner_user_id INTEGER, deleted_at TEXT);
+    CREATE TABLE asset_resource_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, owner_user_id INTEGER NOT NULL, drama_id INTEGER NOT NULL,
+      resource_type TEXT NOT NULL, resource_id INTEGER NOT NULL, role TEXT NOT NULL DEFAULT 'primary_image',
+      asset_id INTEGER, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      detached_at TEXT, UNIQUE(drama_id, resource_type, resource_id, role)
+    );
+  `);
+  db.prepare('INSERT INTO dramas (id, owner_user_id) VALUES (?, ?)').run(8, 7);
+}
+
 test('mapped project resource exposes the canonical character certification', () => {
   const db = dbWithProjectResource();
   const cert = { status: 'active', asset_url: 'asset://character-asset', hub_asset_id: 'character-asset' };
@@ -88,6 +101,26 @@ test('a deleted project-resource tombstone wins over a legacy duplicate and bloc
   assert.deepEqual(mapping.syncEntities(db, log, 'character', [1]), []);
   assert.equal(mapping.linkProjectResource(db, log, 8, 'character', 1).status, 'detached');
   assert.equal(db.prepare('SELECT COUNT(*) total FROM assets').get().total, 2);
+});
+
+test('explicit project-resource detach survives sync and can be explicitly restored', () => {
+  const db = dbWithProjectResource();
+  addExplicitLinks(db);
+  db.prepare('INSERT INTO characters (id, drama_id, name, local_path) VALUES (1, 8, ?, ?)')
+    .run('主角', 'drama_8/characters/hero.png');
+  const [asset] = mapping.syncEntities(db, log, 'character', [1]);
+  const link = db.prepare('SELECT * FROM asset_resource_links WHERE asset_id=?').get(asset.id);
+
+  mapping.detachProjectResource(db, asset.id, 7);
+  assert.equal(mapping.syncEntities(db, log, 'character', [1]).length, 0);
+  assert.equal(db.prepare('SELECT status FROM asset_resource_links WHERE id=?').get(link.id).status, 'detached');
+  assert.equal(mapping.listResourceLinks(db, 7, 8, 'detached').length, 1);
+  assert.equal(mapping.listResourceLinks(db, 8, 8, 'detached').length, 0);
+
+  const restored = mapping.restoreProjectResource(db, log, link.id, 7);
+  assert.equal(restored.id, asset.id);
+  assert.equal(db.prepare('SELECT status FROM asset_resource_links WHERE id=?').get(link.id).status, 'active');
+  assert.equal(db.prepare('SELECT deleted_at FROM assets WHERE id=?').get(asset.id).deleted_at, null);
 });
 
 test('SD2 certificate creation reports a missing provider asset instead of dereferencing null', () => {

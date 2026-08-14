@@ -96,7 +96,8 @@ function setupRouter(cfg, db, log) {
   adminRouter.get('/users', admin.users);
   adminRouter.post('/users', admin.createUser);
   adminRouter.patch('/users/:id', admin.updateUser);
-  adminRouter.post('/users/:id/balance-adjustments', admin.adjust);
+  adminRouter.post('/users/:id/balance-adjustments', admin.balanceAdjustment);
+  adminRouter.post('/users/:id/balance-corrections', admin.balanceCorrection);
   adminRouter.get('/price-books', admin.priceBooks);
   adminRouter.post('/price-books', admin.createPriceBook);
   adminRouter.patch('/price-books/:id', admin.updatePriceBook);
@@ -316,6 +317,8 @@ function setupRouter(cfg, db, log) {
   r.post('/episodes/:episode_id/props/extract', prop.extractProps);
   r.post('/episodes/:episode_id/characters/extract', stub.episodeCharactersExtract);
   r.get('/episodes/:episode_id/storyboards', storyboards.episodeStoryboardsGet);
+  r.get('/episodes/:episode_id/generation-settings', storyboards.episodeGenerationSettingsGet);
+  r.patch('/episodes/:episode_id/generation-settings', storyboards.episodeGenerationSettingsUpdate);
   r.post('/episodes/:episode_id/finalize', drama.finalizeEpisode);
   r.get('/episodes/:episode_id/download', drama.downloadEpisodeVideo);
 
@@ -352,6 +355,7 @@ function setupRouter(cfg, db, log) {
 
   // ---------- videos ----------
   r.get('/videos', videos.list);
+  r.post('/videos/postprocess-quote', videos.postprocessQuote);
   r.post('/videos', videos.create);
   r.post('/videos/image/:image_gen_id', videos.fromImage);
   r.post('/videos/episode/:episode_id/batch', videos.episodeBatch);
@@ -368,6 +372,8 @@ function setupRouter(cfg, db, log) {
   r.get('/assets', assets.list);
   r.post('/assets', assets.create);
   r.post('/assets/project-resource-link', assets.linkProjectResource);
+  r.get('/asset-resource-links', assets.listResourceLinks);
+  r.post('/asset-resource-links/:id/restore', assets.restoreProjectResource);
   r.post('/assets/import/image/:image_gen_id', assets.importImage);
   r.post('/assets/import/video/:video_gen_id', assets.importVideo);
   r.post('/assets/concat', assets.concat);
@@ -388,6 +394,8 @@ function setupRouter(cfg, db, log) {
   r.post('/storyboards/:id/insert-before', storyboards.insertBefore);
   r.get('/storyboards/:id', storyboards.getOne);
   r.put('/storyboards/:id', storyboards.update);
+  r.patch('/storyboards/:id/generation-settings', storyboards.storyboardGenerationSettingsUpdate);
+  r.delete('/storyboards/:id/generation-settings/overrides', storyboards.storyboardGenerationSettingsClear);
   r.delete('/storyboards/:id', storyboards.delete);
   r.post('/storyboards/:id/props', prop.associateProps);
   r.post('/storyboards/:id/frame-prompt', storyboards.framePrompt);

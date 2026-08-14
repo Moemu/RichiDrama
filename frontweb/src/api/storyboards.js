@@ -76,6 +76,18 @@ export const storyboardsAPI = {
   update(id, data) {
     return request.put(`/storyboards/${id}`, data)
   },
+  getEpisodeGenerationSettings(episodeId) {
+    return request.get(`/episodes/${episodeId}/generation-settings`)
+  },
+  updateEpisodeGenerationSettings(episodeId, data) {
+    return request.patch(`/episodes/${episodeId}/generation-settings`, data)
+  },
+  updateGenerationSettings(id, data) {
+    return request.patch(`/storyboards/${id}/generation-settings`, data)
+  },
+  clearGenerationSettingsOverrides(id) {
+    return request.delete(`/storyboards/${id}/generation-settings/overrides`)
+  },
   /** 分镜拖拽排序：body = { episode_id, ids: [有序分镜 id 列表] } */
   reorder(data) {
     return request.put('/storyboards/reorder', data)

@@ -33,6 +33,10 @@ function create(db, log, body, billingUser) {
   if (!String(body.model || '').trim() || String(body.model).trim() === 'auto') throw new Error('请选择一个明确的视频模型');
   const prompt = String(body.prompt || '').trim();
   if (!prompt) throw new Error('提示词不能为空');
+  const postprocessPolicy = require('./videoPostprocessPolicy').normalize(body);
+  body.resolution = postprocessPolicy.resolution;
+  body.upscale_resolution = postprocessPolicy.upscale_resolution;
+  body.target_fps = postprocessPolicy.target_fps;
   const input = Array.isArray(body.assets) ? body.assets : [];
   if (input.length > 50) throw new Error('一次创作最多使用 50 个素材');
   const assets = prioritizePromptReferenceAssets(input.map((entry, ordinal) => resolveAsset(db, entry, ordinal, body.owner_user_id)), body.prompt_document, prompt);
@@ -56,6 +60,8 @@ function create(db, log, body, billingUser) {
   const billingTarget = aiConfigs.resolveBillingTarget(db, 'video', capability.model, capability.config_id);
   const config = aiConfigs.getConfig(db, capability.config_id);
   let billingSettings = {}; try { billingSettings = JSON.parse(config?.settings || '{}'); } catch (_) {}
+  const upscaleResolution = body.upscale_resolution;
+  const targetFps = body.target_fps;
   const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key);
   const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
@@ -78,19 +84,19 @@ function create(db, log, body, billingUser) {
   const first = routed.find((asset) => asset.usage === 'first_frame' && asset.send_to_model);
   const last = routed.find((asset) => asset.usage === 'last_frame' && asset.send_to_model);
   if (existingWaitingId) {
-    db.prepare(`UPDATE video_generations SET billing_authorization_id = ?, provider = ?, prompt = ?, model = ?, duration = ?, aspect_ratio = ?, resolution = ?, seed = ?, camera_fixed = ?, watermark = ?, image_url = ?, first_frame_url = ?, last_frame_url = ?, reference_image_urls = ?, status = ?, error_msg = NULL, updated_at = ? WHERE id = ?`)
-      .run(authorization.authorization_id, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0, imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null, imageUrls.length ? JSON.stringify(imageUrls) : null, 'processing', now, videoGenerationId);
+    db.prepare(`UPDATE video_generations SET billing_authorization_id = ?, provider = ?, prompt = ?, model = ?, duration = ?, aspect_ratio = ?, resolution = ?, upscale_resolution = ?, target_fps = ?, seed = ?, camera_fixed = ?, watermark = ?, image_url = ?, first_frame_url = ?, last_frame_url = ?, reference_image_urls = ?, status = ?, error_msg = NULL, updated_at = ? WHERE id = ?`)
+      .run(authorization.authorization_id, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution, targetFps, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0, imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null, imageUrls.length ? JSON.stringify(imageUrls) : null, 'processing', now, videoGenerationId);
   } else {
-    const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, status, task_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.owner_user_id || payer.id, authorization?.authorization_id || null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null,
-        body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
+    const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, status, task_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`)
+      .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.owner_user_id || payer.id, authorization?.authorization_id || null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution,
+        targetFps, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
         imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null,
         imageUrls.length ? JSON.stringify(imageUrls) : null, waitingForSd2 ? 'sd2_waiting' : 'processing', task.id, now, now);
     videoGenerationId = Number(result.lastInsertRowid);
   }
   const postProcess = { keep_original_audio: !!body.keep_original_audio, audio_volume: clamp(body.audio_volume, 0, 2, 1), audio_fade_seconds: clamp(body.audio_fade_seconds, 0, 10, 0) };
-  const requestSnapshot = { prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
+  const requestSnapshot = { prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
   const job = !existingWaitingId ? db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, owner_user_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, storyboard_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(videoGenerationId, body.owner_user_id || payer.id, modelPrompt, body.negative_prompt || null, body.model || 'auto', capability.model,
@@ -111,11 +117,19 @@ function create(db, log, body, billingUser) {
   if (body.shot_id && body.sequence_id) {
     const shot = db.prepare('SELECT id FROM omni_video_sequence_shots WHERE id = ? AND sequence_id = ? AND deleted_at IS NULL').get(Number(body.shot_id), Number(body.sequence_id));
     if (shot) db.prepare('UPDATE omni_video_sequence_shots SET omni_job_id = ?, prompt = ?, prompt_document_json = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?').run(
-      jobId, modelPrompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model, creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: body.duration, resolution: body.resolution || null, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
+      jobId, modelPrompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model, creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: body.duration, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
   }
   if (waitingForSd2) {
     taskService.updateTaskStatus(db, task.id, 'processing', 0, '真人素材认证准备中，完成后将自动开始生成');
     return { omni_job_id: jobId, video_generation_id: videoGenerationId, task_id: task.id, status: 'sd2_waiting', resolved_model: capability.model, routing_summary: buildSummary(routed) };
+  }
+  try {
+    if (upscaleResolution) require('./videoUpscaleService').reserveForGeneration(db, videoGenerationId, upscaleResolution);
+    if (targetFps) require('./videoInterpolationService').reserveForGeneration(db, videoGenerationId, targetFps);
+  } catch (error) {
+    videoService.setVideoGenFailed(db, videoGenerationId, error.message, new Date().toISOString());
+    taskService.updateTaskError(db, task.id, error.message);
+    throw error;
   }
   setImmediate(() => videoService.processVideoGeneration(db, log, videoGenerationId));
   return { omni_job_id: jobId, video_generation_id: videoGenerationId, task_id: task.id, status: 'processing', resolved_model: capability.model, routing_summary: buildSummary(routed) };
@@ -351,7 +365,9 @@ function get(db, id) {
 function list(db, query = {}) {
   const storyboardId = Number(query.storyboard_id);
   const shotId = Number(query.shot_id);
-  let sql = `SELECT j.*, v.status, v.video_url, v.local_path, v.error_msg
+  let sql = `SELECT j.*, v.status, v.video_url, v.local_path, v.source_local_path, v.upscale_local_path,
+    v.resolution, v.aspect_ratio, v.upscale_resolution, v.target_fps, v.upscale_status, v.interpolation_status,
+    v.output_width, v.output_height, v.output_resolution, v.output_fps, v.output_duration_ms, v.error_msg
     FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id`;
   const params = [];
   const filters = [];
@@ -367,7 +383,12 @@ function list(db, query = {}) {
   }
   if (filters.length) sql += ' WHERE ' + filters.join(' AND ');
   sql += ' ORDER BY j.id DESC LIMIT 100';
-  return db.prepare(sql).all(...params).map((item) => ({ ...item, video_url: videoService.publicVideoUrl(item.video_url, item.local_path), request_snapshot: safeSnapshot(parse(item.request_snapshot_json)) }));
+  return db.prepare(sql).all(...params).map((item) => ({
+    ...item,
+    video_url: videoService.publicVideoUrl(item.video_url, item.local_path),
+    postprocess_chain: `${require('./videoPostprocessPolicy').describe(item)} → 本地规范 ${item.aspect_ratio || '原画幅'}`,
+    request_snapshot: safeSnapshot(parse(item.request_snapshot_json)),
+  }));
 }
 function retry(db, log, id, billingUser) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
@@ -379,6 +400,7 @@ function retry(db, log, id, billingUser) {
   return create(db, log, {
     prompt: snapshot.prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
     aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
+    upscale_resolution: snapshot.upscale_resolution, target_fps: snapshot.target_fps,
     creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
     audio_volume: snapshot.post_process?.audio_volume, audio_fade_seconds: snapshot.post_process?.audio_fade_seconds,
     drama_id: generation.drama_id || undefined,
@@ -403,6 +425,7 @@ function resumeSd2WaitingGenerations(db, log) {
       create(db, log, {
         prompt: snapshot.original_prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
         aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
+        upscale_resolution: snapshot.upscale_resolution, target_fps: snapshot.target_fps,
         creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy,
         keep_original_audio: snapshot.post_process?.keep_original_audio, audio_volume: snapshot.post_process?.audio_volume, audio_fade_seconds: snapshot.post_process?.audio_fade_seconds,
         drama_id: job.drama_id || undefined, sequence_id: job.sequence_id || undefined, shot_id: job.shot_id || undefined, storyboard_id: job.storyboard_id || undefined,

@@ -82,6 +82,12 @@ function routes(db, log, cfg) {
     },
     delete: (req, res) => {
       try {
+        const current = assetService.getByIdForOwner(db, req.params.id, req.auth.id);
+        if (current?.source_type === 'project_resource') {
+          const detached = require('../services/assetMappingService').detachProjectResource(db, current.id, req.auth.id);
+          if (!detached) return response.notFound(res, '资源关联不存在');
+          return response.success(res, { message: '已解除项目资源关联，历史分镜引用保持不变', detached: true });
+        }
         const ok = assetService.deleteById(db, log, req.params.id, req.auth.id);
         if (!ok) return response.notFound(res, '资源不存在');
         response.success(res, { message: '删除成功' });
@@ -89,6 +95,23 @@ function routes(db, log, cfg) {
         log.error('assets delete', { error: err.message });
         response.internalError(res, err.message);
       }
+    },
+    restoreProjectResource: (req, res) => {
+      try {
+        const item = require('../services/assetMappingService').restoreProjectResource(db, log, req.params.id, req.auth.id);
+        if (!item) return response.notFound(res, '资源关联不存在');
+        response.success(res, item);
+      } catch (err) { response.badRequest(res, err.message); }
+    },
+    listResourceLinks: (req, res) => {
+      try {
+        const dramaId = req.query?.drama_id == null ? null : Number(req.query.drama_id);
+        if (dramaId != null && (!Number.isInteger(dramaId) || !db.prepare('SELECT 1 FROM dramas WHERE id=? AND owner_user_id=? AND deleted_at IS NULL').get(dramaId, req.auth.id))) {
+          return response.notFound(res, '项目不存在');
+        }
+        const items = require('../services/assetMappingService').listResourceLinks(db, req.auth.id, dramaId, req.query?.status);
+        response.success(res, items);
+      } catch (err) { response.badRequest(res, err.message); }
     },
     batchDelete: (req, res) => {
       try {

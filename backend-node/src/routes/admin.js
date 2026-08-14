@@ -22,6 +22,19 @@ module.exports = function adminRoutes(db) {
         : billing.adjustBalance(db, req.auth.id, Number(req.params.id), body.credits, body.reason);
       response.success(res, billing.publicAccount(account));
     }),
+    balanceAdjustment: guarded((req, res) => {
+      const body = req.body || {};
+      const account = billing.adjustBalance(db, req.auth.id, Number(req.params.id), body.amount_credits, body.reason, {
+        operation: body.operation, idempotency_key: body.idempotency_key,
+      });
+      response.success(res, billing.publicAccount(account));
+    }),
+    balanceCorrection: guarded((req, res) => {
+      const body = req.body || {};
+      response.success(res, billing.publicAccount(billing.setBalance(db, req.auth.id, Number(req.params.id), body.target_credits, body.reason, {
+        idempotency_key: body.idempotency_key,
+      })));
+    }),
     priceBooks: (_req, res) => response.success(res, billing.listPriceBooks(db)),
     createPriceBook: guarded((req, res) => response.created(res, billing.savePriceBook(db, req.auth.id, req.body || {}))),
     updatePriceBook: guarded((req, res) => response.success(res, billing.savePriceBook(db, req.auth.id, req.body || {}, req.params.id))),

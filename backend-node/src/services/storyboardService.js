@@ -68,6 +68,8 @@ function syncStoryboardCharacterLinks(db, storyboardId, dramaCharacterIds) {
 function createStoryboard(db, log, req) {
   const now = new Date().toISOString();
   const episodeId = Number(req.episode_id);
+  let inheritedGenerationSettings = null;
+  try { inheritedGenerationSettings = require('./generationSettingsService').getEpisodeSettings(db, episodeId)?.defaults || null; } catch (_) {}
   const num = Number(req.storyboard_number ?? 0) || 0;
   const info = db.prepare(
     `INSERT INTO storyboards (episode_id, scene_id, storyboard_number, title, description, location, time, duration, dialogue, action, result, atmosphere, image_prompt, video_prompt, status, created_at, updated_at)
@@ -91,6 +93,7 @@ function createStoryboard(db, log, req) {
     now
   );
   log.info('Storyboard created', { id: info.lastInsertRowid, episode_id: episodeId });
+  try { require('./generationSettingsService').initializeStoryboardFromMaster(db, info.lastInsertRowid, inheritedGenerationSettings); } catch (_) {}
   return getStoryboardById(db, info.lastInsertRowid);
 }
 
@@ -124,7 +127,7 @@ function activeOmniAssetIds(db, storyboardId, rawIds, ownerUserId, log) {
 function updateStoryboard(db, log, id, req, ownerUserId = null) {
   const row = db.prepare('SELECT id FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!row) return null;
-  const allowed = ['title', 'description', 'location', 'time', 'duration', 'dialogue', 'narration', 'action', 'result', 'atmosphere', 'image_prompt', 'polished_prompt', 'video_prompt', 'text_model', 'video_model', 'video_resolution', 'video_aspect_ratio', 'scene_id', 'characters', 'composed_image', 'image_url', 'local_path', 'main_panel_idx', 'video_url', 'audio_local_path', 'narration_audio_local_path', 'status', 'shot_type', 'angle', 'angle_h', 'angle_v', 'angle_s', 'movement', 'segment_index', 'segment_title', 'creation_mode', 'universal_segment_text', 'layout_description', 'first_frame_image_id', 'last_frame_image_id', 'last_frame_image_url', 'last_frame_local_path', 'omni_asset_ids', 'audio_strategy', 'keep_original_audio', 'audio_volume', 'audio_fade_seconds', 'omni_creation_mode', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'omni_asset_usage_json'];
+  const allowed = ['title', 'description', 'location', 'time', 'duration', 'dialogue', 'narration', 'action', 'result', 'atmosphere', 'image_prompt', 'polished_prompt', 'video_prompt', 'text_model', 'video_model', 'video_resolution', 'video_aspect_ratio', 'video_upscale_resolution', 'video_target_fps', 'scene_id', 'characters', 'composed_image', 'image_url', 'local_path', 'main_panel_idx', 'video_url', 'audio_local_path', 'narration_audio_local_path', 'status', 'shot_type', 'angle', 'angle_h', 'angle_v', 'angle_s', 'movement', 'segment_index', 'segment_title', 'creation_mode', 'universal_segment_text', 'layout_description', 'first_frame_image_id', 'last_frame_image_id', 'last_frame_image_url', 'last_frame_local_path', 'omni_asset_ids', 'audio_strategy', 'keep_original_audio', 'audio_volume', 'audio_fade_seconds', 'omni_creation_mode', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'omni_asset_usage_json'];
   const updates = [];
   const params = [];
   // 前端可能传 character_ids，与 characters 统一：存为 JSON 字符串
@@ -215,7 +218,10 @@ function getStoryboardById(db, id) {
     text_model: r.text_model ?? null,
     video_model: r.video_model ?? null,
     video_resolution: r.video_resolution ?? null,
+    video_upscale_resolution: r.video_upscale_resolution ?? null,
+    video_target_fps: r.video_target_fps ?? null,
     video_aspect_ratio: r.video_aspect_ratio ?? null,
+    generation_overrides: parseJsonObject(r.generation_overrides_json),
     shot_type: r.shot_type,
     angle: r.angle,
     angle_h: r.angle_h ?? null,
@@ -300,6 +306,8 @@ function insertBeforeStoryboard(db, log, targetId) {
     'SELECT id, episode_id, storyboard_number, segment_index, segment_title FROM storyboards WHERE id = ? AND deleted_at IS NULL'
   ).get(Number(targetId));
   if (!target) return null;
+  let inheritedGenerationSettings = null;
+  try { inheritedGenerationSettings = require('./generationSettingsService').getEpisodeSettings(db, target.episode_id)?.defaults || null; } catch (_) {}
 
   db.prepare(
     'UPDATE storyboards SET storyboard_number = storyboard_number + 1, updated_at = ? WHERE episode_id = ? AND storyboard_number >= ? AND deleted_at IS NULL'
@@ -310,6 +318,8 @@ function insertBeforeStoryboard(db, log, targetId) {
     `INSERT INTO storyboards (episode_id, storyboard_number, segment_index, segment_title, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, 'pending', ?, ?)`
   ).run(target.episode_id, target.storyboard_number, target.segment_index ?? null, target.segment_title ?? null, now, now);
+
+  try { require('./generationSettingsService').initializeStoryboardFromMaster(db, info.lastInsertRowid, inheritedGenerationSettings); } catch (_) {}
 
   log.info('Storyboard inserted before', { new_id: info.lastInsertRowid, before_id: targetId });
   return getStoryboardById(db, info.lastInsertRowid);

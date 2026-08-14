@@ -404,6 +404,8 @@
             <el-option label="3:4 竖版" value="3:4" />
             <el-option label="1:1 方形" value="1:1" />
             <el-option label="4:3" value="4:3" />
+            <el-option label="3:2" value="3:2" />
+            <el-option label="2:3" value="2:3" />
             <el-option label="21:9 宽银幕" value="21:9" />
           </el-select>
           <el-select v-if="false" v-model="videoClipDuration" style="width: 105px" @change="() => saveProjectSettings(false)">
@@ -515,7 +517,8 @@
         </div>
         <div class="resource-media-library">
           <header><div><b>媒体素材库</b><small>上传的图片、视频、音频会在分镜引用区统一可用。</small></div><div class="resource-media-header-actions"><el-button size="small" @click="router.push('/media-library')">管理媒体库</el-button><span>{{ universalLibraryAssets.length }} 项</span></div></header>
-          <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card"><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><small>{{ asset.name || `素材 ${asset.id}` }}</small><div class="resource-media-card-actions"><el-button size="small" text @click="renameResourceMedia(asset)">重命名</el-button><el-button size="small" type="danger" text @click="deleteResourceMedia(asset)">{{ asset.source_type === 'project_resource' ? '解除素材' : '删除' }}</el-button></div><small v-if="asset.source_type === 'project_resource'">关联资源：解除后不会被自动重建</small></article></div>
+          <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card"><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><small>{{ asset.name || `素材 ${asset.id}` }}</small><small>{{ asset.library_scope === 'global' ? '我的全局素材' : '当前项目素材' }}</small><div class="resource-media-card-actions"><el-button size="small" text @click="renameResourceMedia(asset)">重命名</el-button><el-button size="small" type="danger" text @click="deleteResourceMedia(asset)">{{ asset.source_type === 'project_resource' ? '解除素材' : '删除' }}</el-button></div><small v-if="asset.source_type === 'project_resource'">关联资源：解除后不会被自动重建</small></article></div>
+          <div v-if="detachedResourceLinks.length" class="resource-media-grid"><article v-for="link in detachedResourceLinks" :key="`detached-${link.id}`" class="resource-media-card"><span>已解除</span><small>{{ link.asset_name || `${link.resource_type} #${link.resource_id}` }}</small><small>历史分镜引用仍保留</small><el-button size="small" type="primary" text @click="restoreResourceMedia(link)">恢复关联</el-button></article></div>
           <p v-else class="resource-center-empty">还没有上传媒体素材。</p>
         </div>
       </section>
@@ -845,13 +848,17 @@
           </div>
           <div class="sb-inline-generation-settings">
             <span class="sb-inline-generation-label">分镜参数</span>
+            <el-tag size="small" :type="sbGenerationModes[sb.id] === 'custom' ? 'warning' : 'info'">
+              {{ sbGenerationModes[sb.id] === 'master' ? '首镜母版' : sbGenerationModes[sb.id] === 'custom' ? '当前镜头覆盖' : '跟随首镜' }}
+            </el-tag>
             <GenerationSettings
               :model-value="sbGenerationSettings[sb.id] || {}"
               :show-text-model="true"
               :max-duration="15"
               @update:model-value="onInlineSbGenerationSettingsChange(sb, $event)"
             />
-            <span class="sb-inline-generation-hint">参数会自动保存并用于本镜生成</span>
+            <el-button v-if="sbGenerationModes[sb.id] === 'custom'" text size="small" @click="restoreSbGenerationDefaults(sb)">恢复跟随首镜</el-button>
+            <span class="sb-inline-generation-hint">{{ sbGenerationModes[sb.id] === 'master' ? '修改后同步所有跟随镜头' : '默认采用首镜参数，可单独覆盖' }}</span>
           </div>
           <div :id="'sb-' + sb.id" class="storyboard-row">
             <!-- 左：分镜脚本 -->
@@ -1087,6 +1094,7 @@
                   v-model="sbUniversalSegmentText[sb.id]"
                   :slots="getSbUniversalOmniRefSlots(sb)"
                   class="sb-universal-textarea"
+                  @update:model-value="(value) => onUniversalPromptInput(sb.id, value)"
                   @blur="() => onSaveUniversalSegmentField(sb)"
                   @pick="(slot) => onUniversalSegmentPickAsset(sb, slot)"
                   @drop-asset="(payload) => onUniversalSegmentDropAsset(sb, payload)"
@@ -1179,6 +1187,7 @@
                   :autosize="{ minRows: 10, maxRows: 22 }"
                   placeholder="例如：@图片1 为夜景街道，@图片2 从餐厅冲出停在光斑里，低头操作手机…"
                   class="sb-universal-textarea"
+                  @update:model-value="(value) => onUniversalPromptInput(sb.id, value)"
                   @blur="() => onSaveUniversalSegmentField(sb)"
                 />
               </template>
@@ -1383,6 +1392,7 @@
                   controls
                   class="sb-video-player"
                   preload="metadata"
+                  :autoplay="Number(sbAutoPlayId) === Number(sb.id)"
                 />
                 <button
                   v-else-if="assetVideoUrl(getSbVideo(sb.id))"
@@ -1390,8 +1400,8 @@
                   class="sb-video-lazy-placeholder"
                   @click.stop="setActiveSbId(sb.id)"
                 >
-                  <el-icon><VideoCamera /></el-icon>
-                  <span>点击加载本镜视频</span>
+                  <img :src="sbVideoPoster(sb, getSbVideo(sb.id))" alt="" />
+                  <el-icon class="sb-video-poster-play"><VideoCamera /></el-icon>
                 </button>
                 <div
                   v-else
@@ -1438,7 +1448,7 @@
                   :title="`${item.label}（点击切换）`"
                   @click="onSelectSbMainVideo(sb, item.video)"
                 >
-                  <span class="sb-video-thumb-player sb-video-thumb-placeholder"><el-icon><VideoCamera /></el-icon></span>
+                  <span class="sb-video-thumb-player sb-video-thumb-placeholder"><img :src="sbVideoPoster(sb, item.video)" alt="" /></span>
                   <span class="sb-video-thumb-label">{{ item.label }}</span>
                 </div>
               </div>
@@ -2605,10 +2615,12 @@ import { parseScriptIntoEpisodes, episodesListToPlainScript } from '@/utils/scri
 import { exportStoryboardSheet } from '@/utils/exportStoryboardSheet'
 import { formatChinaTime } from '@/utils/time'
 import { insertTokenAtOffset } from '@/utils/promptInsertion'
+import { setTransparentDragPreview } from '@/utils/dragPreview'
 import StylePickerButton from '@/components/StylePickerButton.vue'
 import AIConfigContent from '@/components/AIConfigContent.vue'
 import UniversalSegmentOmniAtEditor from '@/components/UniversalSegmentOmniAtEditor.vue'
 import FreeCreate from '@/views/FreeCreate.vue'
+import { clearPromptDraft, currentDraftUserId, readPromptDraft, shouldRestorePromptDraft, writePromptDraft } from '@/utils/promptDraft'
 import {
   generationStyleOptions,
   getStylePromptEn,
@@ -2693,7 +2705,10 @@ const generationStyle = ref('')
 const projectAspectRatio = ref('16:9')
 const videoClipDuration = ref(15)
 const projectVideoModel = ref('auto')
+const projectUpscaleResolution = ref('1080p')
+const projectTargetFps = ref(null)
 const universalLibraryAssets = ref([])
+const detachedResourceLinks = ref([])
 /** 全能素材库：上传 / 拖拽 / 首尾帧上传 共享状态 */
 const sbOmniFileInput = ref(null)
 const sbOmniFrameFileInput = ref(null)
@@ -2720,12 +2735,16 @@ const projectGenerationSettings = computed(() => ({
   duration: Number(videoClipDuration.value) || 15,
   resolution: videoResolution.value || '720p',
   aspect_ratio: projectAspectRatio.value || '16:9',
+  upscale_resolution: projectUpscaleResolution.value || null,
+  target_fps: projectTargetFps.value || null,
 }))
 function setProjectGenerationSettings(next = {}) {
   projectVideoModel.value = next.video_model || 'auto'
   if (next.duration != null) videoClipDuration.value = Math.min(15, Math.max(1, Number(next.duration) || 15))
   if (next.resolution) videoResolution.value = next.resolution
   if (next.aspect_ratio) projectAspectRatio.value = next.aspect_ratio
+  projectUpscaleResolution.value = next.upscale_resolution || null
+  projectTargetFps.value = next.target_fps || null
   saveProjectSettings(false)
 }
 
@@ -2785,7 +2804,12 @@ const characters = computed(() => validRows(store.characters))
 const scenes = computed(() => validRows(store.scenes))
 const props = computed(() => validRows(store.props))
 const storyboards = computed(() => validRows(store.storyboards))
-const workflowStage = ref('script')
+const WORKFLOW_STAGE_KEYS = ['script', 'resources', 'storyboard', 'merge']
+function normalizeWorkflowStage(value) {
+  const stage = Array.isArray(value) ? value[0] : value
+  return WORKFLOW_STAGE_KEYS.includes(stage) ? stage : 'script'
+}
+const workflowStage = ref(normalizeWorkflowStage(route.query.stage))
 const showLegacyPipeline = ref(false)
 const resourceMediaFileInput = ref(null)
 const resourceMediaUploading = ref(false)
@@ -2802,8 +2826,15 @@ const workflowStageMeta = computed(() => ({
   merge: { title: '视频合成', description: '检查镜头视频就绪状态后合成当前集成片。' },
 }[workflowStage.value] || {}))
 function setWorkflowStage(stage) {
-  if (['script', 'resources', 'storyboard', 'merge'].includes(stage)) workflowStage.value = stage
+  if (!WORKFLOW_STAGE_KEYS.includes(stage)) return
+  workflowStage.value = stage
+  if (route.query.stage !== stage) {
+    router.replace({ query: { ...route.query, stage }, hash: route.hash }).catch(() => {})
+  }
 }
+watch(() => route.query.stage, (stage) => {
+  workflowStage.value = normalizeWorkflowStage(stage)
+})
 function navigateWorkflowStep(step) {
   setWorkflowStage(step)
   nextTick(() => {
@@ -2814,6 +2845,7 @@ function navigateWorkflowStep(step) {
 }
 /** 当前操作分镜（左侧素材编排面板作用目标）：默认第一个分镜，点击分镜卡片切换 */
 const activeSbId = ref(null)
+const sbAutoPlayId = ref(null)
 const activeSb = computed(() => {
   const list = storyboards.value || []
   const found = list.find((s) => Number(s.id) === Number(activeSbId.value))
@@ -2821,6 +2853,7 @@ const activeSb = computed(() => {
 })
 function setActiveSbId(id) {
   activeSbId.value = id != null ? Number(id) : null
+  sbAutoPlayId.value = id != null ? Number(id) : null
 }
 watch(
   () => storyboards.value?.length,
@@ -3248,9 +3281,41 @@ const regeneratingLayoutSbIds = reactive(new Set())  // 正在 AI 重新生成�
 /** 分镜创作模式：classic | universal（默认 classic，存库 storyboards.creation_mode） */
 const sbCreationMode = ref({})
 const sbGenerationSettings = ref({})
+const sbGenerationModes = ref({})
 const sd2ResourceCertifying = ref(null)
 /** 全能模式片段描述（存库 universal_segment_text，与经典参考图字段独立） */
 const sbUniversalSegmentText = ref({})
+const universalPromptSaveTimers = new Map()
+const universalPromptRevisions = new Map()
+let restoringUniversalPromptMaps = false
+let restoredUniversalDraftNoticeShown = false
+
+function universalPromptDraftIdentity(storyboardId) {
+  return {
+    userId: currentDraftUserId(), workspace: 'film-create-universal', dramaId: dramaId.value,
+    episodeId: currentEpisodeId.value, shotId: storyboardId,
+  }
+}
+
+function persistUniversalPromptDraft(storyboardId, text) {
+  const revision = (universalPromptRevisions.get(storyboardId) || 0) + 1
+  universalPromptRevisions.set(storyboardId, revision)
+  writePromptDraft(localStorage, universalPromptDraftIdentity(storyboardId), { prompt: text == null ? '' : String(text) })
+  return revision
+}
+
+function scheduleUniversalPromptSave(storyboardId) {
+  const sb = (storyboards.value || []).find((item) => Number(item.id) === Number(storyboardId))
+  if (!sb) return
+  clearTimeout(universalPromptSaveTimers.get(storyboardId))
+  universalPromptSaveTimers.set(storyboardId, setTimeout(() => onSaveUniversalSegmentField(sb), 650))
+}
+
+function onUniversalPromptInput(storyboardId, value) {
+  if (restoringUniversalPromptMaps || storyboardId == null) return
+  persistUniversalPromptDraft(storyboardId, value)
+  scheduleUniversalPromptSave(storyboardId)
+}
 const sbOmniAssetIds = ref({})
 const sbAudioStrategy = ref({})
 const sbKeepOriginalAudio = ref({})
@@ -3869,8 +3934,14 @@ function getVideoStripItems(storyboardId) {
       label: `历史${idx + 2}`,
     }))
 }
+function sbVideoPoster(sb, video) {
+  const poster = String(video?.poster_local_path || '').trim()
+  if (poster) return poster.startsWith('/static/') || /^https?:/i.test(poster) ? poster : `/static/${poster.replace(/^\/+/, '')}`
+  return getSbLocalImage(sb) || '/images/video-poster-placeholder.svg'
+}
 /** 选中某条历史视频为当前视频，并持久化到分镜记录供合成视频使用 */
 function onSelectSbMainVideo(sb, video) {
+  setActiveSbId(sb.id)
   sbSelectedVideoId.value = { ...sbSelectedVideoId.value, [sb.id]: video.id }
   storyboardsAPI.update(sb.id, {
     video_url: video.video_url || null,
@@ -4632,8 +4703,21 @@ function syncStoryboardStateFromEpisode(ep) {
       duration: sb.duration != null ? Number(sb.duration) : (Number(videoClipDuration.value) || 15),
       resolution: sb.video_resolution || videoResolution.value || '720p',
       aspect_ratio: sb.video_aspect_ratio || projectAspectRatio.value || '16:9',
+      upscale_resolution: sb.video_upscale_resolution || null,
+      target_fps: sb.video_target_fps || null,
     }
-    nextUniversalSegment[sb.id] = (sb.universal_segment_text ?? '').toString()
+    const serverUniversalPrompt = (sb.universal_segment_text ?? '').toString()
+    const localUniversalDraft = readPromptDraft(localStorage, universalPromptDraftIdentity(sb.id))
+    if (localUniversalDraft && shouldRestorePromptDraft(localUniversalDraft, sb.updated_at)) {
+      nextUniversalSegment[sb.id] = localUniversalDraft.payload?.prompt == null ? '' : String(localUniversalDraft.payload.prompt)
+      if (!restoredUniversalDraftNoticeShown) {
+        restoredUniversalDraftNoticeShown = true
+        queueMicrotask(() => ElMessage.info('已恢复刷新前尚未保存的分镜提示词草稿'))
+      }
+    } else {
+      nextUniversalSegment[sb.id] = serverUniversalPrompt
+      if (localUniversalDraft) clearPromptDraft(localStorage, universalPromptDraftIdentity(sb.id))
+    }
     nextOmniAssetIds[sb.id] = Array.isArray(sb.omni_asset_ids) ? sb.omni_asset_ids.map(Number).filter((id) => Number.isFinite(id)) : []
     nextAudioStrategy[sb.id] = sb.audio_strategy || 'reference_only'
     nextKeepOriginalAudio[sb.id] = !!sb.keep_original_audio
@@ -4667,7 +4751,9 @@ function syncStoryboardStateFromEpisode(ep) {
   sbLayoutDescription.value = nextLayoutDescription
   sbCreationMode.value = nextCreationMode
   sbGenerationSettings.value = nextGenerationSettings
+  restoringUniversalPromptMaps = true
   sbUniversalSegmentText.value = nextUniversalSegment
+  queueMicrotask(() => { restoringUniversalPromptMaps = false })
   sbOmniAssetIds.value = nextOmniAssetIds
   sbAudioStrategy.value = nextAudioStrategy
   sbKeepOriginalAudio.value = nextKeepOriginalAudio
@@ -6000,17 +6086,29 @@ async function onToggleSbUniversalMode(sb) {
 
 async function onSaveUniversalSegmentField(sb) {
   if (!sb?.id) return
+  clearTimeout(universalPromptSaveTimers.get(sb.id))
+  universalPromptSaveTimers.delete(sb.id)
   const next = (sbUniversalSegmentText.value[sb.id] || '').toString()
   const prev = (sb.universal_segment_text || '').toString()
-  if (next === prev) return
+  const savingRevision = universalPromptRevisions.get(sb.id) || 0
+  if (next === prev) {
+    clearPromptDraft(localStorage, universalPromptDraftIdentity(sb.id))
+    return
+  }
   try {
-    await storyboardsAPI.update(sb.id, { universal_segment_text: next.trim() || null })
+    const updated = await storyboardsAPI.update(sb.id, { universal_segment_text: next.trim() || null })
     const list = store.currentEpisode?.storyboards
     if (Array.isArray(list)) {
       const row = list.find((x) => Number(x.id) === Number(sb.id))
-      if (row) row.universal_segment_text = next.trim() || null
+      if (row) {
+        row.universal_segment_text = next.trim() || null
+        if (updated?.updated_at) row.updated_at = updated.updated_at
+      }
     }
-  } catch (_) { /* 静默失败，避免打断输入 */ }
+    if ((universalPromptRevisions.get(sb.id) || 0) === savingRevision) {
+      clearPromptDraft(localStorage, universalPromptDraftIdentity(sb.id))
+    }
+  } catch (_) { /* 草稿已落本地，网络恢复后或下次编辑会再次保存 */ }
 }
 
 function universalSegmentDurationSecForSb(sb) {
@@ -6268,7 +6366,8 @@ async function deleteResourceMedia(asset) {
       : `确定删除“${asset.name || `素材 ${asset.id}`}”？`, linked ? '解除素材关联' : '删除素材', { type: 'warning' })
     await omniVideoAPI.deleteAsset(asset.id)
     universalLibraryAssets.value = universalLibraryAssets.value.filter((item) => Number(item.id) !== Number(asset.id))
-    ElMessage.success('素材已删除')
+    if (linked) await loadDetachedResourceLinks()
+    ElMessage.success(linked ? '已解除素材关联，历史引用保持不变' : '素材已删除')
   } catch (err) {
     if (err !== 'cancel' && err?.action !== 'cancel') ElMessage.error(err?.message || '删除素材失败')
   }
@@ -6349,7 +6448,7 @@ async function onSbOmniAssetRealPersonToggle(sb, asset, value) {
       // it immediately and repair every storyboard that still points at it.
       universalLibraryAssets.value = universalLibraryAssets.value.filter((item) => Number(item.id) !== Number(asset.id))
       await reconcileUnavailableStoryboardAssets()
-      ElMessage.warning('该素材已不存在，已移除相关分镜引用')
+      ElMessage.warning('该素材当前不可用；历史分镜引用已保留，请恢复、替换或显式移除')
       return
     }
     ElMessage.error(err?.message || '真人声明保存失败')
@@ -6388,6 +6487,25 @@ function onSbOmniAssetDragStart(e, item) {
   e.dataTransfer.effectAllowed = 'copy'
   e.dataTransfer.setData('application/json', payload)
   e.dataTransfer.setData('text/plain', payload)
+  setTransparentDragPreview(e)
+}
+
+async function loadDetachedResourceLinks() {
+  try {
+    detachedResourceLinks.value = await omniVideoAPI.listResourceLinks({ drama_id: dramaId.value, status: 'detached' }) || []
+  } catch (_) {
+    detachedResourceLinks.value = []
+  }
+}
+
+async function restoreResourceMedia(link) {
+  try {
+    await omniVideoAPI.restoreResourceLink(link.id)
+    await loadUniversalLibraryAssets()
+    ElMessage.success('素材关联已恢复，原素材 ID 与历史分镜引用继续有效')
+  } catch (err) {
+    ElMessage.error(err?.message || '恢复素材关联失败')
+  }
 }
 
 /** 素材拖入提示词编辑区：加入本镜已选，并在实际拖放位置插入 @图片N 引用。 */
@@ -6418,6 +6536,7 @@ async function loadUniversalLibraryAssets() {
     const [result, limits] = await Promise.all([
       loadAllUniversalLibraryAssets(),
       omniVideoAPI.uploadLimits().catch(() => null),
+      loadDetachedResourceLinks(),
     ])
     universalLibraryAssets.value = (result?.items || []).filter((asset) => asset && Number.isFinite(Number(asset.id)) && ['image', 'video', 'audio'].includes(asset.type) && asset.processing_status !== 'processing')
     sbUniversalUploadLimits.value = limits || null
@@ -6427,48 +6546,50 @@ async function loadUniversalLibraryAssets() {
   }
 }
 
-// A material may have been deleted in another tab or by the media library
-// while this storyboard remained open. Remove only those stale references and
-// retain all valid selections, rather than allowing generation to fail later
-// with an opaque "resource not found" response.
+// A detached or temporarily invisible material remains an auditable history
+// reference. Never rewrite a storyboard simply because this pool cannot show
+// it; replacement/removal must be an explicit user action.
 async function reconcileUnavailableStoryboardAssets() {
   const available = new Set(validRows(universalLibraryAssets.value).map((asset) => Number(asset.id)))
-  let repaired = 0
+  let unavailableCount = 0
   for (const sb of validRows(storyboards.value)) {
     const current = (sbOmniAssetIds.value[sb.id] || []).map(Number)
-    const ids = current.filter((id) => available.has(id))
     const first = sbOmniFirstFrameAssetId.value[sb.id]
     const last = sbOmniLastFrameAssetId.value[sb.id]
-    const patch = { omni_asset_ids: ids }
-    let changed = ids.length !== current.length
-    if (first != null && !available.has(Number(first))) { patch.omni_first_frame_asset_id = null; changed = true }
-    if (last != null && !available.has(Number(last))) { patch.omni_last_frame_asset_id = null; changed = true }
-    if (!changed) continue
-    try {
-      await storyboardsAPI.update(sb.id, patch)
-      sbOmniAssetIds.value = { ...sbOmniAssetIds.value, [sb.id]: ids }
-      if (patch.omni_first_frame_asset_id === null) sbOmniFirstFrameAssetId.value = { ...sbOmniFirstFrameAssetId.value, [sb.id]: null }
-      if (patch.omni_last_frame_asset_id === null) sbOmniLastFrameAssetId.value = { ...sbOmniLastFrameAssetId.value, [sb.id]: null }
-      Object.assign(sb, patch)
-      repaired += 1
-    } catch (_) {}
+    const missing = current.filter((id) => !available.has(id))
+    if (first != null && !available.has(Number(first))) missing.push(Number(first))
+    if (last != null && !available.has(Number(last))) missing.push(Number(last))
+    // Keep the persisted IDs unchanged. The pool may be narrower than the
+    // historical reference set after an explicit detach or scope switch.
+    if (missing.length) {
+      unavailableCount += new Set(missing).size
+      console.warn('[assets] storyboard keeps unavailable references', { storyboard_id: sb.id, asset_ids: [...new Set(missing)] })
+    }
   }
-  if (repaired) ElMessage.warning(`已从 ${repaired} 个分镜移除不存在的素材引用，请重新选择后生成`)
+  if (unavailableCount) ElMessage.warning(`有 ${unavailableCount} 个历史素材引用当前不可用，系统已保留引用，请显式恢复、替换或移除。`)
 }
 
 async function loadAllUniversalLibraryAssets() {
-  const items = []
-  let page = 1
-  let total = Infinity
-  while (items.length < total) {
-    const result = await omniVideoAPI.assets({ page, page_size: 100 })
-    const batch = (result?.items || []).filter((asset) => asset && Number.isFinite(Number(asset.id)))
-    items.push(...batch)
-    total = Number(result?.pagination?.total ?? items.length)
-    if (!batch.length || page >= Number(result?.pagination?.total_pages || 1)) break
-    page += 1
+  const loadScope = async (scope, extra = {}) => {
+    const items = []
+    let page = 1
+    let total = Infinity
+    while (items.length < total) {
+      const result = await omniVideoAPI.assets({ scope, ...extra, page, page_size: 100 })
+      const batch = (result?.items || []).filter((asset) => asset && Number.isFinite(Number(asset.id)))
+        .map((asset) => ({ ...asset, library_scope: scope }))
+      items.push(...batch)
+      total = Number(result?.pagination?.total ?? items.length)
+      if (!batch.length || page >= Number(result?.pagination?.total_pages || 1)) break
+      page += 1
+    }
+    return items
   }
-  return { items }
+  const [projectItems, globalItems] = await Promise.all([
+    loadScope('project', { drama_id: dramaId.value }),
+    loadScope('global'),
+  ])
+  return { items: [...projectItems, ...globalItems] }
 }
 
 async function setSbOmniFrameAsset(sb, position, assetId) {
@@ -6532,6 +6653,8 @@ function getSbVideoRequestSettings(sb) {
     aspect_ratio: settings.aspect_ratio || projectAspectRatio.value || '16:9',
     resolution: settings.resolution || videoResolution.value || undefined,
     duration: getSbVideoDurationForApi(sb),
+    upscale_resolution: settings.upscale_resolution || null,
+    target_fps: settings.target_fps || null,
   }
 }
 
@@ -6545,20 +6668,45 @@ function setSbGenerationSettings(id, settings) {
   sbDuration.value = { ...sbDuration.value, [id]: settings.duration }
 }
 
-let inlineSbSettingsSaveTimer = null
+function applyGenerationSettingsContract(result) {
+  if (!result) return
+  const nextSettings = { ...sbGenerationSettings.value }
+  const nextModes = { ...sbGenerationModes.value }
+  const durationMap = { ...sbDuration.value }
+  const rows = Array.isArray(result.storyboards) ? result.storyboards : [result]
+  for (const item of rows) {
+    if (!item?.id || !item.effective) continue
+    nextSettings[item.id] = { ...item.effective }
+    nextModes[item.id] = item.mode || 'inherited'
+    durationMap[item.id] = item.effective.duration
+  }
+  sbGenerationSettings.value = nextSettings
+  sbGenerationModes.value = nextModes
+  sbDuration.value = durationMap
+  if (result.defaults) setProjectGenerationSettings(result.defaults)
+}
+
+async function loadEpisodeGenerationSettings(episodeId = currentEpisodeId.value) {
+  if (!episodeId) return
+  try { applyGenerationSettingsContract(await storyboardsAPI.getEpisodeGenerationSettings(episodeId)) } catch (_) {}
+}
+
+async function restoreSbGenerationDefaults(sb) {
+  try {
+    applyGenerationSettingsContract(await storyboardsAPI.clearGenerationSettingsOverrides(sb.id))
+    ElMessage.success('当前镜头已恢复跟随首镜参数')
+  } catch (err) { ElMessage.error(err?.message || '恢复本集默认失败') }
+}
+
+const inlineSbSettingsSaveTimers = new Map()
 function onInlineSbGenerationSettingsChange(sb, settings = {}) {
   if (!sb?.id) return
   setSbGenerationSettings(sb.id, settings)
-  clearTimeout(inlineSbSettingsSaveTimer)
-  inlineSbSettingsSaveTimer = setTimeout(async () => {
+  clearTimeout(inlineSbSettingsSaveTimers.get(sb.id))
+  inlineSbSettingsSaveTimers.set(sb.id, setTimeout(async () => {
     try {
-      await storyboardsAPI.update(sb.id, {
-        duration: Number(settings.duration) || 15,
-        text_model: settings.text_model && settings.text_model !== 'auto' ? settings.text_model : null,
-        video_model: settings.video_model && settings.video_model !== 'auto' ? settings.video_model : null,
-        video_resolution: settings.resolution || '720p',
-        video_aspect_ratio: settings.aspect_ratio || '16:9',
-      })
+      const contract = await storyboardsAPI.updateGenerationSettings(sb.id, { scope: 'current', settings })
+      applyGenerationSettingsContract(contract)
       const row = (storyboards.value || []).find((item) => Number(item.id) === Number(sb.id))
       if (row) Object.assign(row, {
         duration: Number(settings.duration) || 15,
@@ -6566,11 +6714,13 @@ function onInlineSbGenerationSettingsChange(sb, settings = {}) {
         video_model: settings.video_model && settings.video_model !== 'auto' ? settings.video_model : null,
         video_resolution: settings.resolution || '720p',
         video_aspect_ratio: settings.aspect_ratio || '16:9',
+        video_upscale_resolution: settings.upscale_resolution || null,
+        video_target_fps: settings.target_fps || null,
       })
     } catch (err) {
       ElMessage.error(err?.message || '分镜参数保存失败')
     }
-  }, 350)
+  }, 350))
 }
 
 function sd2ResourceStatus(item) {
@@ -6607,21 +6757,9 @@ async function applyProjectGenerationSettingsToStoryboards() {
   const shots = storyboards.value || []
   if (!shots.length) return ElMessage.info('暂无可应用的分镜')
   const settings = projectGenerationSettings.value
-  const next = { ...sbGenerationSettings.value }
   try {
-    await Promise.all(shots.map(async (sb) => {
-      next[sb.id] = { ...(next[sb.id] || {}), ...settings }
-      await storyboardsAPI.update(sb.id, {
-        duration: settings.duration,
-        video_model: settings.video_model === 'auto' ? null : settings.video_model,
-        video_resolution: settings.resolution,
-        video_aspect_ratio: settings.aspect_ratio,
-      })
-    }))
-    sbGenerationSettings.value = next
-    const durationMap = { ...sbDuration.value }
-    shots.forEach((sb) => { durationMap[sb.id] = settings.duration })
-    sbDuration.value = durationMap
+    const contract = await storyboardsAPI.updateEpisodeGenerationSettings(currentEpisodeId.value, { defaults: settings, override_policy: 'replace' })
+    applyGenerationSettingsContract(contract)
     await saveProjectSettings(false)
     ElMessage.success('项目视频参数已应用到全部分镜')
   } catch (err) {
@@ -7184,6 +7322,50 @@ function onEditSbImagePrompt(sb) {
   editingSbImagePromptText.value = (sb.image_prompt || '').toString()
 }
 
+function promptDialogDraftIdentity(storyboardId = sbPromptTarget.value?.id) {
+  return { userId: currentDraftUserId(), workspace: 'film-create-prompt-dialog', dramaId: dramaId.value, episodeId: currentEpisodeId.value, shotId: storyboardId }
+}
+
+function persistPromptDialogDraft() {
+  if (!showSbPromptDialog.value || !sbPromptTarget.value?.id) return
+  writePromptDraft(localStorage, promptDialogDraftIdentity(), {
+    image_prompt: sbPromptImageText.value, polished_prompt: sbPromptPolishedText.value, video_prompt: sbPromptVideoText.value,
+  })
+}
+
+let promptDialogSaveTimer = null
+let promptDialogRevision = 0
+function schedulePromptDialogSave() {
+  if (!showSbPromptDialog.value || !sbPromptTarget.value?.id) return
+  persistPromptDialogDraft()
+  promptDialogRevision += 1
+  const revision = promptDialogRevision
+  const storyboardId = sbPromptTarget.value.id
+  clearTimeout(promptDialogSaveTimer)
+  promptDialogSaveTimer = setTimeout(async () => {
+    try {
+      await storyboardsAPI.update(storyboardId, {
+        image_prompt: sbPromptImageText.value.trim() || null,
+        polished_prompt: sbPromptPolishedText.value.trim() || null,
+        video_prompt: sbPromptVideoText.value.replace(/\s+/g, ' ').trim() || null,
+      })
+      if (revision === promptDialogRevision && Number(sbPromptTarget.value?.id) === Number(storyboardId)) {
+        clearPromptDraft(localStorage, promptDialogDraftIdentity(storyboardId))
+      }
+    } catch (_) {}
+  }, 650)
+}
+
+function restorePromptDialogDraft(sb) {
+  const draft = readPromptDraft(localStorage, promptDialogDraftIdentity(sb.id))
+  if (!draft || !shouldRestorePromptDraft(draft, sb.updated_at)) return
+  const payload = draft.payload || {}
+  sbPromptImageText.value = payload.image_prompt == null ? '' : String(payload.image_prompt)
+  sbPromptPolishedText.value = payload.polished_prompt == null ? '' : String(payload.polished_prompt)
+  sbPromptVideoText.value = payload.video_prompt == null ? '' : String(payload.video_prompt)
+  ElMessage.info('已恢复刷新前尚未保存的经典提示词草稿')
+}
+
 async function onOpenSbPromptDialog(sb) {
   if (!sb?.id) return
   sbPromptTarget.value = sb
@@ -7199,8 +7381,9 @@ async function onOpenSbPromptDialog(sb) {
       sbPromptImageText.value = (fresh.image_prompt || '').toString()
       sbPromptPolishedText.value = (fresh.polished_prompt || '').toString()
       sbPromptVideoText.value = formatVideoPromptForEdit((fresh.video_prompt || '').toString())
+      restorePromptDialogDraft(fresh)
     }
-  } catch (_) {}
+  } catch (_) { restorePromptDialogDraft(sb) }
 }
 
 function formatVideoPromptForEdit(text) {
@@ -7240,6 +7423,7 @@ async function onSaveSbPromptDialog() {
       video_prompt: normalizedVideo || null,
     })
     await loadDrama()
+    clearPromptDraft(localStorage, promptDialogDraftIdentity(sb.id))
     showSbPromptDialog.value = false
     ElMessage.success('提示词已保存')
   } catch (e) {
@@ -7292,6 +7476,8 @@ async function onSaveSbVideoFields(sb) {
       video_model: sbGenerationSettings.value[sb.id]?.video_model || null,
       video_resolution: sbGenerationSettings.value[sb.id]?.resolution || null,
       video_aspect_ratio: sbGenerationSettings.value[sb.id]?.aspect_ratio || null,
+      video_upscale_resolution: sbGenerationSettings.value[sb.id]?.upscale_resolution || null,
+      video_target_fps: sbGenerationSettings.value[sb.id]?.target_fps || null,
       action: (sbAction.value[sb.id] || '').toString().trim() || null,
       dialogue: (sbDialogue.value[sb.id] || '').toString().trim() || null,
       narration: (sbNarration.value[sb.id] || '').toString().trim() || null,
@@ -7553,6 +7739,8 @@ async function onGenerateSbVideo(sb) {
           aspect_ratio: requestSettings.aspect_ratio,
           duration: requestSettings.duration,
           resolution: requestSettings.resolution,
+          upscale_resolution: requestSettings.upscale_resolution,
+          target_fps: requestSettings.target_fps,
           audio_strategy: sbAudioStrategy.value[sb.id] || 'reference_only',
           keep_original_audio: !!sbKeepOriginalAudio.value[sb.id],
           audio_volume: Number(sbAudioVolume.value[sb.id] ?? 1),
@@ -9109,7 +9297,25 @@ async function runRepairPipeline() {
 }
 
 
+function flushUniversalPromptDrafts() {
+  persistPromptDialogDraft()
+  for (const [storyboardId, timer] of universalPromptSaveTimers.entries()) {
+    clearTimeout(timer)
+    const sb = (storyboards.value || []).find((item) => Number(item.id) === Number(storyboardId))
+    if (sb) onSaveUniversalSegmentField(sb)
+  }
+}
+
+watch([sbPromptImageText, sbPromptPolishedText, sbPromptVideoText], schedulePromptDialogSave)
+
+function onFilmVisibilityChange() {
+  if (document.visibilityState === 'hidden') flushUniversalPromptDrafts()
+}
+
 onBeforeUnmount(() => {
+  window.removeEventListener('pagehide', flushUniversalPromptDrafts)
+  document.removeEventListener('visibilitychange', onFilmVisibilityChange)
+  flushUniversalPromptDrafts()
 })
 
 function applyRouteToStore() {
@@ -9135,6 +9341,8 @@ function applyRouteToStore() {
 }
 
 onMounted(async () => {
+  window.addEventListener('pagehide', flushUniversalPromptDrafts)
+  document.addEventListener('visibilitychange', onFilmVisibilityChange)
   loadPipelineConcurrency()
   applyRouteToStore()
 })
@@ -9142,6 +9350,10 @@ onMounted(async () => {
 watch(() => route.params.id, () => {
   applyRouteToStore()
 })
+
+watch(() => currentEpisodeId.value, (episodeId) => {
+  if (episodeId) loadEpisodeGenerationSettings(episodeId)
+}, { immediate: true })
 
 // 剧本分集切换时同步 URL query 参数（?episode=<episode_id>），使刷新/分享页面仍保持当前选中集
 // 同时监听 query 变化，支持浏览器前进/后退时自动切换对应集次
@@ -9158,7 +9370,7 @@ watch(
       } else {
         delete newQuery.episode
       }
-      router.replace({ query: newQuery }).catch(() => {})
+      router.replace({ query: newQuery, hash: route.hash }).catch(() => {})
     }
   },
   { flush: 'post' }
@@ -11342,6 +11554,8 @@ html.light .sb-video-placeholder {
   pointer-events: none;
 }
 .sb-video-lazy-placeholder {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   min-height: 198px;
   border: 0;
@@ -11356,9 +11570,11 @@ html.light .sb-video-placeholder {
   cursor: pointer;
   font: inherit;
 }
+.sb-video-lazy-placeholder img,.sb-video-thumb-placeholder img { width:100%; height:100%; object-fit:cover; display:block; }
+.sb-video-poster-play { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:46px; height:46px; border-radius:50%; display:grid; place-items:center; color:#fff; background:rgba(15,23,42,.56); backdrop-filter:blur(4px); }
 .sb-video-lazy-placeholder:hover,
 .sb-video-lazy-placeholder:focus-visible { color: var(--text-primary); background: var(--bg-hover); }
-.sb-video-lazy-placeholder .el-icon { font-size: 28px; }
+.sb-video-lazy-placeholder .el-icon { font-size: 24px; }
 .sb-video-thumb-placeholder {
   display: grid;
   place-items: center;

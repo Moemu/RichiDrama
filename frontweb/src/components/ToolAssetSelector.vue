@@ -21,7 +21,7 @@ const accept = computed(() => props.types.includes('video') && props.types.inclu
 const acceptedLabel = computed(() => props.types.includes('video') && props.types.includes('image') ? '图片或视频' : props.types.includes('video') ? '视频' : '图片')
 const assetUrl = (asset) => asset?.local_path ? `/static/${asset.local_path}` : asset?.url || ''
 
-async function load() { try { const result = await omniVideoAPI.assets({ page_size: 100 }); assets.value = result.items || [] } catch (error) { ElMessage.error(error.message || '素材库加载失败') } }
+async function load() { try { const result = await omniVideoAPI.assets({ scope: 'global', page_size: 100 }); assets.value = result.items || [] } catch (error) { ElMessage.error(error.message || '素材库加载失败') } }
 function select(asset) { emit('update:modelValue', asset.id); emit('selected', asset) }
 async function upload(event) { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; uploading.value = true; try { const result = await omniVideoAPI.upload(file, { name: file.name }); const asset = result.asset; if (!asset) throw new Error('上传未返回素材'); assets.value.unshift(asset); source.value = 'library'; select(asset); ElMessage.success('素材已上传并选中') } catch (error) { ElMessage.error(error.message || '素材上传失败') } finally { uploading.value = false } }
 onMounted(load)

@@ -105,6 +105,22 @@ describe('taskService.failOrphanedAsyncTasksOnStartup', () => {
     assert.equal(taskService.getTask(db, 'video-task').status, 'processing');
   });
 
+  it('preserves async tasks while a locally archived source is being interpolated', () => {
+    const db = createTestDb();
+    addVideoGenerationsTable(db);
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO async_tasks (id, type, status, progress, message, resource_id, created_at, updated_at)
+       VALUES (?, ?, ?, 85, '', ?, ?, ?)`
+    ).run('interpolation-task', 'video_generation', 'processing', '12', now, now);
+    db.prepare('INSERT INTO video_generations (id, task_id, provider_task_id, status) VALUES (?, ?, ?, ?)')
+      .run(12, 'interpolation-task', 'generation-provider-task', 'interpolating');
+
+    const count = taskService.failOrphanedAsyncTasksOnStartup(db, { warn() {}, info() {} });
+    assert.equal(count, 0);
+    assert.equal(taskService.getTask(db, 'interpolation-task').status, 'processing');
+  });
+
   it('marks interrupted videos without a provider task id as retryable', () => {
     const db = createTestDb();
     addVideoGenerationsTable(db);

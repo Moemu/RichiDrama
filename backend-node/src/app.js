@@ -41,10 +41,16 @@ function createApp() {
   applyVendorLock(db, logger, config);
   const log = logger;
 
-  const { resumeProcessingVideoGenerations, reconcileUnarchivedCompletedVideos, resumePendingVideoArchives, startPendingVideoArchiveRetry } = require('./services/videoService');
+  const { resumeProcessingVideoGenerations, reconcileUnarchivedCompletedVideos, resumePendingVideoArchives, resumeMissingVideoPosters, startPendingVideoArchiveRetry } = require('./services/videoService');
   reconcileUnarchivedCompletedVideos(db, log);
   resumeProcessingVideoGenerations(db, log);
   resumePendingVideoArchives(db, log);
+  resumeMissingVideoPosters(db, log);
+  const videoStoragePath = path.isAbsolute(config.storage?.local_path)
+    ? config.storage.local_path
+    : path.join(process.cwd(), config.storage?.local_path || './data/storage');
+  require('./services/videoUpscaleService').resumePending(db, log, videoStoragePath);
+  require('./services/videoInterpolationService').resumePending(db, log, videoStoragePath);
   startPendingVideoArchiveRetry(db, log);
   require('./services/assetSd2Service').resumePendingCertifications(db, log, config);
   require('./services/omniVideoService').startSd2WaitingGenerationRecovery(db, log);

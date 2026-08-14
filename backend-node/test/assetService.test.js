@@ -172,6 +172,18 @@ test('omni video rejects material counts above the per-shot media limits', () =>
   );
 });
 
+test('global and project asset scopes are isolated for the same owner', () => {
+  const db = createDb();
+  db.prepare('INSERT INTO dramas (id, owner_user_id) VALUES (?, ?)').run(9, 7);
+  db.prepare('UPDATE assets SET owner_user_id = ? WHERE id = 1').run(7);
+  db.prepare('INSERT INTO assets (drama_id, owner_user_id, name, type, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(9, 7, 'project-only.png', 'image', new Date().toISOString());
+
+  assert.deepEqual(assetService.list(db, { owner_user_id: 7, scope: 'global' }).items.map((item) => item.name), ['portrait.png']);
+  assert.deepEqual(assetService.list(db, { owner_user_id: 7, scope: 'project', drama_id: 9 }).items.map((item) => item.name), ['project-only.png']);
+  assert.equal(assetService.list(db, { owner_user_id: 7 }).total, 2);
+});
+
 test('Seedance 2.5 applies its model-specific reference limits instead of the legacy 12-asset limit', () => {
   const capability = { model: 'doubao-seedance-2-5-260628', limits: { total_reference: { max: 50 }, image_reference: { max: 30 }, video_reference: { max: 10 }, audio_reference: { max: 10 } } };
   assert.deepEqual(assetLimitsForCapability(capability), { total: 50, image: 30, video: 10, audio: 10 });

@@ -1,5 +1,5 @@
 <template>
-  <div class="editor" @dragenter.prevent="onDragEnter" @dragover.prevent="onDragOver" @dragleave="onDragLeave" @drop.prevent="onDrop">
+  <div ref="editorRoot" class="editor" @dragenter.prevent="onDragEnter" @dragover.prevent="onDragOver" @dragleave="onDragLeave" @drop.prevent="onDrop">
     <div class="drop-status" :class="{ active: dragging }" role="status" aria-live="polite">
       <span v-if="dragging">移动到目标文字间隙，紫色光标就是插入位置</span>
     </div>
@@ -19,30 +19,34 @@
     <span
       v-if="dropCaret.visible"
       class="drop-caret"
-      :style="{ left: `${dropCaret.x}px`, top: `${dropCaret.y}px`, height: `${dropCaret.height}px` }"
+      :class="{ 'blank-line': dropCaret.blankLine }"
+      :style="{ left: `${dropCaret.x}px`, top: `${dropCaret.y}px`, height: `${dropCaret.height}px`, width: dropCaret.blankLine ? `${dropCaret.width}px` : undefined }"
       aria-hidden="true"
     ></span>
-    <div v-if="showPicker" class="asset-picker">
+    <teleport to="body">
+    <div v-if="showPicker" class="asset-picker" :style="pickerStyle">
       <button v-for="asset in pickerAssets" :key="asset.id" type="button" @click="insertAsset(asset)">
         <span class="pa-thumb">
-          <img v-if="asset.type === 'image' && thumbUrl(asset)" :src="thumbUrl(asset)" class="pa-thumb-img" :alt="asset.alias || asset.name" />
-          <img v-else-if="asset.type === 'video' && thumbUrl(asset)" :src="thumbUrl(asset)" class="pa-thumb-img" :alt="asset.alias || asset.name" />
+          <img v-if="asset.type === 'image' && thumbUrl(asset)" :src="thumbUrl(asset)" class="pa-thumb-img" :alt="asset.alias || asset.name" loading="lazy" decoding="async" />
+          <img v-else-if="asset.type === 'video' && thumbUrl(asset)" :src="thumbUrl(asset)" class="pa-thumb-img" :alt="asset.alias || asset.name" loading="lazy" decoding="async" />
           <span v-else class="pa-thumb-icon">{{ icon(asset.type) }}</span>
         </span>
         <span class="pa-name">{{ asset.alias || asset.name }}</span>
         <span v-if="asset._chosen" class="pa-chosen">已选</span>
       </button>
       <p v-if="!pickerAssets.length" class="pa-empty">没有匹配的素材</p>
+      <p v-else-if="pickerMatchCount > pickerAssets.length" class="pa-limit">共 {{ pickerMatchCount }} 个匹配素材，当前轻量展示前 {{ pickerAssets.length }} 个；继续在 @ 后输入名称即可筛选</p>
     </div>
-    <div v-if="referenced.length || unresolved.length" class="hints">
-      <el-tag v-for="asset in referenced" :key="asset.id" size="small" effect="plain" closable @close="removeReference(asset)">@{{ asset.alias || asset.name }}</el-tag>
-      <el-tag v-for="item in unresolved" :key="item.alias" type="warning" size="small" effect="plain">@{{ item.alias }} 待关联（名称重复）</el-tag>
+    </teleport>
+    <div v-if="unresolved.length" class="reference-warnings" role="status" aria-live="polite">
+      <span v-for="item in unresolved" :key="item.alias">@{{ item.alias }} 存在重名素材，请在上方重新选择</span>
     </div>
   </div>
 </template>
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { insertTokenAtOffset } from '@/utils/promptInsertion'
+import { ASSET_POINTER_CANCEL, ASSET_POINTER_DROP, ASSET_POINTER_MOVE } from '@/utils/assetPointerDrag'
 const props = defineProps({
   modelValue: { type: String, default: '' },
   /** 全部可选素材（不限于已选）；插入未选中的时会 emit pick 自动加入创作 */
@@ -52,25 +56,36 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue', 'pick', 'references'])
 const inputRef = ref(null)
+const editorRoot = ref(null)
 const text = ref(props.modelValue)
 const showPicker = ref(false)
 const dragging = ref(false)
-const dropCaret = ref({ visible: false, offset: 0, x: 0, y: 0, height: 18 })
+const dropCaret = ref({ visible: false, offset: 0, x: 0, y: 0, height: 18, width: 0, blankLine: false })
+const pickerStyle = ref({})
 let dragCounter = 0
 let lastCaretOffset = 0
+let layoutCache = null
+let dragRaf = 0
+let latestDragPoint = null
 
 watch(() => props.modelValue, (value) => { if (value !== text.value) text.value = value; syncReferences(value || '') })
 watch(() => props.assets, () => syncReferences(text.value), { deep: false })
-onMounted(() => syncReferences(text.value))
+onMounted(() => {
+  syncReferences(text.value)
+  window.addEventListener(ASSET_POINTER_MOVE, onAssetPointerMove)
+  window.addEventListener(ASSET_POINTER_DROP, onAssetPointerDrop)
+  window.addEventListener(ASSET_POINTER_CANCEL, onAssetPointerCancel)
+})
 
 // @ 选择器：显示全部素材，已选的标记 _chosen
 const pickerQuery = computed(() => (activeMentionRange()?.query || '').toLocaleLowerCase())
-const pickerAssets = computed(() =>
+const pickerMatches = computed(() =>
   (props.assets || [])
     .filter((a) => a && a.id != null && (!pickerQuery.value || String(a.alias || a.name || '').toLocaleLowerCase().includes(pickerQuery.value)))
     .map((a) => ({ ...a, _chosen: props.chosenIds.has(a.id) }))
-    .slice(0, 30)
 )
+const pickerAssets = computed(() => pickerMatches.value.slice(0, 30))
+const pickerMatchCount = computed(() => pickerMatches.value.length)
 const referenced = computed(() => {
   const tokens = referencesFromText(text.value)
   return tokens.flatMap((alias) => {
@@ -84,6 +99,7 @@ const unresolved = computed(() => referencesFromText(text.value).flatMap((alias)
 }))
 
 function onInput(value) {
+  clearLayoutCache()
   emit('update:modelValue', value)
   syncReferences(value)
   nextTick(onCursorChange)
@@ -109,6 +125,23 @@ function onCursorChange() {
   const textarea = inputRef.value?.textarea
   if (Number.isInteger(textarea?.selectionStart)) lastCaretOffset = textarea.selectionStart
   showPicker.value = !!activeMentionRange()
+  if (showPicker.value) nextTick(positionPickerAndMention)
+}
+onBeforeUnmount(() => {
+  clearLayoutCache()
+  window.removeEventListener(ASSET_POINTER_MOVE, onAssetPointerMove)
+  window.removeEventListener(ASSET_POINTER_DROP, onAssetPointerDrop)
+  window.removeEventListener(ASSET_POINTER_CANCEL, onAssetPointerCancel)
+})
+
+function positionPickerAndMention() {
+  const textarea = inputRef.value?.textarea
+  if (!textarea) return
+  const rect = textarea.getBoundingClientRect()
+  const width = Math.min(Math.max(280, window.innerWidth - 16), Math.max(420, Math.min(760, rect.width)))
+  const height = Math.min(260, Math.max(180, window.innerHeight - 24))
+  const top = rect.top >= height + 12 ? rect.top - height - 8 : rect.bottom + 8
+  pickerStyle.value = { position: 'fixed', left: `${Math.max(8, Math.min(window.innerWidth - width - 8, rect.left))}px`, top: `${Math.max(8, top)}px`, width: `${width}px`, maxHeight: `${height}px` }
 }
 
 function referencesFromText(value) {
@@ -122,12 +155,6 @@ function syncReferences(value) {
     if (matches.length > 1) unresolvedRefs.push({ alias, candidate_asset_ids: matches.map((asset) => asset.id) })
   })
   emit('references', { text: value || '', refs, unresolved: unresolvedRefs })
-}
-
-function removeReference(asset) {
-  const token = `@${asset.alias || asset.name}`
-  text.value = text.value.replace(token, '').replace(/\s{2,}/g, ' ').trim()
-  emit('update:modelValue', text.value); syncReferences(text.value)
 }
 
 /** 插入素材 @引用；若未选中则通知父组件加入创作 */
@@ -180,28 +207,40 @@ function thumbUrl(asset) {
 }
 
 // ===== 拖拽支持 =====
-function onDragEnter() { dragCounter += 1; dragging.value = true }
+function onDragEnter() { dragCounter += 1; dragging.value = true; clearLayoutCache(); ensureLayoutCache() }
 function onDragOver(event) {
   dragging.value = true
-  const point = textareaPointFromEvent(event)
-  dropCaret.value = { visible: true, ...point }
+  latestDragPoint = { clientX: event.clientX, clientY: event.clientY }
+  if (!dragRaf) dragRaf = requestAnimationFrame(() => {
+    dragRaf = 0
+    const point = textareaPointFromEvent(latestDragPoint)
+    dropCaret.value = { visible: true, ...point }
+  })
 }
 function onDragLeave() {
   dragCounter = Math.max(0, dragCounter - 1)
   if (!dragCounter) {
     dragging.value = false
     dropCaret.value.visible = false
+    clearLayoutCache()
   }
 }
 
-function textareaPointFromEvent(event) {
+function clearLayoutCache() {
+  if (layoutCache?.mirror) layoutCache.mirror.remove()
+  layoutCache = null
+  if (dragRaf) cancelAnimationFrame(dragRaf)
+  dragRaf = 0
+}
+
+function ensureLayoutCache() {
   const textarea = inputRef.value?.textarea
   const editor = textarea?.closest('.editor')
-  if (!textarea || !editor || !Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) {
-    return { offset: lastCaretOffset, x: 0, y: 0, height: 18 }
-  }
+  if (!textarea || !editor) return null
   const source = String(text.value || '')
   const rect = textarea.getBoundingClientRect()
+  if (layoutCache && layoutCache.source === source && layoutCache.width === rect.width && layoutCache.scrollTop === textarea.scrollTop) return layoutCache
+  clearLayoutCache()
   const editorRect = editor.getBoundingClientRect()
   const style = getComputedStyle(textarea)
   const mirror = document.createElement('div')
@@ -218,41 +257,85 @@ function textareaPointFromEvent(event) {
   mirror.scrollTop = textarea.scrollTop
   mirror.scrollLeft = textarea.scrollLeft
   const fallbackHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.5 || 18
-  let best = {
-    offset: source ? lastCaretOffset : 0,
-    x: rect.left + Number.parseFloat(style.paddingLeft || 0),
-    y: rect.top + Number.parseFloat(style.paddingTop || 0),
-    height: fallbackHeight,
-    score: Number.POSITIVE_INFINITY,
-  }
-  const consider = (offset, x, charRect) => {
-    const top = charRect?.top ?? best.y
-    const bottom = charRect?.bottom ?? (top + fallbackHeight)
-    const yDistance = event.clientY < top ? top - event.clientY : event.clientY > bottom ? event.clientY - bottom : 0
-    // Staying on the pointer's visual line is much more important than the
-    // horizontal distance; otherwise long lines can snap to an adjacent row.
-    const score = yDistance * 1000 + Math.abs(event.clientX - x)
-    if (score < best.score) best = { offset, x, y: top, height: Math.max(12, bottom - top || fallbackHeight), score }
-  }
+  const boundaries = []
+  const contentLeft = rect.left + Number.parseFloat(style.borderLeftWidth || 0) + Number.parseFloat(style.paddingLeft || 0)
+  let logicalLineY = rect.top + Number.parseFloat(style.borderTopWidth || 0) + Number.parseFloat(style.paddingTop || 0) - textarea.scrollTop
   try {
     for (let i = 0; i < source.length; i++) {
+      if (source[i] === '\n') {
+        boundaries.push({ offset: i, x: contentLeft, y: logicalLineY, height: fallbackHeight })
+        logicalLineY += fallbackHeight
+        boundaries.push({ offset: i + 1, x: contentLeft, y: logicalLineY, height: fallbackHeight })
+        continue
+      }
       const range = document.createRange()
       range.setStart(textNode, i)
       range.setEnd(textNode, i + 1)
       const charRect = range.getBoundingClientRect()
       if (!charRect.width && !charRect.height) continue
-      consider(i, charRect.left, charRect)
-      consider(i + 1, charRect.right, charRect)
+      logicalLineY = charRect.top
+      boundaries.push({ offset: i, x: charRect.left, y: charRect.top, height: Math.max(12, charRect.height || fallbackHeight) })
+      boundaries.push({ offset: i + 1, x: charRect.right, y: charRect.top, height: Math.max(12, charRect.height || fallbackHeight) })
     }
-  } finally {
-    mirror.remove()
+  } catch (_) {}
+  if (!boundaries.length) boundaries.push({ offset: 0, x: rect.left + Number.parseFloat(style.paddingLeft || 0), y: rect.top + Number.parseFloat(style.paddingTop || 0), height: fallbackHeight })
+  layoutCache = { source, width: rect.width, scrollTop: textarea.scrollTop, mirror, boundaries, editorRect }
+  return layoutCache
+}
+
+function textareaPointFromEvent(event) {
+  const cache = ensureLayoutCache()
+  if (!cache || !Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return { offset: lastCaretOffset, x: 0, y: 0, height: 18 }
+  let best = { ...cache.boundaries[0], score: Number.POSITIVE_INFINITY }
+  for (const boundary of cache.boundaries) {
+    const bottom = boundary.y + boundary.height
+    const yDistance = event.clientY < boundary.y ? boundary.y - event.clientY : event.clientY > bottom ? event.clientY - bottom : 0
+    const score = yDistance * 1000 + Math.abs(event.clientX - boundary.x)
+    if (score < best.score) best = { ...boundary, score }
   }
+  const lineStart = cache.source.lastIndexOf('\n', Math.max(0, best.offset - 1)) + 1
+  const nextBreak = cache.source.indexOf('\n', best.offset)
+  const lineEnd = nextBreak < 0 ? cache.source.length : nextBreak
+  const blankLine = cache.source.slice(lineStart, lineEnd).trim().length === 0
   return {
     offset: best.offset,
-    x: Math.max(0, Math.min(editorRect.width - 2, best.x - editorRect.left)),
-    y: Math.max(0, best.y - editorRect.top),
-    height: best.height,
+    x: blankLine ? Math.max(8, best.x - cache.editorRect.left) : Math.max(0, Math.min(cache.editorRect.width - 2, best.x - cache.editorRect.left)),
+    y: Math.max(0, best.y - cache.editorRect.top),
+    height: blankLine ? 2 : best.height,
+    width: blankLine ? Math.max(32, cache.editorRect.width - Math.max(16, (best.x - cache.editorRect.left) * 2)) : 3,
+    blankLine,
   }
+}
+
+function pointerInside(detail) {
+  const rect = editorRoot.value?.getBoundingClientRect()
+  return !!rect && detail.clientX >= rect.left && detail.clientX <= rect.right && detail.clientY >= rect.top && detail.clientY <= rect.bottom
+}
+
+function onAssetPointerMove(event) {
+  const detail = event.detail || {}
+  if (!pointerInside(detail)) {
+    dragging.value = false
+    dropCaret.value.visible = false
+    return
+  }
+  dragging.value = true
+  dropCaret.value = { visible: true, ...textareaPointFromEvent(detail) }
+}
+
+function onAssetPointerDrop(event) {
+  const detail = event.detail || {}
+  const point = pointerInside(detail) ? (dropCaret.value.visible ? dropCaret.value : textareaPointFromEvent(detail)) : null
+  dragging.value = false
+  dropCaret.value.visible = false
+  clearLayoutCache()
+  if (point && detail.asset?.id) insertAsset(detail.asset, { offset: point.offset })
+}
+
+function onAssetPointerCancel() {
+  dragging.value = false
+  dropCaret.value.visible = false
+  clearLayoutCache()
 }
 
 function onDrop(e) {
@@ -260,6 +343,7 @@ function onDrop(e) {
   const point = dropCaret.value.visible ? dropCaret.value : textareaPointFromEvent(e)
   dropCaret.value.visible = false
   dragCounter = 0
+  clearLayoutCache()
   const raw = e.dataTransfer?.getData('application/x-localminidrama-asset') || e.dataTransfer?.getData('application/json')
   let asset = null
   try { asset = raw ? JSON.parse(raw) : null } catch (_) { asset = null }
@@ -283,26 +367,28 @@ function onDrop(e) {
 }
 .drop-status.active { color: var(--accent); font-weight: 600; }
 .drop-caret { position: absolute; width: 3px; min-height: 16px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-page) 70%, transparent), 0 0 12px var(--accent); pointer-events: none; z-index: 6; animation: drop-caret-pulse .8s ease-in-out infinite alternate; }
+.drop-caret.blank-line { min-height: 2px; transform: translateY(.7em); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-page) 70%, transparent), 0 0 10px color-mix(in srgb, var(--accent) 62%, transparent); }
+.drop-caret.blank-line::before { content: ''; position: absolute; inset-inline-start: -3px; inset-block-start: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 @keyframes drop-caret-pulse { to { opacity: .45; } }
 .asset-picker {
-  /* The editor sits in a scrollable side panel. Keeping the picker in normal
-     flow prevents overflow:auto from clipping the @ menu at the panel edge. */
-  position: relative; z-index: 30; margin-top: 5px;
-  max-height: 200px; overflow: auto; background: var(--bg-surface, #202020);
-  border: 1px solid var(--border-color, #555); border-radius: var(--radius-md, 6px); box-shadow: 0 8px 20px #0005; padding: 4px;
+  z-index: 5000; overflow: auto; background: color-mix(in srgb,var(--bg-surface,#202020) 74%,transparent);
+  border: 1px solid color-mix(in srgb,var(--border-color,#777) 72%,transparent); border-radius: var(--radius-md, 8px); box-shadow: 0 12px 32px #0006; padding: 8px;
+  backdrop-filter:blur(14px) saturate(.82); -webkit-backdrop-filter:blur(14px) saturate(.82);
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px;
 }
 .asset-picker button {
-  border: 0; background: transparent; width: 100%; text-align: left;
-  padding: 7px 8px; border-radius: 5px; cursor: pointer; display: flex; align-items: center; gap: 6px;
+  border: 0; background: transparent; width: 100%; min-width:0; text-align: left;
+  padding: 7px 8px; border-radius: 5px; cursor: pointer; display:grid; grid-template-columns:72px minmax(0,1fr); align-items:center; gap:8px;
 }
 .asset-picker button { color: var(--text-regular); }
-.asset-picker button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.asset-picker button:hover,.asset-picker button:focus-visible { background:color-mix(in srgb,var(--bg-hover) 78%,transparent); color: var(--text-primary); }
 .pa-icon { font-size: 14px; }
-.pa-thumb { width: 96px; height: 96px; flex: 0 0 96px; display: grid; place-items: center; overflow: hidden; border-radius: 5px; background: var(--bg-hover); }
+.pa-thumb { width:72px; height:54px; display:grid; place-items:center; overflow:hidden; border-radius:5px; background:var(--bg-hover); }
 .pa-thumb-img { width: 100%; height: 100%; object-fit: cover; }
 .pa-thumb-icon { font-size: 28px; }
 .pa-name { flex: 1; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pa-chosen { font-size: 10px; color: var(--text-primary); background: var(--bg-active); padding: 1px 5px; border-radius: 3px; }
-.pa-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 12px; }
-.hints { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
+.pa-chosen { grid-column:2; width:max-content; font-size: 10px; color: var(--text-primary); background: var(--bg-active); padding: 1px 5px; border-radius: 3px; }
+.pa-empty { grid-column:1/-1; font-size: 12px; color: var(--text-muted); text-align: center; padding: 12px; }
+.pa-limit { position:sticky; bottom:-8px; grid-column:1/-1; margin:0 -8px -8px; padding:8px 10px; border-top:1px solid color-mix(in srgb,var(--border-color,#777) 60%,transparent); background:color-mix(in srgb,var(--bg-surface,#202020) 86%,transparent); color:var(--text-muted); font-size:11px; line-height:1.45; backdrop-filter:blur(10px); }
+.reference-warnings { display: grid; gap: 3px; margin-top: 6px; color: var(--status-warning); font-size: 11px; line-height: 1.45; }
 </style>
