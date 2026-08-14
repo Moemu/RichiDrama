@@ -117,6 +117,7 @@ async function archiveLocalFile(cfg, storageRoot, localPath, log, options = {}) 
 }
 
 function archiveStamp() { return new Date().toISOString(); }
+const activeMirrors = new Map();
 function retentionDays(cfg, sourceType) {
   const configured = ossConfig(cfg).local_retention_days;
   const values = typeof configured === 'object' && configured ? configured : { default: configured };
@@ -144,7 +145,7 @@ function trackArchive(db, localPath, sourceType, sourceId, patch = {}) {
   } catch (_) { /* Older unit-test schemas and pre-migration databases remain local-first. */ }
 }
 
-async function mirrorAndTrack(db, cfg, storageRoot, localPath, sourceType, sourceId, log, options = {}) {
+async function mirrorAndTrackOnce(db, cfg, storageRoot, localPath, sourceType, sourceId, log, options = {}) {
   const relative = normalizeKey(localPath);
   if (!isOss(cfg)) {
     trackArchive(db, relative, sourceType, sourceId, { archive_status: 'local_ready' });
@@ -165,6 +166,21 @@ async function mirrorAndTrack(db, cfg, storageRoot, localPath, sourceType, sourc
       archive_error: String(error.message || 'OSS mirror failed').slice(0, 500),
     });
     throw error;
+  }
+}
+
+// Completion and restart-recovery can request the same stable media path at
+// nearly the same time. Share that upload instead of writing the same OSS
+// object twice and emitting duplicate success logs.
+async function mirrorAndTrack(db, cfg, storageRoot, localPath, sourceType, sourceId, log, options = {}) {
+  const key = normalizeKey(localPath);
+  const active = activeMirrors.get(key);
+  if (active) return active;
+  const work = mirrorAndTrackOnce(db, cfg, storageRoot, key, sourceType, sourceId, log, options);
+  activeMirrors.set(key, work);
+  try { return await work; }
+  finally {
+    if (activeMirrors.get(key) === work) activeMirrors.delete(key);
   }
 }
 

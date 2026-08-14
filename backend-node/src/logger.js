@@ -1,14 +1,26 @@
 const fs = require('fs');
 const path = require('path');
 
+const SENSITIVE_KEY = /(?:api[_-]?key|access[_-]?key|secret|authorization|cookie|password|token|signature|sign)/i;
+const REDACTED = '<redacted>';
+
+function sanitize(value, key = '', depth = 0) {
+  if (SENSITIVE_KEY.test(String(key))) return REDACTED;
+  if (depth > 8 || value == null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((item) => sanitize(item, '', depth + 1));
+  const out = {};
+  for (const [childKey, childValue] of Object.entries(value)) out[childKey] = sanitize(childValue, childKey, depth + 1);
+  return out;
+}
+
 // 简单 logger，和 Go 端行为接近；若设置 LOG_FILE 则同时追加到该文件（便于打包 exe 双击时查日志）
 function log(level, msg, ...args) {
   const time = new Date().toISOString();
   let rest = '';
   if (args.length && typeof args[0] === 'object' && args[0] !== null && !Array.isArray(args[0])) {
-    rest = ' ' + JSON.stringify(args[0]);
+    rest = ' ' + JSON.stringify(sanitize(args[0]));
   } else if (args.length) {
-    rest = ' ' + args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+    rest = ' ' + args.map((a) => (typeof a === 'object' ? JSON.stringify(sanitize(a)) : String(a))).join(' ');
   }
   const line = `${time} [${level}] ${msg}${rest}\n`;
   try {

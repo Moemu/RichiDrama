@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { randomUUID } = require('crypto');
 const { getDb } = require('./db/index.js');
 const { loadConfig } = require('./config/index.js');
 const logger = require('./logger.js');
@@ -73,7 +74,20 @@ function createApp() {
   }));
 
   app.use((req, res, next) => {
-    log.info(req.method, req.path);
+    const requestId = String(req.get('x-request-id') || randomUUID()).slice(0, 128);
+    const startedAt = process.hrtime.bigint();
+    req.requestId = requestId;
+    res.setHeader('X-Request-ID', requestId);
+    res.on('finish', () => {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      log.info('HTTP request completed', {
+        request_id: requestId,
+        method: req.method,
+        path: req.path,
+        status_code: res.statusCode,
+        duration_ms: Math.round(durationMs * 100) / 100,
+      });
+    });
     next();
   });
 

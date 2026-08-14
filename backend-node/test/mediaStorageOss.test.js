@@ -58,6 +58,28 @@ test('tracked OSS mirroring preserves the local hot copy after upload', async (t
   assert.deepEqual(db.prepare('SELECT archive_status, oss_key FROM media_archive_records').get(), { archive_status: 'oss_synced', oss_key: 'drama/videos/hot.mp4' });
 });
 
+test('concurrent archive requests for one stable path share one OSS upload', async (t) => {
+  let uploads = 0;
+  const server = http.createServer((req, res) => {
+    uploads += 1;
+    req.resume();
+    req.on('end', () => setTimeout(() => { res.writeHead(200, { ETag: 'one-upload' }); res.end(); }, 20));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-oss-dedupe-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'videos'), { recursive: true }); fs.writeFileSync(path.join(root, 'videos', 'same.mp4'), 'same-copy');
+  const db = new Database(':memory:');
+  db.exec('CREATE TABLE media_archive_records (local_path TEXT PRIMARY KEY, source_type TEXT, source_id INTEGER, oss_key TEXT, oss_etag TEXT, archive_status TEXT, archive_attempts INTEGER, archive_error TEXT, verified_at TEXT, local_delete_after TEXT, created_at TEXT, updated_at TEXT)');
+  const cfg = ossConfig(`http://127.0.0.1:${server.address().port}`);
+  await Promise.all([
+    mirrorAndTrack(db, cfg, root, 'videos/same.mp4', 'video_generation', 10, null),
+    mirrorAndTrack(db, cfg, root, 'videos/same.mp4', 'video_generation', 10, null),
+  ]);
+  assert.equal(uploads, 1);
+});
+
 test('retention prunes a local hot copy only after OSS HEAD verification succeeds', async (t) => {
   const methods = [];
   const server = http.createServer((req, res) => {
