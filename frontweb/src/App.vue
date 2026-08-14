@@ -1,10 +1,12 @@
 <template>
   <div class="app">
     <router-view />
+    <AccountBalanceBadge />
   </div>
 </template>
 
-<script setup lang="ts">
+<script setup>
+import AccountBalanceBadge from './components/AccountBalanceBadge.vue'
 </script>
 
 <style>
