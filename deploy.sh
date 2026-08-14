@@ -84,7 +84,9 @@ log "[5/6] 启动容器..."
 docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans
 
 # 防止 compose 环境变量或工作目录变化后把空目录挂载到容器，造成“旧资源不存在”。
-MOUNT_SOURCE="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/backend-node/data"}}{{.Source}}{{end}}{{end}}' local-minidrama 2>/dev/null || true)"
+APP_CONTAINER_ID="$(docker compose -f "${COMPOSE_FILE}" ps -q app 2>/dev/null || true)"
+[[ -n "${APP_CONTAINER_ID}" ]] || fail "未找到 app 容器，无法校验数据卷挂载"
+MOUNT_SOURCE="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/backend-node/data"}}{{.Source}}{{end}}{{end}}' "${APP_CONTAINER_ID}" 2>/dev/null || true)"
 [[ -n "${MOUNT_SOURCE}" ]] || fail "容器未挂载 /app/backend-node/data"
 [[ "$(realpath -m "${MOUNT_SOURCE}")" = "$(realpath -m "${DATA_DIR}")" ]] || fail "数据卷挂载错误: ${MOUNT_SOURCE}（期望 ${DATA_DIR}）"
 log "数据卷挂载已校验: ${MOUNT_SOURCE}"
