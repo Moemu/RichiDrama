@@ -25,6 +25,17 @@ fi
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 ARCHIVE="${BACKUP_DIR}/minidrama-data-${STAMP}.tar.gz"
-tar -C "${DATA_DIR}" -czf "${ARCHIVE}" .
+# Video and image workers keep writing under the media directory while a
+# deployment backup is taken.  A file that is replaced by an atomic media
+# finalization during this window must not cancel an otherwise safe release:
+# the SQLite checkpoint above is the transactional database boundary and the
+# completed media is also mirrored to OSS.  GNU tar records those races as
+# warnings; ignore only unreadable/changing input files, then validate that a
+# non-empty archive was still created before continuing.
+tar -C "${DATA_DIR}" --ignore-failed-read \
+  --warning=no-file-changed --warning=no-file-removed \
+  -czf "${ARCHIVE}" .
+[[ -s "${ARCHIVE}" ]] || { rm -f -- "${ARCHIVE}"; echo "Backup archive is empty." >&2; exit 1; }
+tar -tzf "${ARCHIVE}" >/dev/null
 find "${BACKUP_DIR}" -maxdepth 1 -type f -name 'minidrama-data-*.tar.gz' -printf '%T@ %p\n' | sort -nr | tail -n +15 | cut -d' ' -f2- | xargs -r rm -f --
 ${QUIET} || echo "Backup created: ${ARCHIVE}"
