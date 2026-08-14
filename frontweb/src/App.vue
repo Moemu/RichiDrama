@@ -1,7 +1,7 @@
 <template>
   <div class="app">
-    <router-view />
     <AccountBalanceBadge />
+    <router-view />
   </div>
 </template>
 
