@@ -143,8 +143,8 @@ function createApp() {
   } else {
     app.get('/', (req, res) => {
       res.send(
-        '<!DOCTYPE html><html><head><meta charset="utf-8"><title>LocalMiniDrama</title></head><body>' +
-          '<h1>LocalMiniDrama API</h1><p>后端已启动。请先构建前端：</p>' +
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><title>瑞池传媒短剧平台</title></head><body>' +
+          '<h1>瑞池传媒短剧平台 API</h1><p>后端已启动。请先构建前端：</p>' +
           '<pre>cd web &amp;&amp; pnpm install &amp;&amp; pnpm build</pre>' +
           '<p>然后将 <code>web/dist</code> 放到与 backend-node 同级的 <code>web/dist</code>，或访问 <a href="/health">/health</a> 检查接口。</p></body></html>'
       );

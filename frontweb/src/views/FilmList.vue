@@ -3,8 +3,8 @@
     <header class="header">
       <div class="header-inner">
         <h1 class="logo">
-          <span class="logo-main">本地短剧助手</span>
-          <span class="logo-sub">LocalMiniDrama</span>
+          <span class="richi-brand-mark" aria-hidden="true"><img src="/brand/richi-logo-color.png" alt="" /></span>
+          <span class="richi-brand-copy"><span class="logo-main">瑞池传媒短剧平台</span><span class="logo-sub">RICH MEDIA</span></span>
         </h1>
         <nav class="header-library" aria-label="创作资源">
           <el-dropdown trigger="click" @command="handleAssetCommand">

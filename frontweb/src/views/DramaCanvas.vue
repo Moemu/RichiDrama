@@ -3,8 +3,8 @@
     <header class="header">
       <div class="header-inner">
         <h1 class="logo" @click="router.push('/')">
-          <span class="logo-main">本地短剧助手</span>
-          <span class="logo-sub">画布模式</span>
+          <span class="richi-brand-mark" aria-hidden="true"><img src="/brand/richi-logo-color.png" alt="" /></span>
+          <span class="richi-brand-copy"><span class="logo-main">瑞池传媒短剧平台</span><span class="logo-sub">画布模式</span></span>
         </h1>
         <span class="breadcrumb-sep">›</span>
         <span class="page-title">{{ drama?.title || '加载中…' }}</span>

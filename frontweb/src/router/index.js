@@ -81,7 +81,7 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   if (to.meta.title) {
-    document.title = `${to.meta.title} - LocalMiniDrama`
+    document.title = `${to.meta.title} - 瑞池传媒短剧平台`
   }
   const user = JSON.parse(localStorage.getItem('lmd_auth_user') || 'null')
   if (!to.meta.public && !localStorage.getItem('lmd_auth_token')) return { path: '/login', query: { redirect: to.fullPath } }

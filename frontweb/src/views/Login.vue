@@ -17,13 +17,11 @@
     </div>
 
     <header class="product-header">
-      <a class="brand-lockup" href="/" aria-label="LocalMiniDrama 首页">
-        <span class="brand-symbol" aria-hidden="true">
-          <i></i><i></i><i></i><i></i><i></i>
-        </span>
+      <a class="brand-lockup" href="/" aria-label="瑞池传媒短剧平台首页">
+        <span class="richi-brand-mark" aria-hidden="true"><img src="/brand/richi-logo-color.png" alt="" /></span>
         <span>
-          <strong>LocalMiniDrama</strong>
-          <small>AI STORY STUDIO</small>
+          <strong>瑞池传媒短剧平台</strong>
+          <small>RICH MEDIA · AI DRAMA</small>
         </span>
       </a>
 
@@ -179,7 +177,7 @@
     </section>
 
     <footer class="page-footer">
-      <span>© 2026 LocalMiniDrama</span>
+      <span>© 2026 瑞池传媒</span>
       <span>从第一句灵感，到最后一个镜头。</span>
     </footer>
   </main>
