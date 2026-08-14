@@ -42,6 +42,7 @@ module.exports = function adminRoutes(db) {
     usage: (req, res) => response.success(res, billing.pagedUsage(db, req.query)),
     reconciliationCases: (req, res) => response.success(res, billing.listReconciliationCases(db, req.query)),
     collectSettlementSupplement: guarded((req, res) => response.success(res, billing.collectSettlementSupplement(db, req.auth, req.params.id, req.body?.reason))),
+    collectHistoricalSettlementSupplements: guarded((req, res) => response.success(res, billing.collectHistoricalSettlementSupplements(db, req.auth, req.body || {}))),
     settleReconciliationCase: guarded((req, res) => response.success(res, billing.settleReconciliationCase(db, req.auth, req.params.id, req.body || {}))),
     waiveReconciliationCase: guarded((req, res) => response.success(res, billing.waiveReconciliationCase(db, req.auth, req.params.id, req.body?.reason))),
     audit: (req, res) => response.success(res, billing.pagedAuditLogs(db, req.query)),

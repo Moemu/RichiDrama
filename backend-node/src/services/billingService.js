@@ -255,6 +255,70 @@ function collectSettlementSupplement(db, actor, authorizationId, reason) {
   return { authorization_id: authorizationId, transaction_id: id, supplemental_micro: supplementalMicro, supplemental: microToCredits(supplementalMicro), reused: false };
 }
 
+function historicalSettlementSupplementCandidates(db, actor) {
+  if (actor.role !== 'admin') throw new Error('仅管理员可以查看历史结算补扣范围');
+  const rows = db.prepare(`SELECT a.id AS authorization_id, a.user_id, a.amount_micro AS authorized_micro,
+      s.id AS settlement_transaction_id, s.amount_micro AS settlement_amount_micro,
+      u.id AS usage_log_id, u.charged_micro AS usage_charged_micro, u.usage_json, a.snapshot_json
+    FROM billing_transactions a
+    JOIN billing_transactions s ON s.authorization_id = a.id AND s.type = 'settlement'
+    JOIN billing_usage_logs u ON u.authorization_id = a.id
+    WHERE a.type = 'authorization'
+    ORDER BY a.created_at, a.id`).all();
+  const supplementalStmt = db.prepare("SELECT COALESCE(SUM(-amount_micro), 0) AS amount FROM billing_transactions WHERE authorization_id=? AND type='adjustment' AND idempotency_key LIKE ?");
+  return rows.map((row) => {
+    try {
+      const actual = calculateFromSnapshot(parse(row.snapshot_json), parse(row.usage_json));
+      const alreadySupplemented = Number(supplementalStmt.get(row.authorization_id, `settlement-supplement:${row.authorization_id}:%`).amount || 0);
+      const originallyCharged = Math.abs(Number(row.settlement_amount_micro || 0));
+      const supplementalMicro = Math.max(0, actual.amount_micro - originallyCharged - alreadySupplemented);
+      return {
+        authorization_id: row.authorization_id,
+        user_id: row.user_id,
+        settlement_transaction_id: row.settlement_transaction_id,
+        authorized_micro: Number(row.authorized_micro || 0),
+        originally_charged_micro: originallyCharged,
+        actual_micro: actual.amount_micro,
+        already_supplemented_micro: alreadySupplemented,
+        supplemental_micro: supplementalMicro,
+        usage: actual.usage,
+      };
+    } catch (error) {
+      return { authorization_id: row.authorization_id, user_id: row.user_id, error: error.message, supplemental_micro: 0 };
+    }
+  }).filter((row) => row.supplemental_micro > 0 || row.error);
+}
+
+// This is intentionally explicit and admin-only. It repairs every legacy
+// capped settlement from the immutable authorization snapshot and the
+// persisted provider usage, never from today's price book. Each item delegates
+// to the same idempotent per-authorization collector, so rerunning a batch is
+// safe. Accounts without enough available balance are reported, not overdraft.
+function collectHistoricalSettlementSupplements(db, actor, input = {}) {
+  if (actor.role !== 'admin') throw new Error('仅管理员可以批量补扣历史结算差额');
+  if (input.confirm !== true) throw new Error('请显式确认后再执行历史结算补扣');
+  const candidates = historicalSettlementSupplementCandidates(db, actor).filter((row) => row.supplemental_micro > 0);
+  const results = []; let collectedMicro = 0; let insufficientCount = 0; let errorCount = 0;
+  for (const candidate of candidates) {
+    try {
+      const result = collectSettlementSupplement(db, actor, candidate.authorization_id, input.reason || '按供应商真实用量批量补扣历史结算差额');
+      collectedMicro += Number(result.supplemental_micro || 0);
+      results.push({ ...result, status: result.reused ? 'reused' : 'collected' });
+    } catch (error) {
+      if (error.code === 'BILLING_ACTUAL_USAGE_EXCEEDS_AVAILABLE_BALANCE') {
+        insufficientCount += 1;
+        results.push({ authorization_id: candidate.authorization_id, user_id: candidate.user_id, supplemental_micro: candidate.supplemental_micro, status: 'insufficient_balance', error: error.message });
+      } else {
+        errorCount += 1;
+        results.push({ authorization_id: candidate.authorization_id, user_id: candidate.user_id, supplemental_micro: candidate.supplemental_micro, status: 'error', error: error.message });
+      }
+    }
+  }
+  const summary = { candidate_count: candidates.length, collected_count: results.filter((row) => row.status === 'collected').length, collected_micro: collectedMicro, insufficient_balance_count: insufficientCount, error_count: errorCount };
+  audit(db, actor.id, 'billing.settlement.supplement.batch', 'billing', 'historical-capped-settlements', summary);
+  return { ...summary, collected: microToCredits(collectedMicro), results };
+}
+
 function voidAuthorization(db, user, authorizationId, reason) {
   const auth = db.prepare("SELECT * FROM billing_transactions WHERE id = ? AND type = 'authorization'").get(authorizationId);
   if (!auth || (auth.user_id !== user.id && user.role !== 'admin')) throw new Error('预授权不存在');
@@ -658,4 +722,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { account, publicAccount, audit, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, collectSettlementSupplement, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, listReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, pagedAuditLogs };
+module.exports = { account, publicAccount, audit, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, listReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, pagedAuditLogs };

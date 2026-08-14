@@ -93,6 +93,38 @@ test('an administrator can collect a historical capped-settlement difference exa
   } finally { teardown(dbPath); }
 });
 
+test('bulk historical settlement repair collects every eligible user and reports insufficient balances', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const funded = auth.createUser(db, { username: 'bulk-funded', password: 'creator123' }, admin.id);
+    const empty = auth.createUser(db, { username: 'bulk-empty', password: 'creator123' }, admin.id);
+    billing.savePriceBook(db, admin.id, { name: 'default', status: 'published', items: [{ service_type: 'image', model: 'seedream', meter: 'image', unit_price: 25 }] });
+    billing.adjustBalance(db, admin.id, funded.id, 200, 'test points');
+    billing.adjustBalance(db, admin.id, empty.id, 25, 'test points');
+    for (const user of [funded, empty]) {
+      const authorization = billing.createAuthorization(db, { id: user.id, role: 'user' }, { idempotency_key: `bulk-${user.id}`, service_type: 'image', model: 'seedream', usage: { image: 1 } });
+      billing.settleAuthorization(db, { id: user.id, role: 'user' }, authorization.authorization_id, { usage: { image: 1 } });
+      db.prepare('UPDATE billing_usage_logs SET usage_json=? WHERE authorization_id=?').run(JSON.stringify({ image: 2 }), authorization.authorization_id);
+    }
+
+    const candidates = billing.historicalSettlementSupplementCandidates(db, admin);
+    assert.equal(candidates.length, 2);
+    assert.throws(() => billing.collectHistoricalSettlementSupplements(db, admin), /显式确认/);
+    const repaired = billing.collectHistoricalSettlementSupplements(db, admin, { confirm: true, reason: '批量修复历史少扣' });
+    assert.equal(repaired.candidate_count, 2);
+    assert.equal(repaired.collected_count, 1);
+    assert.equal(repaired.collected_micro, 250000);
+    assert.equal(repaired.insufficient_balance_count, 1);
+    assert.equal(billing.account(db, funded.id).balance_micro, 1500000);
+    assert.equal(billing.account(db, empty.id).balance_micro, 0);
+    assert.equal(billing.historicalSettlementSupplementCandidates(db, admin).length, 1);
+    const rerun = billing.collectHistoricalSettlementSupplements(db, admin, { confirm: true });
+    assert.equal(rerun.collected_count, 0);
+    assert.equal(rerun.insufficient_balance_count, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_audit_logs WHERE action='billing.settlement.supplement.batch'").get().count, 2);
+  } finally { teardown(dbPath); }
+});
+
 test('setting a balance targets the requested amount instead of adding to it', () => {
   const { db, dbPath, admin } = setup();
   try {

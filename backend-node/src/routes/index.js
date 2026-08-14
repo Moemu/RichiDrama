@@ -105,6 +105,7 @@ function setupRouter(cfg, db, log) {
   adminRouter.get('/usage', admin.usage);
   adminRouter.get('/billing-reconciliations', admin.reconciliationCases);
   adminRouter.post('/billing-authorizations/:id/collect-settlement-supplement', admin.collectSettlementSupplement);
+  adminRouter.post('/billing-authorizations/collect-historical-settlement-supplements', admin.collectHistoricalSettlementSupplements);
   adminRouter.post('/billing-reconciliations/:id/settle', admin.settleReconciliationCase);
   adminRouter.post('/billing-reconciliations/:id/waive', admin.waiveReconciliationCase);
   adminRouter.get('/audit-logs', admin.audit);
