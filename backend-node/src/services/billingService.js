@@ -179,23 +179,80 @@ function settleAuthorization(db, user, authorizationId, input = {}) {
   const completed = db.prepare('SELECT * FROM billing_usage_logs WHERE authorization_id = ?').get(authorizationId);
   if (completed) return { transaction_id: completed.transaction_id, charged_micro: completed.charged_micro, charged: microToCredits(completed.charged_micro), reused: true };
   const snapshot = parse(auth.snapshot_json); const actual = calculateFromSnapshot(snapshot, input.usage); const at = now(); const id = uuid();
-  // A provider may report more usage than the estimate. Never consume an amount
-  // that was not frozen; the capped amount is recorded in the settlement snapshot.
-  const chargedMicro = Math.min(actual.amount_micro, auth.amount_micro);
+  // The authorization is an estimate, not a settlement cap. Once a provider
+  // returns verifiable usage we must charge that real usage, including the
+  // supplemental amount above the reservation. Do this atomically only when
+  // the account can cover it after this authorization is released; otherwise
+  // leave the authorization frozen so the caller can create a reconciliation
+  // case instead of silently undercharging or overdrawing the account.
+  const chargedMicro = actual.amount_micro;
+  const supplementalMicro = Math.max(0, chargedMicro - auth.amount_micro);
   const execute = db.transaction(() => {
     const acct = account(db, auth.user_id);
     if (acct.frozen_micro < auth.amount_micro) throw new Error('预授权冻结状态异常');
+    const availableAfterRelease = acct.balance_micro - (acct.frozen_micro - auth.amount_micro);
+    if (availableAfterRelease < chargedMicro) {
+      const error = new Error('实际用量超出预授权且可用余额不足，等待管理员对账');
+      error.code = 'BILLING_ACTUAL_USAGE_EXCEEDS_AVAILABLE_BALANCE';
+      error.actual_micro = chargedMicro;
+      error.authorized_micro = auth.amount_micro;
+      error.supplemental_micro = supplementalMicro;
+      throw error;
+    }
     const balanceAfter = acct.balance_micro - chargedMicro; const frozenAfter = acct.frozen_micro - auth.amount_micro;
     db.prepare(`UPDATE billing_accounts SET balance_micro = ?, frozen_micro = ?, total_consumed_micro = total_consumed_micro + ?, updated_at = ? WHERE user_id = ?`)
       .run(balanceAfter, frozenAfter, chargedMicro, at, auth.user_id);
     db.prepare(`INSERT INTO billing_transactions (id, user_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, reference_type, reference_id, reason, snapshot_json, created_at)
       VALUES (?, ?, 'settlement', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, auth.user_id, -chargedMicro, balanceAfter, frozenAfter, authorizationId, auth.reference_type, auth.reference_id, input.reason || null, json({ ...snapshot, actual_usage: actual.usage, charged_micro: chargedMicro, overage_micro: Math.max(0, actual.amount_micro - chargedMicro) }), at);
+      .run(id, auth.user_id, -chargedMicro, balanceAfter, frozenAfter, authorizationId, auth.reference_type, auth.reference_id, input.reason || null, json({ ...snapshot, actual_usage: actual.usage, authorized_micro: auth.amount_micro, charged_micro: chargedMicro, supplemental_charged_micro: supplementalMicro, overage_micro: supplementalMicro }), at);
     db.prepare(`INSERT INTO billing_usage_logs (id, user_id, transaction_id, authorization_id, service_type, model, usage_json, charged_micro, provider_request_id, reference_type, reference_id, snapshot_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(uuid(), auth.user_id, id, authorizationId, snapshot.service_type, snapshot.model, json(actual.usage), chargedMicro, input.provider_request_id || null, auth.reference_type, auth.reference_id, json(snapshot), at);
   });
-  execute(); return { transaction_id: id, charged_micro: chargedMicro, charged: microToCredits(chargedMicro), overage_micro: Math.max(0, actual.amount_micro - chargedMicro), reused: false };
+  execute(); return { transaction_id: id, charged_micro: chargedMicro, charged: microToCredits(chargedMicro), supplemental_charged_micro: supplementalMicro, overage_micro: supplementalMicro, reused: false };
+}
+
+// Historical capped settlements must be repaired through a linked, idempotent
+// ledger entry instead of an opaque balance adjustment. This is deliberately
+// admin-only: it uses the already persisted provider usage and authorization
+// price snapshot, and never re-prices an old task from today's price book.
+function collectSettlementSupplement(db, actor, authorizationId, reason) {
+  if (actor.role !== 'admin') throw new Error('仅管理员可以补扣已结算的实际用量差额');
+  const auth = getAuthorization(db, authorizationId);
+  if (!auth) throw new Error('预授权不存在');
+  const settlement = db.prepare("SELECT * FROM billing_transactions WHERE authorization_id=? AND type='settlement' ORDER BY created_at LIMIT 1").get(authorizationId);
+  const usageLog = db.prepare('SELECT * FROM billing_usage_logs WHERE authorization_id=? ORDER BY created_at LIMIT 1').get(authorizationId);
+  if (!settlement || !usageLog) throw new Error('该预授权尚无可补扣的已结算真实用量');
+  const actual = calculateFromSnapshot(auth.snapshot, parse(usageLog.usage_json));
+  const alreadySupplemented = Number(db.prepare("SELECT COALESCE(SUM(-amount_micro), 0) AS amount FROM billing_transactions WHERE authorization_id=? AND type='adjustment' AND idempotency_key LIKE ?").get(authorizationId, `settlement-supplement:${authorizationId}:%`).amount || 0);
+  const originallyCharged = Math.abs(Number(settlement.amount_micro || 0));
+  const supplementalMicro = Math.max(0, actual.amount_micro - originallyCharged - alreadySupplemented);
+  if (!supplementalMicro) return { authorization_id: authorizationId, supplemental_micro: 0, supplemental: 0, reused: true };
+  const idempotencyKey = `settlement-supplement:${authorizationId}:${actual.amount_micro}`;
+  const existing = db.prepare('SELECT * FROM billing_transactions WHERE user_id=? AND idempotency_key=?').get(auth.user_id, idempotencyKey);
+  if (existing) return { authorization_id: authorizationId, transaction_id: existing.id, supplemental_micro: Math.abs(Number(existing.amount_micro || 0)), supplemental: microToCredits(Math.abs(Number(existing.amount_micro || 0))), reused: true };
+  const at = now(); const id = uuid();
+  db.transaction(() => {
+    const acct = account(db, auth.user_id);
+    if (acct.balance_micro - acct.frozen_micro < supplementalMicro) {
+      const error = new Error('历史实际用量差额补扣时可用余额不足，等待管理员对账');
+      error.code = 'BILLING_ACTUAL_USAGE_EXCEEDS_AVAILABLE_BALANCE';
+      error.actual_micro = actual.amount_micro;
+      error.supplemental_micro = supplementalMicro;
+      throw error;
+    }
+    const balanceAfter = acct.balance_micro - supplementalMicro;
+    db.prepare('UPDATE billing_accounts SET balance_micro=?, total_consumed_micro=total_consumed_micro+?, updated_at=? WHERE user_id=?')
+      .run(balanceAfter, supplementalMicro, at, auth.user_id);
+    db.prepare(`INSERT INTO billing_transactions (id, user_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, idempotency_key, reference_type, reference_id, reason, created_by, snapshot_json, created_at)
+      VALUES (?, ?, 'adjustment', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, auth.user_id, -supplementalMicro, balanceAfter, acct.frozen_micro, authorizationId, idempotencyKey, auth.reference_type, auth.reference_id,
+        String(reason || '').trim() || '按供应商真实用量补扣历史结算差额', actor.id,
+        json({ authorization_id: authorizationId, settlement_transaction_id: settlement.id, actual_usage: actual.usage, actual_micro: actual.amount_micro, originally_charged_micro: originallyCharged, already_supplemented_micro: alreadySupplemented, supplemental_micro: supplementalMicro }), at);
+    db.prepare('UPDATE billing_usage_logs SET charged_micro=charged_micro+? WHERE id=?').run(supplementalMicro, usageLog.id);
+  })();
+  audit(db, actor.id, 'billing.settlement.supplement', 'authorization', authorizationId, { settlement_transaction_id: settlement.id, supplemental_micro: supplementalMicro, reason: reason || null });
+  return { authorization_id: authorizationId, transaction_id: id, supplemental_micro: supplementalMicro, supplemental: microToCredits(supplementalMicro), reused: false };
 }
 
 function voidAuthorization(db, user, authorizationId, reason) {
@@ -601,4 +658,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { account, publicAccount, audit, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, listReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, pagedAuditLogs };
+module.exports = { account, publicAccount, audit, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, collectSettlementSupplement, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, listReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, pagedAuditLogs };

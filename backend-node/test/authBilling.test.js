@@ -29,7 +29,7 @@ function teardown(dbPath) {
   for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(dbPath + suffix); } catch (_) {} }
 }
 
-test('billing freezes, caps settlement at the frozen amount, and rejects unpriced models', () => {
+test('billing settles real provider usage above the authorization when the released balance covers it', () => {
   const { db, dbPath, admin } = setup();
   try {
     const user = auth.createUser(db, { username: 'creator', password: 'creator123', display_name: 'Creator' }, admin.id);
@@ -42,13 +42,54 @@ test('billing freezes, caps settlement at the frozen amount, and rejects unprice
     assert.equal(authorization.amount, 25);
     assert.equal(billing.account(db, user.id).frozen_micro, 250000);
     const settled = billing.settleAuthorization(db, actor, authorization.authorization_id, { usage: { image: 2 }, provider_request_id: 'provider-image-1' });
-    assert.equal(settled.charged_micro, 250000);
+    assert.equal(settled.charged_micro, 500000);
     assert.equal(settled.overage_micro, 250000);
-    assert.equal(billing.account(db, user.id).balance_micro, 1750000);
+    assert.equal(settled.supplemental_charged_micro, 250000);
+    assert.equal(billing.account(db, user.id).balance_micro, 1500000);
     assert.equal(billing.account(db, user.id).frozen_micro, 0);
     assert.equal(billing.settleAuthorization(db, actor, authorization.authorization_id, { usage: { image: 1 } }).reused, true);
     assert.throws(() => billing.quote(db, actor, { service_type: 'image', model: 'unapproved', usage: { image: 1 } }), /未定价/);
     assert.throws(() => billing.quote(db, actor, { service_type: 'image', model: 'unpriced', usage: { image: 1 } }), /未定价/);
+  } finally { teardown(dbPath); }
+});
+
+test('billing keeps the authorization frozen for reconciliation when actual usage exceeds releasable balance', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'actual-usage-reconcile', password: 'creator123' }, admin.id);
+    const actor = { id: user.id, role: 'user' };
+    billing.savePriceBook(db, admin.id, { name: 'default', status: 'published', items: [{ service_type: 'image', model: 'seedream', meter: 'image', unit_price: 25 }] });
+    billing.adjustBalance(db, admin.id, user.id, 25, 'test points');
+    const authorization = billing.createAuthorization(db, actor, { idempotency_key: 'actual-usage-reconcile', service_type: 'image', model: 'seedream', usage: { image: 1 } });
+
+    assert.throws(
+      () => billing.settleAuthorization(db, actor, authorization.authorization_id, { usage: { image: 2 } }),
+      (error) => error.code === 'BILLING_ACTUAL_USAGE_EXCEEDS_AVAILABLE_BALANCE'
+    );
+    assert.equal(billing.account(db, user.id).balance_micro, 250000);
+    assert.equal(billing.account(db, user.id).frozen_micro, 250000);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_transactions WHERE authorization_id = ? AND type = 'settlement'").get(authorization.authorization_id).count, 0);
+  } finally { teardown(dbPath); }
+});
+
+test('an administrator can collect a historical capped-settlement difference exactly once', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'historical-overage', password: 'creator123' }, admin.id);
+    const actor = { id: user.id, role: 'user' };
+    billing.savePriceBook(db, admin.id, { name: 'default', status: 'published', items: [{ service_type: 'image', model: 'seedream', meter: 'image', unit_price: 25 }] });
+    billing.adjustBalance(db, admin.id, user.id, 200, 'test points');
+    const authorization = billing.createAuthorization(db, actor, { idempotency_key: 'historical-overage', service_type: 'image', model: 'seedream', usage: { image: 1 } });
+    billing.settleAuthorization(db, actor, authorization.authorization_id, { usage: { image: 1 }, provider_request_id: 'provider-image-legacy' });
+    db.prepare('UPDATE billing_usage_logs SET usage_json=? WHERE authorization_id=?').run(JSON.stringify({ image: 2 }), authorization.authorization_id);
+
+    const repaired = billing.collectSettlementSupplement(db, admin, authorization.authorization_id, '补扣已确认的供应商真实用量差额');
+    assert.equal(repaired.supplemental_micro, 250000);
+    assert.equal(billing.account(db, user.id).balance_micro, 1500000);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_transactions WHERE authorization_id=? AND type='adjustment' AND idempotency_key LIKE ?").get(authorization.authorization_id, `settlement-supplement:${authorization.authorization_id}:%`).count, 1);
+    assert.equal(billing.listUsage(db, { user_id: user.id })[0].charged_micro, 500000);
+    assert.equal(billing.collectSettlementSupplement(db, admin, authorization.authorization_id).reused, true);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_audit_logs WHERE action='billing.settlement.supplement' AND target_id=?").get(authorization.authorization_id).count, 1);
   } finally { teardown(dbPath); }
 });
 

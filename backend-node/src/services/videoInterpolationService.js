@@ -175,37 +175,27 @@ async function process(db, log, videoGenerationId, storagePath) {
       throw new Error(`插帧输出分辨率异常：输入 ${sourceProbe.width}x${sourceProbe.height}，输出 ${outputProbe.width}x${outputProbe.height}`);
     }
     const durationMs = Math.max(1, outputProbe.duration_ms);
-    const actualPricingContext = {
-      resolution_tier: resolutionTier(outputProbe),
-      fps_tier: fpsTier(outputProbe.fps),
-    };
-    const actualQuote = billing.quote(db, { id: row.owner_user_id, role: 'admin' }, {
-      service_type: 'video_postprocess',
-      model: BILLING_MODEL,
-      usage: { millisecond: durationMs },
-      pricing_context: actualPricingContext,
-    });
-    const authorization = billing.getAuthorization(db, job.billing_authorization_id);
-    if (actualQuote.amount_micro > Number(authorization?.amount_micro || 0)) {
+    try {
+      billing.settleAuthorization(db, { id: row.owner_user_id, role: 'admin' }, job.billing_authorization_id, {
+        usage: { millisecond: durationMs }, provider_request_id: result.request_id || job.provider_request_id || job.provider_task_id,
+      });
+    } catch (error) {
+      if (error.code !== 'BILLING_ACTUAL_USAGE_EXCEEDS_AVAILABLE_BALANCE') throw error;
       billing.markPendingReconciliation(db, { id: row.owner_user_id, role: 'admin' }, job.billing_authorization_id, {
         provider_request_id: result.request_id || job.provider_request_id || job.provider_task_id,
         observed_usage: { millisecond: durationMs },
-        reason: `插帧实际规格 ${actualPricingContext.resolution_tier}/${actualPricingContext.fps_tier} 超出预授权，等待管理员补录`,
+        reason: '插帧实际费用超过预授权且可用余额不足，等待管理员对账',
       });
       const now = new Date().toISOString();
       db.prepare(`UPDATE video_interpolation_jobs SET status='reconciliation_required', output_local_path=?, output_duration_ms=?,
         output_width=?, output_height=?, output_resolution=?, output_fps=?, provider_request_id=?, error_msg=?, updated_at=? WHERE id=?`)
         .run(localPath, durationMs, outputProbe.width, outputProbe.height, outputProbe.resolution, outputProbe.fps, result.request_id || job.provider_request_id,
-          '实际插帧费用超过预授权，已进入待对账', now, job.id);
+          '实际插帧费用超过预授权且余额不足，已进入待对账', now, job.id);
       db.prepare("UPDATE video_generations SET status='billing_reconciliation', interpolation_status='reconciliation_required', error_msg=?, updated_at=? WHERE id=?")
-        .run('插帧已完成但实际费用超过预授权，等待管理员对账', now, row.id);
-      const error = new Error('插帧实际费用超过预授权，已进入待对账');
+        .run('插帧已完成但实际费用超过预授权且余额不足，等待管理员对账', now, row.id);
       error.reconciliationRequired = true;
       throw error;
     }
-    billing.settleAuthorization(db, { id: row.owner_user_id, role: 'admin' }, job.billing_authorization_id, {
-      usage: { millisecond: durationMs }, provider_request_id: result.request_id || job.provider_request_id || job.provider_task_id,
-    });
     const now = new Date().toISOString();
     db.prepare(`UPDATE video_interpolation_jobs SET status='completed', output_local_path=?, output_duration_ms=?,
       output_width=?, output_height=?, output_resolution=?, output_fps=?, provider_request_id=?, completed_at=?, updated_at=? WHERE id=?`)
