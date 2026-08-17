@@ -16,4 +16,4 @@ Reference: `https://xc.agent.richbest.cn/` is used only to guide visual hierarch
 | AI tool workbench | Focused single-purpose creation surface | Desktop AI Run Studio with distinct input deck, run archive, and output stage | Close |
 | Operations console | Dense, auditable administration workflows | Desktop command center validated as the operator-facing administration surface | Close |
 | AI configuration | Configuration-heavy administration workflow | Reframed as a tokenized configuration matrix with dedicated desktop control-surface hierarchy | Close |
-| Mobile navigation | Compact controls without horizontal page overflow | Validated for every touched page; remaining pages pending | Pending |
+| Mobile navigation | Compact controls without horizontal page overflow | Basic non-breaking safeguards retained; dedicated mobile parity is explicitly out of scope for this desktop-first pass | Deferred |
