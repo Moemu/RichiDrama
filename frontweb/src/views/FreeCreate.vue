@@ -234,12 +234,14 @@ const chosenAssets = computed(() => selectedOrder.value.map((id) => assets.value
 const chosenImageAssets = computed(() => chosenAssets.value.filter((asset) => asset.type === 'image'))
 const visibleAssets = computed(() => assets.value.filter((asset) => assetScope.value === 'all' || (assetScope.value === 'project' ? Number(asset.drama_id) === projectDramaId.value : !asset.drama_id)))
 const activeJob = computed(() => {
+  const selected = shotHistory.value.find((job) => String(job.id) === String(selectedHistoryJobId.value))
   const adopted = shotHistory.value.find((job) => job.is_current)
   const bound = shotHistory.value.find((job) => String(job.id) === String(currentShot.value?.omni_job_id))
-  const selected = shotHistory.value.find((job) => String(job.id) === String(selectedHistoryJobId.value))
-  // The central player is the delivery surface, so inspecting a history card
-  // must not replace the version currently adopted by the storyboard.
-  return adopted || bound || selected || shotHistory.value[0] || null
+  // A history-card click is a preview action: play that version without
+  // changing the storyboard's adopted version. The previous priority order
+  // always returned `adopted`, so clicked records were highlighted but could
+  // never replace the source of the central player.
+  return selected || adopted || bound || shotHistory.value[0] || null
 })
 const activeVideoUrl = computed(() => activeJob.value?.videoUrl || currentShot.value?.video_url || '')
 const canExtractFrames = computed(() => Number(activeJob.value?.video_generation_id) > 0 && activeJob.value?.status === 'completed')
