@@ -21,6 +21,11 @@ test('storyboard navigation uses real video, including retained source after pos
   assert.doesNotMatch(freeCreate, /storyboard-placeholder\.svg|shotCover\(/)
 })
 
+test('clicking a completed history record previews it without changing the adopted version', () => {
+  assert.match(freeCreate, /function selectHistoryJob\(job\) \{ playOnSelection\.value = true; selectedHistoryJobId\.value = job\.id \}/)
+  assert.match(freeCreate, /return selected \|\| adopted \|\| bound \|\| shotHistory\.value\[0\] \|\| null/)
+})
+
 test('embedded storyboard confines wheel scrolling to its side panels', () => {
   assert.match(freeCreate, /\.project-storyboard-page \.shot-list\{flex:1 1 auto;min-height:0\}/)
   assert.match(freeCreate, /@media\(min-width:761px\)\{\.center-stage\{min-height:0;overflow:hidden\}\.shot-script\{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior-y:contain\}/)
