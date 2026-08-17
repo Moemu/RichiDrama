@@ -189,6 +189,31 @@ test('missing local media is read through the protected static route from OSS', 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('OSS static fallback preserves video byte-range responses', async (t) => {
+  const server = http.createServer((req, res) => { res.writeHead(200); res.end('0123456789'); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); t.after(() => server.close());
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-oss-range-'));
+  const handler = staticHandler(ossConfig(`http://127.0.0.1:${server.address().port}`), root);
+  const calls = { headers: {}, status: null, type: null, body: null, ended: false };
+  const res = {
+    status(value) { calls.status = value; return this; },
+    set(value, next) { if (typeof value === 'string') calls.headers[value] = next; else Object.assign(calls.headers, value); return this; },
+    type(value) { calls.type = value; return this; },
+    send(value) { calls.body = value; return this; },
+    end() { calls.ended = true; return this; },
+  };
+  await handler({ path: '/videos/legacy.mp4', headers: { range: 'bytes=2-5' } }, res, () => assert.fail('should proxy'));
+  assert.equal(calls.status, 206);
+  assert.equal(calls.type, 'video/mp4');
+  assert.equal(calls.headers['Content-Range'], 'bytes 2-5/10');
+  assert.equal(calls.body.toString(), '2345');
+  await handler({ path: '/videos/legacy.mp4', headers: { range: 'bytes=999-' } }, res, () => assert.fail('should proxy'));
+  assert.equal(calls.status, 416);
+  assert.equal(calls.headers['Content-Range'], 'bytes */10');
+  assert.equal(calls.ended, true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('a Lens-style bare CDN domain is normalized to HTTPS for optional object URLs', () => {
   const cfg = ossConfig('http://127.0.0.1:1'); cfg.storage.oss.public_base_url = 'media.example.test';
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-oss-domain-'));
