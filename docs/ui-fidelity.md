@@ -13,6 +13,7 @@ Reference: `https://xc.agent.richbest.cn/` is used only to guide visual hierarch
 | Production workspace | Immersive creative control surface | Desktop studio rail, staged workflow instrument, and script lab hierarchy built on existing workflow controls | Close |
 | Storyboard canvas | Focused visual production stage | Desktop control deck, asset rail, Flow controls, and empty-canvas stage use one studio material system | Close |
 | Free-create workspace | Three-surface director console | Existing track/stage/console presentation retained and tokenized | Close |
+| AI tool workbench | Focused single-purpose creation surface | Desktop AI Run Studio with distinct input deck, run archive, and output stage | Close |
 | Operations console | Dense, auditable administration workflows | Desktop command center validated as the operator-facing administration surface | Close |
 | AI configuration | Configuration-heavy administration workflow | Reframed as a tokenized configuration matrix with dedicated desktop control-surface hierarchy | Close |
 | Mobile navigation | Compact controls without horizontal page overflow | Validated for every touched page; remaining pages pending | Pending |
