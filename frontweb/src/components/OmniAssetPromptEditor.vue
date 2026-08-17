@@ -360,7 +360,7 @@ function onDrop(e) {
 /* textarea 区作为主体撑满 editor 剩余高度；@选择器/引用标签为兄弟元素，按内容自适应 */
 .editor :deep(.el-input) { flex: 1; min-height: 0; display: flex; }
 .editor :deep(.el-textarea) { flex: 1; min-height: 0; display: flex; }
-.editor :deep(.el-textarea__inner) { flex: 1; height: 100% !important; min-height: 160px; resize: none; transition: border-color 0.2s, background 0.2s; }
+.editor :deep(.el-textarea__inner) { flex: 1; height: 100% !important; min-height: 160px; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; resize: none; transition: border-color 0.2s, background 0.2s; }
 .drop-status {
   flex: 0 0 26px; min-width: 0; display: flex; align-items: center; justify-content: flex-end;
   padding: 0 4px; color: var(--text-muted); font-size: 12px; line-height: 1; pointer-events: none;

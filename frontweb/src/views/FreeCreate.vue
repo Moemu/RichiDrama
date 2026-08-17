@@ -394,7 +394,21 @@ function historyPoster(job) {
 }
 function containWorkbenchScroll(event) {
   if (!event.deltaY || !(event.target instanceof Element)) return
-  const panel = event.target.closest('.shot-list, .creation-panel, .material-pool, .selected-assets, .frame-picker-grid')
+  // A long prompt is edited in Element Plus' native textarea.  It must keep
+  // its own wheel/scrollbar behavior; only stop propagation at its boundary
+  // so the surrounding fixed storyboard workbench never scrolls away.
+  const textarea = event.target.closest('textarea.el-textarea__inner')
+  if (textarea) {
+    if (textarea.scrollHeight <= textarea.clientHeight) {
+      event.preventDefault()
+      return
+    }
+    const atTop = textarea.scrollTop <= 0
+    const atBottom = textarea.scrollTop + textarea.clientHeight >= textarea.scrollHeight - 1
+    if ((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) event.preventDefault()
+    return
+  }
+  const panel = event.target.closest('.shot-list, .creation-panel, .shot-script, .material-pool, .selected-assets, .frame-picker-grid')
   // The player area itself must never become a wheel-scrolling surface. This
   // also prevents a list at its boundary from chaining the page underneath it.
   if (!panel || panel.scrollHeight <= panel.clientHeight) {

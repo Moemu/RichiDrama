@@ -37,6 +37,13 @@ assert.match(freeCreate, /\.shot-panel\{overflow:hidden\}\.shot-list\{flex:1 1 a
   assert.match(filmCreate, /\.storyboard-stage-active \.omni-page\.embedded\.project-storyboard-page\{position:static!important;top:auto;height:auto!important;min-height:0!important;overflow:hidden!important;flex:1/)
 })
 
+test('long prompt text keeps an independently scrollable textarea', () => {
+  const promptEditor = readFileSync(new URL('../src/components/OmniAssetPromptEditor.vue', import.meta.url), 'utf8')
+  assert.match(freeCreate, /const textarea = event\.target\.closest\('textarea\.el-textarea__inner'\)/)
+  assert.match(freeCreate, /event\.target\.closest\('\.shot-list, \.creation-panel, \.shot-script,/)
+  assert.match(promptEditor, /overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable/)
+})
+
 test('project settings communicate first-shot master, inherited and override states', () => {
   assert.match(freeCreate, /首镜母版/)
   assert.match(freeCreate, /跟随首镜/)
