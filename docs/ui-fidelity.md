@@ -1,0 +1,16 @@
+# UI Fidelity Ledger
+
+Reference: `https://xc.agent.richbest.cn/` is used only to guide visual hierarchy and interaction mood. No source, assets, copy, or brand material is reused.
+
+| Area | Reference intent | Current implementation | Status |
+| --- | --- | --- | --- |
+| Global canvas | Dark, quiet, focused creative surface | Existing token-based dark/light canvas retained | Close |
+| Project list | Compact controls and a clear creation entry | Shared tokens, grouped controls, responsive project cards | Close |
+| Media library | Media-first cards with practical density | Tokenized cards and two-column mobile media grid | Close |
+| AI tools | Obvious tool choice and readable actions | Shared card, button, and responsive layout treatment | Close |
+| Account center | Quiet operational summary with readable numbers | Tokenized summary cards and contained mobile bill table | Close |
+| Project detail | Focused project workspace with staged content | Shared card language, responsive header, single-column mobile form and episode list | Close |
+| Free-create workspace | Three-surface director console | Existing track/stage/console presentation retained and tokenized | Close |
+| Operations console | Dense, auditable administration workflows | Functional UI present; a dedicated visual pass remains | Pending |
+| AI configuration | Configuration-heavy administration workflow | Functional UI present; a dedicated visual pass remains | Pending |
+| Mobile navigation | Compact controls without horizontal page overflow | Validated for every touched page; remaining pages pending | Pending |
