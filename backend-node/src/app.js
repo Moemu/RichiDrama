@@ -8,6 +8,12 @@ const { loadConfig } = require('./config/index.js');
 const logger = require('./logger.js');
 const { setupRouter } = require('./routes/index.js');
 
+function resolveHttpErrorStatus(err) {
+  if (err?.code === 'LIMIT_FILE_SIZE' || String(err?.message || '').includes('File too large')) return 413;
+  const status = Number(err?.status || err?.statusCode);
+  return Number.isInteger(status) && status >= 400 && status < 500 ? status : 500;
+}
+
 function createApp() {
   const config = loadConfig();
   const db = getDb(config.database);
@@ -163,13 +169,16 @@ function createApp() {
     log.errorw('Unhandled error', { error: err.message, path: req.path });
     if (!res.headersSent) {
       const isFileTooLarge = err.code === 'LIMIT_FILE_SIZE' || (err.message && err.message.includes('File too large'));
-      const status = isFileTooLarge ? 413 : 500;
+      const status = resolveHttpErrorStatus(err);
+      // express.sendFile reports an invalid or stale media Range as 416. This
+      // is a normal media protocol response, not an application failure.
+      if (status === 416) return res.status(416).set('Content-Range', 'bytes */*').end();
       const message = isFileTooLarge ? '图片大小不能超过 16MB，请压缩后重试' : (err.message || '服务器错误');
-      res.status(status).json({ success: false, error: { code: isFileTooLarge ? 'FILE_TOO_LARGE' : 'INTERNAL_ERROR', message }, timestamp: new Date().toISOString() });
+      res.status(status).json({ success: false, error: { code: isFileTooLarge ? 'FILE_TOO_LARGE' : (status === 500 ? 'INTERNAL_ERROR' : 'REQUEST_ERROR'), message }, timestamp: new Date().toISOString() });
     }
   });
 
   return { app, config, db };
 }
 
-module.exports = { createApp };
+module.exports = { createApp, resolveHttpErrorStatus };

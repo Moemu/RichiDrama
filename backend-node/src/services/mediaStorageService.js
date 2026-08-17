@@ -243,6 +243,27 @@ function staticHandler(cfg, storageRoot) {
       if (!body) return next();
       const ext = path.extname(key).toLowerCase();
       const type = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' }[ext] || 'application/octet-stream';
+      // Local files are served by sendFile, which implements byte ranges.
+      // Preserve that contract after a hot copy has been pruned and the bytes
+      // are read from private OSS, otherwise Chromium can discard a video
+      // after seeking or resuming a buffered playback.
+      const range = String(req.headers?.range || '');
+      if (range && /^bytes=/.test(range)) {
+        const match = /^bytes=(\d*)-(\d*)$/i.exec(range.trim());
+        const total = body.length;
+        const start = match && match[1] ? Number(match[1]) : null;
+        const requestedEnd = match && match[2] ? Number(match[2]) : null;
+        const end = requestedEnd == null ? total - 1 : Math.min(requestedEnd, total - 1);
+        if (!match || !Number.isSafeInteger(start) || start < 0 || start >= total || end < start) {
+          return res.status(416).set('Content-Range', `bytes */${total}`).end();
+        }
+        const chunk = body.subarray(start, end + 1);
+        return res.status(206).set({
+          'Accept-Ranges': 'bytes',
+          'Content-Range': `bytes ${start}-${end}/${total}`,
+          'Content-Length': String(chunk.length),
+        }).type(type).send(chunk);
+      }
       res.type(type).send(body);
     } catch (error) { next(error); }
   };
