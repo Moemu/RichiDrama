@@ -384,7 +384,7 @@ function get(db, id) {
 function list(db, query = {}) {
   const storyboardId = Number(query.storyboard_id);
   const shotId = Number(query.shot_id);
-  let sql = `SELECT j.*, v.status, v.video_url, v.local_path, v.source_local_path, v.upscale_local_path,
+  let sql = `SELECT j.*, v.status, v.video_url, v.local_path, v.poster_local_path, v.source_local_path, v.upscale_local_path,
     v.resolution, v.aspect_ratio, v.upscale_resolution, v.target_fps, v.upscale_status, v.interpolation_status,
     v.output_width, v.output_height, v.output_resolution, v.output_fps, v.output_duration_ms, v.error_msg,
     s.active_video_generation_id, s.local_path AS storyboard_local_path
