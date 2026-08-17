@@ -31,7 +31,7 @@ function setupRouter(cfg, db, log) {
   const r = express.Router();
   const auth = authRoutes(db);
   const billing = billingRoutes(db);
-  const admin = adminRoutes(db);
+  const admin = adminRoutes(db, log);
   // Public signup/login endpoints; all workspace data derives identity from JWT.
   r.post('/auth/login', auth.login);
   r.post('/auth/register', auth.register);
@@ -103,6 +103,17 @@ function setupRouter(cfg, db, log) {
   adminRouter.patch('/price-books/:id', admin.updatePriceBook);
   adminRouter.get('/transactions', admin.transactions);
   adminRouter.get('/usage', admin.usage);
+  adminRouter.get('/overview', admin.overview);
+  adminRouter.get('/operations-alert-settings', admin.alertSettings);
+  adminRouter.patch('/operations-alert-settings', admin.saveAlertSettings);
+  adminRouter.get('/production-export', admin.productionExport);
+  adminRouter.get('/operations-reports', admin.reports);
+  adminRouter.get('/production', admin.production);
+  adminRouter.get('/production/:id', admin.productionDetail);
+  adminRouter.get('/media-archives', admin.mediaArchives);
+  adminRouter.post('/production/:id/retry-postprocess', admin.retryPostprocess);
+  adminRouter.post('/production/:id/adopt-source', admin.adoptSource);
+  adminRouter.post('/production/:id/retry-archive', admin.retryArchive);
   adminRouter.get('/billing-reconciliations', admin.reconciliationCases);
   adminRouter.post('/billing-authorizations/:id/collect-settlement-supplement', admin.collectSettlementSupplement);
   adminRouter.post('/billing-authorizations/collect-historical-settlement-supplements', admin.collectHistoricalSettlementSupplements);

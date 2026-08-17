@@ -53,6 +53,7 @@ function createApp() {
   require('./services/videoUpscaleService').resumePending(db, log, videoStoragePath);
   require('./services/videoInterpolationService').resumePending(db, log, videoStoragePath);
   startPendingVideoArchiveRetry(db, log);
+  require('./services/operationsReportService').startDailyReporting(db, log);
   require('./services/assetSd2Service').resumePendingCertifications(db, log, config);
   require('./services/omniVideoService').startSd2WaitingGenerationRecovery(db, log);
   const taskService = require('./services/taskService');

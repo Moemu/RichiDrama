@@ -446,6 +446,22 @@ function listReconciliationCases(db, filters = {}) {
     .map((row) => ({ ...publicReconciliationCase(row), frozen_amount: microToCredits(row.frozen_amount_micro) }));
 }
 
+function pagedReconciliationCases(db, filters = {}) {
+  let where = 'WHERE 1=1'; const args = [];
+  if (filters.status) { where += ' AND c.status = ?'; args.push(String(filters.status)); }
+  if (filters.user_id) { where += ' AND c.user_id = ?'; args.push(Number(filters.user_id)); }
+  if (filters.model) { where += ' AND c.model = ?'; args.push(String(filters.model)); }
+  if (filters.from) { where += ' AND c.created_at >= ?'; args.push(String(filters.from)); }
+  if (filters.to) { where += ' AND c.created_at <= ?'; args.push(String(filters.to)); }
+  const meta = pagination(filters);
+  const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_reconciliation_cases c ${where}`).get(...args)?.total || 0);
+  const rows = db.prepare(`SELECT c.*, u.username, a.amount_micro AS frozen_amount_micro
+    FROM billing_reconciliation_cases c JOIN users u ON u.id = c.user_id
+    JOIN billing_transactions a ON a.id = c.authorization_id ${where}
+    ORDER BY CASE WHEN c.status = 'pending' THEN 0 ELSE 1 END, c.due_at ASC LIMIT ? OFFSET ?`).all(...args, meta.page_size, meta.offset);
+  return { items: rows.map((row) => ({ ...publicReconciliationCase(row), frozen_amount: microToCredits(row.frozen_amount_micro) })), total, page: meta.page, page_size: meta.page_size };
+}
+
 function settleReconciliationCase(db, actor, caseId, input = {}) {
   if (actor.role !== 'admin') throw new Error('仅管理员可以处理待对账记录');
   const row = db.prepare('SELECT * FROM billing_reconciliation_cases WHERE id = ?').get(caseId);
@@ -722,4 +738,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { account, publicAccount, audit, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, listReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, pagedAuditLogs };
+module.exports = { account, publicAccount, audit, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, pagedAuditLogs };
