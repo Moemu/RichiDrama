@@ -11,6 +11,6 @@ Reference: `https://xc.agent.richbest.cn/` is used only to guide visual hierarch
 | Account center | Quiet operational summary with readable numbers | Tokenized summary cards and contained mobile bill table | Close |
 | Project detail | Focused project workspace with staged content | Shared card language, responsive header, single-column mobile form and episode list | Close |
 | Free-create workspace | Three-surface director console | Existing track/stage/console presentation retained and tokenized | Close |
-| Operations console | Dense, auditable administration workflows | Functional UI present; a dedicated visual pass remains | Pending |
-| AI configuration | Configuration-heavy administration workflow | Functional UI present; a dedicated visual pass remains | Pending |
+| Operations console | Dense, auditable administration workflows | Desktop command center validated as the operator-facing administration surface | Close |
+| AI configuration | Configuration-heavy administration workflow | Reframed as a tokenized configuration matrix with dedicated desktop control-surface hierarchy | Close |
 | Mobile navigation | Compact controls without horizontal page overflow | Validated for every touched page; remaining pages pending | Pending |
