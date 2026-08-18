@@ -25,7 +25,7 @@ function requireAuth(db) {
 }
 
 function requireAdmin(req, res, next) {
-  if (req.auth?.role !== 'admin') return response.forbidden(res, '需要管理员权限');
+  if (req.auth?.role !== 'admin' || !req.auth?.console_access) return response.forbidden(res, '需要运营后台账号权限');
   next();
 }
 

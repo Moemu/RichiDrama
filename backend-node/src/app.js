@@ -33,6 +33,13 @@ function createApp() {
     const result = billingService.recoverInterruptedTextReconciliations(db);
     if (result.recovered) logger.warn('recovered interrupted text billing reconciliations', result);
   } catch (error) { logger.warn('interrupted text billing recovery failed', { error: error.message }); }
+  // 历史计费流水的分组快照回填（幂等，仅填 NULL 行；未启用分组的环境自动跳过）
+  try {
+    const result = billingService.backfillTenantSnapshots(db);
+    if (result && !result.skipped && (result.transactions || result.usage_logs)) {
+      logger.info('billing tenant snapshot backfilled', result);
+    }
+  } catch (error) { logger.warn('billing tenant snapshot backfill failed', { error: error.message }); }
   const reconcileExpired = () => {
     try {
       const result = billingService.expireReconciliationCases(db);
@@ -59,6 +66,7 @@ function createApp() {
   require('./services/videoUpscaleService').resumePending(db, log, videoStoragePath);
   require('./services/videoInterpolationService').resumePending(db, log, videoStoragePath);
   startPendingVideoArchiveRetry(db, log);
+  require('./services/operationsReportService').startDailyReporting(db, log);
   require('./services/assetSd2Service').resumePendingCertifications(db, log, config);
   require('./services/omniVideoService').startSd2WaitingGenerationRecovery(db, log);
   const taskService = require('./services/taskService');

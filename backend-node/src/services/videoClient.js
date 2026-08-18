@@ -920,8 +920,8 @@ function parseKlingOmniPollVideoUrl(data) {
 }
 
 // ??????????????????listConfigs ?? is_default DESC, priority DESC ??
-function getDefaultVideoConfig(db, preferredModel) {
-  const configs = aiConfigService.listConfigs(db, 'video');
+function getDefaultVideoConfig(db, preferredModel, options = {}) {
+  const configs = aiConfigService.listConfigs(db, 'video', options);
   const active = configs.filter((c) => c.is_active);
   if (active.length === 0) return null;
   if (preferredModel) {

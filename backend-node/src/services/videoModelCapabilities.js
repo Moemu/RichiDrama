@@ -17,11 +17,11 @@ function parseSettings(raw) {
   try { return JSON.parse(raw); } catch (_) { return {}; }
 }
 
-function list(db) {
+function list(db, options = {}) {
   // A config can declare several models while choosing one default.  Expose
   // every declared model to creators so selecting a cheaper/safer SKU does
   // not silently collapse back to the default model.
-  return aiConfigService.listConfigs(db, 'video').filter((item) => item.is_active).flatMap((item) => {
+  return aiConfigService.listConfigs(db, 'video', options).filter((item) => item.is_active).flatMap((item) => {
     const settings = parseSettings(item.settings);
     const declared = settings.video_capabilities || settings.capabilities || {};
     const models = [...new Set([
@@ -71,8 +71,8 @@ function normalizeSupports(config, declared = {}, selectedModel = '') {
   return supports;
 }
 
-function resolve(db, requestedModel, assets) {
-  const entries = list(db);
+function resolve(db, requestedModel, assets, options = {}) {
+  const entries = list(db, options);
   const requested = String(requestedModel || '').trim();
   const ranked = [...entries].sort((a, b) => Number(b.is_default) - Number(a.is_default) || b.priority - a.priority);
   const candidate = requested && requested !== 'auto'

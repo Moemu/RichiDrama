@@ -778,10 +778,10 @@ function readSeedance2AssetJson(text) {
   }
 }
 
-function resolveSd2RegisterProvider(cfg, db, log) {
-  const hubCtx = jimengMaterialHubService.buildHubContext(cfg, db, log);
+function resolveSd2RegisterProvider(cfg, db, log, userId) {
+  const hubCtx = jimengMaterialHubService.buildHubContext(cfg, db, log, userId);
   if (hubCtx.token) return { provider: 'hub', hubCtx };
-  const arkCtx = modelArkAssetConfigService.buildModelArkContext(db, log);
+  const arkCtx = modelArkAssetConfigService.buildModelArkContext(db, log, userId);
   if (arkCtx.ready) return { provider: 'model_ark', arkCtx };
   return { provider: null, hubCtx, arkCtx };
 }
@@ -995,8 +995,8 @@ async function registerCharacterViaModelArk(db, log, cfg, characterId, arkCtx, p
  * 注册角色主图为 Seedance 2.0 可用 asset 引用。
  * 优先即梦2角色认证（hub）；否则使用已保存的 ModelArk 官方资产库配置。
  */
-async function registerCharacterJimengMaterialAsset(db, log, cfg, characterId) {
-  const route = resolveSd2RegisterProvider(cfg, db, log);
+async function registerCharacterJimengMaterialAsset(db, log, cfg, characterId, userId) {
+  const route = resolveSd2RegisterProvider(cfg, db, log, userId);
   if (!route.provider) {
     return { ok: false, error: sd2ConfigMissingError(route.hubCtx, route.arkCtx) };
   }
@@ -1008,7 +1008,7 @@ async function registerCharacterJimengMaterialAsset(db, log, cfg, characterId) {
   return registerCharacterViaModelArk(db, log, cfg, characterId, route.arkCtx, prep);
 }
 
-async function refreshCharacterJimengMaterialAsset(db, log, cfg, characterId) {
+async function refreshCharacterJimengMaterialAsset(db, log, cfg, characterId, userId) {
   const charRow = db.prepare('SELECT id, seedance2_asset FROM characters WHERE id = ? AND deleted_at IS NULL').get(Number(characterId));
   if (!charRow) return { ok: false, error: 'character not found' };
   const prev = readSeedance2AssetJson(charRow.seedance2_asset);
@@ -1020,7 +1020,7 @@ async function refreshCharacterJimengMaterialAsset(db, log, cfg, characterId) {
   const provider = String(prev?.sd2_provider || '').toLowerCase() === 'model_ark' ? 'model_ark' : 'hub';
   let settled;
   if (provider === 'model_ark') {
-    const arkCtx = modelArkAssetConfigService.buildModelArkContext(db, log);
+    const arkCtx = modelArkAssetConfigService.buildModelArkContext(db, log, userId);
     if (!arkCtx.ready) {
       return { ok: false, error: '未找到有效的 ModelArk 资产库配置，无法刷新认证状态' };
     }
@@ -1028,7 +1028,7 @@ async function refreshCharacterJimengMaterialAsset(db, log, cfg, characterId) {
     if (!r.ok) return { ok: false, error: r.error };
     settled = r.data;
   } else {
-    const hubCtx = jimengMaterialHubService.buildHubContext(cfg, db, log);
+    const hubCtx = jimengMaterialHubService.buildHubContext(cfg, db, log, userId);
     if (!hubCtx.token) {
       return { ok: false, error: '未配置即梦2角色认证：请在「AI 配置」中填写 Token' };
     }

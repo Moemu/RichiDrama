@@ -31,14 +31,17 @@ function setupRouter(cfg, db, log) {
   const r = express.Router();
   const auth = authRoutes(db);
   const billing = billingRoutes(db);
-  const admin = adminRoutes(db);
+  const admin = adminRoutes(db, log);
   // Public signup/login endpoints; all workspace data derives identity from JWT.
   r.post('/auth/login', auth.login);
   r.post('/auth/register', auth.register);
   r.use(requireAuth(db));
   // Preserve the authenticated payer through nested and asynchronous service
   // calls, so every text-model invocation can participate in billing.
-  r.use((req, res, next) => require('../services/billingRequestContext').run({ actor: req.auth, db, log }, next));
+  r.use((req, res, next) => {
+    const tenant = require('../services/tenantService').tenantForUser(db, req.auth?.id);
+    return require('../services/billingRequestContext').run({ actor: req.auth, tenant_id: tenant?.id || null, db, log }, next);
+  });
   r.get('/auth/me', auth.me);
   r.post('/auth/session-cookie', auth.sessionCookie);
   r.post('/auth/logout', auth.logout);
@@ -79,7 +82,8 @@ function setupRouter(cfg, db, log) {
   // Authorization lifecycle is service-owned. Clients may quote a price, but
   // cannot settle or release a provider call themselves.
   r.get('/models/available', (req, res) => {
-    const configs = require('../services/aiConfigService').listConfigs(db);
+    const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id);
+    const configs = require('../services/aiConfigService').listConfigs(db, null, tenant ? { tenant_id: tenant.id } : {});
     const billingService = require('../services/billingService');
     const out = [];
     for (const config of configs) {
@@ -98,11 +102,28 @@ function setupRouter(cfg, db, log) {
   adminRouter.patch('/users/:id', admin.updateUser);
   adminRouter.post('/users/:id/balance-adjustments', admin.balanceAdjustment);
   adminRouter.post('/users/:id/balance-corrections', admin.balanceCorrection);
+  adminRouter.get('/tenants', admin.tenants);
+  adminRouter.post('/tenants', admin.createTenant);
+  adminRouter.get('/tenants/:id', admin.tenant);
+  adminRouter.patch('/tenants/:id', admin.updateTenant);
+  adminRouter.put('/tenants/:id/members/:userId', admin.setTenantMember);
+  adminRouter.put('/tenants/:id/bindings', admin.replaceTenantBindings);
   adminRouter.get('/price-books', admin.priceBooks);
   adminRouter.post('/price-books', admin.createPriceBook);
   adminRouter.patch('/price-books/:id', admin.updatePriceBook);
   adminRouter.get('/transactions', admin.transactions);
   adminRouter.get('/usage', admin.usage);
+  adminRouter.get('/overview', admin.overview);
+  adminRouter.get('/operations-alert-settings', admin.alertSettings);
+  adminRouter.patch('/operations-alert-settings', admin.saveAlertSettings);
+  adminRouter.get('/production-export', admin.productionExport);
+  adminRouter.get('/operations-reports', admin.reports);
+  adminRouter.get('/production', admin.production);
+  adminRouter.get('/production/:id', admin.productionDetail);
+  adminRouter.get('/media-archives', admin.mediaArchives);
+  adminRouter.post('/production/:id/retry-postprocess', admin.retryPostprocess);
+  adminRouter.post('/production/:id/adopt-source', admin.adoptSource);
+  adminRouter.post('/production/:id/retry-archive', admin.retryArchive);
   adminRouter.get('/billing-reconciliations', admin.reconciliationCases);
   adminRouter.post('/billing-authorizations/:id/collect-settlement-supplement', admin.collectSettlementSupplement);
   adminRouter.post('/billing-authorizations/collect-historical-settlement-supplements', admin.collectHistoricalSettlementSupplements);
@@ -154,18 +175,19 @@ function setupRouter(cfg, db, log) {
   r.delete('/dramas/:id', drama.deleteDrama);
 
   // ---------- ai-configs ----------
-  // AI configuration is shared across the workspace. Any signed-in member
-  // may maintain it, while list responses stay credential-free.
+  // Provider credentials are group-managed operational secrets. Creators can
+  // read their own group's sanitized model list, but only console accounts can
+  // create, test, rotate, or delete configurations.
   r.get('/ai-configs', aiConfig.list);
-  r.get('/ai-configs/vendor-lock', aiConfig.vendorLock);
-  r.post('/ai-configs', aiConfig.create);
-  r.post('/ai-configs/test', aiConfig.testConnection);
-  r.post('/ai-configs/jimeng2-list-assets', aiConfig.listJimeng2MaterialAssets);
-  r.post('/ai-configs/model-ark-asset', aiConfig.modelArkAsset);
+  r.get('/ai-configs/vendor-lock', requireAdmin, aiConfig.vendorLock);
+  r.post('/ai-configs', requireAdmin, aiConfig.create);
+  r.post('/ai-configs/test', requireAdmin, aiConfig.testConnection);
+  r.post('/ai-configs/jimeng2-list-assets', requireAdmin, aiConfig.listJimeng2MaterialAssets);
+  r.post('/ai-configs/model-ark-asset', requireAdmin, aiConfig.modelArkAsset);
   r.put('/ai-configs/bulk-update-key', requireAdmin, aiConfig.bulkUpdateKey);  // 必须在 /:id 之前
   r.get('/ai-configs/:id', requireAdmin, aiConfig.get);
-  r.put('/ai-configs/:id', aiConfig.update);
-  r.delete('/ai-configs/:id', aiConfig.delete);
+  r.put('/ai-configs/:id', requireAdmin, aiConfig.update);
+  r.delete('/ai-configs/:id', requireAdmin, aiConfig.delete);
 
   // ---------- generation (角色生成：AI + 入库 + 任务结果) ----------
   r.post('/generation/characters', (req, res) => {
@@ -359,6 +381,7 @@ function setupRouter(cfg, db, log) {
   r.delete('/images/:id', images.delete);
 
   // ---------- videos ----------
+  r.get('/homepage/default-videos', videos.homepageDefaults);
   r.get('/videos', videos.list);
   r.post('/videos/postprocess-quote', videos.postprocessQuote);
   r.post('/videos', videos.create);
@@ -435,10 +458,10 @@ function setupRouter(cfg, db, log) {
 
   // ---------- scene model map ----------
   r.get('/scene-model-map', sceneModelMap.list);
-  r.post('/scene-model-map', sceneModelMap.create);
+  r.post('/scene-model-map', requireAdmin, sceneModelMap.create);
   r.get('/scene-model-map/:key', sceneModelMap.get);
-  r.put('/scene-model-map/:key', sceneModelMap.update);
-  r.delete('/scene-model-map/:key', sceneModelMap.delete);
+  r.put('/scene-model-map/:key', requireAdmin, sceneModelMap.update);
+  r.delete('/scene-model-map/:key', requireAdmin, sceneModelMap.delete);
 
   // 启动时将已有的覆盖加载到 promptI18n 内存缓存
   try {

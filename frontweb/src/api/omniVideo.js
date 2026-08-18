@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { createClientRequestId } from '@/utils/requestId'
 
 export const omniVideoAPI = {
   upload(file, options = {}) {
@@ -10,7 +11,7 @@ export const omniVideoAPI = {
     return request.post('/media/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
   capabilities() { return request.get('/video-model-capabilities') },
-  create(body) { return request.post('/omni-video-jobs', body) },
+  create(body) { return request.post('/omni-video-jobs', { ...body, idempotency_key: body?.idempotency_key || createClientRequestId() }) },
   polishPrompt(body) { return request.post('/omni-video-jobs/polish-prompt', body) },
   retry(id) { return request.post(`/omni-video-jobs/${id}/retry`) },
   retryPostprocess(id, stage) { return request.post(`/omni-video-jobs/${id}/retry-postprocess`, { stage }) },

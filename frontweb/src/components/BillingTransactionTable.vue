@@ -2,6 +2,7 @@
   <el-table :data="rows" size="small" empty-text="暂无账单记录">
     <el-table-column label="时间" min-width="170"><template #default="{ row }">{{ formatChinaDateTime(row.created_at) }}</template></el-table-column>
     <el-table-column v-if="showUser" prop="username" label="用户" min-width="100" />
+    <el-table-column v-if="showUser" label="分组" width="110"><template #default="{ row }">{{ row.tenant_name || '—' }}</template></el-table-column>
     <el-table-column label="状态" width="100">
       <template #default="{ row }"><el-tag :type="transactionMeta(row).tag" effect="plain">{{ transactionMeta(row).label }}</el-tag></template>
     </el-table-column>

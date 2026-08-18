@@ -59,7 +59,7 @@ function verifyPassword(password, encoded) {
 }
 
 function publicUser(row) {
-  return { id: row.id, username: row.username, display_name: row.display_name, role: row.role, is_active: !!row.is_active, created_at: row.created_at, last_login_at: row.last_login_at };
+  return { id: row.id, username: row.username, display_name: row.display_name, role: row.role, console_access: !!row.console_access, account_kind: row.account_kind || (row.role === 'admin' ? 'platform_admin' : 'creator'), is_active: !!row.is_active, created_at: row.created_at, last_login_at: row.last_login_at };
 }
 
 function ensureBootstrapAdmin(db, log) {
@@ -68,8 +68,8 @@ function ensureBootstrapAdmin(db, log) {
     const username = process.env.INITIAL_ADMIN_USERNAME || 'admin';
     const password = process.env.INITIAL_ADMIN_PASSWORD || (isProduction ? crypto.randomBytes(18).toString('base64url') : 'admin123456');
     const at = now();
-    const info = db.prepare(`INSERT INTO users (username, password_hash, display_name, role, is_active, created_at, updated_at)
-      VALUES (?, ?, '平台管理员', 'admin', 1, ?, ?)`)
+    const info = db.prepare(`INSERT INTO users (username, password_hash, display_name, role, console_access, account_kind, is_active, created_at, updated_at)
+      VALUES (?, ?, '平台管理员', 'admin', 1, 'platform_admin', 1, ?, ?)`)
       .run(username, hashPassword(password), at, at);
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
     db.prepare(`INSERT INTO billing_accounts (user_id, updated_at) VALUES (?, ?)`).run(user.id, at);
@@ -79,6 +79,9 @@ function ensureBootstrapAdmin(db, log) {
   for (const table of ['dramas', 'image_generations', 'video_generations', 'async_tasks', 'assets', 'omni_video_sequences', 'omni_video_jobs', 'tool_runs']) {
     try { db.prepare(`UPDATE ${table} SET owner_user_id = ? WHERE owner_user_id IS NULL`).run(user.id); } catch (_) {}
   }
+  // New and upgraded single-project installations always have an explicit
+  // default tenant, while preserving every historical owner relationship.
+  try { require('./tenantService').ensureDefaultTenant(db, user.id); } catch (error) { log.warn('Default tenant adoption skipped', { error: error.message }); }
   return user;
 }
 
@@ -146,11 +149,13 @@ function authenticate(db, token) {
 function createUser(db, input, actorId) {
   const username = normalizeUsername(input.username);
   const at = now();
-  const info = db.prepare(`INSERT INTO users (username, password_hash, display_name, role, is_active, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(username, hashPassword(input.password), String(input.display_name || username).trim(), input.role === 'admin' ? 'admin' : 'user', input.is_active === false ? 0 : 1, at, at);
+  const platformAdmin = input.account_kind === 'platform_admin' || input.console_access === true;
+  const info = db.prepare(`INSERT INTO users (username, password_hash, display_name, role, console_access, account_kind, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(username, hashPassword(input.password), String(input.display_name || username).trim(), platformAdmin ? 'admin' : 'user', platformAdmin ? 1 : 0, platformAdmin ? 'platform_admin' : 'creator', input.is_active === false ? 0 : 1, at, at);
   const id = Number(info.lastInsertRowid);
   db.prepare('INSERT INTO billing_accounts (user_id, updated_at) VALUES (?, ?)').run(id, at);
+  try { require('./tenantService').ensureDefaultTenant(db, actorId); } catch (_) {}
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
@@ -174,7 +179,11 @@ function changeUsername(db, userId, username) {
 function updateUser(db, id, input) {
   const updates = [], params = [];
   if (input.display_name !== undefined) { updates.push('display_name = ?'); params.push(String(input.display_name || '').trim()); }
-  if (input.role !== undefined) { updates.push('role = ?'); params.push(input.role === 'admin' ? 'admin' : 'user'); }
+  if (input.account_kind !== undefined || input.console_access !== undefined || input.role !== undefined) {
+    const platformAdmin = input.account_kind === 'platform_admin' || input.console_access === true || (input.role === 'admin' && input.console_access !== false);
+    updates.push('role = ?', 'console_access = ?', 'account_kind = ?');
+    params.push(platformAdmin ? 'admin' : 'user', platformAdmin ? 1 : 0, platformAdmin ? 'platform_admin' : 'creator');
+  }
   if (input.is_active !== undefined) { updates.push('is_active = ?'); params.push(input.is_active ? 1 : 0); }
   if (input.password) { updates.push('password_hash = ?'); params.push(hashPassword(input.password)); }
   if (!updates.length) return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
@@ -182,5 +191,4 @@ function updateUser(db, id, input) {
   db.prepare(`UPDATE users SET ${updates.join(', ')}, updated_at = ? WHERE id = ?`).run(...params);
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
-
 module.exports = { validateRuntimeSecurity, ensureBootstrapAdmin, sessionCookieOptions, login, register, authenticate, createUser, updateUser, changePassword, changeUsername, issueSession, publicUser, jwtSecret };

@@ -4,7 +4,7 @@
       <div class="header-inner">
         <h1 class="logo" @click="router.push('/')">
           <span class="richi-brand-mark" aria-hidden="true"><img src="/brand/richi-logo-color.png" alt="" /></span>
-          <span class="richi-brand-copy"><span class="logo-main">瑞池传媒短剧平台</span><span class="logo-sub">RICH MEDIA</span></span>
+          <span class="richi-brand-copy"><span class="logo-main">瑞池传媒短剧平台</span><span class="logo-sub">创作工作台</span></span>
         </h1>
         <span class="breadcrumb-sep">›</span>
         <span class="page-title">{{ drama?.title || '剧集管理' }}</span>
@@ -24,8 +24,11 @@
     </header>
 
     <main class="main" v-loading="loading">
+      <nav class="project-workspace-tabs" aria-label="项目工作区">
+        <button v-for="tab in [{v:'episodes',label:'分集'},{v:'resources',label:'制作资源'},{v:'info',label:'项目设置'}]" :key="tab.v" type="button" :class="{ active: workspaceTab === tab.v }" @click="workspaceTab = tab.v">{{ tab.label }}</button>
+      </nav>
       <!-- 基本信息 + 设置 -->
-      <section class="section card">
+      <section v-show="workspaceTab === 'info'" class="section card info-section">
         <div class="section-title">剧集信息</div>
         <el-form :model="infoForm" label-width="110px" label-position="left" class="info-form">
           <el-row :gutter="24">
@@ -103,7 +106,7 @@
       </section>
 
       <!-- 分集列表 -->
-      <section class="section card">
+      <section v-show="workspaceTab === 'episodes'" class="section card episodes-section" :class="{ 'is-sparse': episodes.length > 0 && episodes.length <= 3, 'is-single': episodes.length === 1 }">
         <div class="section-header">
           <div class="section-title">分集列表</div>
           <span class="section-count">共 {{ episodes.length }} 集</span>
@@ -113,44 +116,52 @@
           </el-button>
         </div>
         <div v-if="episodes.length === 0" class="empty-tip">暂无分集，点击「新增一集」开始创作</div>
-        <div v-else class="episode-grid">
-          <div
-            v-for="ep in episodes"
-            :key="ep.id"
-            class="episode-card"
-            title="点击进入制作页"
-            @click="goEpisode(ep.id)"
-          >
-            <div class="episode-card-header">
-              <span class="episode-num">第 {{ ep.episode_number ?? ep.number ?? '?' }} 集</span>
-              <el-button
-                size="small"
-                type="danger"
-                plain
-                circle
-                :icon="Delete"
-                :loading="deletingEpisodeId === ep.id"
-                @click.stop="onDeleteEpisode(ep)"
-              />
-            </div>
-            <div class="episode-title">{{ ep.title || '未命名' }}</div>
-            <div class="episode-preview">{{ (ep.script_content || '').slice(0, 20) || '暂无剧本' }}</div>
-            <div class="episode-stats">
-              <span class="ep-stat">
-                <span class="ep-stat-num">{{ ep.storyboards?.length ?? 0 }}</span> 分镜
-              </span>
-              <span v-if="ep.status" class="ep-stat ep-stat--status" :class="'ep-status--' + ep.status">{{ epStatusLabel(ep.status) }}</span>
-            </div>
-            <div class="episode-enter">
-              <el-icon class="episode-enter-icon"><VideoPlay /></el-icon>
-              进入制作
+        <div v-else class="episode-stage">
+          <div class="episode-grid">
+            <div
+              v-for="ep in episodes"
+              :key="ep.id"
+              class="episode-card"
+              title="点击进入制作页"
+              @click="goEpisode(ep.id)"
+            >
+              <div class="episode-card-header">
+                <span class="episode-num">第 {{ ep.episode_number ?? ep.number ?? '?' }} 集</span>
+                <el-button
+                  size="small"
+                  type="danger"
+                  plain
+                  circle
+                  :icon="Delete"
+                  :loading="deletingEpisodeId === ep.id"
+                  @click.stop="onDeleteEpisode(ep)"
+                />
+              </div>
+              <div class="episode-title">{{ ep.title || '未命名' }}</div>
+              <div class="episode-preview">{{ (ep.script_content || '').slice(0, 20) || '暂无剧本' }}</div>
+              <div class="episode-stats">
+                <span class="ep-stat">
+                  <span class="ep-stat-num">{{ ep.storyboards?.length ?? 0 }}</span> 分镜
+                </span>
+                <span v-if="ep.status" class="ep-stat ep-stat--status" :class="'ep-status--' + ep.status">{{ epStatusLabel(ep.status) }}</span>
+              </div>
+              <div class="episode-enter">
+                <el-icon class="episode-enter-icon"><VideoPlay /></el-icon>
+                进入制作
+              </div>
             </div>
           </div>
+          <aside v-if="episodes.length <= 3" class="episode-next-step" aria-labelledby="episode-progress-title">
+            <header class="episode-progress-heading"><div><p>制作概览</p><h3 id="episode-progress-title">第 {{ episodes[0]?.episode_number ?? episodes[0]?.number ?? 1 }} 集进度</h3><span>从剧本开始，逐步完成资源、分镜与成片。</span></div><span class="episode-progress-state">{{ episodes[0]?.status ? epStatusLabel(episodes[0].status) : '待制作' }}</span></header>
+            <div class="episode-pipeline"><i class="done">01 剧本</i><b></b><i>02 资源</i><b></b><i>03 分镜</i><b></b><i>04 成片</i></div>
+            <dl><div><dt>当前分集</dt><dd>{{ episodes[0]?.title || '未命名' }}</dd></div><div><dt>分镜数量</dt><dd>{{ episodes[0]?.storyboards?.length ?? 0 }}</dd></div><div><dt>画面比例</dt><dd>{{ infoForm.aspect_ratio || '16:9' }}</dd></div></dl>
+            <div class="episode-next-actions"><button type="button" @click="workspaceTab = 'resources'">准备角色与场景</button><button type="button" class="primary" @click="goEpisode(episodes[0].id)">继续第 {{ episodes[0]?.episode_number ?? episodes[0]?.number ?? 1 }} 集 ↗</button></div>
+          </aside>
         </div>
       </section>
 
       <!-- 本剧资源库（Tab 切换） -->
-      <section class="section card res-section">
+      <section v-show="workspaceTab === 'resources'" class="section card res-section">
         <nav class="res-tabbar">
           <span class="res-tab-group-label">资源库</span>
           <button
@@ -1012,6 +1023,7 @@ async function onAddEpisode() {
 }
 
 // ---------- 资源库 Tab ----------
+const workspaceTab = ref('episodes')
 const activeResTab = ref('lib-char') // lib-char | lib-scene | lib-prop | drama-char | drama-scene | drama-prop
 const previewUrl = ref(null)
 function openPreview(url) { if (url) previewUrl.value = url }
@@ -1530,4 +1542,72 @@ html.light .btn-theme {
   --el-button-hover-text-color: #4f46e5;
 }
 .drama-detail { background: var(--bg-page); background-image: none; color: var(--text-primary); }
+/* UI refactor: project detail uses the shared creative-workspace language. */
+.drama-detail{background:var(--bg-page);background-image:radial-gradient(56% 38% at 7% -8%,color-mix(in srgb,var(--accent) 14%,transparent),transparent 72%),radial-gradient(42% 32% at 96% 12%,color-mix(in srgb,var(--accent-teal) 8%,transparent),transparent 70%)}
+.header{padding:10px 20px;background:color-mix(in srgb,var(--bg-surface) 88%,transparent)!important;border-bottom-color:var(--border-subtle)!important;box-shadow:var(--shadow-sm)!important}.header-inner,.main{width:100%;max-width:1200px;box-sizing:border-box}.header-inner{gap:12px}.logo{flex-direction:row;align-items:center;gap:8px}.logo-main{background:none;color:var(--text-primary);-webkit-text-fill-color:var(--text-primary)}.logo-sub{color:var(--text-muted);-webkit-text-fill-color:var(--text-muted)}.page-title{color:var(--text-regular);border-color:var(--border-subtle);border-radius:9px;background:color-mix(in srgb,var(--bg-raised) 76%,transparent)}
+.main{padding:clamp(1rem,2.7vw,2.5rem) 0 4rem;gap:16px}.section.card{border-color:var(--border-subtle);border-radius:var(--radius-lg);background:color-mix(in srgb,var(--bg-surface) 93%,transparent);box-shadow:var(--shadow-sm)}.section.card:hover{border-color:color-mix(in srgb,var(--accent) 43%,var(--border-color));box-shadow:var(--shadow-md)}.section-title{color:var(--text-primary);font-size:1.05rem;letter-spacing:-.015em}.section-count,.empty-tip,.import-tip,.library-placeholder,.library-empty{color:var(--text-muted)}
+.episode-grid{gap:14px}.episode-card{border-color:var(--border-subtle);border-radius:12px;background:var(--bg-raised);box-shadow:none}.episode-card::before{background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 12%,transparent),transparent 62%)}.episode-card:hover{border-color:color-mix(in srgb,var(--accent) 56%,var(--border-color));background:color-mix(in srgb,var(--accent) 7%,var(--bg-raised));box-shadow:var(--shadow-sm)}.episode-title,.library-item-name{color:var(--text-primary)}.episode-num,.episode-preview,.ep-stat,.library-item-desc{color:var(--text-muted)}.ep-stat-num{color:var(--accent-teal)}.episode-enter{border-color:var(--border-subtle);color:var(--text-faint)}
+.library-item,.drama-res-item{border-color:var(--border-subtle);border-radius:10px;background:var(--bg-raised)}.res-tabbar{border-color:var(--border-subtle)}.res-tab{color:var(--text-muted)}.res-tab:hover{color:var(--text-primary);background:color-mix(in srgb,var(--bg-raised) 76%,transparent)}.res-tab--lib.active,.res-tab--drama.active{color:var(--accent)}.res-tab--lib.active::after,.res-tab--drama.active::after{background:var(--accent)}
+@media(max-width:760px){.header{padding:9px 12px}.header-inner{gap:7px}.logo{min-width:30px}.richi-brand-copy,.breadcrumb-sep,.btn-back-list{display:none}.richi-brand-mark{width:30px;height:30px;flex:0 0 30px}.page-title{min-width:0;flex:1;padding:0;border:0;background:transparent}.header-actions{margin-left:0;gap:4px}.header-actions :deep(.account-balance){display:none}.header-actions .el-button{height:34px;padding-inline:9px;font-size:0}.header-actions .el-icon{font-size:15px}.main{padding:18px 12px 40px}.section.card{padding:16px;border-radius:14px}.section-header{align-items:flex-start;flex-wrap:wrap;gap:8px}.section-header .section-count{margin-right:auto}.episode-grid{grid-template-columns:1fr}.episode-card{min-height:132px}.drama-res-item{width:100%}.res-tabbar{margin-inline:-16px;padding-left:16px}.res-tab-spacer,.res-tab-group-label--prod{display:none}:deep(.info-form .el-col){width:100%;max-width:100%;flex:0 0 100%}:deep(.info-form .el-form-item){margin-bottom:16px}:deep(.info-form .el-form-item__label){font-size:13px}}
+@media(min-width:900px){
+  .drama-detail{background-image:radial-gradient(52% 42% at 7% -8%,color-mix(in srgb,var(--accent) 22%,transparent),transparent 72%),radial-gradient(38% 36% at 94% 18%,color-mix(in srgb,var(--accent-teal) 13%,transparent),transparent 70%),linear-gradient(180deg,color-mix(in srgb,var(--bg-page) 82%,#05070b),var(--bg-page) 36%)}
+  .header{padding-block:13px}.header-inner{max-width:1340px}.main{max-width:1340px;padding-top:42px;gap:22px}.section.card{position:relative;overflow:hidden;padding:28px 30px;border-radius:20px}.section.card::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(120deg,color-mix(in srgb,var(--text-primary) 4%,transparent),transparent 34%);opacity:.6}.section.card>*{position:relative;z-index:1}
+  .main > .section.card:first-child{min-height:276px;padding:34px 36px;border-color:color-mix(in srgb,var(--accent) 44%,var(--border-color));background:radial-gradient(circle at 92% 10%,color-mix(in srgb,var(--accent-teal) 24%,transparent),transparent 25%),radial-gradient(circle at 76% 105%,color-mix(in srgb,var(--accent) 24%,transparent),transparent 39%),linear-gradient(140deg,color-mix(in srgb,var(--accent) 16%,var(--bg-surface)),var(--bg-surface) 54%,color-mix(in srgb,var(--accent-teal) 7%,var(--bg-surface)))}
+  .main > .section.card:first-child::before{content:'';position:absolute;right:-90px;top:-152px;width:420px;height:420px;border:1px solid color-mix(in srgb,var(--accent) 34%,transparent);border-radius:50%;box-shadow:0 0 0 36px color-mix(in srgb,var(--accent) 6%,transparent),0 0 0 74px color-mix(in srgb,var(--accent) 4%,transparent);pointer-events:none}
+  .section-title{display:flex;align-items:center;gap:10px;margin-bottom:24px;font-size:1.25rem;font-weight:740}.main > .section.card:first-child .section-title::before,.main > .section.card:nth-child(2) .section-title::before,.main > .section.card:nth-child(3) .section-title::before{font-size:10px;font-weight:800;letter-spacing:.12em;color:var(--accent);white-space:nowrap}.main > .section.card:first-child .section-title::before{content:'项目'}.main > .section.card:nth-child(2) .section-title::before{content:'分集'}.main > .section.card:nth-child(3) .section-title::before{content:'素材'}
+  .info-form{max-width:1020px}.info-form :deep(.el-input__wrapper),.info-form :deep(.el-select__wrapper),.info-form :deep(.el-textarea__inner){background:color-mix(in srgb,var(--bg-page) 46%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--text-primary) 10%,transparent) inset!important}.info-form :deep(.el-input__wrapper:hover),.info-form :deep(.el-select__wrapper:hover),.info-form :deep(.el-textarea__inner:hover){box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 58%,var(--border-color)) inset!important}.info-form :deep(.el-form-item__label){font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--text-muted)}
+  .section-header{padding-bottom:16px;border-bottom:1px solid var(--border-subtle)}.episode-grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}.episode-card{min-height:178px;padding:18px}.episode-card::after{content:'';position:absolute;right:14px;bottom:15px;width:32px;height:32px;border-right:1px solid color-mix(in srgb,var(--accent) 58%,transparent);border-bottom:1px solid color-mix(in srgb,var(--accent) 58%,transparent);opacity:.55}.episode-card:hover{transform:translateY(-5px) scale(1.01)}.episode-title{font-size:1rem}.episode-preview{line-height:1.55;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.episode-enter{margin-top:auto}
+  .res-section{padding-top:22px!important}.res-tabbar{margin-inline:-30px;padding-left:30px;background:color-mix(in srgb,var(--bg-page) 26%,transparent)}.res-tab{padding:13px 18px}.drama-res-list{gap:16px}.drama-res-item{padding:14px;border-radius:12px;transition:transform .18s ease,border-color .18s ease}.drama-res-item:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--accent) 48%,var(--border-color))}
+}
+
+/* Project cockpit: one bounded workspace instead of three stacked admin cards. */
+.drama-detail { display:flex; height:100vh; height:100dvh; min-height:0; flex-direction:column; overflow:hidden; }
+.drama-detail > .header { position:relative; flex:0 0 auto; }
+.drama-detail > .main { display:grid; grid-template-rows:auto minmax(0,1fr); flex:1; min-height:0; width:100%; max-width:min(1500px,calc(100vw - 3rem)); padding:1.2rem 0; overflow:hidden; }
+.project-workspace-tabs { display:flex; gap:.3rem; align-items:center; padding:.35rem; justify-self:start; border:1px solid var(--border-subtle); border-radius:999px; background:color-mix(in srgb,var(--bg-surface) 84%,transparent); }
+.project-workspace-tabs button { padding:.65rem 1rem; border:0; border-radius:999px; background:transparent; color:var(--text-muted); font-size:.75rem; cursor:pointer; transition:background-color var(--motion-fast,140ms) ease,color var(--motion-fast,140ms) ease; }.project-workspace-tabs button:hover,.project-workspace-tabs button.active { background:var(--text-primary); color:var(--bg-page); }
+.drama-detail .main > .section.card { min-height:0; margin-top:.8rem; padding:clamp(1.2rem,2.5vw,2.4rem); overflow:auto; border-radius:1.1rem; }
+.drama-detail .main > .episodes-section { background:linear-gradient(145deg,color-mix(in srgb,var(--bg-surface) 94%,transparent),color-mix(in srgb,var(--bg-page) 94%,transparent)); }
+.drama-detail .episodes-section .section-title::before { content:'分集'!important; }.drama-detail .info-section .section-title::before { content:'项目'!important; }
+.drama-detail .main > .episodes-section .episode-grid { display:flex; flex-direction:column; align-content:start; gap:0; border-top:1px solid var(--border-color); }.drama-detail .main > .episodes-section .episode-card { display:grid; grid-template-columns:6rem minmax(12rem,1fr) 10rem 7rem; grid-template-rows:auto auto; gap:.35rem 1.2rem; align-items:center; width:100%; min-height:6.7rem; padding:1rem .5rem; border-width:0 0 1px; border-radius:0; background:transparent; box-shadow:none; }.drama-detail .episodes-section .episode-card:hover { transform:none; background:color-mix(in srgb,var(--bg-hover) 42%,transparent); }.drama-detail .episodes-section .episode-card::after,.drama-detail .episodes-section .episode-card::before { display:none; }.drama-detail .episodes-section .episode-card-header { grid-column:1; grid-row:1 / 3; align-self:stretch; flex-direction:column; align-items:flex-start; justify-content:space-between; }.drama-detail .episodes-section .episode-title { grid-column:2; grid-row:1; align-self:end; }.drama-detail .episodes-section .episode-preview { grid-column:2; grid-row:2; align-self:start; }.drama-detail .episodes-section .episode-stats { grid-column:3; grid-row:1 / 3; }.drama-detail .episodes-section .episode-enter { grid-column:4; grid-row:1 / 3; margin:0; padding:0; border:0; }
+.drama-detail .episodes-section .episode-stage { min-height:0; }.drama-detail .episodes-section.is-sparse .episode-stage { display:grid; grid-template-columns:minmax(34rem,1.1fr) minmax(27rem,.9fr); gap:clamp(1.5rem,3vw,3.5rem); height:100%; min-height:0; padding-top:1.2rem; }.drama-detail .episodes-section.is-sparse .episode-grid { align-self:start; border-top:1px solid var(--border-color); }
+.drama-detail .episodes-section.is-single .episode-grid { align-self:stretch; height:100%; border-bottom:1px solid var(--border-color); }.drama-detail .episodes-section.is-single .episode-card { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto minmax(0,1fr) auto auto; height:100%; min-height:0; padding:clamp(1.4rem,3vw,3rem); }.drama-detail .episodes-section.is-single .episode-card-header { grid-column:1/-1; grid-row:1; flex-direction:row; align-items:center; }.drama-detail .episodes-section.is-single .episode-title { grid-column:1/-1; grid-row:2; align-self:end; max-width:13ch; font-size:clamp(2.4rem,4vw,5.2rem); line-height:.9; letter-spacing:-.07em; }.drama-detail .episodes-section.is-single .episode-preview { grid-column:1/-1; grid-row:3; align-self:start; margin-top:1rem; font-size:.9rem; }.drama-detail .episodes-section.is-single .episode-stats { grid-column:1; grid-row:4; align-self:end; margin-top:1.8rem; }.drama-detail .episodes-section.is-single .episode-enter { grid-column:2; grid-row:4; align-self:end; padding:.7rem .9rem; border:1px solid var(--border-strong); border-radius:.5rem; }
+.episode-next-step { display:flex; min-width:0; flex-direction:column; justify-content:space-between; padding:clamp(1.3rem,2.5vw,2.6rem) 0; border-top:1px solid var(--border-color); border-bottom:1px solid var(--border-color); }.episode-next-step p { margin:0 0 1rem; color:var(--accent-teal); font:800 .62rem/1 ui-monospace,monospace; letter-spacing:.15em; }.episode-next-step h3 { margin:0; font-size:clamp(2.7rem,4vw,4.8rem); line-height:.9; letter-spacing:-.07em; }.episode-next-step>div:first-child>span { display:block; max-width:38rem; margin-top:1.2rem; color:var(--text-muted); line-height:1.7; }.episode-pipeline { display:flex; align-items:center; gap:.55rem; color:var(--text-faint); font:700 .6rem/1 ui-monospace,monospace; }.episode-pipeline i { font-style:normal; white-space:nowrap; }.episode-pipeline i.done { color:var(--accent-teal); }.episode-pipeline b { flex:1; height:1px; background:var(--border-color); }.episode-next-step dl { display:grid; grid-template-columns:1.5fr .65fr .65fr; margin:0; border-top:1px solid var(--border-color); border-bottom:1px solid var(--border-color); }.episode-next-step dl div { min-width:0; padding:1rem; border-right:1px solid var(--border-color); }.episode-next-step dl div:last-child { border-right:0; }.episode-next-step dt { color:var(--text-faint); font-size:.6rem; }.episode-next-step dd { overflow:hidden; margin:.5rem 0 0; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }.episode-next-actions { display:flex; gap:.65rem; }.episode-next-actions button { padding:.78rem 1rem; border:1px solid var(--border-strong); border-radius:.5rem; background:transparent; color:var(--text-regular); cursor:pointer; }.episode-next-actions button.primary { border-color:var(--accent); background:var(--accent); color:#fff; }
+.drama-detail .main > .info-section { background:radial-gradient(circle at 90% 5%,color-mix(in srgb,var(--accent) 18%,transparent),transparent 26%),var(--bg-surface); }
+.drama-detail .main > .res-section { display:block; }
+@media(max-width:72rem){.drama-detail .episodes-section.is-sparse .episode-stage{grid-template-columns:1fr}.episode-next-step{display:none}}
+@media(max-width:48rem){.drama-detail>.main{max-width:100%;padding:.75rem}.project-workspace-tabs{width:100%;justify-content:space-between}.project-workspace-tabs button{flex:1;padding:.6rem .5rem}.drama-detail .main>.section.card{margin-top:.65rem;padding:1rem}.drama-detail .main>.episodes-section .episode-card{grid-template-columns:3.7rem minmax(0,1fr) 1rem;min-height:5.8rem;gap:.25rem .7rem}.drama-detail .episodes-section .episode-card-header{grid-column:1}.drama-detail .episodes-section .episode-title,.drama-detail .episodes-section .episode-preview{grid-column:2}.drama-detail .episodes-section .episode-stats{display:none}.drama-detail .episodes-section .episode-enter{grid-column:3;font-size:0}}
+@media(max-width:48rem){
+  .drama-detail .main>.episodes-section{display:flex;flex-direction:column;overflow:hidden}
+  .drama-detail .episodes-section.is-sparse .episode-stage{display:grid;grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr);gap:.8rem;flex:1;height:auto;min-height:0;padding-top:.7rem;overflow:hidden}
+  .drama-detail .episodes-section.is-single .episode-grid{align-self:start;height:auto}
+  .drama-detail .episodes-section.is-single .episode-card{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto auto auto;height:auto;min-height:14rem;padding:1.1rem}
+  .drama-detail .episodes-section.is-single .episode-card-header{grid-column:1/-1;grid-row:1;flex-direction:row;align-items:center}
+  .drama-detail .episodes-section.is-single .episode-title{grid-column:1/-1;grid-row:2;align-self:auto;margin-top:2rem;font-size:2.35rem;line-height:.92}
+  .drama-detail .episodes-section.is-single .episode-preview{grid-column:1/-1;grid-row:3;margin-top:.7rem}
+  .drama-detail .episodes-section.is-single .episode-enter{grid-column:1/-1;grid-row:4;justify-self:start;margin-top:1rem;padding:.55rem .75rem;font-size:.78rem}
+  .drama-detail .episodes-section .episode-next-step{display:grid;grid-template-rows:auto auto auto auto;gap:.7rem;min-height:0;padding:.8rem 0;overflow:hidden}
+  .drama-detail .episodes-section .episode-next-step h3{font-size:1.8rem}.drama-detail .episodes-section .episode-next-step p{margin-bottom:.35rem}
+  .drama-detail .episodes-section .episode-pipeline{gap:.25rem}.drama-detail .episodes-section .episode-next-step dl div{padding:.65rem .45rem}.drama-detail .episodes-section .episode-next-actions button{flex:1;padding:.65rem .5rem}
+}
+.drama-detail .episodes-section.is-single .episode-title{max-width:18ch;overflow-wrap:anywhere;font-size:clamp(2rem,3vw,3.8rem);line-height:1;letter-spacing:-.055em}
+/* 单集概览以“剧集信息 + 下一步”成对呈现，避免大字与大片空白割裂项目页。 */
+@media(min-width:72.1rem){
+  .drama-detail .episodes-section.is-single .episode-stage{grid-template-columns:minmax(24rem,.86fr) minmax(31rem,1.14fr);gap:clamp(1.25rem,2.4vw,2.4rem);align-items:stretch;min-height:27rem}
+  .drama-detail .episodes-section.is-single .episode-grid{height:auto;min-height:27rem;border:1px solid var(--border-subtle);border-radius:1rem;background:color-mix(in srgb,var(--bg-raised) 80%,transparent);overflow:hidden}
+  .drama-detail .episodes-section.is-single .episode-card{height:auto;min-height:27rem;padding:clamp(1.35rem,2.6vw,2.4rem);grid-template-rows:auto minmax(0,1fr) auto auto;background:transparent}
+  .drama-detail .episodes-section.is-single .episode-title{align-self:center;max-width:16ch;font-size:clamp(2rem,3vw,3.35rem);line-height:1.04;letter-spacing:-.052em}
+  .drama-detail .episodes-section.is-single .episode-preview{max-width:38ch;margin-top:.7rem;line-height:1.6}
+  .drama-detail .episodes-section.is-single .episode-stats{margin-top:1rem}
+  .episode-next-step{min-height:27rem;padding:clamp(1.35rem,2.6vw,2.4rem);border:1px solid var(--border-subtle);border-radius:1rem;background:color-mix(in srgb,var(--bg-surface) 88%,transparent);box-sizing:border-box}
+  .episode-progress-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
+  .episode-next-step p{margin-bottom:.55rem}
+  .episode-next-step h3{font-size:clamp(1.55rem,2.15vw,2.35rem);line-height:1.08;letter-spacing:-.045em}
+  .episode-progress-heading>div>span{display:block;max-width:34rem;margin-top:.7rem;color:var(--text-muted);font-size:.84rem;line-height:1.6}
+  .episode-progress-state{flex:0 0 auto;padding:.38rem .58rem;border:1px solid color-mix(in srgb,var(--accent-teal) 38%,var(--border-subtle));border-radius:999px;color:var(--accent-teal);font-size:.72rem;font-weight:700;white-space:nowrap}
+  .episode-pipeline{margin-top:1.35rem;padding:.75rem .85rem;border-radius:.65rem;background:color-mix(in srgb,var(--bg-page) 54%,transparent)}
+  .episode-next-step dl{margin-top:1.25rem}
+  .episode-next-actions{margin-top:1.25rem}
+  .episode-next-actions button{min-height:2.7rem}
+}
 </style>

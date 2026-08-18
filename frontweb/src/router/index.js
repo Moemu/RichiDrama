@@ -6,6 +6,7 @@ const router = createRouter({
   routes: [
     { path: '/login', name: 'login', component: () => import('@/views/Login.vue'), meta: { public: true, title: '登录' } },
     { path: '/account', name: 'account', component: () => import('@/views/AccountCenter.vue'), meta: { title: '账户中心' } },
+    { path: '/admin/operations', name: 'admin-operations', component: () => import('@/views/OperationsScale.vue'), meta: { title: '运营告警与报表', admin: true } },
     { path: '/admin', name: 'admin', component: () => import('@/views/AdminConsole.vue'), meta: { title: '后台管理', admin: true } },
     {
       path: '/',
@@ -35,7 +36,7 @@ const router = createRouter({
       path: '/ai-config',
       name: 'ai-config',
       component: () => import('@/views/AiConfig.vue'),
-      meta: { title: 'AI 配置' }
+      meta: { title: 'AI 配置', admin: true }
     },
     {
       path: '/free-create',
@@ -85,7 +86,7 @@ router.beforeEach((to) => {
   }
   const user = JSON.parse(localStorage.getItem('lmd_auth_user') || 'null')
   if (!to.meta.public && !localStorage.getItem('lmd_auth_token')) return { path: '/login', query: { redirect: to.fullPath } }
-  if (to.meta.admin && user?.role !== 'admin') return '/'
+  if (to.meta.admin && user?.console_access !== true) return '/'
   if (to.path === '/login' && localStorage.getItem('lmd_auth_token')) {
     return safeRedirectPath(to.query.redirect, '/')
   }

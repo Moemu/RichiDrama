@@ -1,11 +1,12 @@
 import request from '@/utils/request'
 
 export const aiAPI = {
-  list(serviceType) {
-    return request.get('/ai-configs', { params: serviceType ? { service_type: serviceType } : {} })
+  list(serviceType, options = {}) {
+    const params = { ...(serviceType ? { service_type: serviceType } : {}), ...(options.tenantId ? { tenant_id: options.tenantId } : {}) }
+    return request.get('/ai-configs', { params })
   },
-  get(id) {
-    return request.get(`/ai-configs/${id}`)
+  get(id, options = {}) {
+    return request.get(`/ai-configs/${id}`, { params: options.tenantId ? { tenant_id: options.tenantId } : {} })
   },
   create(body) {
     return request.post('/ai-configs', body)
@@ -13,8 +14,8 @@ export const aiAPI = {
   update(id, body) {
     return request.put(`/ai-configs/${id}`, body)
   },
-  delete(id) {
-    return request.delete(`/ai-configs/${id}`)
+  delete(id, options = {}) {
+    return request.delete(`/ai-configs/${id}`, { params: options.tenantId ? { tenant_id: options.tenantId } : {} })
   },
   testConnection(body) {
     return request.post('/ai-configs/test', body)

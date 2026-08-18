@@ -272,17 +272,23 @@ function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress
   });
 }
 
+function configScope(options = {}) {
+  if (options.tenant_id || options.tenantId) return { tenant_id: options.tenant_id || options.tenantId };
+  const tenantId = require('./billingRequestContext').current()?.tenant_id;
+  return tenantId ? { tenant_id: tenantId } : {};
+}
+
 // 使用前端设置的「默认」与「优先级」：listConfigs 已按 is_default DESC, priority DESC 排序
-function getDefaultConfig(db, serviceType) {
-  const configs = aiConfigService.listConfigs(db, serviceType);
+function getDefaultConfig(db, serviceType, options = {}) {
+  const configs = aiConfigService.listConfigs(db, serviceType, configScope(options));
   const active = configs.filter((c) => c.is_active);
   if (active.length === 0) return null;
   const defaultOne = active.find((c) => c.is_default);
   return defaultOne != null ? defaultOne : active[0];
 }
 
-function getConfigForModel(db, serviceType, modelName) {
-  const configs = aiConfigService.listConfigs(db, serviceType);
+function getConfigForModel(db, serviceType, modelName, options = {}) {
+  const configs = aiConfigService.listConfigs(db, serviceType, configScope(options));
   for (const config of configs) {
     if (!config.is_active) continue;
     const models = Array.isArray(config.model) ? config.model : [config.model];
@@ -309,7 +315,7 @@ function createAutomaticTextAuthorization(db, config, model, userPrompt, systemP
   const context = require('./billingRequestContext').current();
   if (!context?.actor?.id || context.auto_billing_disabled) return null;
   const billing = require('./billingService');
-  const target = aiConfigService.resolveBillingTarget(db, billingServiceType, model, config.id);
+  const target = aiConfigService.resolveBillingTarget(db, billingServiceType, model, config.id, configScope());
   const meters = billing.activeMeters(db, context.actor, billingServiceType, target.billing_key);
   const reserve = require('./billingUsageService').textReservation(`${systemPrompt || ''}\n${userPrompt || ''}`, maxOutputTokens);
   const usage = {};
@@ -360,11 +366,11 @@ function voidAutomaticTextAuthorization(ticket, reason) {
  * 从 ai_model_map 表查找业务场景对应的模型配置
  * 返回 { config, modelOverride } 或 null（未配置时）
  */
-function getConfigFromModelMap(db, sceneKey) {
+function getConfigFromModelMap(db, sceneKey, options = {}) {
   try {
     const row = db.prepare('SELECT * FROM ai_model_map WHERE key = ?').get(sceneKey);
     if (!row) return null;
-    const configs = aiConfigService.listConfigs(db, row.service_type || 'text');
+    const configs = aiConfigService.listConfigs(db, row.service_type || 'text', configScope(options));
     let config = null;
     if (row.config_id) {
       config = configs.find((c) => c.id === row.config_id && c.is_active) || null;
@@ -380,6 +386,7 @@ function getConfigFromModelMap(db, sceneKey) {
 
 async function generateText(db, log, serviceType, userPrompt, systemPrompt, options = {}) {
   const { model: preferredModelRaw, temperature = 0.7, json_mode = false, min_max_tokens = null, streamCallback = null, scene_key = null } = options;
+  const tenantOptions = options.tenant_id || options.tenantId ? { tenant_id: options.tenant_id || options.tenantId } : {};
   const preferredModel = preferredModelRaw && preferredModelRaw !== 'auto' ? preferredModelRaw : undefined;
 
   // F2: 若传入 scene_key，优先从 ai_model_map 查找对应的模型路由配置
@@ -387,7 +394,7 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
   let routedModelOverride = null;
   // A direct per-shot selection must win over the default scene routing.
   if (scene_key && !preferredModel) {
-    const mapped = getConfigFromModelMap(db, scene_key);
+    const mapped = getConfigFromModelMap(db, scene_key, tenantOptions);
     if (mapped) {
       config = mapped.config;
       routedModelOverride = mapped.modelOverride;
@@ -397,12 +404,12 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
 
   if (!config) {
     config = preferredModel
-      ? getConfigForModel(db, serviceType, preferredModel)
-      : getDefaultConfig(db, serviceType);
+      ? getConfigForModel(db, serviceType, preferredModel, tenantOptions)
+      : getDefaultConfig(db, serviceType, tenantOptions);
   }
   if (!config && preferredModel === undefined) {
     // 兜底：如果前端传了 undefined，且没找到默认，尝试重新找一下（可能 serviceType 传值问题，或者数据库问题）
-    config = getDefaultConfig(db, 'text');
+    config = getDefaultConfig(db, 'text', tenantOptions);
   }
   if (!config) {
     throw new Error(`未配置文本模型，请在「AI 配置」中添加 ${serviceType} 类型 且已启用的配置`);
@@ -715,10 +722,11 @@ async function generateTextWithVision(db, log, serviceType, userPrompt, systemPr
 
   // 复用 generateText 的配置查找逻辑
   const { model: preferredModel, temperature = 0.3, max_tokens = 500 } = options;
+  const tenantOptions = options.tenant_id || options.tenantId ? { tenant_id: options.tenant_id || options.tenantId } : {};
   let config = preferredModel
-    ? getConfigForModel(db, serviceType, preferredModel)
-    : getDefaultConfig(db, serviceType);
-  if (!config) config = getDefaultConfig(db, 'text');
+    ? getConfigForModel(db, serviceType, preferredModel, tenantOptions)
+    : getDefaultConfig(db, serviceType, tenantOptions);
+  if (!config) config = getDefaultConfig(db, 'text', tenantOptions);
   if (!config) throw new Error(`未配置文本模型，请在「AI 配置」中添加 ${serviceType} 类型的配置`);
   const model = getModelFromConfig(config, preferredModel);
   const url = buildChatUrl(config);

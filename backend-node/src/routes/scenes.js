@@ -138,14 +138,14 @@ function routes(db, log, cfg) {
     },
     sd2Certify: async (req, res) => {
       try {
-        const out = await assetSd2Service.certifyResource(db, log, cfg, 'scene', req.params.scene_id);
+        const out = await assetSd2Service.certifyResource(db, log, cfg, 'scene', req.params.scene_id, req.auth.id);
         if (!out.ok) return response.badRequest(res, out.error);
         response.success(res, { message: 'SD2 素材认证已更新', seedance2_asset: out.seedance2_asset });
       } catch (err) { log.error('scenes sd2-certify', { error: err.message }); response.internalError(res, err.message); }
     },
     sd2CertifyRefresh: async (req, res) => {
       try {
-        const out = await assetSd2Service.refreshResource(db, log, cfg, 'scene', req.params.scene_id);
+        const out = await assetSd2Service.refreshResource(db, log, cfg, 'scene', req.params.scene_id, req.auth.id);
         if (!out.ok) return response.badRequest(res, out.error);
         response.success(res, { message: 'SD2 认证状态已刷新', seedance2_asset: out.seedance2_asset });
       } catch (err) { log.error('scenes sd2-certify-refresh', { error: err.message }); response.internalError(res, err.message); }

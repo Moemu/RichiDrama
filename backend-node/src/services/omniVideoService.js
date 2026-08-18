@@ -40,9 +40,13 @@ function create(db, log, body, billingUser) {
   body.upscale_resolution = postprocessPolicy.upscale_resolution;
   body.target_fps = postprocessPolicy.target_fps;
   const input = Array.isArray(body.assets) ? body.assets : [];
+  const payer = billingUser || { id: body.owner_user_id, role: 'admin' };
+  if (!payer?.id) throw new Error('缺少生成任务所属账号');
+  const tenantId = Number(body.tenant_id) || require('./tenantService').tenantForUser(db, payer.id)?.id || null;
+  const tenantOptions = tenantId ? { tenant_id: tenantId } : {};
   if (input.length > 50) throw new Error('一次创作最多使用 50 个素材');
   const assets = prioritizePromptReferenceAssets(input.map((entry, ordinal) => resolveAsset(db, entry, ordinal, body.owner_user_id)), body.prompt_document, prompt);
-  const capability = capabilityService.resolve(db, body.model, assets);
+  const capability = capabilityService.resolve(db, body.model, assets, tenantOptions);
   if (!capability.model) throw new Error('请先在 AI 配置中启用视频模型');
   validateShotAssetLimits(assets, capability);
   body.duration = Math.min(maxDurationForModel(capability.model), Math.max(4, Math.round(Number(body.duration) || 15)));
@@ -56,10 +60,8 @@ function create(db, log, body, billingUser) {
   const modelPrompt = bindPromptReferences(prompt, body.prompt_document, routed);
   const now = new Date().toISOString();
   const billing = require('./billingService');
-  const payer = billingUser || { id: body.owner_user_id, role: 'admin' };
-  if (!payer?.id) throw new Error('缺少生成任务所属账号');
   const aiConfigs = require('./aiConfigService');
-  const billingTarget = aiConfigs.resolveBillingTarget(db, 'video', capability.model, capability.config_id);
+  const billingTarget = aiConfigs.resolveBillingTarget(db, 'video', capability.model, capability.config_id, tenantOptions);
   const config = aiConfigs.getConfig(db, capability.config_id);
   let billingSettings = {}; try { billingSettings = JSON.parse(config?.settings || '{}'); } catch (_) {}
   const upscaleResolution = body.upscale_resolution;
@@ -68,8 +70,9 @@ function create(db, log, body, billingUser) {
   const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
   const existingWaitingId = Number(body.__sd2_waiting_generation_id) || null;
+  if (!waitingForSd2 && !String(body.idempotency_key || '').trim()) throw new Error('视频生成请求缺少幂等键，请刷新后重试');
   const authorization = waitingForSd2 ? null : billing.createAuthorization(db, payer, {
-    idempotency_key: body.idempotency_key || (existingWaitingId ? `sd2-wait:${existingWaitingId}` : `omni-video:${payer.id}:${Date.now()}:${Math.random()}`),
+    idempotency_key: String(body.idempotency_key).trim(),
     service_type: 'video', model: billingTarget.billing_key, usage,
     pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || null,
   });
@@ -81,7 +84,7 @@ function create(db, log, body, billingUser) {
     if (!existing || existing.status !== 'sd2_waiting' || Number(existing.owner_user_id) !== Number(payer.id)) throw new Error('SD2 等待任务不存在或已被处理');
     task = taskService.getTask(db, existing.task_id) || { id: existing.task_id };
     videoGenerationId = existing.id;
-  } else task = taskService.createTask(db, log, 'video_generation', '', body.owner_user_id || payer.id);
+  } else task = taskService.createTask(db, log, 'video_generation', '', body.owner_user_id || payer.id, tenantId);
   const imageUrls = routed.filter((asset) => asset.send_to_model && asset.type === 'image').map((asset) => asset.model_url || asset.local_path || asset.url).filter(Boolean);
   const first = routed.find((asset) => asset.usage === 'first_frame' && asset.send_to_model);
   const last = routed.find((asset) => asset.usage === 'last_frame' && asset.send_to_model);
@@ -89,9 +92,9 @@ function create(db, log, body, billingUser) {
     db.prepare(`UPDATE video_generations SET billing_authorization_id = ?, provider = ?, prompt = ?, model = ?, duration = ?, aspect_ratio = ?, resolution = ?, upscale_resolution = ?, target_fps = ?, seed = ?, camera_fixed = ?, watermark = ?, image_url = ?, first_frame_url = ?, last_frame_url = ?, reference_image_urls = ?, status = ?, error_msg = NULL, updated_at = ? WHERE id = ?`)
       .run(authorization.authorization_id, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution, targetFps, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0, imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null, imageUrls.length ? JSON.stringify(imageUrls) : null, 'processing', now, videoGenerationId);
   } else {
-    const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, status, task_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`)
-      .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.owner_user_id || payer.id, authorization?.authorization_id || null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution,
+    const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, status, task_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`)
+      .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.owner_user_id || payer.id, tenantId, authorization?.authorization_id || null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution,
         targetFps, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
         imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null,
         imageUrls.length ? JSON.stringify(imageUrls) : null, waitingForSd2 ? 'sd2_waiting' : 'processing', task.id, now, now);
@@ -368,7 +371,8 @@ function buildSummary(assets) { return { sent_to_model: assets.filter((a) => a.s
 function get(db, id) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
   if (!job) return null;
-  const generation = db.prepare('SELECT * FROM video_generations WHERE id = ?').get(job.video_generation_id);
+  const generation = db.prepare(`SELECT v.*, t.progress AS task_progress, t.message AS task_message, t.updated_at AS task_updated_at
+    FROM video_generations v LEFT JOIN async_tasks t ON t.id=v.task_id AND t.deleted_at IS NULL WHERE v.id = ?`).get(job.video_generation_id);
   const assets = db.prepare('SELECT * FROM omni_video_job_assets WHERE omni_job_id = ? ORDER BY ordinal').all(job.id);
   const safeGeneration = generation ? { ...generation, video_url: videoService.publicVideoUrl(generation.video_url, generation.local_path) } : null;
   let isCurrent = false;
@@ -386,9 +390,10 @@ function list(db, query = {}) {
   const shotId = Number(query.shot_id);
   let sql = `SELECT j.*, v.status, v.video_url, v.local_path, v.poster_local_path, v.source_local_path, v.upscale_local_path,
     v.resolution, v.aspect_ratio, v.upscale_resolution, v.target_fps, v.upscale_status, v.interpolation_status,
-    v.output_width, v.output_height, v.output_resolution, v.output_fps, v.output_duration_ms, v.error_msg,
+    v.output_width, v.output_height, v.output_resolution, v.output_fps, v.output_duration_ms, v.error_msg, v.task_id, t.progress AS task_progress, t.message AS task_message, t.updated_at AS task_updated_at,
     s.active_video_generation_id, s.local_path AS storyboard_local_path
     FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id
+    LEFT JOIN async_tasks t ON t.id=v.task_id AND t.deleted_at IS NULL
     LEFT JOIN storyboards s ON s.id = v.storyboard_id AND s.deleted_at IS NULL`;
   const params = [];
   const filters = [];

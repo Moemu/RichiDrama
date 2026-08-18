@@ -537,7 +537,7 @@ function mergePromptWithStyle(prompt, style) {
 
 function create(db, log, req) {
   const now = new Date().toISOString();
-  const task = taskService.createTask(db, log, 'image_generation', String(req.drama_id || ''), req.owner_user_id || null);
+  const task = taskService.createTask(db, log, 'image_generation', String(req.drama_id || ''), req.owner_user_id || null, req.tenant_id || null);
   const taskId = task.id;
   const frameType = req.frame_type ?? null;
   const sceneId = req.scene_id != null ? Number(req.scene_id) : null;
@@ -560,13 +560,14 @@ function create(db, log, req) {
   }
   const useFirstFrameLayoutLock = resolveUseFirstFrameLayoutLock(req, frameType);
   const info = db.prepare(
-    `INSERT INTO image_generations (storyboard_id, drama_id, scene_id, owner_user_id, billing_authorization_id, provider, prompt, negative_prompt, model, frame_type, reference_images, use_first_frame_layout_lock, size, status, task_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+    `INSERT INTO image_generations (storyboard_id, drama_id, scene_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, negative_prompt, model, frame_type, reference_images, use_first_frame_layout_lock, size, status, task_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
   ).run(
     req.storyboard_id ?? null,
     Number(req.drama_id) || 0,
     sceneId,
     req.owner_user_id || null,
+    req.tenant_id || null,
     req.billing_authorization_id || null,
     req.provider || 'openai',
     mergedPrompt,
@@ -717,7 +718,7 @@ async function processImageGeneration(db, log, imageGenId) {
     }
 
     // ── Step 1: 获取 AI 配置 ──────────────────────────────────────────
-    const config = imageClient.getDefaultImageConfig(db, row.model, null, imageServiceType);
+    const config = imageClient.getDefaultImageConfig(db, row.model, null, imageServiceType, row.tenant_id ? { tenant_id: row.tenant_id } : {});
     if (!config) {
       log.error('[图生] ✗ 未找到图片 AI 配置', { id: imageGenId, imageServiceType, elapsed: elapsed() });
       db.prepare('UPDATE image_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run(

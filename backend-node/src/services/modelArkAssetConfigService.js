@@ -2,9 +2,17 @@
 
 const { callModelArkAsset } = require('./modelArkAssetProxyService');
 
-function loadModelArkAssetRow(db) {
+function loadModelArkAssetRow(db, userId) {
   if (!db) return null;
   try {
+    const tenant = userId ? require('./tenantService').tenantForUser(db, userId) : null;
+    if (tenant) {
+      const bound = db.prepare(`SELECT c.id, c.name, c.base_url, c.api_key, c.settings FROM tenant_sd2_config_bindings b
+        JOIN ai_service_configs c ON c.id=b.ai_config_id
+        WHERE b.tenant_id=? AND b.is_active=1 AND c.deleted_at IS NULL AND c.is_active=1 AND c.service_type=?
+        ORDER BY c.is_default DESC, c.priority DESC, c.id ASC LIMIT 1`).get(tenant.id, 'model_ark_asset');
+      if (bound) return bound;
+    }
     return db
       .prepare(
         `SELECT id, name, base_url, api_key, settings FROM ai_service_configs
@@ -31,8 +39,8 @@ function parseSettingsJson(raw) {
 /**
  * @returns {{ ready: boolean, row?: object, settings?: object, callOpts?: object, assetGroupId?: string, diag?: object }}
  */
-function buildModelArkContext(db, log) {
-  const row = loadModelArkAssetRow(db);
+function buildModelArkContext(db, log, userId) {
+  const row = loadModelArkAssetRow(db, userId);
   if (!row) {
     return { ready: false, diag: { db_model_ark_row_found: false } };
   }

@@ -32,3 +32,9 @@ volumes/
 .env
 .env.*
 minidrama.oss.env
+
+# 运行时临时日志/垃圾文件
+nul
+*.restart-current.*.log
+backend-node/backend-restart-current.*.log
+frontweb/frontweb-restart-current.*.log

@@ -44,10 +44,10 @@ function createdAssetFromResult(result, provider) {
   }
   return { ok: true, asset };
 }
-function chooseProvider(db, cfg, log) {
-  const ark = modelArk.buildModelArkContext(db, log);
+function chooseProvider(db, cfg, log, userId) {
+  const ark = modelArk.buildModelArkContext(db, log, userId);
   if (ark.ready) return { provider: 'model_ark', ctx: ark };
-  const hub = materialHub.buildHubContext(cfg, db, log);
+  const hub = materialHub.buildHubContext(cfg, db, log, userId);
   if (hub.token) return { provider: 'hub', ctx: hub };
   return { provider: null, error: '未配置 SD2 资产库，请配置 ModelArk 资产库或即梦2认证网关' };
 }
@@ -124,13 +124,13 @@ function scheduleResourceSettlement(db, log, table, id, route, created, initial,
   });
 }
 
-async function certifyResource(db, log, cfg, kind, id) {
+async function certifyResource(db, log, cfg, kind, id, userId) {
   const table = tableFor(kind);
   if (!table) return { ok: false, error: '不支持的 SD2 素材类型' };
   const row = db.prepare(`SELECT * FROM ${table} WHERE id = ? AND deleted_at IS NULL`).get(Number(id));
   if (!row) return { ok: false, error: '素材不存在' };
   if (!String(row.image_url || row.url || '').trim() && !String(row.local_path || '').trim()) return { ok: false, error: '请先为素材上传图片后再认证' };
-  const route = chooseProvider(db, cfg, log); if (!route.provider) return { ok: false, error: route.error };
+  const route = chooseProvider(db, cfg, log, userId); if (!route.provider) return { ok: false, error: route.error };
   const source = await publicImageUrl(row, cfg, log); if (!source.ok) return source;
   const name = row.name || row.location || `${kind}-${row.id}`;
   const create = route.provider === 'model_ark' ? await modelArk.createImageAsset(route.ctx, { name, url: source.url }, log) : await materialHub.createImageAsset(route.ctx, { name, url: source.url }, log);
@@ -145,14 +145,14 @@ async function certifyResource(db, log, cfg, kind, id) {
   return { ok: true, async: true, seedance2_asset: out };
 }
 
-async function refreshResource(db, log, cfg, kind, id) {
+async function refreshResource(db, log, cfg, kind, id, userId) {
   const table = tableFor(kind);
   if (!table) return { ok: false, error: '不支持的 SD2 素材类型' };
   const row = db.prepare(`SELECT * FROM ${table} WHERE id = ? AND deleted_at IS NULL`).get(Number(id));
   if (!row) return { ok: false, error: '素材不存在' };
   const previous = parse(row.seedance2_asset);
   if (!previous?.hub_asset_id) return { ok: false, error: '请先完成 SD2 认证' };
-  const route = previous.sd2_provider === 'model_ark' ? { provider: 'model_ark', ctx: modelArk.buildModelArkContext(db, log) } : { provider: 'hub', ctx: materialHub.buildHubContext(cfg, db, log) };
+  const route = previous.sd2_provider === 'model_ark' ? { provider: 'model_ark', ctx: modelArk.buildModelArkContext(db, log, userId) } : { provider: 'hub', ctx: materialHub.buildHubContext(cfg, db, log, userId) };
   if ((route.provider === 'model_ark' && !route.ctx.ready) || (route.provider === 'hub' && !route.ctx.token)) return { ok: false, error: '当前 SD2 认证配置不可用，无法刷新状态' };
   const result = route.provider === 'model_ark' ? await modelArk.getAsset(route.ctx, previous.hub_asset_id, log) : await materialHub.getAsset(route.ctx, previous.hub_asset_id, log);
   if (!result.ok) return { ok: false, error: result.error };
@@ -177,32 +177,32 @@ function markResourceStale(db, kind, previous, next) {
   db.prepare(`UPDATE ${table} SET seedance2_asset = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(out), out.updated_at, previous.id);
 }
 
-async function certify(db, log, cfg, id) {
+async function certify(db, log, cfg, id, userId) {
   const asset = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!asset) return { ok: false, error: '素材不存在' };
   if (asset.type !== 'image') return { ok: false, error: '仅图片素材支持 SD2 认证' };
   const linked = mappedResource(asset);
   if (linked?.kind === 'character') {
-    return require('./characterLibraryService').registerCharacterJimengMaterialAsset(db, log, cfg, linked.id);
+    return require('./characterLibraryService').registerCharacterJimengMaterialAsset(db, log, cfg, linked.id, userId);
   }
   if (linked) {
-    const out = await certifyResource(db, log, cfg, linked.kind, linked.id);
+    const out = await certifyResource(db, log, cfg, linked.kind, linked.id, userId);
     if (!out.ok) return out;
     return { ...out, seedance2_asset: mappedAssetAfterSync(db, log, linked) || out.seedance2_asset };
   }
-  return certifyResource(db, log, cfg, 'asset', id);
+  return certifyResource(db, log, cfg, 'asset', id, userId);
 }
-async function refresh(db, log, cfg, id) {
+async function refresh(db, log, cfg, id, userId) {
   const asset = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!asset) return { ok: false, error: '素材不存在' };
   const linked = mappedResource(asset);
-  if (linked?.kind === 'character') return require('./characterLibraryService').refreshCharacterJimengMaterialAsset(db, log, cfg, linked.id);
+  if (linked?.kind === 'character') return require('./characterLibraryService').refreshCharacterJimengMaterialAsset(db, log, cfg, linked.id, userId);
   if (linked) {
-    const out = await refreshResource(db, log, cfg, linked.kind, linked.id);
+    const out = await refreshResource(db, log, cfg, linked.kind, linked.id, userId);
     if (!out.ok) return out;
     return { ...out, seedance2_asset: mappedAssetAfterSync(db, log, linked) || out.seedance2_asset };
   }
-  return refreshResource(db, log, cfg, 'asset', id);
+  return refreshResource(db, log, cfg, 'asset', id, userId);
 }
 
 function ownedImageAssetIds(db, ownerUserId, ids) {
@@ -214,12 +214,12 @@ function ownedImageAssetIds(db, ownerUserId, ids) {
     .all(...normalized, Number(ownerUserId), Number(ownerUserId)).map((row) => Number(row.id));
 }
 
-async function runCertificationBatch(db, log, cfg, ids, concurrency = 2) {
+async function runCertificationBatch(db, log, cfg, ids, concurrency = 2, userId) {
   const queue = [...ids]; const outcome = { started: 0, failed: 0 };
   const worker = async () => { while (queue.length) {
     const id = queue.shift();
     try {
-      const result = await certify(db, log, cfg, id);
+      const result = await certify(db, log, cfg, id, userId);
       if (result.ok) outcome.started++;
       else { outcome.failed++; markCertificationFailed(db, 'asset', id, result.error); }
     } catch (error) {
@@ -241,7 +241,7 @@ function queueBatchCertification(db, log, cfg, ownerUserId, ids) {
   const key = assetIds.join(',');
   if (assetIds.length && !activeBatchCertificationRuns.has(key)) {
     activeBatchCertificationRuns.add(key);
-    setImmediate(() => runCertificationBatch(db, log, cfg, assetIds, 2)
+    setImmediate(() => runCertificationBatch(db, log, cfg, assetIds, 2, ownerUserId)
       .then((outcome) => log.info('SD2 batch certification submitted', { ...outcome, count: assetIds.length }))
       .finally(() => activeBatchCertificationRuns.delete(key)));
   }
@@ -251,16 +251,25 @@ function markStale(db, previous, next) { return markResourceStale(db, 'asset', p
 
 function resumePendingCertifications(db, log, cfg, options = {}) {
   const kinds = [['asset', 'assets'], ['scene', 'scenes'], ['prop', 'props']];
+  const ownerFor = (kind, table, id) => {
+    try {
+      if (kind === 'asset') {
+        return db.prepare(`SELECT COALESCE(a.owner_user_id, d.owner_user_id) AS owner_user_id FROM assets a LEFT JOIN dramas d ON d.id=a.drama_id WHERE a.id=?`).get(id)?.owner_user_id || null;
+      }
+      return db.prepare(`SELECT d.owner_user_id FROM ${table} r LEFT JOIN dramas d ON d.id=r.drama_id WHERE r.id=?`).get(id)?.owner_user_id || null;
+    } catch (_) { return null; }
+  };
   const refreshOne = async () => {
     for (const [kind, table] of kinds) {
       let rows = [];
       try { rows = db.prepare(`SELECT id, seedance2_asset FROM ${table} WHERE deleted_at IS NULL AND seedance2_asset IS NOT NULL`).all(); } catch (_) { continue; }
       for (const row of rows) {
+        const ownerUserId = ownerFor(kind, table, row.id);
         const cert = parse(row.seedance2_asset);
         const status = String(cert?.status || '').toLowerCase();
         if (status === 'queued') {
           try {
-            const result = await (kind === 'asset' ? certify(db, log, cfg, row.id) : certifyResource(db, log, cfg, kind, row.id));
+            const result = await (kind === 'asset' ? certify(db, log, cfg, row.id, ownerUserId) : certifyResource(db, log, cfg, kind, row.id, ownerUserId));
             if (!result?.ok) markCertificationFailed(db, kind, row.id, result?.error);
           } catch (error) {
             markCertificationFailed(db, kind, row.id, error.message);
@@ -269,17 +278,19 @@ function resumePendingCertifications(db, log, cfg, options = {}) {
           continue;
         }
         if (status !== 'processing' || !cert?.hub_asset_id) continue;
-        try { await (options.refreshResource || refreshResource)(db, log, cfg, kind, row.id); }
+        try { await (options.refreshResource || refreshResource)(db, log, cfg, kind, row.id, ownerUserId); }
         catch (error) { log.warn('SD2 restart recovery refresh failed', { table, id: row.id, error: error.message }); }
       }
     }
     // Characters use a separate library representation but follow the same
     // persisted processing contract.
     try {
-      const characters = db.prepare('SELECT id, seedance2_asset FROM characters WHERE deleted_at IS NULL AND seedance2_asset IS NOT NULL').all();
+      const characters = db.prepare(`SELECT c.id, c.seedance2_asset, d.owner_user_id
+        FROM characters c LEFT JOIN dramas d ON d.id=c.drama_id
+        WHERE c.deleted_at IS NULL AND c.seedance2_asset IS NOT NULL`).all();
       for (const row of characters) {
         if (String(parse(row.seedance2_asset)?.status || '').toLowerCase() === 'processing') {
-          await (options.refreshCharacter || require('./characterLibraryService').refreshCharacterJimengMaterialAsset)(db, log, cfg, row.id);
+          await (options.refreshCharacter || require('./characterLibraryService').refreshCharacterJimengMaterialAsset)(db, log, cfg, row.id, row.owner_user_id || null);
         }
       }
     } catch (error) { log.warn('Character SD2 restart recovery refresh failed', { error: error.message }); }

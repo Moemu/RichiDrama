@@ -113,17 +113,17 @@
           </el-table>
         </div>
       </el-tab-pane>
-      <el-tab-pane label="高级设置（提示词）" name="prompts">
+      <el-tab-pane v-if="!tenantId" label="高级设置（提示词）" name="prompts">
         <div class="tab-content">
           <PromptEditor />
         </div>
       </el-tab-pane>
-      <el-tab-pane label="高级设置（业务场景）" name="sceneModelMap">
+      <el-tab-pane v-if="!tenantId" label="高级设置（业务场景）" name="sceneModelMap">
         <div class="tab-content">
           <SceneModelMap />
         </div>
       </el-tab-pane>
-      <el-tab-pane label="生成设置" name="generation">
+      <el-tab-pane v-if="!tenantId" label="生成设置" name="generation">
         <div class="tab-content generation-settings">
           <div class="gs-section-title">⚡ 一键生成并发设置</div>
           <p class="gs-desc">控制「一键生成视频」和「补全并生成」流水线中，各类任务同时并行生成的数量。并发数越高速度越快，但过高可能触发 API 限流（429 错误）。建议根据你的 API 额度选择。</p>
@@ -900,8 +900,8 @@ input_reference = (图片文件，可选)</pre>
           </template>
           <div class="deepseek-settings">
             <el-radio-group v-model="form.deepseek_thinking">
-              <el-radio-button label="disabled">关闭思考</el-radio-button>
-              <el-radio-button label="enabled">开启思考</el-radio-button>
+              <el-radio-button value="disabled">关闭思考</el-radio-button>
+              <el-radio-button value="enabled">开启思考</el-radio-button>
             </el-radio-group>
             <el-select
               v-if="form.deepseek_thinking === 'enabled'"
@@ -1195,6 +1195,13 @@ import { generationSettingsAPI } from '@/api/prompts'
 import PromptEditor from '@/components/PromptEditor.vue'
 import SceneModelMap from '@/components/SceneModelMap.vue'
 import Sd2AssetManagement from '@/components/Sd2AssetManagement.vue'
+
+const props = defineProps({
+  tenantId: { type: [Number, String], default: null },
+  tenantName: { type: String, default: '' },
+})
+const tenantId = computed(() => Number(props.tenantId) || null)
+const tenantBody = () => tenantId.value ? { tenant_id: tenantId.value } : {}
 
 const activeTab = ref('configs')
 const importFileRef = ref(null)
@@ -1867,7 +1874,7 @@ function onRowEdit(row) {
 async function loadList() {
   loading.value = true
   try {
-    list.value = await aiAPI.list()
+    list.value = await aiAPI.list(null, { tenantId: tenantId.value })
   } catch (_) {
     list.value = []
   } finally {
@@ -2087,10 +2094,10 @@ async function submit() {
       ...(settings !== undefined ? { settings } : {}),
     }
     if (editingId.value) {
-      await aiAPI.update(editingId.value, payload)
+      await aiAPI.update(editingId.value, { ...payload, ...tenantBody() })
       ElMessage.success('保存成功')
     } else {
-      await aiAPI.create(payload)
+      await aiAPI.create({ ...payload, ...tenantBody() })
       ElMessage.success('添加成功')
     }
     dialogVisible.value = false
@@ -2204,7 +2211,7 @@ async function onDelete(row) {
     type: 'warning'
   })
   try {
-    await aiAPI.delete(row.id)
+    await aiAPI.delete(row.id, { tenantId: tenantId.value })
     ElMessage.success('已删除')
     await loadList()
   } catch (_) {}
@@ -2225,7 +2232,7 @@ async function onBatchDelete() {
   let success = 0, failed = 0
   for (const row of selectedRows.value) {
     try {
-      await aiAPI.delete(row.id)
+      await aiAPI.delete(row.id, { tenantId: tenantId.value })
       success++
     } catch (_) { failed++ }
   }
@@ -2247,7 +2254,7 @@ async function submitOneKeyTongyi() {
   try {
     for (const cfg of TONGYI_CONFIGS) {
       const models = cfg.model || []
-      await aiAPI.create({
+      await aiAPI.create({ ...tenantBody(),
         service_type: cfg.service_type,
         name: cfg.name,
         provider: cfg.provider,
@@ -2281,7 +2288,7 @@ async function submitOneKeyVolc() {
   try {
     for (const cfg of VOLCENGINE_CONFIGS) {
       const models = cfg.model || []
-      await aiAPI.create({
+      await aiAPI.create({ ...tenantBody(),
         service_type: cfg.service_type,
         name: cfg.name,
         provider: cfg.provider,
@@ -2315,7 +2322,7 @@ async function submitOneKeyAgnes() {
   try {
     for (const cfg of AGNES_CONFIGS) {
       const models = cfg.model || []
-      await aiAPI.create({
+      await aiAPI.create({ ...tenantBody(),
         service_type: cfg.service_type,
         name: cfg.name,
         provider: cfg.provider,
@@ -2342,7 +2349,7 @@ async function submitOneKeyAgnes() {
 
 async function exportConfigs() {
   try {
-    const configs = await aiAPI.list()
+    const configs = await aiAPI.list(null, { tenantId: tenantId.value })
     const exportData = configs.map(({ id, created_at, updated_at, ...rest }) => rest)
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -2376,7 +2383,7 @@ async function importConfigs(event) {
     for (const cfg of configs) {
       try {
         const models = Array.isArray(cfg.model) ? cfg.model : (cfg.model ? [cfg.model] : [])
-        await aiAPI.create({
+        await aiAPI.create({ ...tenantBody(),
           service_type: cfg.service_type,
           name: cfg.name,
           provider: cfg.provider,
@@ -2406,6 +2413,13 @@ async function importConfigs(event) {
 }
 
 async function loadVendorLock() {
+  // 创作账号只读取项目组分配的模型列表，不具备供应商配置权限。
+  // 不要让它们发起仅限运营后台的锁定状态请求，避免无意义的 403。
+  const user = JSON.parse(localStorage.getItem('lmd_auth_user') || 'null')
+  if (user?.console_access !== true) {
+    vendorLock.value = { enabled: true, config_file: '' }
+    return
+  }
   try {
     vendorLock.value = await aiAPI.getVendorLock()
   } catch (_) {

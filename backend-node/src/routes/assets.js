@@ -182,7 +182,7 @@ function routes(db, log, cfg) {
     sd2Certify: async (req, res) => {
       try {
         if (!assetService.getByIdForOwner(db, req.params.id, req.auth.id)) return response.notFound(res, '素材不存在');
-        const out = await require('../services/assetSd2Service').certify(db, log, cfg, req.params.id); if (!out.ok) return response.badRequest(res, out.error); response.success(res, out);
+        const out = await require('../services/assetSd2Service').certify(db, log, cfg, req.params.id, req.auth.id); if (!out.ok) return response.badRequest(res, out.error); response.success(res, out);
       }
       catch (err) { log.error('assets sd2-certify', { error: err.message }); response.internalError(res, err.message); }
     },
@@ -195,7 +195,7 @@ function routes(db, log, cfg) {
       } catch (err) { log.error('assets sd2 batch certify', { error: err.message }); response.internalError(res, err.message); }
     },
     sd2CertifyRefresh: async (req, res) => {
-      try { const out = await require('../services/assetSd2Service').refresh(db, log, cfg, req.params.id); if (!out.ok) return response.badRequest(res, out.error); response.success(res, out); }
+      try { const out = await require('../services/assetSd2Service').refresh(db, log, cfg, req.params.id, req.auth.id); if (!out.ok) return response.badRequest(res, out.error); response.success(res, out); }
       catch (err) { log.error('assets sd2-certify-refresh', { error: err.message }); response.internalError(res, err.message); }
     },
   };

@@ -1,12 +1,12 @@
 const { v4: uuidv4 } = require('uuid');
 
-function createTask(db, log, taskType, resourceId, ownerUserId = null) {
+function createTask(db, log, taskType, resourceId, ownerUserId = null, tenantId = null) {
   const id = uuidv4();
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT INTO async_tasks (id, type, status, progress, message, resource_id, owner_user_id, created_at, updated_at)
-     VALUES (?, ?, 'pending', 0, '', ?, ?, ?, ?)`
-  ).run(id, taskType, resourceId || '', ownerUserId, now, now);
+    `INSERT INTO async_tasks (id, type, status, progress, message, resource_id, owner_user_id, tenant_id, created_at, updated_at)
+     VALUES (?, ?, 'pending', 0, '', ?, ?, ?, ?, ?)`
+  ).run(id, taskType, resourceId || '', ownerUserId, tenantId || null, now, now);
   log.info('Task created', { task_id: id, type: taskType, resource_id: resourceId });
   const task = getTask(db, id);
   return task || { id, type: taskType, status: 'pending', progress: 0, message: '', resource_id: resourceId || '', created_at: now, updated_at: now, completed_at: null };
@@ -36,6 +36,28 @@ function updateTaskStatus(db, taskId, status, progress, message) {
   ).run(status, progress ?? 0, message || '', now, completedAt, taskId);
 }
 
+function releaseTaskAuthorization(db, taskId, reason) {
+  const billing = require('./billingService');
+  const candidates = [
+    ['image_generations', 'task_id'],
+    ['video_generations', 'task_id'],
+  ];
+  for (const [table, taskColumn] of candidates) {
+    const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+    if (!exists) continue;
+    const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
+    if (!columns.has(taskColumn) || !columns.has('owner_user_id') || !columns.has('billing_authorization_id')) continue;
+    const row = db.prepare(`SELECT owner_user_id, billing_authorization_id FROM ${table} WHERE ${taskColumn}=?`).get(taskId);
+    if (!row?.owner_user_id || !row?.billing_authorization_id) continue;
+    try {
+      billing.voidAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, reason || '异步任务失败，释放预授权');
+    } catch (_) {
+      // The original failure must remain terminal even if a historical billing
+      // record is malformed; reconciliation tooling can repair that record.
+    }
+  }
+}
+
 function updateTaskError(db, taskId, errMsg) {
   const now = new Date().toISOString();
   try {
@@ -48,6 +70,9 @@ function updateTaskError(db, taskId, errMsg) {
       updateTaskStatus(db, taskId, 'failed', 0, errMsg || '任务失败');
     } else throw e;
   }
+  // Image/video workers share async_tasks.  Terminal task failure must always
+  // release an unsettled reservation; voidAuthorization itself is idempotent.
+  releaseTaskAuthorization(db, taskId, errMsg || '异步任务失败，释放预授权');
 }
 
 function updateTaskResult(db, taskId, result) {
@@ -125,6 +150,7 @@ module.exports = {
   updateTaskStatus,
   updateTaskError,
   updateTaskResult,
+  releaseTaskAuthorization,
   failOrphanedAsyncTasksOnStartup,
   cancelTask,
   ORPHAN_ASYNC_TASK_MSG,

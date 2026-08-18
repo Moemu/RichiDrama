@@ -20,7 +20,7 @@
         <el-button type="primary" :loading="running" :disabled="!prompt.trim()" @click="submit">{{ running ? '正在提交任务…' : `生成${media === 'image' ? '图片' : '视频'}` }}</el-button>
       </aside>
       <section class="preview-stage">
-        <div class="stage-heading"><div><p>OUTPUT PREVIEW</p><h2>当前生成结果</h2></div><span class="status-key">● 完成　● 处理中　● 失败</span></div>
+        <div class="stage-heading"><div><p>结果预览</p><h2>当前生成结果</h2></div><span class="status-key">● 完成　● 处理中　● 失败</span></div>
         <div v-if="featured" class="featured">
           <img v-if="media === 'image' && featured.image_url" :src="featured.image_url" />
           <video v-else-if="media === 'video' && (featured.local_path || featured.video_url)" :src="mediaUrl(featured)" controls />
@@ -98,4 +98,7 @@ watch(() => props.media, () => { featured.value = null; load() }); onMounted(loa
 .featured footer small { color: var(--text-muted); }
 .history-card.active, .history-card:hover { border-color: var(--accent); box-shadow: inset 2px 0 0 var(--accent); }
 .history-card img, .history-card video, .history-card > span { background: var(--bg-elevated); color: var(--text-primary); }
+.media-tool { display:grid; grid-template-rows:auto minmax(0,1fr); width:100%; height:100vh; height:100dvh; min-height:0; padding:1.4rem 1.8rem; overflow:hidden; }
+.media-layout { width:100%; max-width:1500px; min-height:0; margin-top:1rem; grid-template-columns:19rem minmax(28rem,1fr) 18rem; }.control-panel,.preview-stage,.generation-history { min-height:0; }.control-panel,.generation-history { overflow-y:auto; overscroll-behavior:contain; }.preview-stage { min-height:0; }.featured,.empty-result { min-height:0; }
+@media(max-width:1050px){.media-layout{grid-template-columns:18rem minmax(0,1fr);overflow-y:auto}.generation-history{max-height:15rem}}@media(max-width:760px){.media-tool{height:100dvh;overflow:hidden}.media-layout{grid-template-columns:1fr}.preview-stage{min-height:28rem}}
 </style>

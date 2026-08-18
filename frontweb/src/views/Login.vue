@@ -39,8 +39,7 @@
 
     <section class="story-stage" aria-labelledby="story-title">
       <p class="story-kicker"><span></span> AI 原生短剧创作产品</p>
-      <h1 id="story-title">让脑海里的故事，<br><em>直接开拍。</em></h1>
-      <p class="story-copy">从灵感、剧本到角色、分镜和成片，让每一个创作决定都在同一条叙事流里发生。</p>
+      <h1 id="story-title">本地短剧<br><em>制作平台</em></h1>
 
       <ol class="creation-track" aria-label="短剧创作流程">
         <li v-for="(step, index) in creationSteps" :key="step.label" :class="{ active: activeStep === index }">
@@ -64,8 +63,7 @@
       <div class="panel-glow" aria-hidden="true"></div>
       <div class="panel-content">
         <p class="panel-eyebrow">STUDIO ACCESS <span>·</span> 01</p>
-        <h2 id="access-title">{{ mode === 'login' ? '继续你的创作' : '创建你的片场' }}</h2>
-        <p class="panel-subtitle">{{ mode === 'login' ? '故事还在这里，等你接着往下拍。' : '从一个账号开始，让第一幕发生。' }}</p>
+        <h2 id="access-title">{{ mode === 'login' ? '登录' : '注册' }}</h2>
 
         <div class="mode-tabs" role="tablist" aria-label="账号操作">
           <button

@@ -16,6 +16,15 @@ function routes(db, log) {
         response.internalError(res, err.message);
       }
     },
+    homepageDefaults: (req, res) => {
+      try {
+        // 默认轮播返回产品配置的固定媒体资源，不关联管理员或任何用户作品。
+        response.success(res, videoService.listHomepageDefaultVideos(db, 3));
+      } catch (err) {
+        log.error('homepage default videos', { error: err.message });
+        response.internalError(res, err.message);
+      }
+    },
     create: (req, res) => {
       try {
         const body = req.body || {};
@@ -27,10 +36,12 @@ function routes(db, log) {
           if (!own) return response.notFound(res, '项目不存在');
         }
         const billing = require('../services/billingService');
-        const videoConfig = require('../services/aiConfigService').listConfigs(db, body.service_type || 'video')[0];
+        const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id);
+        const aiOptions = tenant ? { tenant_id: tenant.id } : {};
+        const videoConfig = require('../services/aiConfigService').listConfigs(db, body.service_type || 'video', aiOptions)[0];
         const modelForBilling = String(body.model || videoConfig?.default_model || videoConfig?.model?.[0] || '').trim();
         if (!modelForBilling) return response.badRequest(res, '请选择视频模型后再生成');
-        const billingTarget = require('../services/aiConfigService').resolveBillingTarget(db, body.service_type || 'video', modelForBilling, body.ai_config_id);
+        const billingTarget = require('../services/aiConfigService').resolveBillingTarget(db, body.service_type || 'video', modelForBilling, body.ai_config_id, aiOptions);
         const configForBilling = require('../services/aiConfigService').getConfig(db, billingTarget.config_id) || videoConfig;
         let settings = {}; try { settings = JSON.parse(configForBilling?.settings || '{}'); } catch (_) {}
         const meters = billing.activeMeters(db, req.auth, body.service_type || 'video', billingTarget.billing_key);
@@ -48,12 +59,13 @@ function routes(db, log) {
           usage.output_token = cap;
         }
         if (!Object.keys(usage).length) return response.badRequest(res, '该视频模型未配置可用计费项');
+        if (!String(body.idempotency_key || '').trim()) return response.badRequest(res, '视频生成请求缺少幂等键，请刷新后重试');
         const authorization = billing.createAuthorization(db, req.auth, {
-          idempotency_key: body.idempotency_key || `video:${req.auth.id}:${Date.now()}:${Math.random()}`,
+          idempotency_key: String(body.idempotency_key).trim(),
           service_type: body.service_type || 'video', model: billingTarget.billing_key,
           usage, pricing_context: { has_video_input: !!body.video_url, resolution: body.resolution || '480p', has_audio: !!body.audio_url }, reference_type: 'video_generation', reference_id: body.drama_id || null,
         });
-        const task = taskService.createTask(db, log, 'video_generation', String(body.drama_id || ''), req.auth.id);
+        const task = taskService.createTask(db, log, 'video_generation', String(body.drama_id || ''), req.auth.id, tenant?.id || null);
         const now = new Date().toISOString();
         const dramaId = Number(body.drama_id) || 0;
         const storyboardId = body.storyboard_id != null ? Number(body.storyboard_id) : null;
@@ -99,9 +111,9 @@ function routes(db, log) {
             ? JSON.stringify(body.reference_image_urls.slice(0, 10))
             : null;
         db.prepare(
-          `INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, status, task_id, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'processing', ?, ?, ?)`
-        ).run(dramaId, storyboardId, req.auth.id, authorization.authorization_id, provider, prompt, model, duration, aspectRatio, resolution, upscaleResolution, targetFps, seed, cameraFixed, watermark, imageUrl, firstFrameUrl, lastFrameUrl, refImagesJson, task.id, now, now);
+          `INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, status, task_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'processing', ?, ?, ?)`
+        ).run(dramaId, storyboardId, req.auth.id, tenant?.id || null, authorization.authorization_id, provider, prompt, model, duration, aspectRatio, resolution, upscaleResolution, targetFps, seed, cameraFixed, watermark, imageUrl, firstFrameUrl, lastFrameUrl, refImagesJson, task.id, now, now);
         const videoGenId = db.prepare('SELECT last_insert_rowid() as id').get().id;
         try {
           if (upscaleResolution) require('../services/videoUpscaleService').reserveForGeneration(db, videoGenId, upscaleResolution);

@@ -28,6 +28,7 @@ async function generateStory(db, log, body) {
   const rawText = await aiClient.generateText(db, log, 'text', userPrompt, systemPrompt, {
     scene_key: 'story_generation',
     model: body.model || undefined,
+    tenant_id: body.tenant_id || undefined,
     temperature: 0.8,
     min_max_tokens: minTokensNeeded,
   });

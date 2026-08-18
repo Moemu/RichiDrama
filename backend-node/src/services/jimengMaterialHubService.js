@@ -6,9 +6,17 @@
  * 参考：https://83zi.com/sd2realperson.html
  */
 
-function loadAiJimeng2AuthRow(db) {
+function loadAiJimeng2AuthRow(db, userId) {
   if (!db) return null;
   try {
+    const tenant = userId ? require('./tenantService').tenantForUser(db, userId) : null;
+    if (tenant) {
+      const bound = db.prepare(`SELECT c.id, c.name, c.base_url, c.api_key FROM tenant_sd2_config_bindings b
+        JOIN ai_service_configs c ON c.id=b.ai_config_id
+        WHERE b.tenant_id=? AND b.is_active=1 AND c.deleted_at IS NULL AND c.is_active=1 AND c.service_type=?
+        ORDER BY c.is_default DESC, c.priority DESC, c.id ASC LIMIT 1`).get(tenant.id, 'jimeng2_character_auth');
+      if (bound) return bound;
+    }
     return db
       .prepare(
         `SELECT id, name, base_url, api_key FROM ai_service_configs
@@ -55,8 +63,8 @@ function tokenFingerprint(tok) {
  * @param {object|null} [log] - 可选 logger；传入时打一条不含密钥原文的鉴权诊断
  * @returns {{ baseUrl: string, token: string, poll_max_ms?: number, poll_interval_ms?: number, hubAuthDiag?: object }}
  */
-function buildHubContext(cfg, db, log) {
-  const row = loadAiJimeng2AuthRow(db);
+function buildHubContext(cfg, db, log, userId) {
+  const row = loadAiJimeng2AuthRow(db, userId);
   let base_url = (row?.base_url || '').toString().trim();
   let token = (row?.api_key || '').toString().trim();
   let poll_max_ms;

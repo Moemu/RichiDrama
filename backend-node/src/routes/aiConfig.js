@@ -3,9 +3,18 @@ const response = require('../response');
 
 function list(db) {
   return (req, res) => {
+    const requestedTenantId = Number(req.query?.tenant_id);
+    if (requestedTenantId) {
+      if (req.auth?.role !== 'admin') return response.forbidden(res, '仅运营后台可管理分组 API');
+      const tenant = require('../services/tenantService').tenantDetail(db, requestedTenantId);
+      if (!tenant) return response.notFound(res, '项目分组不存在');
+      return response.success(res, aiConfigService.listOwnedTenantConfigs(db, requestedTenantId, req.query.service_type));
+    }
+    const tenant = require('../services/tenantService').tenantForUser(db, req.auth?.id);
+    const options = tenant ? { tenant_id: tenant.id } : {};
     const list = req.auth?.role === 'admin'
-      ? aiConfigService.listConfigs(db, req.query.service_type)
-      : aiConfigService.listPublicConfigs(db, req.query.service_type);
+      ? aiConfigService.listConfigs(db, req.query.service_type, options)
+      : aiConfigService.listPublicConfigs(db, req.query.service_type, options);
     response.success(res, list);
   };
 }
@@ -16,6 +25,8 @@ function get(db) {
     if (isNaN(id)) return response.badRequest(res, '无效的配置ID');
     const config = aiConfigService.getConfig(db, id);
     if (!config) return response.notFound(res, '配置不存在');
+    const tenantId = Number(req.query?.tenant_id);
+    if (tenantId && Number(config.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
     response.success(res, config);
   };
 }
@@ -33,6 +44,8 @@ function create(db, log, cfg) {
       return response.badRequest(res, '当前为厂商锁定模式，不允许添加配置');
     }
     const body = req.body || {};
+    const tenantId = Number(body.tenant_id || req.query?.tenant_id);
+    if (tenantId && !require('../services/tenantService').tenantDetail(db, tenantId)) return response.notFound(res, '项目分组不存在');
     if (!body.service_type || !body.name || !body.provider || !body.base_url) {
       return response.badRequest(res, '缺少必填字段: service_type, name, provider, base_url');
     }
@@ -42,8 +55,12 @@ function create(db, log, cfg) {
     try {
       const config = aiConfigService.createConfig(db, log, {
         ...body,
+        owner_tenant_id: tenantId || null,
+        // 分组默认项记录在绑定表，不能改动其他分组或旧平台配置。
+        is_default: tenantId ? false : body.is_default,
         model: body.model ?? [],
       });
+      if (tenantId) require('../services/tenantService').bindOwnedConfig(db, tenantId, config, { is_default: body.is_default !== false, priority: body.priority });
       response.created(res, config);
     } catch (err) {
       log.errorw('Create AI config failed', { error: err.message });
@@ -58,6 +75,9 @@ function update(db, log, cfg) {
     if (isNaN(id)) return response.badRequest(res, '无效的配置ID');
 
     let body = req.body || {};
+    const tenantId = Number(body.tenant_id || req.query?.tenant_id);
+    const owned = aiConfigService.getConfig(db, id);
+    if (tenantId && Number(owned?.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
 
     // 普通成员只拿到不含凭据的共享配置列表。限制其更新字段，避免前端的
     // 空端点/空设置覆盖管理员已经保存的供应商接入和计费参数。
@@ -86,8 +106,10 @@ function update(db, log, cfg) {
       body = allowed;
     }
 
+    if (tenantId) body = { ...body, is_default: false };
     const config = aiConfigService.updateConfig(db, log, id, body);
     if (!config) return response.notFound(res, '配置不存在');
+    if (tenantId) require('../services/tenantService').bindOwnedConfig(db, tenantId, config, { is_default: req.body?.is_default !== false, priority: req.body?.priority });
     response.success(res, config);
   };
 }
@@ -99,6 +121,9 @@ function remove(db, log, cfg) {
     }
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return response.badRequest(res, '无效的配置ID');
+    const tenantId = Number(req.query?.tenant_id);
+    const owned = aiConfigService.getConfig(db, id);
+    if (tenantId && Number(owned?.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
     const ok = aiConfigService.deleteConfig(db, log, id);
     if (!ok) return response.notFound(res, '配置不存在');
     response.success(res, { message: '删除成功' });

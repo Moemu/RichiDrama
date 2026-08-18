@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
-const { publicVideoUrl, reconcileUnarchivedCompletedVideos, archiveCompletedVideo, list } = require('../src/services/videoService');
+const { publicVideoUrl, reconcileUnarchivedCompletedVideos, archiveCompletedVideo, list, listHomepageDefaultVideos } = require('../src/services/videoService');
 
 test('completed-video output never falls back to a supplier signed URL', () => {
   assert.equal(publicVideoUrl('https://tos.example/a.mp4?signature=temporary', null), null);
@@ -15,6 +15,25 @@ test('video list exposes a durable local poster path without mounting video byte
   const item = list(db, {}).items[0];
   assert.equal(item.video_url, '/static/videos/a.mp4');
   assert.equal(item.poster_local_path, 'videos/posters/a.jpg');
+});
+
+test('homepage defaults use the configured product media resources rather than any user videos', () => {
+  const db = new Database(':memory:');
+  db.exec('CREATE TABLE global_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)');
+  db.prepare('INSERT INTO global_settings (key, value, updated_at) VALUES (?, ?, ?)').run(
+    'homepage_default_video_paths',
+    JSON.stringify(['library/videos/first.mp4', 'library/videos/second.mp4', '../outside.mp4', 'library/videos/fourth.mp4']),
+    '2026-08-18T00:00:00Z'
+  );
+
+  const items = listHomepageDefaultVideos(db);
+  assert.deepEqual(items.map((item) => item.id), ['global-default-1', 'global-default-2', 'global-default-3']);
+  assert.deepEqual(items.map((item) => item.video_url), [
+    '/static/library/videos/first.mp4',
+    '/static/library/videos/second.mp4',
+    '/static/library/videos/fourth.mp4',
+  ]);
+  assert.ok(items.every((item) => item.drama_id === null && item.status === 'completed'));
 });
 
 test('a completed local video remains completed when OSS archival is temporarily unavailable', async () => {

@@ -110,11 +110,11 @@ function inferProtocol(provider, model) {
  * @param {string} [preferredProvider] - 指定供应商（如 openai / dashscope），只在该 provider 的配置中选
  * @param {string} [imageServiceType] - 'image' 文本生成图片（角色/场景/道具），'storyboard_image' 分镜图片生成（支持参考图）；缺省为 'image'
  */
-function getDefaultImageConfig(db, preferredModel, preferredProvider, imageServiceType) {
+function getDefaultImageConfig(db, preferredModel, preferredProvider, imageServiceType, options = {}) {
   const serviceType = imageServiceType || 'image';
-  let configs = aiConfigService.listConfigs(db, serviceType);
+  let configs = aiConfigService.listConfigs(db, serviceType, options);
   if (configs.length === 0 && serviceType === 'storyboard_image') {
-    configs = aiConfigService.listConfigs(db, 'image');
+    configs = aiConfigService.listConfigs(db, 'image', options);
   }
   let active = configs.filter((c) => c.is_active);
   if (active.length === 0) return null;

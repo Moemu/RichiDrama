@@ -32,17 +32,17 @@ function ensureSingleDefaultPerType(db) {
   const types = ['text', 'image', 'storyboard_image', 'video', 'video_postprocess', 'tts', 'jimeng2_character_auth', 'model_ark_asset'];
   for (const st of types) {
     const rows = db.prepare(
-      'SELECT id, priority FROM ai_service_configs WHERE deleted_at IS NULL AND service_type = ? AND is_default = 1 ORDER BY priority DESC, id ASC'
+      'SELECT id, priority FROM ai_service_configs WHERE deleted_at IS NULL AND owner_tenant_id IS NULL AND service_type = ? AND is_default = 1 ORDER BY priority DESC, id ASC'
     ).all(st);
     if (rows.length <= 1) continue;
     const keepId = rows[0].id;
     db.prepare(
-      'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND service_type = ? AND id != ?'
+      'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND owner_tenant_id IS NULL AND service_type = ? AND id != ?'
     ).run(st, keepId);
   }
 }
 
-function listConfigs(db, serviceType) {
+function listConfigs(db, serviceType, options = {}) {
   ensureSingleDefaultPerType(db);
   const order = 'ORDER BY is_default DESC, priority DESC, created_at DESC';
   let sql = 'SELECT * FROM ai_service_configs WHERE deleted_at IS NULL ' + order;
@@ -50,6 +50,30 @@ function listConfigs(db, serviceType) {
   if (serviceType) {
     sql = 'SELECT * FROM ai_service_configs WHERE deleted_at IS NULL AND service_type = ? ' + order;
     params.push(serviceType);
+  }
+  // A tenant can explicitly bind its shared provider configurations. Only the
+  // migrated default tenant retains the legacy global fallback; an empty custom
+  // group must never silently borrow another group's provider credentials.
+  const tenantId = Number(options.tenant_id || options.tenantId);
+  if (tenantId) {
+    const tenantService = require('./tenantService');
+    const ids = serviceType
+      ? tenantService.configIdsForService(db, tenantId, serviceType)
+      : tenantService.configIdsForTenant(db, tenantId);
+    if (!ids.length && !tenantService.usesLegacyGlobalConfigs(db, tenantId)) return [];
+    if (ids.length) {
+      const typeClause = serviceType ? ' AND c.service_type = ?' : '';
+      // Group defaults are deliberately stored on bindings.  The same platform
+      // configuration may therefore be the default in one project group but a
+      // fallback in another, without changing the shared credential library.
+      sql = `SELECT c.*, b.is_default AS tenant_is_default, b.priority AS tenant_priority
+        FROM tenant_ai_config_bindings b JOIN ai_service_configs c ON c.id = b.ai_config_id
+        WHERE b.tenant_id = ? AND b.is_active = 1 AND c.deleted_at IS NULL${typeClause}
+        ORDER BY b.is_default DESC, b.priority DESC, c.priority DESC, c.created_at DESC`;
+      params.length = 0;
+      params.push(tenantId);
+      if (serviceType) params.push(serviceType);
+    }
   }
   const rows = params.length ? db.prepare(sql).all(...params) : db.prepare(sql).all();
   return rows.map(rowToConfig);
@@ -71,27 +95,39 @@ function publicConfig(config) {
   };
 }
 
-function listPublicConfigs(db, serviceType) {
-  return listConfigs(db, serviceType).map(publicConfig);
+function listPublicConfigs(db, serviceType, options = {}) {
+  return listConfigs(db, serviceType, options).map(publicConfig);
 }
 
-function resolveBillingTarget(db, serviceType, model, configId) {
+function resolveBillingTarget(db, serviceType, model, configId, options = {}) {
   const providerModel = String(model || '').trim();
-  const configs = listConfigs(db, serviceType).filter((config) => config.is_active);
+  const configs = listConfigs(db, serviceType, options).filter((config) => config.is_active);
   const config = configs.find((item) => Number(item.id) === Number(configId)) || configs.find((item) => item.model.includes(providerModel)) || configs[0] || null;
   return { config_id: config?.id || null, provider: config?.provider || null, provider_model: providerModel, billing_key: String(config?.billing_key || providerModel).trim() };
 }
 
-function clearOtherDefault(db, serviceType, exceptId) {
+function clearOtherDefault(db, serviceType, exceptId, ownerTenantId = null) {
   const stmt = db.prepare(
-    'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND service_type = ? AND id != ?'
+    'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND service_type = ? AND id != ? AND ((? IS NULL AND owner_tenant_id IS NULL) OR owner_tenant_id = ?)'
   );
-  stmt.run(serviceType, exceptId);
+  stmt.run(serviceType, exceptId, ownerTenantId, ownerTenantId);
 }
 
 function getConfig(db, id) {
   const row = db.prepare('SELECT * FROM ai_service_configs WHERE id = ? AND deleted_at IS NULL').get(id);
   return row ? rowToConfig(row) : null;
+}
+
+function listOwnedTenantConfigs(db, tenantId, serviceType) {
+  const params = [Number(tenantId)];
+  const legacy = require('./tenantService').usesLegacyGlobalConfigs(db, tenantId);
+  let sql = `SELECT c.*, b.is_default AS tenant_is_default, b.priority AS tenant_priority
+    FROM ai_service_configs c LEFT JOIN tenant_ai_config_bindings b ON b.ai_config_id=c.id AND b.tenant_id=? AND b.is_active=1
+    WHERE c.deleted_at IS NULL AND ${legacy ? 'c.owner_tenant_id IS NULL' : 'c.owner_tenant_id = ?'}`;
+  if (!legacy) params.push(Number(tenantId));
+  if (serviceType) { sql += ' AND c.service_type = ?'; params.push(serviceType); }
+  sql += ' ORDER BY b.is_default DESC, b.priority DESC, c.created_at DESC';
+  return db.prepare(sql).all(...params).map(rowToConfig);
 }
 
 function createConfig(db, log, req) {
@@ -140,8 +176,8 @@ function createConfig(db, log, req) {
   }
   const defaultModel = req.default_model != null ? String(req.default_model).trim() || null : null;
   const info = db.prepare(
-    `INSERT INTO ai_service_configs (service_type, provider, api_protocol, name, base_url, api_key, model, default_model, billing_key, endpoint, query_endpoint, priority, is_default, is_active, settings, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
+    `INSERT INTO ai_service_configs (service_type, provider, api_protocol, name, base_url, api_key, model, default_model, billing_key, endpoint, query_endpoint, priority, is_default, is_active, settings, owner_tenant_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
   ).run(
     req.service_type || 'text',
     req.provider || '',
@@ -157,12 +193,13 @@ function createConfig(db, log, req) {
     req.priority ?? 0,
     req.is_default ? 1 : 0,
     req.settings || null,
+    Number.isSafeInteger(Number(req.owner_tenant_id)) ? Number(req.owner_tenant_id) : null,
     now,
     now
   );
   log.info('AI config created', { config_id: info.lastInsertRowid, provider: req.provider });
   const newId = info.lastInsertRowid;
-  if (req.is_default) clearOtherDefault(db, req.service_type || 'text', newId);
+  if (req.is_default) clearOtherDefault(db, req.service_type || 'text', newId, req.owner_tenant_id || null);
   return getConfig(db, newId);
 }
 
@@ -231,7 +268,7 @@ function updateConfig(db, log, id, req) {
   if (updates.length === 0) return existing;
   params.push(new Date().toISOString(), id);
   db.prepare('UPDATE ai_service_configs SET ' + updates.join(', ') + ', updated_at = ? WHERE id = ?').run(...params);
-  if (req.is_default === true) clearOtherDefault(db, existing.service_type, id);
+  if (req.is_default === true) clearOtherDefault(db, existing.service_type, id, existing.owner_tenant_id || null);
   log.info('AI config updated', { config_id: id });
   return getConfig(db, id);
 }
@@ -258,12 +295,14 @@ function rowToConfig(r) {
     billing_key: r.billing_key ? String(r.billing_key).trim() : null,
     endpoint: r.endpoint,
     query_endpoint: r.query_endpoint,
-    priority: r.priority ?? 0,
-    is_default: !!r.is_default,
+    priority: r.tenant_priority ?? r.priority ?? 0,
+    is_default: r.tenant_is_default == null ? !!r.is_default : !!r.tenant_is_default,
+    platform_is_default: !!r.is_default,
     is_active: r.is_active == null ? true : !!r.is_active,
     settings: r.settings,
     created_at: r.created_at,
     updated_at: r.updated_at,
+    owner_tenant_id: r.owner_tenant_id == null ? null : Number(r.owner_tenant_id),
   };
   // TTS 配置：从 settings JSON 展开 voice_id / group_id 供 ttsService 直接读取
   if (r.service_type === 'tts' && r.settings) {
@@ -604,6 +643,7 @@ function bulkUpdateApiKey(db, log, newKey) {
 
 module.exports = {
   listConfigs,
+  listOwnedTenantConfigs,
   listPublicConfigs,
   resolveBillingTarget,
   getConfig,

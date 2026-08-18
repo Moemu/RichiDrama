@@ -30,17 +30,20 @@ function routes(db, cfg, log) {
         if (!Number.isSafeInteger(requestedCount) || requestedCount !== 1) {
           return response.badRequest(res, '当前图片接口每次仅支持生成 1 张');
         }
-        const imageConfig = require('../services/aiConfigService').listConfigs(db, body.service_type || 'image')[0]
-          || require('../services/aiConfigService').listConfigs(db, 'storyboard_image')[0];
+        const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id);
+        const aiOptions = tenant ? { tenant_id: tenant.id } : {};
+        const imageConfig = require('../services/aiConfigService').listConfigs(db, body.service_type || 'image', aiOptions)[0]
+          || require('../services/aiConfigService').listConfigs(db, 'storyboard_image', aiOptions)[0];
         const model = String(body.model || imageConfig?.default_model || imageConfig?.model?.[0] || '').trim();
         if (!model) return response.badRequest(res, '请选择图片模型后再生成');
-        const billingTarget = require('../services/aiConfigService').resolveBillingTarget(db, body.service_type || 'image', model, body.ai_config_id);
+        const billingTarget = require('../services/aiConfigService').resolveBillingTarget(db, body.service_type || 'image', model, body.ai_config_id, aiOptions);
+        if (!String(body.idempotency_key || '').trim()) return response.badRequest(res, '图片生成请求缺少幂等键，请刷新后重试');
         const authorization = billing.createAuthorization(db, req.auth, {
-          idempotency_key: body.idempotency_key || `image:${req.auth.id}:${Date.now()}:${Math.random()}`,
+          idempotency_key: String(body.idempotency_key).trim(),
           service_type: body.service_type || 'image', model: billingTarget.billing_key,
           usage: { image: 1 }, reference_type: 'image_generation', reference_id: body.drama_id || null,
         });
-        const rec = imageService.create(db, log, { ...body, model, owner_user_id: req.auth.id, billing_authorization_id: authorization.authorization_id });
+        const rec = imageService.create(db, log, { ...body, model, owner_user_id: req.auth.id, tenant_id: tenant?.id || null, billing_authorization_id: authorization.authorization_id });
         response.created(res, rec);
       } catch (err) {
         log.error('images create', { error: err.message });

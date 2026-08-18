@@ -298,7 +298,7 @@ function routes(db, cfg, log, uploadService) {
     /** 即梦素材库 asset 注册（Seedance 2.0 等视频引用 asset://） */
     sd2Certify: async (req, res) => {
       try {
-        const out = await characterLibraryService.registerCharacterJimengMaterialAsset(db, log, cfg, req.params.id);
+        const out = await characterLibraryService.registerCharacterJimengMaterialAsset(db, log, cfg, req.params.id, req.auth.id);
         if (!out.ok) {
           if (out.error === 'character not found') return response.notFound(res, '角色不存在');
           return response.badRequest(res, out.error);
@@ -311,7 +311,7 @@ function routes(db, cfg, log, uploadService) {
     },
     sd2CertifyRefresh: async (req, res) => {
       try {
-        const out = await characterLibraryService.refreshCharacterJimengMaterialAsset(db, log, cfg, req.params.id);
+        const out = await characterLibraryService.refreshCharacterJimengMaterialAsset(db, log, cfg, req.params.id, req.auth.id);
         if (!out.ok) {
           if (out.error === 'character not found') return response.notFound(res, '角色不存在');
           return response.badRequest(res, out.error);
