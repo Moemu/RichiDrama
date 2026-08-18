@@ -48,7 +48,7 @@
           <aside v-if="allRecords.length" class="recent-stack" aria-label="最近项目">
             <p>最近项目</p>
             <button v-for="(record, index) in allRecords.slice(0, 3)" :key="`${record.type}-${record.id}`" type="button" @click="openRecord(record)">
-              <span class="recent-thumb"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" /><i v-else>{{ String(index + 1).padStart(2, '0') }}</i></span><div><small>{{ record.type === 'drama' ? '短剧' : '全能视频' }}</small><b>{{ record.title }}</b><em>{{ record.meta }}</em></div><i>→</i>
+              <span class="recent-thumb"><video v-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><img v-else-if="recordCover(record)" :src="recordCover(record)" alt="" /><i v-else>{{ String(index + 1).padStart(2, '0') }}</i></span><div><small>{{ record.type === 'drama' ? '短剧' : '全能视频' }}</small><b>{{ record.title }}</b><em>{{ record.meta }}</em></div><i>→</i>
             </button>
           </aside>
           <aside v-if="recordsOpen" id="creation-records" class="records-panel" aria-labelledby="records-title">
@@ -64,7 +64,7 @@
               <article v-for="(record, index) in filteredRecords" :key="`${record.type}-${record.id}`" class="record-row">
                 <button type="button" class="record-open" @click="openRecord(record)">
                   <span class="record-index">{{ String(index + 1).padStart(2, '0') }}</span>
-                  <span class="record-thumb" :class="{ 'has-image': recordCover(record) }"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" loading="lazy" decoding="async" /><i v-else>{{ record.type === 'drama' ? '剧' : '片' }}</i></span>
+                  <span class="record-thumb" :class="{ 'has-image': recordCover(record) || recordVideo(record) }"><video v-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><img v-else-if="recordCover(record)" :src="recordCover(record)" alt="" loading="lazy" decoding="async" /><i v-else>{{ record.type === 'drama' ? '剧' : '片' }}</i></span>
                   <span class="record-title"><small>{{ record.label }}</small><b :title="record.title">{{ record.title }}</b><em>{{ record.description }}</em></span>
                   <span class="record-meta">{{ record.meta }}</span><span class="record-arrow">→</span>
                 </button>
@@ -591,6 +591,7 @@ const allRecords = computed(() => {
   const dramaRecords = dramas.value.map(drama => ({
     id: drama.id,
     type: 'drama',
+    video_url: latestDramaVideo(drama.id),
     label: `短剧项目 · ${formatStatus(drama.status)}`,
     title: drama.title || '未命名项目',
     description: drama.description || '暂无故事描述',
@@ -606,6 +607,7 @@ const allRecords = computed(() => {
     description: project.description || '全能视频制作序列',
     meta: `${project.completed_count || 0} / ${project.shot_count || 0} 镜头完成`,
     updatedAt: project.updated_at,
+    video_url: project.latest_video_url || null,
     source: project,
   }))
   return [...dramaRecords, ...omniRecords].sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
@@ -629,6 +631,19 @@ function openRecord(record) {
   else if (record?.id) openProject(record.id)
 }
 
+function latestDramaVideo(dramaId) {
+  const latest = (workspaceVideos.value || []).filter(v => Number(v.drama_id) === Number(dramaId)).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0]
+  if (!latest) return null
+  if (latest.video_url) return latest.video_url
+  if (latest.local_path) return '/static/' + String(latest.local_path).replace(/^\/+/, '')
+  return null
+}
+function recordVideo(record) {
+  if (!record) return null
+  if (record.video_url) return record.video_url
+  if (record.type === 'drama') return latestDramaVideo(record.id)
+  return null
+}
 function recordCover(record) {
   if (record?.type !== 'drama') return ''
   const matched = workspaceAssets.value.find(asset => Number(asset.drama_id) === Number(record.id) && assetCoverUrl(asset))
@@ -1999,7 +2014,7 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 .recent-stack { position:absolute; z-index:3; right:clamp(2rem,4vw,4.5rem); top:10.5rem; display:grid; width:min(27rem,32vw); border-top:1px solid rgba(255,255,255,.28); }
 .recent-stack button { display:grid; grid-template-columns:3.25rem minmax(0,1fr) auto; gap:.9rem; align-items:center; min-height:5.2rem; padding:.65rem 0; overflow:hidden; border:0; border-bottom:1px solid rgba(255,255,255,.18); border-radius:0; background:linear-gradient(90deg,rgba(5,7,11,.66),rgba(5,7,11,.14)); color:#fff; text-align:left; cursor:pointer; backdrop-filter:blur(.45rem); opacity:0; animation:recent-in var(--motion-slow,420ms) var(--motion-spring,cubic-bezier(.16,1,.3,1)) forwards; transition:padding var(--motion-fast) var(--motion-ease),background-color var(--motion-fast) var(--motion-ease); }
 .recent-stack button:nth-child(2){animation-delay:70ms}.recent-stack button:nth-child(3){animation-delay:140ms}.recent-stack button:hover{padding-inline:.6rem;background:rgba(5,7,11,.72)}
-.recent-thumb { display:grid; width:3.25rem; height:3.25rem; place-items:center; overflow:hidden; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.07); color:rgba(255,255,255,.52); font:700 .62rem/1 ui-monospace,monospace; }.recent-thumb img{width:100%;height:100%;object-fit:cover}.recent-thumb i{font-style:normal}
+.recent-thumb { display:grid; width:3.25rem; height:3.25rem; place-items:center; overflow:hidden; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.07); color:rgba(255,255,255,.52); font:700 .62rem/1 ui-monospace,monospace; }.recent-thumb img,.recent-thumb video{width:100%;height:100%;object-fit:cover;display:block}.recent-thumb i{font-style:normal}
 .recent-stack div{min-width:0}.recent-stack small,.recent-stack b,.recent-stack em{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recent-stack small{color:#9ff6df;font-size:.55rem;letter-spacing:.11em}.recent-stack b{margin:.28rem 0;font-size:.82rem}.recent-stack em{color:rgba(255,255,255,.48);font-size:.6rem;font-style:normal}.recent-stack>button>i{color:rgba(255,255,255,.55);font-style:normal;transition:transform var(--motion-fast) var(--motion-ease)}.recent-stack button:hover>i{transform:translateX(.25rem)}
 @keyframes recent-in{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
 .records-workspace { scroll-margin-top: 4.5rem; padding: clamp(4rem, 7vw, 7rem) clamp(1.25rem, 5vw, 5rem); border-bottom: 1px solid var(--border-subtle); }
@@ -2012,7 +2027,7 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 .record-list { border-top: 1px solid var(--border-color); }
 .record-row { position: relative; border-bottom: 1px solid var(--border-color); transition: background-color var(--motion-fast,140ms) ease; }.record-row:hover { background: color-mix(in srgb, var(--bg-hover) 46%, transparent); }
 .record-open { display: grid; grid-template-columns: 2.4rem 6.5rem minmax(12rem,1fr) 8.5rem 9rem 1.5rem; gap: 1rem; align-items: center; width: 100%; min-height: 7.8rem; padding: .85rem 10rem .85rem .4rem; border: 0; border-radius: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
-.record-index { color: var(--text-faint); font: 700 .66rem/1 ui-monospace,monospace; }.record-thumb { display: grid; width: 6.5rem; height: 4.5rem; place-items: center; overflow: hidden; background: linear-gradient(145deg, var(--bg-raised), var(--bg-page)); color: var(--text-faint); }.record-thumb img { width: 100%; height: 100%; object-fit: cover; transition: transform var(--motion-normal,220ms) var(--ease-out-premium,cubic-bezier(.22,1,.36,1)); }.record-row:hover .record-thumb img { transform: scale(1.045); }.record-thumb i { font-style: normal; font-size: 1.1rem; }
+.record-index { color: var(--text-faint); font: 700 .66rem/1 ui-monospace,monospace; }.record-thumb { display: grid; width: 6.5rem; height: 4.5rem; place-items: center; overflow: hidden; background: linear-gradient(145deg, var(--bg-raised), var(--bg-page)); color: var(--text-faint); }.record-thumb img, .record-thumb video { width: 100%; height: 100%; object-fit: cover; transition: transform var(--motion-normal,220ms) var(--ease-out-premium,cubic-bezier(.22,1,.36,1)); display: block; }.record-row:hover .record-thumb img { transform: scale(1.045); }.record-thumb i { font-style: normal; font-size: 1.1rem; }
 .record-title { min-width: 0; }.record-title small, .record-title b, .record-title em { display: block; }.record-title small { color: var(--accent-teal); font-size: .58rem; font-weight: 700; letter-spacing: .08em; }.record-title b { margin: .4rem 0 .3rem; overflow: hidden; font-size: 1.05rem; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }.record-title em { overflow: hidden; color: var(--text-muted); font-size: .7rem; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }.record-meta, .record-open time { color: var(--text-faint); font-size: .67rem; }.record-arrow { color: var(--text-muted); transition: transform var(--motion-fast,140ms) ease; }.record-row:hover .record-arrow { transform: translateX(.3rem); }
 .record-actions { position: absolute; right: 2rem; top: 50%; display: flex; gap: .35rem; transform: translateY(-50%); opacity: 0; transition: opacity var(--motion-fast,140ms) ease; }.record-row:hover .record-actions, .record-actions:focus-within { opacity: 1; }.record-actions .el-button { width: 2rem; height: 2rem; min-height: 0; }
 .record-no-result { display: grid; min-height: 12rem; place-content: center; text-align: center; }.record-no-result b, .record-no-result span { display: block; }.record-no-result span { margin-top: .5rem; color: var(--text-muted); font-size: .75rem; }

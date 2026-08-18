@@ -57,7 +57,13 @@ function list(db, options = {}) {
   const deleted = options.deleted ? 'IS NOT NULL' : 'IS NULL';
   const scoped = hasOwnerColumn(db) && options.owner_user_id;
   return db.prepare(`SELECT q.*, COUNT(s.id) shot_count,
-      SUM(CASE WHEN v.status = 'completed' THEN 1 ELSE 0 END) completed_count
+      SUM(CASE WHEN v.status = 'completed' THEN 1 ELSE 0 END) completed_count,
+      (SELECT v3.local_path FROM omni_video_sequence_shots s3
+         JOIN omni_video_jobs j3 ON j3.id = s3.omni_job_id
+         JOIN video_generations v3 ON v3.id = j3.video_generation_id
+        WHERE s3.sequence_id = q.id AND s3.deleted_at IS NULL
+          AND v3.status = 'completed' AND v3.local_path IS NOT NULL
+        ORDER BY v3.created_at DESC LIMIT 1) AS latest_video_path
     FROM omni_video_sequences q
     LEFT JOIN omni_video_sequence_shots s ON s.sequence_id = q.id AND s.deleted_at IS NULL
     LEFT JOIN omni_video_jobs j ON j.id = s.omni_job_id
@@ -68,6 +74,7 @@ function list(db, options = {}) {
       ...row,
       shot_count: Number(row.shot_count || 0),
       completed_count: Number(row.completed_count || 0),
+      latest_video_url: row.latest_video_path ? `/static/${String(row.latest_video_path).replace(/^\/+/, '')}` : null,
     }));
 }
 
