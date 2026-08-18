@@ -68,30 +68,48 @@ function syncStoryboardCharacterLinks(db, storyboardId, dramaCharacterIds) {
 function createStoryboard(db, log, req) {
   const now = new Date().toISOString();
   const episodeId = Number(req.episode_id);
+  if (!Number.isInteger(episodeId) || episodeId <= 0) throw new Error('缺少有效的 episode_id');
   let inheritedGenerationSettings = null;
   try { inheritedGenerationSettings = require('./generationSettingsService').getEpisodeSettings(db, episodeId)?.defaults || null; } catch (_) {}
-  const num = Number(req.storyboard_number ?? 0) || 0;
-  const info = db.prepare(
+  const requestedNumber = Number(req.storyboard_number ?? 0);
+  const requestedNum = Number.isInteger(requestedNumber) && requestedNumber > 0 ? requestedNumber : null;
+  const create = db.prepare(
     `INSERT INTO storyboards (episode_id, scene_id, storyboard_number, title, description, location, time, duration, dialogue, action, result, atmosphere, image_prompt, video_prompt, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
-  ).run(
-    episodeId,
-    req.scene_id ?? null,
-    num,
-    req.title ?? null,
-    req.description ?? null,
-    req.location ?? null,
-    req.time ?? null,
-    req.duration ?? 0,
-    req.dialogue ?? null,
-    req.action ?? null,
-    req.result ?? null,
-    req.atmosphere ?? null,
-    req.image_prompt ?? null,
-    req.video_prompt ?? null,
-    now,
-    now
   );
+  // The client may be working from a de-duplicated/stale storyboard list.  Never
+  // let that turn into duplicate storyboard_number rows: the visible list is
+  // keyed by this number and duplicates make a successfully created shot appear
+  // to be missing.  Allocation and insert are one synchronous SQLite transaction.
+  const info = db.transaction(() => {
+    const existing = db.prepare(
+      'SELECT 1 FROM storyboards WHERE episode_id = ? AND storyboard_number = ? AND deleted_at IS NULL LIMIT 1'
+    );
+    const max = db.prepare(
+      'SELECT COALESCE(MAX(storyboard_number), 0) AS value FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL'
+    );
+    const duplicate = requestedNum != null && existing.get(episodeId, requestedNum);
+    const num = !requestedNum || duplicate ? Number(max.get(episodeId).value) + 1 : requestedNum;
+    const defaultTitle = requestedNum != null ? `镜头 ${requestedNum}` : null;
+    return create.run(
+      episodeId,
+      req.scene_id ?? null,
+      num,
+      req.title === defaultTitle ? `镜头 ${num}` : (req.title ?? null),
+      req.description ?? null,
+      req.location ?? null,
+      req.time ?? null,
+      req.duration ?? 0,
+      req.dialogue ?? null,
+      req.action ?? null,
+      req.result ?? null,
+      req.atmosphere ?? null,
+      req.image_prompt ?? null,
+      req.video_prompt ?? null,
+      now,
+      now
+    );
+  })();
   log.info('Storyboard created', { id: info.lastInsertRowid, episode_id: episodeId });
   try { require('./generationSettingsService').initializeStoryboardFromMaster(db, info.lastInsertRowid, inheritedGenerationSettings); } catch (_) {}
   return getStoryboardById(db, info.lastInsertRowid);
