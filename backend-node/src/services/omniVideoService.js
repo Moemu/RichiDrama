@@ -368,7 +368,8 @@ function buildSummary(assets) { return { sent_to_model: assets.filter((a) => a.s
 function get(db, id) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
   if (!job) return null;
-  const generation = db.prepare('SELECT * FROM video_generations WHERE id = ?').get(job.video_generation_id);
+  const generation = db.prepare(`SELECT v.*, t.progress AS task_progress, t.message AS task_message, t.updated_at AS task_updated_at
+    FROM video_generations v LEFT JOIN async_tasks t ON t.id=v.task_id AND t.deleted_at IS NULL WHERE v.id = ?`).get(job.video_generation_id);
   const assets = db.prepare('SELECT * FROM omni_video_job_assets WHERE omni_job_id = ? ORDER BY ordinal').all(job.id);
   const safeGeneration = generation ? { ...generation, video_url: videoService.publicVideoUrl(generation.video_url, generation.local_path) } : null;
   let isCurrent = false;
@@ -386,9 +387,10 @@ function list(db, query = {}) {
   const shotId = Number(query.shot_id);
   let sql = `SELECT j.*, v.status, v.video_url, v.local_path, v.source_local_path, v.upscale_local_path,
     v.resolution, v.aspect_ratio, v.upscale_resolution, v.target_fps, v.upscale_status, v.interpolation_status,
-    v.output_width, v.output_height, v.output_resolution, v.output_fps, v.output_duration_ms, v.error_msg,
+    v.output_width, v.output_height, v.output_resolution, v.output_fps, v.output_duration_ms, v.error_msg, v.task_id, t.progress AS task_progress, t.message AS task_message, t.updated_at AS task_updated_at,
     s.active_video_generation_id, s.local_path AS storyboard_local_path
     FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id
+    LEFT JOIN async_tasks t ON t.id=v.task_id AND t.deleted_at IS NULL
     LEFT JOIN storyboards s ON s.id = v.storyboard_id AND s.deleted_at IS NULL`;
   const params = [];
   const filters = [];

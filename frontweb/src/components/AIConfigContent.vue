@@ -900,8 +900,8 @@ input_reference = (图片文件，可选)</pre>
           </template>
           <div class="deepseek-settings">
             <el-radio-group v-model="form.deepseek_thinking">
-              <el-radio-button label="disabled">关闭思考</el-radio-button>
-              <el-radio-button label="enabled">开启思考</el-radio-button>
+              <el-radio-button value="disabled">关闭思考</el-radio-button>
+              <el-radio-button value="enabled">开启思考</el-radio-button>
             </el-radio-group>
             <el-select
               v-if="form.deepseek_thinking === 'enabled'"

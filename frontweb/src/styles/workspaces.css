@@ -1,0 +1,34 @@
+.ui-workspace {
+  display: grid;
+  grid-template-columns: var(--ui-rail-width) minmax(0, 1fr) var(--ui-inspector-width);
+  gap: var(--ui-space-4);
+  min-width: 0;
+  min-height: 0;
+}
+
+.ui-workspace__rail,
+.ui-workspace__inspector {
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.ui-workspace__stage { min-width: 0; min-height: 0; }
+
+.ui-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  min-width: 0;
+}
+
+.ui-section-heading > * { min-width: 0; }
+
+.ui-meta { color: var(--ui-text-3); font-size: 13px; line-height: 1.5; }
+
+/* Browser zoom reduces the CSS viewport. Let inspector rails shrink before a
+   desktop workspace turns into a page-wide horizontal overflow. */
+@media (max-width: 80rem) {
+  .ui-workspace { grid-template-columns: minmax(11rem, 18vw) minmax(0, 1fr) minmax(14rem, 24vw); gap: var(--ui-space-3); }
+}

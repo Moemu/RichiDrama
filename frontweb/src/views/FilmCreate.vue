@@ -1,5 +1,5 @@
 <template>
-  <div class="film-create" :class="{ 'sidebar-collapsed': navCollapsed, 'storyboard-stage-active': workflowStage === 'storyboard' }">
+  <div class="film-create" :class="{ 'sidebar-collapsed': navCollapsed, 'script-stage-active': workflowStage === 'script', 'resources-stage-active': workflowStage === 'resources', 'storyboard-stage-active': workflowStage === 'storyboard', 'merge-stage-active': workflowStage === 'merge' }">
     <!-- 全能素材上传：上传素材 / 首尾帧参考图（共享隐藏 input） -->
     <input ref="sbOmniFileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="onSbOmniFileInputChange" />
     <input ref="sbOmniFrameFileInput" hidden type="file" accept="image/*" @change="onSbOmniFrameFileInputChange" />
@@ -8,7 +8,7 @@
       <div class="header-inner">
         <h1 class="logo" @click="goList">
           <span class="richi-brand-mark" aria-hidden="true"><img src="/brand/richi-logo-color.png" alt="" /></span>
-          <span class="richi-brand-copy"><span class="logo-main">瑞池传媒短剧平台</span><span class="logo-sub">RICH MEDIA</span></span>
+          <span class="richi-brand-copy"><span class="logo-main">瑞池传媒短剧平台</span><span class="logo-sub">创作工作台</span></span>
         </h1>
         <span class="breadcrumb-sep">›</span>
         <span class="page-title">{{ dramaId ? (store.drama?.title || '项目') : '新建故事' }}</span>
@@ -539,16 +539,6 @@
         <el-button type="primary" :disabled="!currentEpisodeId" @click="setWorkflowStage('storyboard')">进入分镜管理</el-button>
       </div>
 
-      <section v-show="workflowStage === 'storyboard'" class="section card storyboard-workbench-toolbar">
-        <div>
-          <h2 class="section-title">分镜工作台</h2>
-          <p class="section-desc">复用全能创作的镜头工作台：左侧统一素材、中央提示词与预览、右侧镜头列表可拖动排序。</p>
-        </div>
-        <div class="row gap">
-          <el-button type="primary" :loading="storyboardGenerating" :disabled="!currentEpisodeId || storyboardGenerating" @click="onGenerateStoryboard">{{ storyboards.length ? '重新生成分镜' : 'AI 生成分镜' }}</el-button>
-          <el-button :disabled="!currentEpisodeId" @click="onAddSingleStoryboard">添加镜头</el-button>
-        </div>
-      </section>
       <FreeCreate v-if="workflowStage === 'storyboard' && currentEpisodeId" :project-episode-id="currentEpisodeId" :project-drama-id="dramaId" embedded @reordered="loadDrama" @changed="loadDrama" />
 
       <div v-if="false" class="storyboard-workspace">
@@ -1116,8 +1106,8 @@
                       size="small"
                       @change="(value) => onSbOmniModeChange(sb, value)"
                     >
-                      <el-radio-button label="multi_reference">多参考</el-radio-button>
-                      <el-radio-button label="first_last_frame">首尾帧</el-radio-button>
+                      <el-radio-button value="multi_reference">多参考</el-radio-button>
+                      <el-radio-button value="first_last_frame">首尾帧</el-radio-button>
                     </el-radio-group>
                     <span class="sb-omni-control-hint">
                       {{ (sbOmniCreationMode[sb.id] || 'multi_reference') === 'first_last_frame' ? '仅提交一张首帧和一张尾帧' : '图片、视频、音频按模型能力路由' }}
@@ -1500,7 +1490,7 @@
       </div>
 
       <!-- 7. 视频配置 + AI 模型配置 -->
-      <section v-show="workflowStage === 'merge'" class="section card">
+      <section v-show="workflowStage === 'merge'" class="section card merge-settings">
         <h2 class="section-title">视频配置</h2>
         <div class="config-grid">
           <el-form-item label="分辨率">
@@ -1556,10 +1546,14 @@
           </el-form-item>
         </div>
         <p class="config-tip">文本/图片/视频使用的模型以「<el-link type="primary" underline="never" @click="showAiConfigDialog = true">AI 配置</el-link>」中设为默认的为准。</p>
+        <div class="merge-format-preview" aria-label="输出格式预览">
+          <div class="merge-format-frame" :class="{ landscape: ['16:9', '4:3', '3:2', '21:9'].includes(projectAspectRatio), square: projectAspectRatio === '1:1' }"><span>{{ projectAspectRatio }}</span><b>{{ videoResolution }}</b></div>
+          <dl><div><dt>字幕</dt><dd>{{ videoSubtitle ? '开启' : '关闭' }}</dd></div><div><dt>对白</dt><dd>{{ videoBurnDialogue ? '开启' : '关闭' }}</dd></div><div><dt>水印</dt><dd>{{ videoWatermark ? '开启' : '关闭' }}</dd></div></dl>
+        </div>
       </section>
 
       <!-- 8. 合成视频 -->
-      <section v-show="workflowStage === 'merge'" id="anchor-video" class="section card">
+      <section v-show="workflowStage === 'merge'" id="anchor-video" class="section card merge-output">
         <h2 class="section-title">合成视频</h2>
         <div class="merge-readiness" :class="{ ready: mergeReadiness.total > 0 && mergeReadiness.missing === 0 }">
           <b>镜头就绪：{{ mergeReadiness.ready }} / {{ mergeReadiness.total }}</b>
@@ -1567,6 +1561,10 @@
           <span v-else-if="mergeReadiness.total">全部分镜视频已就绪，可以合成当前集。</span>
           <span v-else>请先在分镜管理中生成镜头视频。</span>
         </div>
+        <div v-if="storyboards.length" class="merge-shot-grid" aria-label="分镜视频就绪状态">
+          <button v-for="(shot, index) in storyboards" :key="shot.id" type="button" :class="{ ready: getSbAllVideos(shot.id).length > 0 }" :title="`镜头 ${index + 1}：${getSbAllVideos(shot.id).length > 0 ? '已就绪' : '缺少视频'}`" @click="getSbAllVideos(shot.id).length === 0 && setWorkflowStage('storyboard')"><span>{{ String(index + 1).padStart(2, '0') }}</span><i></i></button>
+        </div>
+        <el-button v-if="mergeReadiness.missing" plain @click="setWorkflowStage('storyboard')">返回分镜补齐视频</el-button>
         <el-button
           type="primary"
           size="large"
@@ -10047,8 +10045,6 @@ html.light .nav-sub-item.sb-nav-over { background: rgba(99,102,241,0.10); }
 .storyboard-stage-active .workflow-shell{flex:none;margin:0 0 8px;padding:8px 14px}
 .storyboard-stage-active .workflow-head{display:none}
 .storyboard-stage-active .workflow-steps{margin-top:0}
-.storyboard-stage-active .storyboard-workbench-toolbar{flex:none;margin:0 0 8px;padding:10px 14px}
-.storyboard-stage-active .storyboard-workbench-toolbar .section-desc{display:none}
 .storyboard-stage-active .omni-page.embedded.project-storyboard-page{position:static!important;top:auto;height:auto!important;min-height:0!important;overflow:hidden!important;flex:1;z-index:auto}
 .storyboard-stage-active .omni-page.embedded.project-storyboard-page .workbench{height:100%!important;min-height:0!important}
 .storyboard-stage-active .workflow-next-action{flex:none;margin:8px 0 0;padding:8px 12px}
@@ -12074,11 +12070,82 @@ html.light .frame-layout-anchor {
 /* Desktop studio pass: make the production flow read as one directed creative surface. */
 @media(min-width:961px){
   .film-create{background:var(--bg-page);background-image:radial-gradient(56% 46% at 18% -8%,color-mix(in srgb,var(--accent) 19%,transparent),transparent 72%),radial-gradient(32% 36% at 95% 15%,color-mix(in srgb,var(--accent-teal) 10%,transparent),transparent 70%),linear-gradient(180deg,color-mix(in srgb,var(--bg-page) 84%,#05070c),var(--bg-page) 42%)}
-  .quick-nav{width:214px;padding-top:18px;background:linear-gradient(180deg,color-mix(in srgb,var(--bg-surface) 97%,#070910),color-mix(in srgb,var(--bg-page) 94%,#03050a));border-right-color:var(--border-subtle);box-shadow:12px 0 38px rgba(0,0,0,.2)}.quick-nav::before{content:'STUDIO / 01';padding:0 14px 13px;color:var(--text-faint);font-size:10px;font-weight:800;letter-spacing:.18em}.quick-nav.collapsed{width:54px}.header,.main{margin-left:214px}.sidebar-collapsed .header,.sidebar-collapsed .main{margin-left:54px}
-  .header{padding:12px 26px;background:color-mix(in srgb,var(--bg-surface) 88%,transparent)!important;border-bottom-color:var(--border-subtle)!important;box-shadow:var(--shadow-sm)!important}.header-inner{gap:12px}.logo{flex-direction:row;align-items:center;gap:8px}.logo-main{background:none;color:var(--text-primary);-webkit-text-fill-color:var(--text-primary)}.logo-sub{color:var(--text-muted);-webkit-text-fill-color:var(--text-muted)}.page-title{border-color:var(--border-subtle);border-radius:9px;background:color-mix(in srgb,var(--bg-raised) 80%,transparent);color:var(--text-regular)}
+  .quick-nav{width:214px;padding-top:18px;background:linear-gradient(180deg,color-mix(in srgb,var(--bg-surface) 97%,#070910),color-mix(in srgb,var(--bg-page) 94%,#03050a));border-right-color:var(--border-subtle);box-shadow:12px 0 38px rgba(0,0,0,.2)}.quick-nav::before{content:'创作流程';padding:0 14px 13px;color:var(--text-faint);font-size:10px;font-weight:800;letter-spacing:.18em}.quick-nav.collapsed{width:54px}.header,.main{margin-left:214px}.sidebar-collapsed .header,.sidebar-collapsed .main{margin-left:54px}
+  .header{padding:12px 26px;background:color-mix(in srgb,var(--bg-surface) 88%,transparent)!important;border-bottom-color:var(--border-subtle)!important;box-shadow:var(--shadow-sm)!important}.header-inner{gap:12px;min-width:0}.logo{flex:0 0 165px;flex-direction:row;align-items:center;gap:8px;min-width:0}.richi-brand-copy{display:grid;min-width:0}.logo-main{overflow:visible;background:none;color:var(--text-primary);font-size:.88rem;line-height:1.15;white-space:nowrap;-webkit-text-fill-color:var(--text-primary)}.logo-sub{color:var(--text-muted);font-size:.62rem;letter-spacing:0;-webkit-text-fill-color:var(--text-muted)}.page-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-color:var(--border-subtle);border-radius:9px;background:color-mix(in srgb,var(--bg-raised) 80%,transparent);color:var(--text-regular)}
   .main{max-width:1680px;padding:34px 38px 64px}.workflow-shell{position:relative;overflow:hidden;margin-bottom:22px;padding:30px 32px;border-color:color-mix(in srgb,var(--accent) 36%,var(--border-color))!important;border-radius:20px;background:radial-gradient(circle at 92% 12%,color-mix(in srgb,var(--accent-teal) 19%,transparent),transparent 24%),linear-gradient(138deg,color-mix(in srgb,var(--accent) 13%,var(--bg-surface)),var(--bg-surface) 55%,color-mix(in srgb,var(--accent-teal) 7%,var(--bg-surface)))!important;box-shadow:var(--shadow-md)!important}.workflow-shell::after{content:'';position:absolute;right:-88px;bottom:-164px;width:390px;height:390px;border:1px solid color-mix(in srgb,var(--accent) 36%,transparent);border-radius:50%;box-shadow:0 0 0 38px color-mix(in srgb,var(--accent) 5%,transparent),0 0 0 78px color-mix(in srgb,var(--accent) 3%,transparent);pointer-events:none}.workflow-shell>*{position:relative;z-index:1}.workflow-kicker{color:var(--accent);font-size:10px;letter-spacing:.16em}.workflow-head h2{font-size:28px;letter-spacing:-.035em}.workflow-head p{max-width:58ch}.workflow-episode{border:1px solid color-mix(in srgb,var(--accent) 34%,var(--border-color));background:color-mix(in srgb,var(--bg-surface) 74%,transparent);color:var(--text-primary)}
   .workflow-steps{gap:10px;margin-top:27px}.workflow-step{min-height:54px;border-color:var(--border-subtle);border-radius:12px;background:color-mix(in srgb,var(--bg-page) 30%,transparent);font-weight:650;transition:transform .18s ease,border-color .18s ease,background .18s ease}.workflow-step:hover{transform:translateY(-2px);border-color:var(--border-strong);background:color-mix(in srgb,var(--bg-raised) 90%,transparent)}.workflow-step.active{border-color:transparent;background:linear-gradient(135deg,var(--accent),#6f61df);box-shadow:0 12px 26px color-mix(in srgb,var(--accent) 26%,transparent)}
-  .section.card{position:relative;overflow:hidden;padding:28px 30px;border-color:var(--border-subtle);border-radius:18px;background:color-mix(in srgb,var(--bg-surface) 94%,transparent);box-shadow:var(--shadow-sm)}.section.card:hover{transform:none;border-color:color-mix(in srgb,var(--accent) 38%,var(--border-color));box-shadow:var(--shadow-md)}.script-workbench-unified::before{content:'SCRIPT LAB';display:block;margin-bottom:16px;color:var(--accent);font-size:10px;font-weight:800;letter-spacing:.17em}.section-title{color:var(--text-primary)!important;font-size:1.15rem!important;letter-spacing:-.02em}.section-desc{color:var(--text-muted)!important}.story-textarea :deep(.el-textarea__inner){background:color-mix(in srgb,var(--bg-page) 35%,transparent)!important;border-color:var(--border-subtle)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}.story-textarea :deep(.el-textarea__inner:focus){box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 68%,transparent)!important}.workflow-next-action{border-color:color-mix(in srgb,var(--accent) 30%,var(--border-color));border-radius:13px;background:color-mix(in srgb,var(--accent) 7%,var(--bg-raised));box-shadow:var(--shadow-sm)}
+  .section.card{position:relative;overflow:hidden;padding:28px 30px;border-color:var(--border-subtle);border-radius:18px;background:color-mix(in srgb,var(--bg-surface) 94%,transparent);box-shadow:var(--shadow-sm)}.section.card:hover{transform:none;border-color:color-mix(in srgb,var(--accent) 38%,var(--border-color));box-shadow:var(--shadow-md)}.script-workbench-unified::before{content:none}.section-title{color:var(--text-primary)!important;font-size:1.15rem!important;letter-spacing:-.02em}.section-desc{color:var(--text-muted)!important}.story-textarea :deep(.el-textarea__inner){background:color-mix(in srgb,var(--bg-page) 35%,transparent)!important;border-color:var(--border-subtle)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}.story-textarea :deep(.el-textarea__inner:focus){box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 68%,transparent)!important}.workflow-next-action{border-color:color-mix(in srgb,var(--accent) 30%,var(--border-color));border-radius:13px;background:color-mix(in srgb,var(--accent) 7%,var(--bg-raised));box-shadow:var(--shadow-sm)}
   .nav-sidebar-header{padding:0 14px 12px;border-bottom-color:var(--border-subtle)}.nav-sidebar-title{color:var(--text-faint);font-size:10px;font-weight:800;letter-spacing:.15em}.nav-steps{padding-inline:13px}.nav-step{padding:7px 8px;border-radius:10px}.nav-step:hover{background:color-mix(in srgb,var(--accent) 8%,transparent)}.step-label{color:var(--text-regular);font-size:13px}.step-dot{width:25px;height:25px}.status-generating .step-label{color:var(--accent)}.status-done .step-label{color:var(--accent-teal)}.nav-group{margin-top:11px}.nav-sub-toggle{padding:8px 14px;color:var(--text-faint);border-top-color:var(--border-subtle)}
+}
+
+/* The production studio owns the viewport; only its active canvas scrolls. */
+.film-create { height:100vh; height:100dvh; min-height:0; overflow:hidden; }
+.film-create > .header { position:relative; height:3.75rem; box-sizing:border-box; }
+.film-create > .main { height:calc(100vh - 3.75rem); height:calc(100dvh - 3.75rem); box-sizing:border-box; padding-bottom:2rem; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
+@media(min-width:961px){
+  .script-stage-active>.main{display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:14px;overflow:hidden;padding-top:18px;padding-bottom:18px}
+  .script-stage-active .workflow-shell{margin:0;padding:15px 22px;border-radius:16px}
+  .script-stage-active .workflow-head{align-items:center}.script-stage-active .workflow-head h2{margin-block:2px;font-size:22px}.script-stage-active .workflow-head p{font-size:12px}
+  .script-stage-active .workflow-steps{margin-top:12px}.script-stage-active .workflow-step{min-height:38px}
+  .script-stage-active .script-workbench-unified{min-height:0;padding:17px 22px;overflow:hidden}
+  .script-stage-active .script-workbench-unified::before{margin-bottom:8px}
+  .script-stage-active .script-workbench-tabs{height:calc(100% - 18px);min-height:0}
+  .script-stage-active .script-workbench-tabs:deep(.el-tabs__content),.script-stage-active .script-workbench-tabs:deep(.el-tab-pane){height:calc(100% - 28px);min-height:0}
+  .script-stage-active .script-pane-inner{display:grid;grid-template-columns:minmax(18rem,.72fr) minmax(0,1.55fr);gap:24px;height:100%;min-height:0;overflow:hidden}
+  .script-stage-active .script-sub-block{min-width:0;min-height:0;overflow:auto;padding-right:5px;scrollbar-width:thin}
+  .script-stage-active .script-sub-divider{width:1px;height:100%;margin:0;background:var(--border-subtle)}
+  .script-stage-active .script-pane-inner{grid-template-columns:minmax(18rem,.72fr) 1px minmax(0,1.55fr)}
+  .script-stage-active .script-sub-block .section-title{margin-top:0}
+  .script-stage-active #anchor-script{display:flex;flex-direction:column}
+  .script-stage-active #anchor-script>.story-textarea{flex:1;min-height:0}
+  .script-stage-active #anchor-script>.story-textarea:deep(.el-textarea__inner){height:100%!important;min-height:10rem!important;resize:none}
+  .script-stage-active .workflow-next-action{margin:0}
+  .resources-stage-active>.main{display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:14px;overflow:hidden;padding-top:18px;padding-bottom:18px}
+  .resources-stage-active .workflow-shell{margin:0;padding:15px 22px;border-radius:16px}
+  .resources-stage-active .workflow-head{align-items:center}.resources-stage-active .workflow-head h2{margin-block:2px;font-size:22px}.resources-stage-active .workflow-head p{font-size:12px}
+  .resources-stage-active .workflow-steps{margin-top:12px}.resources-stage-active .workflow-step{min-height:38px}
+  .resources-stage-active .resource-center{display:grid;grid-template-rows:auto minmax(0,1fr) 9.5rem;gap:12px;min-height:0;padding:18px 22px;overflow:hidden}
+  .resources-stage-active .resource-center-heading{margin:0}.resources-stage-active .resource-center-heading .section-title{margin-top:0}.resources-stage-active .resource-center-heading .section-desc{margin-bottom:0}
+  .resources-stage-active .resource-center-grid{min-height:0}.resources-stage-active .resource-center-group{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .resources-stage-active .resource-center-list{flex:1;min-height:0;max-height:none;overflow:auto;scrollbar-width:thin}
+  .resources-stage-active .resource-media-library{min-height:0;margin:0;padding:10px 12px;overflow:hidden}
+  .resources-stage-active .resource-media-library>header{margin-bottom:7px}
+  .resources-stage-active .resource-media-grid{display:flex;gap:9px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
+  .resources-stage-active .resource-media-card{flex:0 0 9.5rem}.resources-stage-active .resource-media-card img,.resources-stage-active .resource-media-card>span{height:54px}.resources-stage-active .resource-media-card small{padding-block:4px}
+  .resources-stage-active .workflow-next-action{margin:0}
+  .merge-stage-active>.main{display:grid;grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr);grid-template-rows:auto minmax(0,1fr);gap:16px;overflow:hidden;padding-top:18px;padding-bottom:18px}
+  .merge-stage-active .workflow-shell{grid-column:1/-1;margin:0;padding:15px 22px;border-radius:16px}
+  .merge-stage-active .workflow-head{align-items:center}.merge-stage-active .workflow-head h2{margin-block:2px;font-size:22px}.merge-stage-active .workflow-head p{font-size:12px}
+  .merge-stage-active .workflow-steps{margin-top:12px}.merge-stage-active .workflow-step{min-height:38px}
+  .merge-stage-active .main>:is(.merge-settings,.merge-output){display:flex;flex-direction:column;min-height:0;margin:0;padding:24px 26px}
+  .merge-stage-active .main>:is(.merge-settings,.merge-output)>h2{font-size:1.45rem!important}
+  .merge-stage-active #anchor-video{background:radial-gradient(circle at 88% 12%,color-mix(in srgb,var(--accent) 15%,transparent),transparent 28%),color-mix(in srgb,var(--bg-surface) 94%,transparent)}
+  .merge-format-preview{display:grid;grid-template-columns:minmax(9rem,.8fr) 1fr;gap:1.4rem;align-items:center;flex:1;min-height:0;margin-top:1rem;padding-top:1.2rem;border-top:1px solid var(--border-subtle)}
+  .merge-format-frame{display:grid;place-items:center;align-content:center;aspect-ratio:9/16;max-height:20rem;border:1px solid color-mix(in srgb,var(--accent) 52%,var(--border-color));border-radius:14px;background:radial-gradient(circle at 50% 32%,color-mix(in srgb,var(--accent) 28%,transparent),transparent 34%),linear-gradient(155deg,var(--bg-raised),var(--bg-page));box-shadow:inset 0 0 0 8px color-mix(in srgb,var(--bg-page) 55%,transparent)}
+  .merge-format-frame.landscape{aspect-ratio:16/9;max-height:none}.merge-format-frame.square{aspect-ratio:1}
+  .merge-format-frame span{color:var(--text-faint);font:700 .7rem/1 ui-monospace,monospace}.merge-format-frame b{margin-top:.65rem;font-size:1.6rem}
+  .merge-format-preview dl{display:grid;gap:.8rem;margin:0}.merge-format-preview dl div{display:flex;justify-content:space-between;padding-bottom:.7rem;border-bottom:1px solid var(--border-subtle)}.merge-format-preview dt{color:var(--text-muted)}.merge-format-preview dd{margin:0;font-weight:700}
+  .merge-shot-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(4.2rem,1fr));gap:8px;margin:1rem 0;overflow:auto;scrollbar-width:thin}
+  .merge-shot-grid button{display:grid;gap:.5rem;min-height:4rem;padding:.65rem;border:1px solid var(--border-subtle);border-radius:9px;background:var(--bg-page);color:var(--text-faint);text-align:left}.merge-shot-grid button:hover{border-color:var(--accent)}.merge-shot-grid button span{font:700 .66rem/1 ui-monospace,monospace}.merge-shot-grid button i{height:4px;border-radius:99px;background:var(--status-danger)}.merge-shot-grid button.ready i{background:var(--accent-teal)}
+  .script-stage-active .script-workbench-unified,.resources-stage-active .resource-center,.merge-stage-active .main>:is(.merge-settings,.merge-output){animation:stage-reveal var(--motion-standard) var(--motion-spring) both}
+}
+@keyframes stage-reveal{from{opacity:0;transform:translateY(7px) scale(.997)}to{opacity:1;transform:none}}
+@media(max-width:960px){.film-create>.main{height:calc(100vh - 3.75rem);height:calc(100dvh - 3.75rem);overflow-y:auto}.film-create>.header{position:relative}}
+@media(prefers-reduced-motion:reduce){.script-stage-active .script-workbench-unified,.resources-stage-active .resource-center,.merge-stage-active .main>:is(.merge-settings,.merge-output){animation:none!important}}
+/* A restrained sense of motion keeps the production flow visually alive without competing with the editor. */
+@media(min-width:961px) and (prefers-reduced-motion:no-preference){
+  .workflow-shell::after{animation:workflow-orbit 15s var(--motion-ease) infinite alternate}
+  .workflow-shell::before{content:'';position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 24% 116%,color-mix(in srgb,var(--accent-teal) 12%,transparent),transparent 23%);opacity:.8;transform:translate3d(0,0,0)}
+  .workflow-step.active{animation:workflow-current 2.8s var(--motion-ease) infinite}
+}
+@keyframes workflow-orbit{to{transform:translate3d(-1.5rem,-1rem,0) rotate(8deg)}}
+@keyframes workflow-current{50%{transform:translateY(-.12rem);box-shadow:0 .9rem 2rem color-mix(in srgb,var(--accent) 32%,transparent)}}
+@media(prefers-reduced-motion:reduce){.workflow-shell::after,.workflow-step.active{animation:none!important}}
+/* The film shell consumes a navigation rail, so storyboard breakpoints are
+   based on the remaining work area rather than the full browser width. */
+@media(min-width:961px){
+  .film-create>.main{width:calc(100% - 214px);max-width:none;min-width:0;padding-inline:clamp(.75rem,2vw,2rem)}
+  .film-create.sidebar-collapsed>.main{width:calc(100% - 54px)}
+  .storyboard-stage-active .main{padding-inline:clamp(.5rem,1.5vw,1.5rem)}
 }
 </style>

@@ -100,7 +100,13 @@ function list(db, query) {
   const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 20));
   const offset = (page - 1) * pageSize;
   const rows = db.prepare('SELECT * ' + sql + ' ORDER BY created_at DESC LIMIT ? OFFSET ?').all(...params, pageSize, offset);
-  return { items: rows.map(rowToItem), total, page, pageSize };
+  return { items: rows.map((row) => rowToItem(withTaskProgress(db, row))), total, page, pageSize };
+}
+
+function withTaskProgress(db, row) {
+  if (!row?.task_id) return row;
+  const task = db.prepare('SELECT progress, message, updated_at FROM async_tasks WHERE id=? AND deleted_at IS NULL').get(row.task_id);
+  return task ? { ...row, task_progress: task.progress, task_message: task.message, task_updated_at: task.updated_at } : row;
 }
 
 function rowToItem(r) {
@@ -140,6 +146,9 @@ function rowToItem(r) {
     poster_local_path: r.poster_local_path || null,
     status: r.status,
     task_id: r.task_id,
+    task_progress: r.task_progress == null ? null : Number(r.task_progress),
+    task_message: r.task_message || null,
+    task_updated_at: r.task_updated_at || null,
     error_msg: r.error_msg,
     created_at: r.created_at,
     updated_at: r.updated_at,
@@ -149,7 +158,7 @@ function rowToItem(r) {
 
 function getById(db, id) {
   const r = db.prepare('SELECT * FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(Number(id));
-  return r ? rowToItem(r) : null;
+  return r ? rowToItem(withTaskProgress(db, r)) : null;
 }
 
 const fs = require('fs');

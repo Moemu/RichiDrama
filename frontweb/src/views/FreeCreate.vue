@@ -8,13 +8,19 @@
       <div class="topbar-actions"><AccountBalanceBadge /><el-button text @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" :disabled="!currentShot" @click="copyCurrentShot">复制当前镜头</el-button><el-button type="primary" plain size="small" @click="saveCurrentShot">保存整集</el-button></div>
     </header>
 
-    <section class="workbench">
+    <nav class="mobile-workbench-tabs" aria-label="自由创作工作区">
+      <button type="button" :class="{ active: mobileWorkspaceTab === 'shots' }" @click="mobileWorkspaceTab = 'shots'">镜头</button>
+      <button type="button" :class="{ active: mobileWorkspaceTab === 'stage' }" @click="mobileWorkspaceTab = 'stage'">画面</button>
+      <button type="button" :class="{ active: mobileWorkspaceTab === 'create' }" @click="mobileWorkspaceTab = 'create'">控制</button>
+    </nav>
+
+    <section class="workbench" :class="`mobile-${mobileWorkspaceTab}`">
       <aside class="panel shot-panel" aria-label="镜头导航">
         <div class="shot-heading"><b>镜头列表</b><small>{{ shots.length }} 个 · 滚轮切镜</small></div>
         <div class="shot-actions"><el-button size="small" type="primary" plain @click="addShot(false)">+ 尾部添加</el-button><el-button size="small" @click="addShot(true)">当前镜头后添加</el-button></div>
         <div ref="shotListRef" class="shot-list" tabindex="0" aria-label="镜头列表，可用上下方向键或滚轮切换镜头" @keydown.up.prevent="selectRelative(-1)" @keydown.down.prevent="selectRelative(1)" @wheel.prevent="onShotListWheel">
           <article v-for="(shot, index) in shots" :key="shot.id" class="shot-card" :class="{ active: shot.id === activeShotId, dragging: draggedShotId === shot.id }" :aria-current="shot.id === activeShotId ? 'true' : undefined" draggable="true" @dragstart="draggedShotId = shot.id" @dragend="draggedShotId = null" @dragover.prevent @drop="dropShot(shot.id)" @click="selectShot(shot)">
-            <div class="shot-title"><span class="drag-handle">⠿</span><span class="shot-number">{{ index + 1 }}</span><b>{{ shot.title || '未命名镜头' }}</b><span class="shot-controls"><el-button text size="small" :disabled="index === 0" aria-label="上移镜头" @click.stop="moveShot(index, -1)">↑</el-button><el-button text size="small" :disabled="index === shots.length - 1" aria-label="下移镜头" @click.stop="moveShot(index, 1)">↓</el-button><el-button text size="small" aria-label="重命名镜头" @click.stop="renameShot(shot)"><el-icon><Edit /></el-icon></el-button></span><el-button class="shot-delete" type="danger" plain size="small" :disabled="shots.length <= 1" :title="shots.length <= 1 ? '至少保留一个镜头；请先新增镜头再删除当前镜头' : '删除镜头'" aria-label="删除镜头" @click.stop="removeShot(shot)"><el-icon><Delete /></el-icon><span>删除</span></el-button></div>
+            <div class="shot-title"><span class="drag-handle">⠿</span><span class="shot-number">{{ index + 1 }}</span><b :title="shot.title || '未命名镜头'">{{ shot.title || '未命名镜头' }}</b><span class="shot-controls"><el-button text size="small" :disabled="index === 0" aria-label="上移镜头" @click.stop="moveShot(index, -1)">↑</el-button><el-button text size="small" :disabled="index === shots.length - 1" aria-label="下移镜头" @click.stop="moveShot(index, 1)">↓</el-button><el-button text size="small" aria-label="重命名镜头" @click.stop="renameShot(shot)"><el-icon><Edit /></el-icon></el-button></span><el-button class="shot-delete" type="danger" plain size="small" :disabled="shots.length <= 1" :title="shots.length <= 1 ? '至少保留一个镜头；请先新增镜头再删除当前镜头' : '删除镜头'" aria-label="删除镜头" @click.stop="removeShot(shot)"><el-icon><Delete /></el-icon><span>删除</span></el-button></div>
             <div class="shot-preview"><video v-if="shot.video_url" :src="shot.video_url" :poster="shot.poster_local_path ? `/static/${String(shot.poster_local_path).replace(/^\/+/, '')}` : undefined" muted playsinline preload="metadata" /><div v-else class="shot-video-placeholder" aria-label="尚未生成视频"><span class="shot-play">▶</span></div><span>{{ shot.settings?.duration || 15 }}s</span></div>
             <div class="shot-state" :class="shot.status"><i></i>{{ shotState(shot) }}</div>
           </article>
@@ -23,20 +29,21 @@
 
       <section class="center-stage" aria-label="当前镜头播放与时间线">
         <div class="player-tools"><el-button text size="small" @click="selectRelative(-1)">上一镜</el-button><el-button text size="small" @click="selectRelative(1)">下一镜</el-button><span class="current-version">当前采用：{{ activeJob ? `版本 #${activeJob.video_generation_id || activeJob.id}` : '暂无版本' }}</span><el-tag :type="stageTagType" effect="dark">{{ stageLabel }}</el-tag></div>
-        <div class="video-stage" :class="{ rendering: ['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status) }">
-          <template v-if="activeVideoUrl"><video :key="activeVideoUrl" :src="activeVideoUrl" controls playsinline preload="metadata" :autoplay="playOnSelection" class="main-video" /><div class="frame-actions"><el-button size="small" @click="downloadCurrentVideo">下载成片</el-button><template v-if="activeJob"><el-button size="small" type="primary" :disabled="savedResultJobId === activeJob.id" @click="saveResultAsAsset">{{ savedResultJobId === activeJob.id ? '已加入素材' : '作为视频素材继续创作' }}</el-button><el-button v-if="isProjectMode && savedResultJobId === activeJob.id" size="small" @click="$router.push(`/film/${projectDramaId}/canvas`)">在项目画布中打开</el-button><template v-if="canExtractFrames"><el-button size="small" :loading="extractingPosition === 'first'" :disabled="!!extractingPosition" @click="extractFrame('first')">提取首帧</el-button><el-button size="small" :loading="extractingPosition === 'last'" :disabled="!!extractingPosition" @click="extractFrame('last')">提取尾帧</el-button></template></template></div></template>
-          <template v-else-if="['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status)"><div class="render-ring ring-one"></div><div class="render-ring ring-two"></div><div class="render-play">▶</div><b>{{ activeJob?.status === 'sd2_waiting' ? '真人素材认证准备中，完成后将自动生成' : ['upscale_pending','upscaling'].includes(activeJob?.status) ? '正在进行 AI 超分' : activeJob?.status === 'interpolating' ? '正在进行智能插帧' : activeJob?.status === 'persisting' ? '正在持久化最终成片' : (stagePhase || '正在生成当前镜头') }}</b></template>
+        <div class="video-stage" :class="{ rendering: ['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status), 'has-video': !!activeVideoUrl }">
+          <template v-if="mediaLayers.length"><video v-for="layer in mediaLayers" :key="layer.id" :src="layer.url" :controls="layer.id === topMediaLayerId && layer.ready" playsinline preload="metadata" :autoplay="playOnSelection && layer.id === topMediaLayerId" class="main-video" :class="{ 'is-ready': layer.ready, 'is-current': layer.id === topMediaLayerId }" @canplay="promoteMediaLayer(layer.id)" @error="discardMediaLayer(layer.id)" /></template>
+          <template v-else-if="['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status)"><div class="render-ring ring-one"></div><div class="render-ring ring-two"></div><div class="render-play">▶</div><b>{{ activeJob?.status === 'sd2_waiting' ? '真人素材认证准备中，完成后将自动生成' : generationProgressLabel }}</b><div class="generation-progress" role="status" aria-live="polite"><span><i :style="{ width: `${generationProgress}%` }"></i></span><em>{{ generationProgress }}%</em><small>{{ generationProgressMessage }}</small></div></template>
           <template v-else-if="activeJob && ['failed','retryable','invalid','billing_reconciliation'].includes(activeJob.status)"><el-icon class="stage-warning"><WarningFilled /></el-icon><b>{{ stageLabel }}</b><small>{{ failureHint(activeJob) }}</small><div class="failure-actions"><el-button v-if="canAdoptSource(activeJob)" type="primary" @click="adoptSource(activeJob)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(activeJob)" :type="canAdoptSource(activeJob) ? 'default' : 'primary'" @click="retryPostprocess(activeJob)">仅重试{{ activeJob.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-else-if="activeJob.status === 'retryable'" type="primary" @click="retry(activeJob)">重新生成</el-button></div></template>
           <template v-else><div class="empty-play">▶</div><b>尚未生成视频</b></template>
         </div>
-        <div class="time-ruler"><span>0秒</span><div><i :style="{ width: `${Math.min(100, duration / maxDuration * 100)}%` }"></i></div><span>{{ duration }}秒 / {{ maxDuration }}秒</span></div>
+        <div v-if="activeVideoUrl" class="frame-actions" aria-label="成片操作"><el-button size="small" @click="downloadCurrentVideo">下载成片</el-button><template v-if="activeJob"><el-button size="small" type="primary" :disabled="savedResultJobId === activeJob.id" @click="saveResultAsAsset">{{ savedResultJobId === activeJob.id ? '已加入素材' : '作为视频素材继续创作' }}</el-button><el-button v-if="isProjectMode && savedResultJobId === activeJob.id" size="small" @click="$router.push(`/film/${projectDramaId}/canvas`)">在项目画布中打开</el-button><template v-if="canExtractFrames"><el-button size="small" :loading="extractingPosition === 'first'" :disabled="!!extractingPosition" @click="extractFrame('first')">提取首帧</el-button><el-button size="small" :loading="extractingPosition === 'last'" :disabled="!!extractingPosition" @click="extractFrame('last')">提取尾帧</el-button></template></template></div>
+        <div class="time-ruler" aria-label="镜头时长"><span>时长 {{ duration }} 秒</span><span>最多 {{ maxDuration }} 秒</span></div>
         <div class="shot-tabs"><span class="active">镜头提示词</span><span>输入或拖入 @ 素材</span><span>镜头 {{ activeShotIndex + 1 }} / {{ shots.length }}</span></div>
         <div class="shot-script"><OmniAssetPromptEditor ref="promptEditorRef" v-model="prompt" :assets="assets" :chosen-ids="selected" @pick="onPickFromEditor" @references="setPromptReferences" /></div>
       </section>
 
       <aside class="panel creation-panel" aria-label="创作输入与生成设置">
         <div class="panel-title"><b>视频生成方式</b><el-tag size="small" type="info">{{ creationMode === 'first_last_frame' ? '首尾帧生视频' : '多参考生视频' }}</el-tag></div>
-        <el-radio-group v-model="creationMode" size="small" class="mode-switch"><el-radio-button label="multi_reference">多参考生视频</el-radio-button><el-radio-button label="first_last_frame">首尾帧生视频</el-radio-button></el-radio-group>
+        <el-radio-group v-model="creationMode" size="small" class="mode-switch"><el-radio-button value="multi_reference">多参考生视频</el-radio-button><el-radio-button value="first_last_frame">首尾帧生视频</el-radio-button></el-radio-group>
         <small class="mode-note">{{ creationMode === 'first_last_frame' ? '必须设置一张首帧（必填），尾帧可选；模型不支持时不可提交。' : '图片、视频、音频可按用途自由编排，按模型能力自动路由。' }}</small>
         <el-alert v-if="!currentCapability" class="model-config-alert" type="warning" :closable="false" title="尚未配置可用的视频模型" description="请先在 AI 配置中启用并保存一个已验证的视频模型；配置后本工作台会自动读取它的素材能力与限制。"><template #default><el-button text size="small" @click="$router.push('/ai-config')">前往 AI 配置</el-button></template></el-alert>
         <div class="creation-generate-dock" aria-label="当前镜头生成操作">
@@ -135,6 +142,7 @@ import { beginAssetPointerDrag, shouldSuppressAssetClick } from '@/utils/assetPo
 const componentProps = defineProps({ projectEpisodeId: { type: [Number, String], default: null }, projectDramaId: { type: [Number, String], default: null }, embedded: { type: Boolean, default: false } })
 const emit = defineEmits(['reordered', 'changed'])
 const assets = ref([]), capabilities = ref([]), jobs = ref([]), sequence = ref(null), shots = ref([]), activeShotId = ref(null)
+const mobileWorkspaceTab = ref('stage')
 const route = useRoute()
 const router = useRouter()
 const embedded = computed(() => componentProps.embedded)
@@ -147,6 +155,10 @@ const keepOriginalAudio = ref(false), audioVolume = ref(1), audioFadeSeconds = r
 const draggedShotId = ref(null), draggedAssetId = ref(null), loadingShot = ref(false)
 const generationModes = ref({}), masterShotId = ref(null), projectGenerationDirty = ref(false)
 const playOnSelection = ref(false)
+const mediaLayers = ref([])
+let mediaLayerSequence = 0
+let mediaLayerTransitionTimer = null
+const generationClock = ref(Date.now())
 const shotListRef = ref(null)
 const promptEditorRef = ref(null)
 let wheelShotLocked = false
@@ -155,6 +167,9 @@ const shotHistory = ref([]), selectedHistoryJobId = ref(null)
 let saveTimer = null
 let promptRevision = 0
 let restoredDraftNoticeShown = false
+let generationClockTimer = null
+const pollingJobIds = new Set()
+const activeGenerationStatuses = new Set(['sd2_waiting', 'processing', 'upscale_pending', 'upscaling', 'interpolation_pending', 'interpolating', 'persisting'])
 
 function currentPromptDraftIdentity(shotId = currentShot.value?.id) {
   return {
@@ -242,6 +257,35 @@ const activeJob = computed(() => {
   return adopted || bound || selected || shotHistory.value[0] || null
 })
 const activeVideoUrl = computed(() => activeJob.value?.videoUrl || currentShot.value?.video_url || '')
+const topMediaLayerId = computed(() => mediaLayers.value.at(-1)?.id || null)
+function discardMediaLayer(id) {
+  const index = mediaLayers.value.findIndex((layer) => layer.id === id)
+  if (index < 0) return
+  // 加载失败时继续保留当前成片，避免切换时黑屏或回落到静态占位。
+  mediaLayers.value.splice(index, 1)
+}
+function promoteMediaLayer(id) {
+  const layer = mediaLayers.value.find((item) => item.id === id)
+  if (!layer || layer.ready) return
+  layer.ready = true
+  window.clearTimeout(mediaLayerTransitionTimer)
+  mediaLayerTransitionTimer = window.setTimeout(() => {
+    const current = mediaLayers.value.find((item) => item.id === id)
+    if (current) mediaLayers.value = [current]
+  }, 180)
+}
+watch(activeVideoUrl, (url) => {
+  const nextUrl = String(url || '')
+  if (!nextUrl) {
+    window.clearTimeout(mediaLayerTransitionTimer)
+    mediaLayers.value = []
+    return
+  }
+  const latest = mediaLayers.value.at(-1)
+  if (latest?.url === nextUrl) return
+  // 第一条没有旧画面可保持，后续地址则先静默预加载并在可播放后覆盖旧画面。
+  mediaLayers.value.push({ id: ++mediaLayerSequence, url: nextUrl, ready: mediaLayers.value.length === 0 })
+}, { immediate: true })
 const canExtractFrames = computed(() => Number(activeJob.value?.video_generation_id) > 0 && activeJob.value?.status === 'completed')
 const currentCapability = computed(() => capabilities.value.find((item) => item.model === model.value) || null)
 const shotLimits = computed(() => {
@@ -336,6 +380,14 @@ async function adoptVersion(job) {
 }
 const stageLabel = computed(() => ({ completed: '成片完成', sd2_waiting: '真人素材认证准备中', processing: '生成中', upscale_pending: '等待超分', upscaling: 'AI 超分中', interpolation_pending: '等待插帧', interpolating: '智能插帧中', persisting: '成片持久化中', billing_reconciliation: '等待计费对账', failed: failureLabel(activeJob.value), retryable: '可重试', invalid: '无效任务' })[activeJob.value?.status] || '镜头草稿')
 const stageTagType = computed(() => ({ completed: 'success', failed: 'danger', retryable: 'warning', invalid: 'info' })[activeJob.value?.status] || 'info')
+const generationProgress = computed(() => Math.max(0, Math.min(100, Number(activeJob.value?.task_progress || 0))))
+const generationProgressLabel = computed(() => ['upscale_pending','upscaling'].includes(activeJob.value?.status) ? '正在进行 AI 超分' : activeJob.value?.status === 'interpolating' ? '正在进行智能插帧' : activeJob.value?.status === 'persisting' ? '正在持久化最终成片' : (stagePhase.value || '正在生成当前镜头'))
+const generationStallMinutes = computed(() => {
+  const updatedAt = activeJob.value?.task_updated_at || activeJob.value?.updated_at || activeJob.value?.created_at
+  const elapsed = generationClock.value - new Date(updatedAt || 0).getTime()
+  return Number.isFinite(elapsed) && elapsed > 8 * 60 * 1000 ? Math.floor(elapsed / 60000) : 0
+})
+const generationProgressMessage = computed(() => generationStallMinutes.value ? `已 ${generationStallMinutes.value} 分钟未收到新状态，仍在持续查询；可继续编辑其他镜头。` : (activeJob.value?.task_message || '任务已提交，正在等待下一次状态更新'))
 const requestPreview = computed(() => ({ prompt: prompt.value, creation_mode: creationMode.value, model: currentCapability.value?.model || model.value, aspect_ratio: aspectRatio.value, duration_seconds: normalizeDuration(duration.value), resolution: resolution.value, upscale_resolution: upscaleResolution.value, target_fps: targetFps.value, audio_strategy: audioStrategy.value, assets: chosenAssets.value.map((asset, index) => ({ ordinal: index + 1, name: asset.alias || asset.name, type: asset.type, usage: asset.usage, routing: assetRouteHint(asset) })) }))
 
 async function suggestPolish() {
@@ -427,7 +479,7 @@ function bestPlayableVideo(items) {
     || videos.find((video) => !!localVideoUrl(video))
     || null
 }
-function normalizeJob(data) { const generation = data.generation || {}; return { ...data, ...generation, omni_job_id: data.id, status: generation.status || data.status || 'processing', error_msg: generation.error_msg || data.error_msg, videoUrl: localVideoUrl(generation) || data.video_url, local_path: generation.local_path || data.local_path, duration: generation.duration || data.duration } }
+function normalizeJob(data) { const generation = data.generation || {}; return { ...data, ...generation, omni_job_id: data.id, status: generation.status || data.status || 'processing', error_msg: generation.error_msg || data.error_msg, task_progress: generation.task_progress ?? data.task_progress ?? null, task_message: generation.task_message || data.task_message || null, task_updated_at: generation.task_updated_at || data.task_updated_at || null, videoUrl: localVideoUrl(generation) || data.video_url, local_path: generation.local_path || data.local_path, duration: generation.duration || data.duration } }
 function legacyVideoHistoryItem(video) { return { ...video, id: `video-${video.id}`, omni_job_id: null, video_generation_id: video.id, status: video.status || 'completed', videoUrl: localVideoUrl(video), duration: video.duration } }
 function promptDocumentFor(text) {
   const value = String(text || '')
@@ -591,6 +643,7 @@ async function loadShotHistory(shot) {
     const jobGenerationIds = new Set(jobs.map((job) => Number(job.video_generation_id)))
     const legacy = (videoResult?.items || []).filter((video) => !jobGenerationIds.has(Number(video.id))).map(legacyVideoHistoryItem)
     shotHistory.value = [...jobs, ...legacy].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    jobs.filter((job) => activeGenerationStatuses.has(job.status)).forEach((job) => poll(job.id))
   } catch (_) { if (Number(currentShot.value?.id) === shotId) shotHistory.value = [] }
 }
 async function selectShot(shot) { if (shot.id === activeShotId.value) { playOnSelection.value = true; return }; await saveCurrentShot(false); playOnSelection.value = true; loadShot(shot) }
@@ -746,7 +799,39 @@ async function certify(asset) {
 }
 
 async function create() { creating.value = true; stagePhase.value = '保存镜头'; try { if (!canCreate.value) throw new Error('请补齐当前视频创作模式所需的素材与模型能力'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id }), prompt: prompt.value, prompt_document: promptDocument.value, creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', upscale_resolution: upscaleResolution.value || null, target_fps: targetFps.value || null, audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: chosenAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: asset.alias || asset.name, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const status = res.status || 'processing'; const job = { id: res.omni_job_id, prompt: prompt.value, status, video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = status; stagePhase.value = status === 'sd2_waiting' ? '真人素材认证准备中，完成后自动生成' : '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
-async function poll(id) { for (let n = 0; n < 450; n++) { await new Promise((resolve) => setTimeout(resolve, 4000)); try { const data = await omniVideoAPI.get(id), job = normalizeJob(data), index = jobs.value.findIndex((item) => String(item.id) === String(id)), historyIndex = shotHistory.value.findIndex((item) => String(item.id) === String(id)); if (index >= 0) jobs.value[index] = job; if (historyIndex >= 0) shotHistory.value[historyIndex] = job; if (String(currentShot.value?.omni_job_id) === String(id)) { currentShot.value.status = job.status; currentShot.value.video_url = job.videoUrl; currentShot.value.generation_error = job.error_msg } if (['completed','failed','retryable','invalid','billing_reconciliation'].includes(job.status)) return } catch (_) { return } } }
+async function poll(id) {
+  if (!id || pollingJobIds.has(String(id))) return
+  pollingJobIds.add(String(id))
+  let failures = 0
+  try {
+    for (let n = 0; n < 450; n++) {
+      await new Promise((resolve) => setTimeout(resolve, 4000))
+      try {
+        const data = await omniVideoAPI.get(id)
+        const job = normalizeJob(data)
+        failures = 0
+        const index = jobs.value.findIndex((item) => String(item.id) === String(id))
+        const historyIndex = shotHistory.value.findIndex((item) => String(item.id) === String(id))
+        if (index >= 0) jobs.value[index] = job
+        if (historyIndex >= 0) shotHistory.value[historyIndex] = job
+        if (String(currentShot.value?.omni_job_id) === String(id)) {
+          currentShot.value.status = job.status
+          currentShot.value.video_url = job.videoUrl
+          currentShot.value.generation_error = job.error_msg
+        }
+        if (!activeGenerationStatuses.has(job.status)) return
+      } catch (_) {
+        failures += 1
+        const retrying = { task_message: `状态连接暂不可用，正在重试（${failures}/5）`, task_progress: null }
+        const index = jobs.value.findIndex((item) => String(item.id) === String(id))
+        const historyIndex = shotHistory.value.findIndex((item) => String(item.id) === String(id))
+        if (index >= 0) jobs.value[index] = { ...jobs.value[index], ...retrying }
+        if (historyIndex >= 0) shotHistory.value[historyIndex] = { ...shotHistory.value[historyIndex], ...retrying }
+        if (failures >= 5) return
+      }
+    }
+  } finally { pollingJobIds.delete(String(id)) }
+}
 async function retry(job) { const res = await omniVideoAPI.retry(job.id); const next = { id: res.omni_job_id, prompt: job.prompt, status: 'processing', video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value?.id : null, shot_id: isProjectMode.value ? null : currentShot.value?.id, created_at: new Date().toISOString() }; jobs.value.unshift(next); shotHistory.value.unshift(next); selectedHistoryJobId.value = next.id; currentShot.value.omni_job_id = next.id; currentShot.value.status = 'processing'; poll(next.id) }
 function downloadCurrentVideo() { if (!activeVideoUrl.value) return; const link = document.createElement('a'); link.href = activeVideoUrl.value; link.download = `local-mini-drama-${activeJob.value?.video_generation_id || currentShot.value?.id || 'storyboard'}.mp4`; document.body.appendChild(link); link.click(); link.remove() }
 async function saveResultAsAsset() { const job = activeJob.value; if (!job?.videoUrl || savedResultJobId.value === job.id) return; try { const generation = job.generation || job; const asset = await omniVideoAPI.createAsset({ drama_id: projectDramaId.value || null, name: `成片 ${job.video_generation_id || job.id}`, type: 'video', url: generation.video_url || job.video_url || job.videoUrl, local_path: generation.local_path || job.local_path || null, source_type: 'omni_generation', video_gen_id: job.video_generation_id || null, processing_status: 'ready', metadata: { source_omni_job_id: job.id, source_video_generation_id: job.video_generation_id || null, resolution: generation.output_resolution || generation.resolution || null, fps: generation.output_fps || null, duration_ms: generation.output_duration_ms || null, upscale_resolution: generation.upscale_resolution || null, target_fps: generation.target_fps || null, postprocess_chain: generation.postprocess_chain || null } }); const item = { ...asset, alias: asset.name, usage: 'motion' }; assets.value.unshift(item); savedResultJobId.value = job.id; toggle(item); ElMessage.success('成片已加入素材库，并已选入当前镜头') } catch (error) { ElMessage.error(error.message || '加入素材库失败') } }
@@ -758,8 +843,9 @@ watch([creationMode, audioStrategy, keepOriginalAudio, audioVolume, audioFadeSec
 watch(chosenAssets, () => { persistCurrentPromptDraft(); scheduleSave() }, { deep: true })
 function flushPromptBeforePageHide() { persistCurrentPromptDraft(); saveCurrentShot(false).catch(() => {}) }
 function onPromptVisibilityChange() { if (document.visibilityState === 'hidden') flushPromptBeforePageHide() }
-onBeforeUnmount(() => { clearTimeout(saveTimer); clearTimeout(wheelShotTimer); window.removeEventListener('pagehide', flushPromptBeforePageHide); document.removeEventListener('visibilitychange', onPromptVisibilityChange); flushPromptBeforePageHide() })
+onBeforeUnmount(() => { clearTimeout(saveTimer); clearTimeout(wheelShotTimer); window.clearTimeout(mediaLayerTransitionTimer); window.clearInterval(generationClockTimer); window.removeEventListener('pagehide', flushPromptBeforePageHide); document.removeEventListener('visibilitychange', onPromptVisibilityChange); flushPromptBeforePageHide() })
 onMounted(async () => {
+  generationClockTimer = window.setInterval(() => { generationClock.value = Date.now() }, 60_000)
   window.addEventListener('pagehide', flushPromptBeforePageHide)
   document.addEventListener('visibilitychange', onPromptVisibilityChange)
   try {
@@ -767,7 +853,7 @@ onMounted(async () => {
       const [media, caps, history, limits, boards, project, generationContract] = await Promise.all([loadProjectScopedAssets(), omniVideoAPI.capabilities(), omniVideoAPI.list(), omniVideoAPI.uploadLimits(), dramaAPI.getStoryboards(projectEpisodeId.value), dramaAPI.get(projectDramaId.value), storyboardsAPI.getEpisodeGenerationSettings(projectEpisodeId.value)])
       const allAssets = await ensureProjectResourceAssets(project, media.items || [])
       assets.value = allAssets.filter(Boolean).map((item) => ({ ...item, alias: item.name, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' }))
-      capabilities.value = caps || []; uploadLimits.value = limits || null; jobs.value = (history || []).map(normalizeJob)
+      capabilities.value = caps || []; uploadLimits.value = limits || null; jobs.value = (history || []).map(normalizeJob); jobs.value.filter((job) => activeGenerationStatuses.has(job.status)).forEach((job) => poll(job.id))
       sequence.value = { id: projectEpisodeId.value, name: `项目剧集 ${projectEpisodeId.value}` }
       const projectStoryboards = boards?.storyboards || []
       applyProjectVideoSources(projectStoryboards, await loadProjectVideos(projectStoryboards))
@@ -779,7 +865,7 @@ onMounted(async () => {
     const sequenceRequest = route.query.sequence_id ? omniVideoAPI.getSequence(route.query.sequence_id) : omniVideoAPI.defaultSequence()
     const [media, caps, history, limits, seq] = await Promise.all([...baseRequests, sequenceRequest])
     assets.value = (media.items || []).filter((item) => item && Number.isFinite(Number(item.id))).map((item) => ({ ...item, alias: item.name, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' }))
-    capabilities.value = caps || []; uploadLimits.value = limits || null; jobs.value = (history || []).map(normalizeJob); sequence.value = seq; shots.value = seq.shots || []; if (shots.value[0]) loadShot(shots.value[0])
+    capabilities.value = caps || []; uploadLimits.value = limits || null; jobs.value = (history || []).map(normalizeJob); jobs.value.filter((job) => activeGenerationStatuses.has(job.status)).forEach((job) => poll(job.id)); sequence.value = seq; shots.value = seq.shots || []; if (shots.value[0]) loadShot(shots.value[0])
   } catch (error) { ElMessage.error(error.message || '全能创作工作台加载失败') }
 })
 onMounted(() => {
@@ -833,7 +919,7 @@ onMounted(() => {
 .generation-actions{display:grid;grid-template-columns:1fr 1.6fr;gap:7px;margin-top:14px}.generation-actions .generate-button{margin-top:0}
 .identity-expired-warn{display:flex;align-items:flex-start;gap:7px;margin-top:10px;padding:8px 10px;border-radius:7px;background:#3a2a1c!important;border:1px solid #7a5430!important;color:#f0d9b5!important;font-size:12px;line-height:1.5}
 .identity-expired-warn .el-icon{color:#e6a23c;font-size:15px;flex-shrink:0;margin-top:1px}.request-preview-note{margin:0 0 10px;color:#9ca7bc;font-size:13px}.request-preview{max-height:440px;margin:0;overflow:auto;padding:12px;border:1px solid #39435a;border-radius:7px;background:#111621;color:#dce6ff;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.55}.request-preview-actions{display:flex;gap:8px;margin-top:10px}.polish-suggestion{margin-top:12px;padding:10px;border:1px solid #39435a;border-radius:7px;background:#151b24;color:#dce6ff;font-size:12px}.polish-suggestion b{display:block;margin-bottom:6px}.polish-suggestion pre{margin:0;white-space:pre-wrap;word-break:break-word}
-.frame-actions{position:absolute;right:14px;bottom:14px;z-index:8;display:flex;align-items:center;justify-content:flex-end;gap:6px;max-width:calc(100% - 28px);padding:7px 9px;border:1px solid #69655e;background:#181818e6;border-radius:7px;box-shadow:0 6px 18px #0008}.frame-actions .el-button{margin:0!important}.generation-history{display:grid;gap:7px;margin-top:12px;padding-top:10px;border-top:1px solid #45433f}.generation-history-head{display:flex;align-items:baseline;justify-content:space-between}.generation-history-head b{font-size:12px}.generation-history-head small,.generation-history-empty{margin:0;color:#aaa69e;font-size:11px}.generation-history-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.generation-history-item{position:relative;display:grid;grid-template-rows:92px auto;gap:5px;min-width:0;padding:4px;border:1px solid #4b4944;border-radius:6px;background:#202020;color:#dedbd4;text-align:left;cursor:pointer;font:inherit;overflow:hidden}.generation-history-item video,.history-video-empty{display:block;width:100%;height:92px;object-fit:cover;border-radius:4px;background:#0b0b0b}.history-video-empty{display:grid;place-items:center;color:#96928a;font-size:11px}.generation-history-item:hover,.generation-history-item.active{border-color:#f0eee8;background:#30302e}.generation-history-item.active{box-shadow:inset 0 0 0 1px #f0eee8}.history-card-meta{display:grid;gap:2px;min-width:0;padding:0 2px 2px}.history-card-meta b,.history-card-meta small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-card-meta b{font-size:10px}.history-card-meta small{color:#c4c1ba;font-size:10px}.history-dot{position:absolute;top:8px;right:8px;width:7px;height:7px;border:1px solid #111;border-radius:50%;background:#8b8983}.history-dot.completed{background:#7eae85}.history-dot.processing{background:#d6a854}.history-dot.failed,.history-dot.retryable{background:#d66b6b}@media(max-width:520px){.generation-history-grid{grid-template-columns:1fr}.frame-actions{right:8px;bottom:8px;gap:3px;padding:5px;flex-wrap:wrap}.frame-actions .el-button{font-size:11px}}
+.frame-actions{display:flex;flex:0 0 auto;align-items:center;justify-content:flex-end;gap:6px;min-width:0;padding:8px 12px;border-top:1px solid #45433f;background:#181818;color:#dedbd4;overflow-x:auto;scrollbar-width:thin}.frame-actions .el-button{flex:0 0 auto;margin:0!important}.generation-history{display:grid;gap:7px;margin-top:12px;padding-top:10px;border-top:1px solid #45433f}.generation-history-head{display:flex;align-items:baseline;justify-content:space-between}.generation-history-head b{font-size:12px}.generation-history-head small,.generation-history-empty{margin:0;color:#aaa69e;font-size:11px}.generation-history-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.generation-history-item{position:relative;display:grid;grid-template-rows:92px auto;gap:5px;min-width:0;padding:4px;border:1px solid #4b4944;border-radius:6px;background:#202020;color:#dedbd4;text-align:left;cursor:pointer;font:inherit;overflow:hidden}.generation-history-item video,.history-video-empty{display:block;width:100%;height:92px;object-fit:cover;border-radius:4px;background:#0b0b0b}.history-video-empty{display:grid;place-items:center;color:#96928a;font-size:11px}.generation-history-item:hover,.generation-history-item.active{border-color:#f0eee8;background:#30302e}.generation-history-item.active{box-shadow:inset 0 0 0 1px #f0eee8}.history-card-meta{display:grid;gap:2px;min-width:0;padding:0 2px 2px}.history-card-meta b,.history-card-meta small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-card-meta b{font-size:10px}.history-card-meta small{color:#c4c1ba;font-size:10px}.history-dot{position:absolute;top:8px;right:8px;width:7px;height:7px;border:1px solid #111;border-radius:50%;background:#8b8983}.history-dot.completed{background:#7eae85}.history-dot.processing{background:#d6a854}.history-dot.failed,.history-dot.retryable{background:#d66b6b}@media(max-width:520px){.generation-history-grid{grid-template-columns:1fr}.frame-actions{gap:3px;padding:6px 8px}.frame-actions .el-button{font-size:11px}}
 .asset-scope{width:92px;margin-right:4px}.material-card .asset-scope-label{position:absolute;left:3px;top:3px;padding:1px 3px;border-radius:3px;background:#111c;color:#dbe7f2;font-size:9px;font-style:normal;line-height:1.2}
 .material-card .insert-at-caret{position:absolute;right:5px;bottom:4px;z-index:2;border:1px solid color-mix(in srgb,var(--accent) 55%,var(--border-color));border-radius:999px;padding:2px 7px;background:color-mix(in srgb,var(--bg-elevated) 92%,transparent);color:var(--text-primary);font-size:10px;line-height:1.35;cursor:pointer;box-shadow:var(--shadow-sm)}
 .material-card .insert-at-caret:hover,.material-card .insert-at-caret:focus-visible{border-color:var(--accent);background:var(--accent);color:var(--text-on-accent);outline:none}
@@ -915,6 +1001,14 @@ onMounted(() => {
 /* At short desktop heights, the prompt must shrink and scroll inside the stage.
    It must never push the player above the visible workbench. */
 @media(min-width:761px){.center-stage{min-height:0;overflow:hidden}.shot-script{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior-y:contain}.project-storyboard-page .center-stage{height:100%}}
+/* 独立自由创作与项目分镜使用同一工作台方向：素材和参数在左、提示词居中、镜头轨道在右。 */
+@media(min-width:761px){
+  .omni-page:not(.project-storyboard-page) .workbench{grid-template-columns:minmax(280px,320px) minmax(0,1fr) minmax(250px,290px)!important;gap:0;border:1px solid var(--border-color);border-radius:10px;overflow:hidden;box-shadow:var(--shadow-sm)}
+  .omni-page:not(.project-storyboard-page) .creation-panel{grid-column:1;grid-row:1;border-left:0;border-right:1px solid var(--border-color);overflow-y:auto}
+  .omni-page:not(.project-storyboard-page) .center-stage{grid-column:2;grid-row:1;min-height:0}
+  .omni-page:not(.project-storyboard-page) .shot-panel{grid-column:3;grid-row:1;border-left:1px solid var(--border-color);border-right:0;overflow:hidden}
+  .omni-page:not(.project-storyboard-page) .shot-list{flex:1 1 auto;min-height:0;overflow-y:auto!important;overflow-x:hidden}
+}
 /* Desktop free-create uses a fixed-height workbench too.  Without these
    shrink constraints, a long shot list expands the grid row and makes the
    page itself scroll, carrying the player away while switching later shots. */
@@ -943,9 +1037,10 @@ onMounted(() => {
 .workbench{height:calc(100vh - 60px);background:var(--bg-page)!important}
 .panel{background:color-mix(in srgb,var(--bg-surface) 94%,transparent)!important;border-color:var(--border-subtle)!important}
 .shot-panel{position:relative}.shot-panel::before,.creation-panel::before{display:block;margin:0 0 8px;color:var(--text-faint);font-size:9px;font-weight:700;letter-spacing:.16em}
-.shot-panel::before{content:'SHOT TRACK'}.creation-panel::before{content:'DIRECTOR CONSOLE'}
+.shot-panel::before,.creation-panel::before{content:none}
 .shot-heading b,.panel-title b,.materials-title b,.t0-settings-heading b{color:var(--text-primary)!important}
 .shot-card{position:relative;background:var(--bg-raised)!important;border-color:var(--border-subtle)!important;border-radius:11px!important;box-shadow:none!important;transition:transform .16s ease,border-color .16s ease,background .16s ease}
+.shot-controls{display:flex;flex:none;gap:0}.shot-controls :deep(.el-button){min-width:20px;padding-inline:3px}.shot-delete{min-width:30px!important;padding:4px!important}.shot-delete span{display:none}
 .shot-card:hover{transform:translateX(2px);border-color:var(--border-strong)!important}
 .shot-card.active{background:color-mix(in srgb,var(--studio-accent) 12%,var(--bg-raised))!important;border-color:color-mix(in srgb,var(--studio-accent) 68%,var(--border-color))!important;box-shadow:inset 3px 0 0 var(--studio-accent)!important}
 .shot-number{background:color-mix(in srgb,var(--studio-accent) 18%,var(--bg-elevated))!important;color:var(--text-primary)!important}
@@ -979,4 +1074,69 @@ onMounted(() => {
 :global(html.light) .shot-script :deep(.el-textarea__inner){background:#fff!important;border-radius:10px!important}
 @media(min-width:961px){.omni-page:not(.project-storyboard-page) .workbench{grid-template-columns:minmax(220px,240px) minmax(0,1fr) minmax(340px,370px)}}
 .shot-state.upscale_pending i,.shot-state.upscaling i,.shot-state.interpolation_pending i,.shot-state.interpolating i,.shot-state.persisting i{background:#d6a854}
+/* 素材是提示词与参数的核心输入：桌面端保留足够宽度并以两列预览呈现，
+   避免 220px 四列网格把刚上传的图片压成无法辨识的小条。 */
+@media(min-width:961px){
+  .omni-page:not(.project-storyboard-page) .workbench{grid-template-columns:minmax(300px,340px) minmax(0,1fr) minmax(280px,320px)!important}
+}
+.material-pool{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px;max-height:264px}
+.material-card{height:auto!important;min-height:126px;display:grid;grid-template-rows:minmax(94px,1fr) auto}
+.material-card img,.material-card video,.material-card>span{height:100%!important;min-height:94px;aspect-ratio:4 / 3}
+.material-card small{min-width:0;padding:5px 6px;line-height:1.35}
+.mobile-workbench-tabs{display:none}
+/* Mobile keeps the app shell fixed; the studio itself is the deliberate scroll surface. */
+@media(max-width:760px){
+  .omni-page{display:flex;flex-direction:column;height:100vh;height:100dvh;min-height:0;overflow:hidden}
+  .topbar{flex:0 0 auto}.topbar-actions>:deep(.account-balance),.topbar-actions .el-button:not(:last-child){display:none}
+  .mobile-workbench-tabs{display:grid;grid-template-columns:repeat(3,1fr);flex:0 0 44px;padding:5px;border-top:1px solid var(--border-subtle);border-bottom:1px solid var(--border-subtle);background:var(--bg-surface)}
+  .mobile-workbench-tabs button{border:0;border-radius:7px;background:transparent;color:var(--text-muted);font:inherit;font-size:.78rem;cursor:pointer;transition:background-color var(--motion-fast) var(--motion-ease),color var(--motion-fast) var(--motion-ease),transform var(--motion-fast) var(--motion-spring)}
+  .mobile-workbench-tabs button.active{background:var(--bg-active);color:var(--text-primary);font-weight:750}
+  .workbench{display:block;flex:1 1 auto;width:100%;height:auto;min-height:0;overflow:hidden;overscroll-behavior:contain}
+  .workbench.mobile-stage>.shot-panel,.workbench.mobile-stage>.creation-panel,.workbench.mobile-shots>.center-stage,.workbench.mobile-shots>.creation-panel,.workbench.mobile-create>.shot-panel,.workbench.mobile-create>.center-stage{display:none!important}
+  .workbench.mobile-stage>.center-stage,.workbench.mobile-shots>.shot-panel,.workbench.mobile-create>.creation-panel{display:flex!important;width:100%;height:100%;min-height:0;max-height:none;animation:mobile-panel-in var(--motion-standard) var(--motion-spring) both}
+  .workbench.mobile-stage>.center-stage{order:0;min-height:0}.workbench.mobile-shots>.shot-panel{overflow:hidden}.workbench.mobile-shots .shot-list{flex:1;min-height:0;overflow-y:auto}.workbench.mobile-create>.creation-panel{overflow-y:auto}
+  .shot-list{display:flex!important;flex-direction:column}.shot-card{width:100%;min-width:0!important}
+}
+@keyframes mobile-panel-in{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:none}}
+.generation-progress{display:grid;grid-template-columns:minmax(130px,240px) auto;gap:7px 10px;align-items:center;margin-top:13px;color:var(--text-regular);font-size:12px}.generation-progress>span{display:block;height:5px;overflow:hidden;border-radius:99px;background:var(--border-strong)}.generation-progress>span i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--studio-accent),var(--studio-teal));transition:width .22s ease}.generation-progress em{font-style:normal;font-variant-numeric:tabular-nums;color:var(--text-primary)}.generation-progress small{grid-column:1 / -1;max-width:360px;line-height:1.45;text-align:center;color:var(--text-muted)!important}
+@media(prefers-reduced-motion:reduce){.workbench.mobile-stage>.center-stage,.workbench.mobile-shots>.shot-panel,.workbench.mobile-create>.creation-panel{animation:none!important}}
+.video-stage::before{content:'';position:absolute;inset:-28%;z-index:0;pointer-events:none;background:radial-gradient(circle at 38% 44%,color-mix(in srgb,var(--accent) 24%,transparent),transparent 25%),radial-gradient(circle at 67% 57%,color-mix(in srgb,var(--accent-teal) 16%,transparent),transparent 28%);opacity:.82;transform:translate3d(0,0,0)}
+.video-stage.rendering::before{animation:stage-atmosphere 7s var(--motion-ease) infinite alternate}
+.empty-play,.render-play{box-shadow:0 0 0 .65rem color-mix(in srgb,var(--accent) 5%,transparent),0 1.2rem 3.6rem rgba(0,0,0,.36)!important}
+.video-stage.rendering .render-play{animation:stage-pulse 2.4s var(--motion-ease) infinite}
+@keyframes stage-atmosphere{to{opacity:1;transform:translate3d(2.2%,-1.5%,0) scale(1.035)}}
+@keyframes stage-pulse{50%{transform:scale(1.055);box-shadow:0 0 0 1rem color-mix(in srgb,var(--accent) 8%,transparent),0 1.2rem 3.6rem rgba(0,0,0,.36)}}
+@media(prefers-reduced-motion:reduce){.video-stage.rendering::before,.video-stage.rendering .render-play{animation:none!important}}
+/* 未生成分镜保留 main 的紫色状态提示。 */
+.project-storyboard-page .shot-video-placeholder{background:radial-gradient(circle at 50% 42%,#704cff 0,#39218f 38%,#171125 75%)}
+.project-storyboard-page .shot-play{border-color:#ffffff55;background:#7b5cff;box-shadow:0 10px 26px #6c4bff66}
+/* 只有已有成片的主播放器去除紫色氛围光；空态、生成态和其它组件沿用 main 的紫色反馈。 */
+.video-stage.has-video{background:#05070c!important}
+.video-stage.has-video::before{display:none!important}
+.video-stage.has-video .main-video{position:relative;z-index:1}
+/* 提示词与参数是分镜主操作：播放器只保留审片高度，操作条压缩为单行。 */
+@media(min-width:761px){
+  .project-storyboard-page .workbench{grid-template-columns:minmax(320px,340px) minmax(0,1fr) minmax(240px,270px)!important}
+  .project-storyboard-page .video-stage{flex:0 0 clamp(160px,21vh,200px)}
+  .project-storyboard-page .frame-actions{min-height:0;padding:5px 10px}
+  .project-storyboard-page .frame-actions .el-button{min-height:30px}
+  .project-storyboard-page .time-ruler{height:40px}
+  .project-storyboard-page .shot-tabs{height:34px}
+  .project-storyboard-page .shot-script{min-height:300px;padding:12px 16px 16px!important}
+}
+/* 分镜生成沿用 main 的紫色状态层级：可生成时给出明确的主操作，
+   未满足素材条件时仍保留紫色轮廓，但不会伪装为可点击。 */
+.project-storyboard-page .creation-generate-dock,
+.project-storyboard-page .t0-generation-settings{border-color:color-mix(in srgb,var(--studio-accent) 52%,var(--border-color))!important}
+.project-storyboard-page .creation-generate-actions .generate-button.el-button--primary:not(.is-disabled):not(:disabled){background:linear-gradient(135deg,var(--studio-accent),#6d5de0)!important;border-color:color-mix(in srgb,var(--studio-accent) 82%,#6d5de0)!important;color:#fff!important;box-shadow:0 9px 24px color-mix(in srgb,var(--studio-accent) 32%,transparent)!important}
+.project-storyboard-page .creation-generate-actions .generate-button.el-button--primary.is-disabled,
+.project-storyboard-page .creation-generate-actions .generate-button.el-button--primary:disabled{opacity:1!important;background:color-mix(in srgb,var(--studio-accent) 14%,var(--bg-raised))!important;border-color:color-mix(in srgb,var(--studio-accent) 50%,var(--border-color))!important;color:color-mix(in srgb,#fff 68%,var(--studio-accent))!important;box-shadow:none!important}
+/* 时长是参数，不再伪装成第二条任务进度；生成态只展示播放器内的真实任务进度。 */
+.time-ruler{grid-template-columns:minmax(0,1fr) auto!important;gap:12px!important}
+.time-ruler>span:last-child{text-align:right;color:var(--text-muted)!important}
+/* 成片切换采用双缓冲：下一条静默加载，准备好后覆盖旧画面，防止静态资源闪回。 */
+.video-stage.has-video .main-video{position:absolute!important;inset:0;z-index:1;opacity:0;pointer-events:none;transition:opacity 160ms var(--motion-ease)}
+.video-stage.has-video .main-video.is-ready{opacity:1;pointer-events:auto}
+.video-stage.has-video .main-video.is-current{z-index:2}
+@media(prefers-reduced-motion:reduce){.video-stage.has-video .main-video{transition:none}}
 </style>

@@ -804,18 +804,21 @@ html.light body #app .project-storyboard-page .t0-settings-heading :is(b, small)
 }
 
 /* Small, composited feedback makes the product feel responsive without noise. */
-:root { --motion-instant: 80ms; --motion-fast: 160ms; --motion-standard: 210ms; --motion-ease: cubic-bezier(.2, .8, .2, 1); }
+:root { --motion-instant: 80ms; --motion-fast: 160ms; --motion-standard: 260ms; --motion-slow: 420ms; --motion-ease: cubic-bezier(.2, .8, .2, 1); --motion-spring: cubic-bezier(.16, 1, .3, 1); }
 html { scroll-behavior: smooth; }
 html body #app :is(button, .el-button, .project-card, .episode-card, .tool-card, .media-card, .shot-card, .sidebar-item, .run-item) {
   transition-duration: var(--motion-fast) !important;
   transition-timing-function: var(--motion-ease) !important;
 }
 html body #app :is(button, .el-button):not(:disabled):active { transform: scale(.98); transition-duration: var(--motion-instant) !important; }
-html body #app :is(.page > main, .film-list main, .tools-page > *, .media-library-page > *, .tool-layout, .drama-detail .main) {
-  animation: surface-reveal var(--motion-standard) var(--motion-ease) both;
+html body #app :is(.page > main, .film-list main, .tools-page > *, .media-library-page > *, .tool-layout, .drama-detail .main, .account-page > *, .admin-shell > *) {
+  animation: surface-reveal var(--motion-standard) var(--motion-spring) both;
 }
 html body #app :is(input, textarea, .el-input__wrapper, .el-select__wrapper) { transition: border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease) !important; }
-@keyframes surface-reveal { from { opacity: .72; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+html body #app :is(.el-drawer, .el-dialog, .records-workspace) { will-change: transform, opacity; }
+html body #app :is(.el-table__row, .record-row, .history-item, .library-item, .media-card) { transition: background-color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring) !important; }
+html body #app :is(.el-table__row, .record-row, .history-item, .library-item, .media-card):hover { transform: translateY(-1px); }
+@keyframes surface-reveal { from { opacity: 0; transform: translateY(8px) scale(.995); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
 * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text-faint) 58%, transparent) transparent; }
 *::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -827,5 +830,33 @@ html.asset-pointer-dragging * { cursor: grabbing !important; user-select: none !
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  html body #app :is(.page > main, .film-list main, .tools-page > *, .media-library-page > *, .tool-layout, .drama-detail .main) { animation: none !important; }
+  html body #app :is(.page > main, .film-list main, .tools-page > *, .media-library-page > *, .tool-layout, .drama-detail .main, .account-page > *, .admin-shell > *) { animation: none !important; }
+  html body #app :is(.el-table__row, .record-row, .history-item, .library-item, .media-card):hover { transform:none !important; }
 }
+
+/* Product-wide motion layer: rich feedback without animating layout or data. */
+@media (prefers-reduced-motion: no-preference) {
+  .app-header { animation: chrome-settle var(--motion-standard) var(--motion-spring) both; }
+  .app-header__brand { animation: nav-item-in var(--motion-standard) var(--motion-spring) .03s both; }
+  .app-header__nav { animation: nav-item-in var(--motion-standard) var(--motion-spring) .08s both; }
+  .app-header__actions { animation: nav-item-in var(--motion-standard) var(--motion-spring) .13s both; }
+  html body #app :is(.section-heading, .workbench-heading, .page-header, .panel-title, .card-title) { animation: rise-in var(--motion-standard) var(--motion-spring) both; }
+  html body #app :is(.project-card, .episode-card, .tool-card, .media-card, .library-item, .shot-card, .record-row, .history-item, .run-item) { transition: transform var(--motion-fast) var(--motion-spring), box-shadow var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease) !important; }
+  html body #app :is(.project-card, .episode-card, .tool-card, .media-card, .library-item, .shot-card, .record-row, .history-item, .run-item):hover { transform:translateY(-2px); }
+  html body #app :is(.el-button, button):not(:disabled) .el-icon { transition:transform var(--motion-fast) var(--motion-spring); }
+  html body #app :is(.el-button, button):not(:disabled):hover .el-icon { transform:translateX(1px); }
+  html body #app :is(.el-button--primary):not(:disabled):hover { transform:translateY(-1px); box-shadow:0 10px 24px color-mix(in srgb,var(--accent, #8273f4) 25%,transparent); }
+  html body #app .el-loading-mask { animation: loading-veil var(--motion-fast) var(--motion-ease) both; }
+  html body #app .el-loading-spinner { animation: loading-float 1.4s ease-in-out infinite; }
+  .media-stage-content > :is(.stage-kicker, h2, .focus-current, .stage-actions, .hero-video-controls, .stage-data) { animation: hero-copy-in var(--motion-slow) var(--motion-spring) both; }
+  .media-stage-content > h2 { animation-delay:.05s; }.media-stage-content > .focus-current { animation-delay:.1s; }.media-stage-content > .stage-actions { animation-delay:.15s; }.media-stage-content > .hero-video-controls { animation-delay:.2s; }.media-stage-content > .stage-data { animation-delay:.25s; }
+}
+@keyframes chrome-settle { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:none; } }
+@keyframes nav-item-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+@keyframes rise-in { from { opacity:0; transform:translateY(9px); } to { opacity:1; transform:none; } }
+@keyframes hero-copy-in { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+@keyframes loading-veil { from { opacity:0; } to { opacity:1; } }
+@keyframes loading-float { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-3px); } }
+
+/* 首页的关键操作文字始终可读；不因入场动效或尺寸切换短暂隐身。 */
+.film-list .media-stage-content > :is(.stage-kicker, h2, .focus-current, .stage-actions, .hero-video-controls, .stage-data){animation:none!important;opacity:1!important;transform:none!important}

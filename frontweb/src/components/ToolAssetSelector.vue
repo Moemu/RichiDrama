@@ -1,6 +1,6 @@
 <template>
   <section class="tool-asset-selector">
-    <div class="selector-heading"><b>{{ label }}</b><el-radio-group v-model="source" size="small"><el-radio-button label="library">素材库</el-radio-button><el-radio-button label="upload">本地上传</el-radio-button></el-radio-group></div>
+    <div class="selector-heading"><b>{{ label }}</b><el-radio-group v-model="source" size="small"><el-radio-button value="library">素材库</el-radio-button><el-radio-button value="upload">本地上传</el-radio-button></el-radio-group></div>
     <template v-if="source === 'library'"><div class="asset-grid"><button v-for="asset in filteredAssets" :key="asset.id" type="button" :class="{ active: modelValue === asset.id }" @click="select(asset)"><img v-if="asset.type === 'image'" :src="assetUrl(asset)" alt="" /><video v-else-if="asset.type === 'video'" :src="assetUrl(asset)" muted preload="metadata" /><span v-else>♫</span><small>{{ asset.alias || asset.name }}</small></button></div><p v-if="!filteredAssets.length" class="empty">素材库暂无可用素材，可切换到“本地上传”。</p></template>
     <template v-else><el-button :loading="uploading" @click="fileInput?.click()">选择本地{{ acceptedLabel }}</el-button><input ref="fileInput" hidden type="file" :accept="accept" @change="upload" /><p class="upload-note">上传后会自动进入素材库并选中，后续可在其他工具复用。</p></template>
     <p v-if="selectedAsset" class="selected">已选：{{ selectedAsset.alias || selectedAsset.name }}</p>

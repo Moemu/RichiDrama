@@ -1,0 +1,23 @@
+html body .el-popper,
+html body .el-select-dropdown,
+html body .el-dropdown-menu {
+  z-index: var(--ui-z-popover);
+  border: 1px solid var(--ui-line-2);
+  border-radius: 10px;
+  box-shadow: var(--ui-shadow-popover);
+}
+
+html body .el-dropdown-menu { min-width: 192px; padding: 6px; }
+html body .el-dropdown-menu__item {
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 14px;
+  line-height: 40px;
+}
+
+html body .el-dropdown-menu__item:hover,
+html body .el-dropdown-menu__item:focus-visible { background: var(--ui-surface-hover); }
+
+html body .el-overlay { z-index: var(--ui-z-dialog-backdrop); }
+html body .el-overlay-dialog { z-index: var(--ui-z-dialog); }

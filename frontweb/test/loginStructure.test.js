@@ -7,7 +7,8 @@ const loginSource = readFileSync(fileURLToPath(new URL('../src/views/Login.vue',
 
 test('login presents a cinematic product entrance without changing the auth contract', () => {
   assert.match(loginSource, /login-cinematic-stage\.png/)
-  assert.match(loginSource, /让脑海里的故事/)
+  assert.match(loginSource, /本地短剧<br><em>制作平台<\/em>/)
+  assert.doesNotMatch(loginSource, /让脑海里的故事/)
   assert.match(loginSource, /灵感成形/)
   assert.match(loginSource, /世界建立/)
   assert.match(loginSource, /镜头开拍/)

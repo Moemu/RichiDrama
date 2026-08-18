@@ -148,7 +148,17 @@ function overview(db, query = {}) {
   for (const row of failed) alerts.push({ key: 'continuous_failures', severity: 'warning', count: row.count, model: row.model || null, threshold: settings.failed_count, target: { tab: 'production', status: 'failed', model: row.model || undefined } });
   if (reconciliation.count >= settings.pending_reconciliation_count) alerts.push({ key: 'pending_reconciliation', severity: 'warning', count: reconciliation.count, threshold: settings.pending_reconciliation_count, target: { tab: 'reconciliations', status: 'pending' } });
   if (archiveFailed >= settings.archive_failed_count) alerts.push({ key: 'archive_failed', severity: 'warning', count: archiveFailed, threshold: settings.archive_failed_count, target: { tab: 'archives', status: 'failed' } });
-  return { generated_at:now.toISOString(), production, postprocess:{ upscale:postprocess, interpolation }, storage, billing:{...billing,...frozen,pending_reconciliations:reconciliation.count}, stage_summary:stageSummary, trend, alerts, alert_settings:settings };
+  const actionQueue = [
+    ...db.prepare(`SELECT v.id, v.status, v.updated_at, v.model, v.error_msg, d.title AS project_title
+      FROM video_generations v LEFT JOIN dramas d ON d.id=v.drama_id
+      WHERE v.deleted_at IS NULL AND v.status IN ('processing','persisting','upscale_pending','upscaling','interpolation_pending','interpolating') AND v.updated_at < ?
+      ORDER BY v.updated_at ASC LIMIT 6`).all(staleBefore).map((row) => ({ ...row, kind: 'stalled', target: { tab: 'production', status: 'processing' } })),
+    ...db.prepare(`SELECT v.id, v.status, v.updated_at, v.model, v.error_msg, d.title AS project_title
+      FROM video_generations v LEFT JOIN dramas d ON d.id=v.drama_id
+      WHERE v.deleted_at IS NULL AND v.status IN ('failed','retryable','invalid')
+      ORDER BY v.updated_at DESC LIMIT 6`).all().map((row) => ({ ...row, kind: 'failed', target: { tab: 'production', status: 'failed' } })),
+  ].sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at))).slice(0, 8);
+  return { generated_at:now.toISOString(), production, postprocess:{ upscale:postprocess, interpolation }, storage, billing:{...billing,...frozen,pending_reconciliations:reconciliation.count}, stage_summary:stageSummary, trend, alerts, action_queue:actionQueue, alert_settings:settings };
 }
 
 function csvCell(value) {

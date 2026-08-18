@@ -75,3 +75,35 @@ test('operations projections paginate video production and keep optional stages 
     for (const suffix of ['', '-wal', '-shm']) try { fs.unlinkSync(dbPath + suffix); } catch (_) {}
   }
 });
+
+test('billing ledgers filter by Shanghai calendar day and user role without changing user scope', () => {
+  const dbPath = path.join(os.tmpdir(), `lmd-billing-ledger-filters-${Date.now()}.db`);
+  const db = getDb({ path: dbPath, type: 'sqlite' });
+  try {
+    runMigrationsAndEnsure(db);
+    const created = '2026-08-17T00:00:00.000Z';
+    db.prepare("INSERT INTO users (username,password_hash,role,is_active,created_at,updated_at) VALUES ('ledger-admin','x','admin',1,?,?)").run(created, created);
+    db.prepare("INSERT INTO users (username,password_hash,role,is_active,created_at,updated_at) VALUES ('ledger-user','x','user',1,?,?)").run(created, created);
+    const adminId = db.prepare("SELECT id FROM users WHERE username='ledger-admin'").get().id;
+    const userId = db.prepare("SELECT id FROM users WHERE username='ledger-user'").get().id;
+    const insertTransaction = db.prepare('INSERT INTO billing_transactions (id,user_id,type,amount_micro,balance_after_micro,frozen_after_micro,created_at) VALUES (?,?,?,?,?,?,?)');
+    insertTransaction.run('ledger-admin-17', adminId, 'adjustment', 100000, 100000, 0, '2026-08-17T00:00:00.000Z');
+    insertTransaction.run('ledger-user-17', userId, 'adjustment', 100000, 100000, 0, '2026-08-17T15:59:59.999Z');
+    insertTransaction.run('ledger-user-18', userId, 'adjustment', 100000, 200000, 0, '2026-08-17T16:00:00.000Z');
+    const insertUsage = db.prepare('INSERT INTO billing_usage_logs (id,user_id,transaction_id,authorization_id,service_type,model,usage_json,charged_micro,snapshot_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)');
+    insertUsage.run('usage-admin-17', adminId, 'ledger-admin-17', 'auth-admin-17', 'video', 'seedance', '{}', 100000, '{}', '2026-08-17T00:00:00.000Z');
+    insertUsage.run('usage-user-17', userId, 'ledger-user-17', 'auth-user-17', 'video', 'seedance', '{}', 100000, '{}', '2026-08-17T15:59:59.999Z');
+    insertUsage.run('usage-user-18', userId, 'ledger-user-18', 'auth-user-18', 'video', 'seedance', '{}', 100000, '{}', '2026-08-17T16:00:00.000Z');
+
+    const userTransactions = billing.pagedTransactions(db, { page: 1, page_size: 20, role: 'user', date_from: '2026-08-17', date_to: '2026-08-17' });
+    assert.equal(userTransactions.total, 1);
+    assert.equal(userTransactions.items[0].username, 'ledger-user');
+    const adminUsage = billing.pagedUsage(db, { page: 1, page_size: 20, role: 'admin', date_from: '2026-08-17', date_to: '2026-08-17' });
+    assert.equal(adminUsage.total, 1);
+    assert.equal(adminUsage.items[0].username, 'ledger-admin');
+    assert.equal(billing.listTransactions(db, { user_id: userId, role: 'admin', date_from: '2026-08-17', date_to: '2026-08-17' }).length, 0);
+  } finally {
+    closeDb();
+    for (const suffix of ['', '-wal', '-shm']) try { fs.unlinkSync(dbPath + suffix); } catch (_) {}
+  }
+});

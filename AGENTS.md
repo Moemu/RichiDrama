@@ -43,6 +43,28 @@ cd frontweb && npm run build
 - AI content generation requires external API keys (configured via the app's "AI 配置" page), but the app fully functions without them for development/testing purposes.
 - The backend also serves the built frontend from `frontweb/dist/` at port 5679 when the dist folder exists; during development, use the Vite dev server at port 3013 instead.
 
+### 修改闭环与验证（强制规则）
+
+- 所有改动在交付前必须完成闭环验证；不得只根据代码审查或构建成功宣称完成。
+- 修改前端后，必须运行前端自动化测试和 production build；还必须使用 Codex 内置浏览器或 Computer Use 实际审查改动页面的布局与交互，重点验证滚动、窄屏、固定/粘性区域、遮挡和主要用户路径。
+- 修改后端逻辑后，必须运行覆盖该改动的后端测试；涉及异步、媒体、状态恢复、计费或 API 合约时，必须补充相应的集成/重启恢复验证。
+- 非必要不得发起 API 调用；验证应优先使用现有测试、静态检查和本地 UI。只有接口行为本身是本次改动的验证目标时，才可以调用项目 API；禁止为方便而调用供应商 API。
+- 涉及提交和部署的任务，只有在 **Git 提交已推送到目标远端分支，且该提交对应的部署检查/工作流显示成功** 后才可结束任务；若 Git 平台显示部署检查失败、缺失或仍在运行，即使服务器容器健康、页面可访问，也必须将任务保持为失败或进行中，不得宣称上线成功。部署检查成功后，再确认部署环境运行目标提交、服务健康检查通过；必要时验证受影响页面或接口。
+
+### Codex 内置浏览器测试入口（本地协作规则）
+
+- 前端视觉与交互验收默认使用 Codex 内置浏览器，优先访问本地开发地址：`http://127.0.0.1:3013/`。
+- 本地默认验收账号：`admin` / `admin123456`。仅用于本机开发验证，禁止写入前端代码、配置文件、日志、截图说明或提交到远端。
+- 线上测试入口：`http://drama.richbest.cn/`。仅在需要验证线上发布结果或线上特有数据时访问；不得因常规前端样式验收触发线上 API、生成或计费调用。
+
+### 桌面端 UI 验收基线（强制规则）
+
+桌面端界面改动必须同时适配并实际验收以下三个视口：`1280×720`、`1440×900`、`1920×1080`。不得只在单一分辨率完成布局判断。
+
+- 每个受影响页面都必须验证页面纵向滚动可达：不可由 `height`、`max-height`、`overflow: hidden` 或固定/粘性区截断内容；表格横向滚动只能归属到表格容器，不能阻断页面纵向滚动。
+- 验收时检查无页面横向溢出、最后一个操作项可到达、固定区域不遮挡正文或按钮、关键文字未被裁切。
+- 这三档尺寸是产品 UI 的长期系统提示与交付门槛；新增或重构桌面页面时必须沿用，直到用户明确变更该基线。
+
 ### AI 调用与计费边界（强制规则）
 
 所有面向用户的 AI 生成、验收和真实调用，**必须通过本项目的 HTTP API 路由进入**（`/api/v1/...`），使用项目登录态和业务请求 ID；不得在脚本、REPL、测试工具或前端中直接调用供应商 API，也不得直接调用 `aiClient`、`imageClient`、`videoService` 等内部服务来替代业务接口。

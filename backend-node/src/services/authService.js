@@ -182,5 +182,4 @@ function updateUser(db, id, input) {
   db.prepare(`UPDATE users SET ${updates.join(', ')}, updated_at = ? WHERE id = ?`).run(...params);
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
-
 module.exports = { validateRuntimeSecurity, ensureBootstrapAdmin, sessionCookieOptions, login, register, authenticate, createUser, updateUser, changePassword, changeUsername, issueSession, publicUser, jwtSecret };

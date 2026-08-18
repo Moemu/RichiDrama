@@ -1,0 +1,35 @@
+html body .el-button {
+  min-height: 40px;
+  border-radius: var(--ui-radius-control);
+  transition: transform var(--ui-motion-fast) var(--ui-ease-standard), background-color var(--ui-motion-fast) var(--ui-ease-standard), border-color var(--ui-motion-fast) var(--ui-ease-standard), color var(--ui-motion-fast) var(--ui-ease-standard), box-shadow var(--ui-motion-fast) var(--ui-ease-standard);
+}
+
+html body .el-button:not(.is-disabled):active { transform: scale(.98); }
+
+html body .el-button--primary {
+  --el-button-bg-color: var(--ui-accent);
+  --el-button-border-color: var(--ui-accent);
+  --el-button-hover-bg-color: var(--ui-accent-hover);
+  --el-button-hover-border-color: var(--ui-accent-hover);
+}
+
+html body .el-input__wrapper,
+html body .el-textarea__wrapper,
+html body .el-select__wrapper {
+  min-height: 40px;
+  border-radius: var(--ui-radius-control);
+}
+
+html body .el-dialog {
+  border-radius: var(--ui-radius-dialog);
+  box-shadow: var(--ui-shadow-dialog);
+}
+
+html body .el-dialog__header {
+  padding: 20px 24px 16px;
+  margin-right: 0;
+  border-bottom: 1px solid var(--ui-line-1);
+}
+
+html body .el-dialog__body { padding: 20px 24px; }
+html body .el-dialog__footer { padding: 16px 24px 20px; border-top: 1px solid var(--ui-line-1); }

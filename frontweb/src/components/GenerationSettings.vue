@@ -1,44 +1,12 @@
 <template>
   <section class="generation-settings" aria-label="生成参数">
-    <label v-if="showTextModel">文本模型
-      <el-select :model-value="value.text_model || 'auto'" size="small" @update:model-value="set('text_model', $event)">
-        <el-option label="自动 / 默认文本模型" value="auto" />
-        <el-option v-for="item in textModels" :key="item" :label="item" :value="item" />
-      </el-select>
-    </label>
-    <label>视频模型
-      <el-select :model-value="value.video_model || 'auto'" size="small" @update:model-value="set('video_model', $event)">
-        <el-option label="请选择视频模型" value="" disabled />
-        <el-option v-for="item in videoModels" :key="item.model" :label="item.is_default ? `${item.model}（默认）` : item.model" :value="item.model" />
-      </el-select>
-    </label>
-    <label class="duration-setting">时长（秒）
-      <el-select :model-value="duration" size="small" aria-label="视频时长" @update:model-value="set('duration', $event)">
-        <el-option v-for="second in durationOptions" :key="second" :label="`${second} 秒`" :value="second" />
-      </el-select>
-    </label>
-    <label>分辨率
-      <el-select :model-value="value.resolution || '720p'" size="small" @update:model-value="set('resolution', $event)">
-        <el-option label="480p" value="480p" /><el-option label="720p" value="720p" /><el-option label="1080p" value="1080p" />
-      </el-select>
-    </label>
-    <label>AI 超分（新镜头默认 1080p）
-      <el-select :model-value="value.upscale_resolution || ''" size="small" @update:model-value="set('upscale_resolution', $event || null)">
-        <el-option v-for="item in upscaleOptions" :key="item.value || 'off'" :label="item.label" :value="item.value" />
-      </el-select>
-    </label>
-    <label>智能插帧（按需）
-      <el-select :model-value="value.target_fps || ''" size="small" @update:model-value="set('target_fps', $event || null)">
-        <el-option label="不插帧（保持原帧率）" value="" />
-        <el-option label="60 fps" :value="60" />
-        <el-option label="120 fps" :value="120" />
-      </el-select>
-    </label>
-    <label>宽高比
-      <el-select :model-value="value.aspect_ratio || '16:9'" size="small" @update:model-value="set('aspect_ratio', $event)">
-        <el-option label="16:9" value="16:9" /><el-option label="9:16" value="9:16" /><el-option label="1:1" value="1:1" /><el-option label="3:4" value="3:4" /><el-option label="4:3" value="4:3" /><el-option label="3:2" value="3:2" /><el-option label="2:3" value="2:3" /><el-option label="21:9" value="21:9" />
-      </el-select>
-    </label>
+    <UiChoiceField v-if="showTextModel" label="文本模型" :model-value="value.text_model || 'auto'" :options="textModelOptions" @update:model-value="set('text_model', $event)" />
+    <UiChoiceField label="视频模型" :model-value="value.video_model || ''" :options="videoModelOptions" @update:model-value="set('video_model', $event)" />
+    <UiChoiceField class="duration-setting" label="时长（秒）" :model-value="duration" :options="durationOptions.map((second) => ({ label: `${second} 秒`, value: second }))" @update:model-value="set('duration', $event)" />
+    <UiChoiceField label="分辨率" :model-value="value.resolution || '720p'" :options="resolutionOptions" @update:model-value="set('resolution', $event)" />
+    <UiChoiceField label="AI 超分（新镜头默认 1080p）" :model-value="value.upscale_resolution || ''" :options="upscaleOptions" @update:model-value="set('upscale_resolution', $event || null)" />
+    <UiChoiceField label="智能插帧（按需）" :model-value="value.target_fps || ''" :options="fpsOptions" @update:model-value="set('target_fps', $event || null)" />
+    <UiChoiceField label="宽高比" :model-value="value.aspect_ratio || '16:9'" :options="aspectRatioOptions" @update:model-value="set('aspect_ratio', $event)" />
     <div class="postprocess-quote" role="status" aria-live="polite" :aria-busy="quoteLoading">
       <b>产出链路：</b>{{ quote?.chain || localChain }}
       <span v-if="quoteLoading"> · 正在核算</span>
@@ -53,6 +21,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { aiAPI } from '@/api/ai'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { videosAPI } from '@/api/videos'
+import UiChoiceField from '@/components/ui/UiChoiceField.vue'
 
 const props = defineProps({ modelValue: { type: Object, default: () => ({}) }, showTextModel: { type: Boolean, default: false }, maxDuration: { type: Number, default: 60 } })
 const emit = defineEmits(['update:modelValue'])
@@ -62,6 +31,11 @@ let modelOptionsPromise = null
 const value = computed(() => props.modelValue || {})
 const duration = computed(() => Math.min(props.maxDuration, Math.max(4, Number(value.value.duration) || 15)))
 const durationOptions = computed(() => Array.from({ length: Math.max(0, props.maxDuration - 3) }, (_, index) => index + 4))
+const textModelOptions = computed(() => [{ label: '自动选择', description: '使用当前默认文本模型', value: 'auto' }, ...textModels.value.map((item) => ({ label: displayModelName(item), description: '已启用文本模型', value: item }))])
+const videoModelOptions = computed(() => videoModels.value.map((item) => ({ label: displayModelName(item.model), description: item.is_default ? '默认模型' : '已启用视频模型', value: item.model })))
+const resolutionOptions = [{ label: '480p', value: '480p' }, { label: '720p', value: '720p' }, { label: '1080p', value: '1080p' }]
+const fpsOptions = [{ label: '不插帧', description: '保持原始帧率', value: '' }, { label: '60 fps', value: 60 }, { label: '120 fps', value: 120 }]
+const aspectRatioOptions = ['16:9', '9:16', '1:1', '3:4', '4:3', '3:2', '2:3', '21:9'].map((item) => ({ label: item, value: item }))
 const upscaleOptions = computed(() => {
   const resolution = String(value.value.resolution || '720p').toLowerCase()
   const items = [{ label: '不超分（保持原分辨率）', value: '' }]
@@ -73,6 +47,9 @@ const localChain = computed(() => ['生成原片', value.value.upscale_resolutio
 const quote = ref(null), quoteLoading = ref(false)
 let quoteTimer = null, quoteRevision = 0
 function formatPoints(value) { return Number(value || 0).toFixed(4).replace(/\.?(?:0+)$/, '') }
+function displayModelName(model) {
+  return String(model || '') || '未选择'
+}
 function set(key, next) {
   const nextValue = { ...value.value, [key]: key === 'duration' ? Math.min(props.maxDuration, Math.max(4, Number(next) || 15)) : next }
   if (key === 'resolution') {
@@ -118,9 +95,9 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.generation-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 12px;width:100%;padding:10px 12px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-light)}.generation-settings label{display:grid;gap:5px;font-size:14px;color:var(--el-text-color-regular)}.generation-settings :deep(.el-select),.generation-settings :deep(.el-input-number){width:100%}.duration-setting{grid-column:span 1}.duration-controls{display:grid;gap:6px}.duration-controls :deep(.el-button-group){display:flex}.duration-controls :deep(.el-button){flex:1;padding-inline:7px}.duration-controls :deep(.el-input-number){max-width:130px}.postprocess-quote{grid-column:1/-1;padding:9px 10px;border-radius:6px;background:var(--el-color-primary-light-9);color:var(--el-text-color-regular);font-size:13px}.postprocess-quote small{display:block;margin-top:4px;color:var(--el-text-color-secondary);line-height:1.45}
+.generation-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;width:100%;padding:14px;border:1px solid var(--ui-line-1);border-radius:var(--ui-radius-panel);background:var(--ui-surface-1)}.duration-setting{grid-column:span 1}.postprocess-quote{grid-column:1/-1;padding:10px 12px;border:1px solid color-mix(in srgb,var(--ui-accent) 24%,var(--ui-line-1));border-radius:var(--ui-radius-control);background:color-mix(in srgb,var(--ui-accent) 9%,var(--ui-surface-2));color:var(--ui-text-2);font-size:13px;line-height:1.55}.postprocess-quote b{color:var(--ui-text-1)}.postprocess-quote small{display:block;margin-top:5px;color:var(--ui-text-3);line-height:1.5}
 /* 右侧或左侧窄栏的宽度不足以承载三列，必须按容器而非按屏幕宽度折行。 */
-:global(.creation-panel .generation-settings){grid-template-columns:1fr;gap:12px;padding:10px}
+:global(.creation-panel .generation-settings){grid-template-columns:1fr;gap:12px;padding:14px}
 :global(.creation-panel .generation-settings .duration-setting){grid-column:1}
 :global(.creation-panel .generation-settings .duration-controls){grid-template-columns:minmax(0,1fr) 88px;align-items:center}
 :global(.creation-panel .generation-settings .duration-controls .el-input-number){max-width:none}

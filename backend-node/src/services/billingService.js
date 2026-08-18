@@ -682,10 +682,26 @@ function savePriceBook(db, actorId, input, id) {
   return listPriceBooks(db).find((b) => b.id === bookId);
 }
 
+function shanghaiDayBoundary(value, endOfDay = false) {
+  const match = String(value || '').match(/^(\d{4}-\d{2}-\d{2})$/);
+  return match ? new Date(`${match[1]}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}+08:00`).toISOString() : null;
+}
+
+function appendLedgerFilters(where, params, tableAlias, userAlias, filters = {}) {
+  const role = String(filters.role || '').trim();
+  if (role === 'admin' || role === 'user') { where += ` AND ${userAlias}.role = ?`; params.push(role); }
+  const from = shanghaiDayBoundary(filters.date_from);
+  const to = shanghaiDayBoundary(filters.date_to, true);
+  if (from) { where += ` AND ${tableAlias}.created_at >= ?`; params.push(from); }
+  if (to) { where += ` AND ${tableAlias}.created_at <= ?`; params.push(to); }
+  return where;
+}
+
 function listTransactions(db, filters = {}) {
   let where = 'WHERE 1=1', p = [];
   if (filters.user_id) { where += ' AND t.user_id = ?'; p.push(Number(filters.user_id)); }
-  const rows = db.prepare(`SELECT t.*, u.username FROM billing_transactions t JOIN users u ON u.id = t.user_id ${where} ORDER BY t.created_at DESC, t.rowid DESC LIMIT 300`).all(...p);
+  where = appendLedgerFilters(where, p, 't', 'u', filters);
+  const rows = db.prepare(`SELECT t.*, u.username, u.role FROM billing_transactions t JOIN users u ON u.id = t.user_id ${where} ORDER BY t.created_at DESC, t.rowid DESC LIMIT 300`).all(...p);
   return rows.map((r) => ({ ...r, amount: microToCredits(r.amount_micro), balance_after: microToCredits(r.balance_after_micro), frozen_after: microToCredits(r.frozen_after_micro), snapshot: parse(r.snapshot_json) }));
 }
 
@@ -698,9 +714,10 @@ function pagination(input = {}) {
 function pagedTransactions(db, filters = {}) {
   let where = 'WHERE 1=1', params = [];
   if (filters.user_id) { where += ' AND t.user_id = ?'; params.push(Number(filters.user_id)); }
+  where = appendLedgerFilters(where, params, 't', 'u', filters);
   const meta = pagination(filters);
-  const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_transactions t ${where}`).get(...params)?.total || 0);
-  const rows = db.prepare(`SELECT t.*, u.username FROM billing_transactions t JOIN users u ON u.id = t.user_id ${where} ORDER BY t.created_at DESC, t.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
+  const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_transactions t JOIN users u ON u.id = t.user_id ${where}`).get(...params)?.total || 0);
+  const rows = db.prepare(`SELECT t.*, u.username, u.role FROM billing_transactions t JOIN users u ON u.id = t.user_id ${where} ORDER BY t.created_at DESC, t.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
   return {
     items: rows.map((r) => ({ ...r, amount: microToCredits(r.amount_micro), balance_after: microToCredits(r.balance_after_micro), frozen_after: microToCredits(r.frozen_after_micro), snapshot: parse(r.snapshot_json) })),
     total,
@@ -711,16 +728,18 @@ function pagedTransactions(db, filters = {}) {
 
 function listUsage(db, filters = {}) {
   let where = 'WHERE 1=1', p = []; if (filters.user_id) { where += ' AND l.user_id = ?'; p.push(Number(filters.user_id)); }
-  return db.prepare(`SELECT l.*, u.username FROM billing_usage_logs l JOIN users u ON u.id = l.user_id ${where} ORDER BY l.created_at DESC LIMIT 300`).all(...p)
+  where = appendLedgerFilters(where, p, 'l', 'u', filters);
+  return db.prepare(`SELECT l.*, u.username, u.role FROM billing_usage_logs l JOIN users u ON u.id = l.user_id ${where} ORDER BY l.created_at DESC LIMIT 300`).all(...p)
     .map((r) => ({ ...r, charged: microToCredits(r.charged_micro), usage: parse(r.usage_json), snapshot: parse(r.snapshot_json) }));
 }
 
 function pagedUsage(db, filters = {}) {
   let where = 'WHERE 1=1', params = [];
   if (filters.user_id) { where += ' AND l.user_id = ?'; params.push(Number(filters.user_id)); }
+  where = appendLedgerFilters(where, params, 'l', 'u', filters);
   const meta = pagination(filters);
-  const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_usage_logs l ${where}`).get(...params)?.total || 0);
-  const rows = db.prepare(`SELECT l.*, u.username FROM billing_usage_logs l JOIN users u ON u.id = l.user_id ${where} ORDER BY l.created_at DESC, l.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
+  const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_usage_logs l JOIN users u ON u.id = l.user_id ${where}`).get(...params)?.total || 0);
+  const rows = db.prepare(`SELECT l.*, u.username, u.role FROM billing_usage_logs l JOIN users u ON u.id = l.user_id ${where} ORDER BY l.created_at DESC, l.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
   return {
     items: rows.map((r) => ({ ...r, charged: microToCredits(r.charged_micro), usage: parse(r.usage_json), snapshot: parse(r.snapshot_json) })),
     total,
