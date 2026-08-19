@@ -444,6 +444,50 @@ function publicReconciliationCase(row) {
   return { ...row, observed_usage: parse(row.observed_usage_json, null), resolution: parse(row.resolution_json, null) };
 }
 
+// 后处理阶段（插帧/超分）授权兜底：视频已 failed/deleted 但阶段任务的预授权未结算时，
+// 会形成用户永久冻结且对账队列不可见。按供应商是否已调用分类处置：
+// - 未调用（无 provider 任务 ID）：直接 void 归还用户，无需人工核验
+// - 已调用：生成待对账案件，由运营核验真实用量后结算或豁免
+function recoverStuckStageAuthorizations(db) {
+  const stageTables = [
+    ['video_interpolation_jobs', '插帧', 'video_interpolation'],
+    ['video_upscale_jobs', '超分', 'video_upscale'],
+  ];
+  let voided = 0; let reconciled = 0;
+  for (const [table, label, refType] of stageTables) {
+    const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+    if (!exists) continue;
+    const rows = db.prepare(`
+      SELECT j.billing_authorization_id, j.provider_task_id, j.owner_user_id, j.video_generation_id, j.id AS job_id
+      FROM ${table} j
+      JOIN video_generations v ON v.id = j.video_generation_id
+      WHERE j.billing_authorization_id IS NOT NULL
+        AND (v.status = 'failed' OR v.deleted_at IS NOT NULL)
+        AND NOT EXISTS (SELECT 1 FROM billing_transactions t
+                        WHERE t.authorization_id = j.billing_authorization_id AND t.type IN ('void', 'settlement'))`).all();
+    for (const row of rows) {
+      const providerTaskId = (row.provider_task_id || '').toString().trim();
+      if (providerTaskId) {
+        try {
+          markPendingReconciliation(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, {
+            provider_request_id: providerTaskId,
+            reason: `视频已失败/删除但${label}预授权未结算且供应商已被调用，转待对账核验`,
+          });
+          reconciled += 1;
+        } catch (_) {}
+      } else {
+        try {
+          voidAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, `视频已失败/删除，${label}未调用供应商，自动释放预授权`);
+          db.prepare(`UPDATE ${table} SET status='cancelled', error_msg=COALESCE(error_msg, '') || '; ' || ?, updated_at=? WHERE id=? AND status NOT IN ('completed','cancelled')`)
+            .run(`视频失败，${label}预授权已由启动扫描释放`, new Date().toISOString(), row.job_id);
+          voided += 1;
+        } catch (_) {}
+      }
+    }
+  }
+  return { voided, reconciled };
+}
+
 function listReconciliationCases(db, filters = {}) {
   let where = 'WHERE 1=1'; const args = [];
   if (filters.status) { where += ' AND c.status = ?'; args.push(String(filters.status)); }
@@ -796,4 +840,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { account, publicAccount, audit, backfillTenantSnapshots, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, pagedAuditLogs };
+module.exports = { account, publicAccount, audit, backfillTenantSnapshots, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, pagedAuditLogs };

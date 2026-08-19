@@ -47,13 +47,28 @@ function releaseTaskAuthorization(db, taskId, reason) {
     if (!exists) continue;
     const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
     if (!columns.has(taskColumn) || !columns.has('owner_user_id') || !columns.has('billing_authorization_id')) continue;
-    const row = db.prepare(`SELECT owner_user_id, billing_authorization_id FROM ${table} WHERE ${taskColumn}=?`).get(taskId);
-    if (!row?.owner_user_id || !row?.billing_authorization_id) continue;
-    try {
-      billing.voidAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, reason || '异步任务失败，释放预授权');
-    } catch (_) {
-      // The original failure must remain terminal even if a historical billing
-      // record is malformed; reconciliation tooling can repair that record.
+    const row = db.prepare(`SELECT id, owner_user_id, billing_authorization_id FROM ${table} WHERE ${taskColumn}=?`).get(taskId);
+    if (!row?.owner_user_id) continue;
+    const tryVoid = (authorizationId, why) => {
+      if (!authorizationId) return;
+      try {
+        billing.voidAuthorization(db, { id: row.owner_user_id, role: 'admin' }, authorizationId, why);
+      } catch (_) {
+        // The original failure must remain terminal even if a historical billing
+        // record is malformed; reconciliation tooling can repair that record.
+      }
+    };
+    tryVoid(row.billing_authorization_id, reason || '异步任务失败，释放预授权');
+    // 视频任务还挂有独立的插帧/超分预授权，必须一并释放，否则会形成永久冻结
+    if (table === 'video_generations' && row.id != null) {
+      for (const stageTable of ['video_interpolation_jobs', 'video_upscale_jobs']) {
+        const stageExists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(stageTable);
+        if (!stageExists) continue;
+        const stage = db.prepare(`SELECT billing_authorization_id FROM ${stageTable} WHERE video_generation_id=?`).get(row.id);
+        if (stage?.billing_authorization_id) {
+          tryVoid(stage.billing_authorization_id, (reason || '异步任务失败') + '，释放后处理阶段预授权');
+        }
+      }
     }
   }
 }

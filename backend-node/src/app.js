@@ -33,6 +33,11 @@ function createApp() {
     const result = billingService.recoverInterruptedTextReconciliations(db);
     if (result.recovered) logger.warn('recovered interrupted text billing reconciliations', result);
   } catch (error) { logger.warn('interrupted text billing recovery failed', { error: error.message }); }
+  // 后处理阶段（插帧/超分）滞留授权兜底：未调用供应商的自动释放，已调用的转待对账
+  try {
+    const result = billingService.recoverStuckStageAuthorizations(db);
+    if (result.voided || result.reconciled) logger.warn('recovered stuck stage authorizations', result);
+  } catch (error) { logger.warn('stuck stage authorization recovery failed', { error: error.message }); }
   // 历史计费流水的分组快照回填（幂等，仅填 NULL 行；未启用分组的环境自动跳过）
   try {
     const result = billingService.backfillTenantSnapshots(db);
