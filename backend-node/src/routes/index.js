@@ -331,6 +331,7 @@ function setupRouter(cfg, db, log) {
   r.post('/omni-video-jobs', omniVideo.create);
   r.post('/omni-video-jobs/polish-prompt', omniVideo.polishPrompt);
   r.post('/omni-video-jobs/:id/retry', omniVideo.retry);
+  r.post('/omni-video-jobs/:id/cancel', omniVideo.cancel);
   r.post('/omni-video-jobs/:id/retry-postprocess', omniVideo.retryPostprocess);
   r.post('/omni-video-jobs/:id/adopt-source', omniVideo.adoptSource);
   r.post('/omni-video-jobs/:id/adopt', omniVideo.adopt);

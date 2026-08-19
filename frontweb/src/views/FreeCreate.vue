@@ -866,6 +866,12 @@ async function poll(id) {
         if (failures >= 5) return
       }
     }
+    // 轮询达到上限(约30分钟)仍未终态: 置 unknown 露出手动刷新, 避免永久卡"生成中"
+    const timedOut = jobs.value.find((item) => String(item.id) === String(id)) || shotHistory.value.find((item) => String(item.id) === String(id))
+    if (timedOut && activeGenerationStatuses.has(timedOut.status)) {
+      replacePolledJob(id, { ...timedOut, status: 'unknown', task_message: '任务长时间未返回结果，已停止自动刷新，请手动刷新状态', task_progress: null })
+      if (String(currentShot.value?.omni_job_id) === String(id)) currentShot.value.status = 'unknown'
+    }
   } finally { pollingJobIds.delete(String(id)) }
 }
 async function retry(job) { const res = await omniVideoAPI.retry(job.id); const next = { id: res.omni_job_id, prompt: job.prompt, status: 'processing', video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value?.id : null, shot_id: isProjectMode.value ? null : currentShot.value?.id, created_at: new Date().toISOString() }; jobs.value.unshift(next); shotHistory.value.unshift(next); selectedHistoryJobId.value = next.id; currentShot.value.omni_job_id = next.id; currentShot.value.status = 'processing'; poll(next.id) }

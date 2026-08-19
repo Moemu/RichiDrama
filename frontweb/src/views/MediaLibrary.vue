@@ -252,8 +252,15 @@ async function loadMedia() {
     const res = await request.get('/assets', { params })
     mediaItems.value = (res?.items || []).filter((item) => item && Number.isFinite(Number(item.id))).map(normalizeItem)
     total.value = Number(res?.pagination?.total ?? res?.total ?? 0)
+    // 删除末页最后几条后原页码越界会得到空列表(看似素材全没了): 收敛页码后重载一次
+    const maxPage = Math.max(1, Math.ceil(total.value / pageSize.value))
+    if (page.value > maxPage) {
+      page.value = maxPage
+      return loadMedia()
+    }
   } catch (err) {
-    mediaItems.value = []
+    // 加载失败不伪装成空库: 保留旧列表并提示, 避免用户误以为素材被清空
+    ElMessage.error(err?.message || '素材列表加载失败，请刷新重试')
   } finally {
     loading.value = false
   }

@@ -159,8 +159,8 @@ function syncReferences(value) {
 
 /** 插入素材 @引用；若未选中则通知父组件加入创作 */
 function insertAsset(asset, opts = {}) {
-  // 未选中的先加入创作
-  if (!props.chosenIds.has(asset.id)) emit('pick', asset)
+  // 未选中的先加入创作; entity 类素材(无素材库 id)只插入引用, 不触发加入创作
+  if (asset.id != null && !props.chosenIds.has(asset.id)) emit('pick', asset)
   const token = `@${asset.alias || asset.name}`
   const explicitOffset = Number.isFinite(Number(opts.offset)) ? Number(opts.offset) : null
   const mention = explicitOffset == null ? activeMentionRange() : null
@@ -353,7 +353,10 @@ function onDrop(e) {
     const a = e.dataTransfer.getData('asset')
     if (a) { try { asset = JSON.parse(a) } catch (_) {} }
   }
-  if (asset && asset.id) insertAsset(asset, { offset: point.offset })
+  // 兼容 FilmCreate 分镜页旧原生拖拽的 payload 字段(assetId/entity):
+  // entity 类素材(角色/场景/道具)没有素材库 id, 仅插入 @token 不加入创作。
+  if (asset && asset.assetId != null && asset.id == null) asset.id = asset.assetId
+  if (asset && (asset.id != null || asset.entity)) insertAsset(asset, { offset: point.offset })
 }
 </script>
 <style scoped>

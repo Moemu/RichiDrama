@@ -34,7 +34,9 @@ function addVideoGenerationsTable(db) {
       status TEXT,
       error_msg TEXT,
       updated_at TEXT,
-      deleted_at TEXT
+      deleted_at TEXT,
+      billing_authorization_id TEXT,
+      owner_user_id INTEGER
     );
     CREATE TABLE omni_video_jobs (
       id INTEGER PRIMARY KEY,

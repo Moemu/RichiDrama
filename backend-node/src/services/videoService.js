@@ -776,7 +776,7 @@ function resumeProcessingVideoGenerations(db, log) {
   const hasOmniJobs = !!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'omni_video_jobs'").get();
   const stuck = db
     .prepare(
-      `SELECT id, task_id FROM video_generations
+      `SELECT id, task_id, billing_authorization_id, owner_user_id FROM video_generations
        WHERE status = 'processing' AND deleted_at IS NULL
          AND (provider_task_id IS NULL OR TRIM(provider_task_id) = '')`
     )
@@ -794,6 +794,10 @@ function resumeProcessingVideoGenerations(db, log) {
     const status = isEmptyOmniJob ? 'invalid' : 'retryable';
     db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run(status, message, now, s.id);
     if (s.task_id) taskService.updateTaskError(db, s.task_id, message);
+    // 原请求未提交模型, 释放旧预授权; 否则用户显式重试会走全新冻结, 双重占用额度
+    try {
+      if (s.billing_authorization_id) require('./billingService').voidAuthorization(db, { id: s.owner_user_id, role: 'admin' }, s.billing_authorization_id, '服务重启标记可重试, 释放未提交模型的旧预授权');
+    } catch (voidError) { log.warn('void stale authorization on restart-retryable failed', { videoGenId: s.id, error: voidError.message }); }
     log.warn(isEmptyOmniJob ? 'Marked empty omni video task invalid' : 'Marked interrupted video generation as retryable', { videoGenId: s.id });
   }
 

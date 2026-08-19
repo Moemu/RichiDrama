@@ -566,9 +566,9 @@
                   class="sb-omni-material-card"
                   :class="{ selected: sbOmniPoolItemSelected(activeSb, item) }"
                   :title="(item.name || '素材') + ': 点击选用；拖到提示词框直接引用'"
-                  draggable="true"
-                  @dragstart="onSbOmniAssetDragStart($event, item)"
-                  @click="onSbOmniPoolToggle(activeSb, item)"
+                  draggable="false"
+                  @pointerdown="beginSbOmniPointerDrag($event, item)"
+                  @click="onSbOmniPoolGuardedClick(activeSb, item)"
                 >
                   <img v-if="item.type === 'image'" :src="item.thumbUrl || sbOmniAssetUrl(item)" alt="" />
                   <span v-else class="sb-omni-material-card-icon">{{ item.type === 'audio' ? '🎵' : '🎬' }}</span>
@@ -2591,6 +2591,7 @@ import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Setting, Plus, Minus, Sunny, Moon, MagicStick, Upload, Delete, Check, Loading, WarningFilled, User, Box, Picture, Film, VideoCamera, Document, InfoFilled, Refresh, ZoomIn, QuestionFilled, DocumentAdd, Expand, Fold, VideoPlay, Grid, Close } from '@element-plus/icons-vue'
 import { useTheme } from '@/composables/useTheme'
+import { beginAssetPointerDrag, shouldSuppressAssetClick } from '@/utils/assetPointerDrag'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import GenerationSettings from '@/components/GenerationSettings.vue'
 import { useFilmStore } from '@/stores/film'
@@ -6481,6 +6482,22 @@ async function onUniversalSegmentPickAsset(sb, slot) {
 }
 
 /** 素材库卡片拖拽：携带素材信息供提示词编辑区接收（实体候选需先勾选导入素材库） */
+// 与 FreeCreate 工作台统一的 pointer 拖拽: 载荷字段对齐 OmniAssetPromptEditor
+// 期望的 {id, name, alias, type}; entity 类素材(角色/场景/道具)保留 entity 透传。
+function sbOmniPointerPayload(item) {
+  if (!item) return null
+  if (item.poolType === 'entity') return { alias: item.name || '资源', entity: item.entity || null }
+  return { id: Number(item.id), name: item.name, alias: item.name || `素材${item.id}`, type: item.type || 'image' }
+}
+function beginSbOmniPointerDrag(event, item) {
+  beginAssetPointerDrag(event, sbOmniPointerPayload(item))
+}
+// 拖拽结束后抑制紧随的 click, 防止误触发选用
+function onSbOmniPoolGuardedClick(activeSb, item) {
+  if (shouldSuppressAssetClick()) return
+  onSbOmniPoolToggle(activeSb, item)
+}
+
 function onSbOmniAssetDragStart(e, item) {
   if (!e?.dataTransfer || !item) return
   const payload = JSON.stringify(item.poolType === 'entity'

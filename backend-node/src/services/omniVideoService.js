@@ -584,6 +584,11 @@ function resumeSd2WaitingGenerations(db, log) {
           : error.message;
         const now = new Date().toISOString();
         db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run(status, message, now, job.video_generation_id);
+        // 原请求未提交模型, 释放旧预授权, 避免重试时双重冻结
+        try {
+          const authRow = db.prepare('SELECT billing_authorization_id, owner_user_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
+          if (authRow?.billing_authorization_id) require('./billingService').voidAuthorization(db, { id: authRow.owner_user_id, role: 'admin' }, authRow.billing_authorization_id, 'SD2 准备超时标记可重试, 释放未提交模型的旧预授权');
+        } catch (voidError) { log.warn('void stale authorization on sd2-timeout failed', { videoGenerationId: job.video_generation_id, error: voidError.message }); }
         if (job.storyboard_id) {
           try { db.prepare('UPDATE storyboards SET status=?, error_msg=?, updated_at=? WHERE id=? AND deleted_at IS NULL').run(status, message, now, job.storyboard_id); } catch (_) {}
         }
@@ -601,5 +606,36 @@ function startSd2WaitingGenerationRecovery(db, log) {
   return { runNow: run, stop: () => clearInterval(timer) };
 }
 function parse(value) { try { return value ? JSON.parse(value) : null; } catch (_) { return null; } }
+
+/**
+ * 用户主动取消全能创作任务。
+ * 仅当任务尚未提交厂商(provider_task_id 为空)时允许完全取消: 标记 failed(用户取消)、
+ * 停止前端轮询并释放积分预授权。已提交厂商的任务无法中断, 如实返回不可取消,
+ * 避免停止轮询后厂商照常出片扣费而用户侧看似"已取消"造成计费争议。
+ */
+function cancelJob(db, log, jobId, user) {
+  const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(jobId));
+  if (!job) throw new Error('全能视频任务不存在');
+  const generation = db.prepare('SELECT id, owner_user_id, status, provider_task_id, billing_authorization_id, task_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
+  if (!generation) throw new Error('视频生成记录不存在');
+  if (Number(generation.owner_user_id) !== Number(user.id) && user.role !== 'admin') throw new Error('只能取消自己的任务');
+  if (['completed', 'failed', 'invalid'].includes(generation.status)) throw new Error('任务已结束，无需取消');
+  if (generation.provider_task_id && String(generation.provider_task_id).trim()) {
+    throw new Error('任务已提交到厂商执行，无法中断；将正常完成并按真实用量计费');
+  }
+  const now = new Date().toISOString();
+  const message = '用户取消：任务尚未提交模型，已停止并释放预授权';
+  db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run('failed', message, now, generation.id);
+  if (generation.task_id) {
+    try { require('./taskService').updateTaskError(db, generation.task_id, message); } catch (_) {}
+  }
+  try {
+    if (generation.billing_authorization_id) {
+      require('./billingService').voidAuthorization(db, { id: generation.owner_user_id, role: 'admin' }, generation.billing_authorization_id, message);
+    }
+  } catch (voidError) { log.warn('void authorization on user cancel failed', { videoGenerationId: generation.id, error: voidError.message }); }
+  log.info('Omni video job cancelled by user', { job_id: Number(jobId), video_generation_id: generation.id });
+  return get(db, jobId);
+}
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };

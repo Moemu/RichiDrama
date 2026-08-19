@@ -279,12 +279,24 @@ function generateStoryboard(db, log, episodeId, options) {
 }
 
 function deleteDrama(db, log, dramaId) {
+  const id = Number(dramaId);
+  // 删除前检测活跃生成任务: 软删项目不会取消任务, 继续消耗厂商成本并维持积分冻结,
+  // 成片还会写回已删除的分镜。有活跃任务时阻止删除, 引导用户先等完成或取消。
+  const hasVideoTable = !!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'video_generations'").get();
+  if (hasVideoTable) {
+    const active = db.prepare(
+      `SELECT COUNT(*) AS c FROM video_generations
+        WHERE drama_id = ? AND deleted_at IS NULL
+          AND status IN ('processing','persisting','upscale_pending','upscaling','interpolation_pending','interpolating')`
+    ).get(id).c;
+    if (active > 0) throw new Error(`项目还有 ${active} 个生成中的任务，请先等待完成或在全能创作中取消后再删除`);
+  }
   const result = db.prepare('UPDATE dramas SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').run(
     new Date().toISOString(),
-    Number(dramaId)
+    id
   );
   if (result.changes === 0) return false;
-  log.info('Drama deleted', { drama_id: dramaId });
+  log.info('Drama deleted', { drama_id: id });
   return true;
 }
 
