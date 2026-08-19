@@ -130,7 +130,11 @@ function issueSession(db, user) {
 
 function normalizeUsername(username) {
   const value = String(username || '').trim();
-  if (!/^[A-Za-z0-9_.-]{3,64}$/.test(value)) throw new Error('用户名需为 3-64 位字母、数字或 ._-');
+  // 支持中文等 Unicode 字母；仅拒绝空白与其它符号（. _ - 除外）。长度按字符数计。
+  const chars = Array.from(value);
+  if (chars.length < 3 || chars.length > 64 || !/^[\p{L}\p{N}_.-]+$/u.test(value)) {
+    throw new Error('用户名需为 3-64 位字母、数字、中文或 ._-');
+  }
   return value;
 }
 
