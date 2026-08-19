@@ -129,11 +129,12 @@ function issueSession(db, user) {
 }
 
 function normalizeUsername(username) {
+  // 不限制用户名字符集（中文/符号等均可）；仅要求非空、去除首尾空白、
+  // 长度按字符数 1-64，防止空用户名与超长滥用。
   const value = String(username || '').trim();
-  // 支持中文等 Unicode 字母；仅拒绝空白与其它符号（. _ - 除外）。长度按字符数计。
   const chars = Array.from(value);
-  if (chars.length < 3 || chars.length > 64 || !/^[\p{L}\p{N}_.-]+$/u.test(value)) {
-    throw new Error('用户名需为 3-64 位字母、数字、中文或 ._-');
+  if (!chars.length || chars.length > 64) {
+    throw new Error('用户名需为 1-64 个字符');
   }
   return value;
 }
