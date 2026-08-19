@@ -181,6 +181,17 @@ function changeUsername(db, userId, username) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
 }
 
+function changeDisplayName(db, userId, displayName) {
+  // 显示名不限制字符集；trim 后最长 64 字符，允许留空（回退展示用户名）。
+  const value = String(displayName ?? '').trim();
+  if (Array.from(value).length > 64) throw new Error('显示名最长 64 个字符');
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(userId));
+  if (!user) throw new Error('账户不存在');
+  if ((user.display_name || '') === value) return user;
+  db.prepare('UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?').run(value, now(), user.id);
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+}
+
 function updateUser(db, id, input) {
   const updates = [], params = [];
   if (input.display_name !== undefined) { updates.push('display_name = ?'); params.push(String(input.display_name || '').trim()); }
@@ -196,4 +207,4 @@ function updateUser(db, id, input) {
   db.prepare(`UPDATE users SET ${updates.join(', ')}, updated_at = ? WHERE id = ?`).run(...params);
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
-module.exports = { validateRuntimeSecurity, ensureBootstrapAdmin, sessionCookieOptions, login, register, authenticate, createUser, updateUser, changePassword, changeUsername, issueSession, publicUser, jwtSecret };
+module.exports = { validateRuntimeSecurity, ensureBootstrapAdmin, sessionCookieOptions, login, register, authenticate, createUser, updateUser, changePassword, changeUsername, changeDisplayName, issueSession, publicUser, jwtSecret };

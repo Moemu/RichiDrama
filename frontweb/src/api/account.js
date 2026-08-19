@@ -7,6 +7,7 @@ export const accountAPI = {
   models: () => request.get('/models/available'),
   changePassword: (data) => request.post('/auth/change-password', data),
   changeUsername: (data) => request.patch('/auth/username', data),
+  changeDisplayName: (data) => request.patch('/auth/display-name', data),
 }
 
 export const adminAPI = {

@@ -24,7 +24,7 @@
       </section>
     </div>
     <div v-show="accountTab === 'models'" class="account-view"><section class="panel"><h2>平台可用模型</h2><el-tag v-for="m in models" :key="`${m.service_type}-${m.model}`" class="tag">{{ m.service_type }} · {{ m.model }}</el-tag><p v-if="!models.length" class="muted">管理员尚未配置可计费模型。</p></section></div>
-    <div v-show="accountTab === 'security'" class="account-view security-view"><section class="panel"><h2>修改密码</h2><el-form inline><el-form-item label="当前密码"><el-input v-model="password.old_password" type="password" show-password /></el-form-item><el-form-item label="新密码"><el-input v-model="password.new_password" type="password" show-password /></el-form-item><el-button type="primary" @click="changePassword">更新密码</el-button></el-form></section><section class="panel"><h2>修改用户名</h2><el-form inline><el-form-item label="用户名"><el-input v-model="username" maxlength="64" /></el-form-item><el-button type="primary" @click="changeUsername">保存用户名</el-button></el-form><p class="muted">仅支持 3–64 位字母、数字和 . _ -；保存后会刷新当前登录会话。</p></section></div>
+    <div v-show="accountTab === 'security'" class="account-view security-view"><section class="panel"><h2>修改密码</h2><el-form inline><el-form-item label="当前密码"><el-input v-model="password.old_password" type="password" show-password /></el-form-item><el-form-item label="新密码"><el-input v-model="password.new_password" type="password" show-password /></el-form-item><el-button type="primary" @click="changePassword">更新密码</el-button></el-form></section><section class="panel"><h2>修改用户名</h2><el-form inline><el-form-item label="用户名"><el-input v-model="username" maxlength="64" /></el-form-item><el-button type="primary" @click="changeUsername">保存用户名</el-button></el-form><p class="muted">1–64 个字符，不限内容；保存后会刷新当前登录会话。</p></section><section class="panel"><h2>修改显示名</h2><el-form inline><el-form-item label="显示名"><el-input v-model="displayName" maxlength="64" placeholder="留空则展示用户名" /></el-form-item><el-button type="primary" @click="changeDisplayName">保存显示名</el-button></el-form><p class="muted">展示在界面上的昵称，最长 64 个字符；保存后会刷新当前登录会话。</p></section></div>
     <div v-show="accountTab === 'billing'" class="account-view"><section class="panel bills"><div class="panel-title"><div><h2>账单记录</h2><p>“冻结”只占用可用额度；只有“已结算”才会计入累计消费。</p></div></div><div class="billing-table-scroll"><BillingTransactionTable :rows="transactions" :total="transactionPage.total" :page="transactionPage.page" :page-size="transactionPage.page_size" @page-change="loadTransactions" /></div></section></div>
   </main>
 </template>
@@ -43,6 +43,7 @@ const models = ref([])
 const isAdmin = JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').console_access === true
 const password = reactive({ old_password: '', new_password: '' })
 const username = ref(JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').username || '')
+const displayName = ref(JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').display_name || '')
 const accountTab = ref('overview')
 
 async function changePassword() {
@@ -58,6 +59,15 @@ async function changeUsername() {
   localStorage.setItem('lmd_auth_user', JSON.stringify(session.user))
   username.value = session.user.username
   ElMessage.success('用户名已更新')
+}
+
+async function changeDisplayName() {
+  const session = await accountAPI.changeDisplayName({ display_name: displayName.value })
+  localStorage.setItem('lmd_auth_token', session.token)
+  localStorage.setItem('lmd_auth_user', JSON.stringify(session.user))
+  displayName.value = session.user.display_name || ''
+  ElMessage.success('显示名已更新')
+  window.dispatchEvent(new Event('lmd:auth-user-changed'))
 }
 
 async function loadTransactions(page = transactionPage.page) {

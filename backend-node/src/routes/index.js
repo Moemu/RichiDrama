@@ -47,6 +47,7 @@ function setupRouter(cfg, db, log) {
   r.post('/auth/logout', auth.logout);
   r.post('/auth/change-password', auth.changePassword);
   r.patch('/auth/username', auth.changeUsername);
+  r.patch('/auth/display-name', auth.changeDisplayName);
   r.use(ownershipGuard(db));
   const drama = dramaRoutes(db, cfg, log);
   const task = taskRoutes(db, log);

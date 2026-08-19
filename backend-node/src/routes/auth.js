@@ -41,5 +41,13 @@ module.exports = function authRoutes(db) {
         response.success(res, session);
       } catch (err) { response.badRequest(res, err.message); }
     },
+    changeDisplayName: (req, res) => {
+      try {
+        const user = authService.changeDisplayName(db, req.auth.id, req.body?.display_name);
+        const session = authService.issueSession(db, user);
+        res.cookie('lmd_session', session.token, authService.sessionCookieOptions(req));
+        response.success(res, session);
+      } catch (err) { response.badRequest(res, err.message); }
+    },
   };
 };
