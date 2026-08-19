@@ -239,7 +239,8 @@ function ensureLayoutCache() {
   if (!textarea || !editor) return null
   const source = String(text.value || '')
   const rect = textarea.getBoundingClientRect()
-  if (layoutCache && layoutCache.source === source && layoutCache.width === rect.width && layoutCache.scrollTop === textarea.scrollTop) return layoutCache
+  // 缓存键必须包含视口位置: 页面/面板滚动后 rect.top 变化而 source/width/scrollTop 不变, 旧缓存的 boundaries 是过期视口坐标, 造成拖拽光标错乱或不显示(时灵时不灵的根因)
+  if (layoutCache && layoutCache.source === source && layoutCache.width === rect.width && layoutCache.scrollTop === textarea.scrollTop && Math.abs(layoutCache.rectTop - rect.top) < 0.5 && Math.abs(layoutCache.rectLeft - rect.left) < 0.5) return layoutCache
   clearLayoutCache()
   const editorRect = editor.getBoundingClientRect()
   const style = getComputedStyle(textarea)
@@ -279,7 +280,7 @@ function ensureLayoutCache() {
     }
   } catch (_) {}
   if (!boundaries.length) boundaries.push({ offset: 0, x: rect.left + Number.parseFloat(style.paddingLeft || 0), y: rect.top + Number.parseFloat(style.paddingTop || 0), height: fallbackHeight })
-  layoutCache = { source, width: rect.width, scrollTop: textarea.scrollTop, mirror, boundaries, editorRect }
+  layoutCache = { source, width: rect.width, scrollTop: textarea.scrollTop, rectTop: rect.top, rectLeft: rect.left, mirror, boundaries, editorRect }
   return layoutCache
 }
 

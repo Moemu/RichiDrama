@@ -21,6 +21,7 @@
         </el-dropdown>
         <button type="button" :class="{ active: active === 'tools' }" :aria-current="active === 'tools' ? 'page' : undefined" @click="router.push('/ai-tools')">AI 工具</button>
         <button type="button" :class="{ active: active === 'omni' }" :aria-current="active === 'omni' ? 'page' : undefined" @click="emit('create-omni')">全能创作</button>
+        <button v-if="isAdmin" type="button" :class="{ active: active === 'admin' }" :aria-current="active === 'admin' ? 'page' : undefined" @click="router.push('/admin')">运营</button>
       </nav>
 
       <div class="app-header__actions">
