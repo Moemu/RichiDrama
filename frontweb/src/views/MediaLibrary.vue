@@ -46,7 +46,9 @@
     <div v-if="uploading" class="upload-progress">
       <el-icon class="is-loading"><Loading /></el-icon>
       <span>正在上传 {{ uploadProgress.current }}/{{ uploadProgress.total }}...</span>
+      <el-progress :percentage="uploadPercent" :stroke-width="8" :show-text="false" />
     </div>
+    <div v-if="failedUploads.length" class="upload-progress"><span>失败 {{ failedUploads.length }} 个</span><el-button size="small" @click="retryFailedUploads">重新上传失败项</el-button></div>
 
     <!-- 媒体网格 -->
     <div v-loading="loading" class="media-grid" :class="{ 'sparse-library': mediaItems.length > 0 && mediaItems.length <= 3 }">
@@ -142,7 +144,7 @@
           class="preview-video"
           autoplay
         />
-        <div v-if="previewItem?.type === 'video'" class="trim-controls"><el-input-number v-model="trimStart" :min="0" :max="Math.max(0, trimEnd - .1)" :step=".1" size="small"/><span>至</span><el-input-number v-model="trimEnd" :min="trimStart + .1" :max="Number(previewItem.duration) || 3600" :step=".1" size="small"/><el-button size="small" :loading="trimming" @click="trimVideo">裁切为新素材</el-button></div>
+        <div v-if="previewItem?.type === 'video'" class="trim-controls"><el-input-number v-model="trimStart" :min="0" :max="Math.max(0, trimEnd - .1)" :step=".1" size="small"/><span>至</span><el-input-number v-model="trimEnd" :min="trimStart + .1" :max="Number(previewItem.duration) || 3600" :step=".1" size="small"/><small>将导出 {{ Math.max(0, trimEnd - trimStart).toFixed(1) }} 秒 / 原片 {{ Number(previewItem.duration || 0).toFixed(1) }} 秒</small><el-button size="small" :loading="trimming" @click="trimVideo">裁切为新素材</el-button></div>
         <audio v-else-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" controls />
         <AudioWaveform v-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" />
         <img v-else-if="previewItem" :src="itemUrl(previewItem)" class="preview-image" />
@@ -200,6 +202,10 @@ const editableTags = ref('')
 const trimStart = ref(0), trimEnd = ref(5), trimming = ref(false)
 const lineage = ref(null), lineageLoading = ref(false)
 const uploadInput = ref(null)
+const failedUploads = ref([])
+const uploadPercent = computed(() => uploadProgress.value.total
+  ? Math.round(uploadProgress.value.current / uploadProgress.value.total * 100)
+  : 0)
 const router = useRouter()
 let keywordTimer = null
 
@@ -212,20 +218,33 @@ async function onUpload(e) {
   if (!files.length) return
   uploading.value = true
   uploadProgress.value = { current: 0, total: files.length }
+  let uploadedCount = 0
+  const limits = await omniVideoAPI.uploadLimits().catch(() => null)
+  failedUploads.value = []
   for (const file of files) {
     try {
+      const type = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : null
+      const maxMb = type ? Number(limits?.files?.[type]?.max_mb) : 0
+      if (!type) throw new Error('仅支持图片、视频或音频文件')
+      // 报价/限制接口不可用时仍交给上传接口校验，不能把网络故障伪装成文件超限。
+      if (maxMb > 0 && file.size > maxMb * 1024 * 1024) throw new Error(`文件超过 ${maxMb}MB 限制`)
       const item = await omniVideoAPI.upload(file)
       uploadProgress.value.current++
+      uploadedCount++
       if (item?.deduplicated) ElMessage.info(`${file.name} 已存在，已复用素材记录`)
     } catch (err) {
+      failedUploads.value.push(file)
       ElMessage.warning(`${file.name} 上传失败: ${err.message}`)
     }
   }
   uploading.value = false
   e.target.value = ''
-  ElMessage.success(`${files.length} 个素材上传完成`)
+  const failed = files.length - uploadedCount
+  if (failed) ElMessage.warning(`上传完成：成功 ${uploadedCount} 个，失败 ${failed} 个；请查看上方错误提示后重试`)
+  else ElMessage.success(`${uploadedCount} 个素材上传完成`)
   loadMedia()
 }
+async function retryFailedUploads() { const files = [...failedUploads.value]; if (!files.length) return; await onUpload({ target: { files, value: '' } }) }
 
 function debouncedLoad() {
   clearTimeout(keywordTimer)
@@ -733,7 +752,7 @@ onMounted(loadMedia)
 .sparse-asset-facts { display:grid; grid-template-columns:1.2fr .7fr 1fr; gap:0; border-top:1px solid var(--border-color); border-bottom:1px solid var(--border-color); }.sparse-asset-facts span { display:grid; gap:.45rem; min-width:0; padding:1rem; border-right:1px solid var(--border-color); }.sparse-asset-facts span:last-child { border-right:0; }.sparse-asset-facts small { color:var(--text-faint); font-size:.6rem; letter-spacing:.08em; }.sparse-asset-facts b { overflow:hidden; font-size:.78rem; text-overflow:ellipsis; white-space:nowrap; }
 .sparse-flow { display:flex; align-items:center; gap:.75rem; color:var(--text-faint); font:700 .62rem/1 ui-monospace,monospace; }.sparse-flow i { flex:1; height:1px; background:var(--border-color); }
 .sparse-actions { display:flex; gap:.7rem; }.sparse-actions button { padding:.85rem 1.1rem; border:1px solid var(--border-strong); border-radius:.55rem; background:transparent; color:var(--text-regular); cursor:pointer; }.sparse-actions button.primary { border-color:var(--accent); background:var(--accent); color:#fff; }
-@media(max-width:52rem){.media-library-page{grid-template-columns:1fr;grid-template-rows:auto auto minmax(0,1fr) auto}.library-header{grid-column:1;grid-row:1;min-height:10rem;height:auto;padding:1.2rem;border-width:0 0 1px;flex-direction:row;gap:1rem}.library-header .header-left{gap:.7rem}.library-header .page-title{font-size:2.5rem}.library-header .library-subtitle{display:none}.library-header .header-actions{width:auto;justify-content:flex-end}.library-header .header-actions :deep(.account-balance),.library-header .header-actions .el-button--danger{display:none}.upload-limits{display:none}.filter-bar{grid-column:1;grid-row:2}.media-grid{grid-column:1;grid-row:3}.pagination{grid-column:1;grid-row:4}}
+@media(max-width:52rem){.media-library-page{grid-template-columns:1fr;grid-template-rows:auto auto minmax(0,1fr) auto}.library-header{grid-column:1;grid-row:1;min-height:10rem;height:auto;padding:1.2rem;border-width:0 0 1px;flex-direction:row;gap:1rem}.library-header .header-left{gap:.7rem}.library-header .page-title{font-size:2.5rem}.library-header .library-subtitle{display:none}.library-header .header-actions{width:auto;justify-content:flex-end}.library-header .header-actions :deep(.account-balance),.library-header .header-actions .el-button--danger{display:none}.upload-limits{display:none}.filter-bar{grid-column:1;grid-row:2}.media-grid{grid-column:1;grid-row:3}.pagination{grid-column:1;grid-row:4}.concat-bar{right:12px;bottom:72px}.batch-bar{right:12px;bottom:14px;max-width:calc(100vw - 24px)}}
 @media(max-width:70rem){.media-grid.sparse-library{grid-template-columns:minmax(16rem,.85fr) minmax(22rem,1.15fr);padding:1.2rem}.sparse-library-guide h3{font-size:3rem}.sparse-asset-facts{grid-template-columns:1fr}.sparse-asset-facts span{border-right:0;border-bottom:1px solid var(--border-color)}.sparse-asset-facts span:last-child{border-bottom:0}.sparse-flow{display:none}}
 @media(max-width:52rem){.media-grid.sparse-library{display:grid;grid-template-columns:1fr;grid-template-rows:minmax(0,.95fr) minmax(0,1.05fr);gap:.8rem;padding:1rem;overflow:hidden}.sparse-library>.media-card{min-height:0}.sparse-library>.media-card .audio-thumb{min-height:0}.sparse-library-guide{min-height:0;padding:.85rem 0}.sparse-library-guide h3{font-size:2rem}.sparse-library-guide>div:first-child>p:last-child{margin:.65rem 0 0;line-height:1.5}.sparse-asset-facts{display:none}.sparse-actions{gap:.55rem}.sparse-actions button{min-height:2.7rem;padding:.65rem .8rem}}
 </style>

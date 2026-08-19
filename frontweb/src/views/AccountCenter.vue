@@ -47,39 +47,34 @@ const displayName = ref(JSON.parse(localStorage.getItem('lmd_auth_user') || '{}'
 const accountTab = ref('overview')
 
 async function changePassword() {
-  await accountAPI.changePassword(password)
-  password.old_password = ''
-  password.new_password = ''
-  ElMessage.success('密码已更新')
+  try { await accountAPI.changePassword(password); password.old_password = ''; password.new_password = ''; ElMessage.success('密码已更新') }
+  catch (error) { ElMessage.error(error?.message || '密码更新失败') }
 }
 
 async function changeUsername() {
-  const session = await accountAPI.changeUsername({ username: username.value })
-  localStorage.setItem('lmd_auth_token', session.token)
-  localStorage.setItem('lmd_auth_user', JSON.stringify(session.user))
-  username.value = session.user.username
-  ElMessage.success('用户名已更新')
+  try { const session = await accountAPI.changeUsername({ username: username.value }); localStorage.setItem('lmd_auth_token', session.token); localStorage.setItem('lmd_auth_user', JSON.stringify(session.user)); username.value = session.user.username; ElMessage.success('用户名已更新') }
+  catch (error) { ElMessage.error(error?.message || '用户名更新失败') }
 }
 
 async function changeDisplayName() {
-  const session = await accountAPI.changeDisplayName({ display_name: displayName.value })
-  localStorage.setItem('lmd_auth_token', session.token)
-  localStorage.setItem('lmd_auth_user', JSON.stringify(session.user))
-  displayName.value = session.user.display_name || ''
-  ElMessage.success('显示名已更新')
-  window.dispatchEvent(new Event('lmd:auth-user-changed'))
+  try { const session = await accountAPI.changeDisplayName({ display_name: displayName.value }); localStorage.setItem('lmd_auth_token', session.token); localStorage.setItem('lmd_auth_user', JSON.stringify(session.user)); displayName.value = session.user.display_name || ''; ElMessage.success('显示名已更新'); window.dispatchEvent(new Event('lmd:auth-user-changed')) }
+  catch (error) { ElMessage.error(error?.message || '显示名更新失败') }
 }
 
 async function loadTransactions(page = transactionPage.page) {
-  const result = await accountAPI.transactions({ page, page_size: transactionPage.page_size })
-  transactions.value = result.items || []
-  Object.assign(transactionPage, { page: result.page || page, page_size: result.page_size || transactionPage.page_size, total: result.total || 0 })
+  try {
+    const result = await accountAPI.transactions({ page, page_size: transactionPage.page_size })
+    transactions.value = result.items || []
+    Object.assign(transactionPage, { page: result.page || page, page_size: result.page_size || transactionPage.page_size, total: result.total || 0 })
+  } catch (error) { ElMessage.error(error?.message || '账单记录加载失败，请稍后重试') }
 }
 
 onMounted(async () => {
-  const [, loadedAccount, loadedModels] = await Promise.all([loadTransactions(), accountAPI.me(), accountAPI.models()])
-  account.value = loadedAccount
-  models.value = loadedModels
+  const [accountResult, modelResult] = await Promise.allSettled([accountAPI.me(), accountAPI.models(), loadTransactions()])
+  if (accountResult.status === 'fulfilled') account.value = accountResult.value
+  else ElMessage.error(accountResult.reason?.message || '账户信息加载失败，请刷新重试')
+  if (modelResult.status === 'fulfilled') models.value = modelResult.value
+  else ElMessage.error(modelResult.reason?.message || '可用模型加载失败，请稍后重试')
 })
 </script>
 

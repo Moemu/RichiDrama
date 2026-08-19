@@ -34,7 +34,7 @@ module.exports = function routes(db, log, cfg) { return {
   adopt(req, res) { try { response.success(res, omniVideoService.adoptCompletedVersion(db, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
   extractFrame(req, res) { try { response.created(res, require('../services/omniFrameService').extract(db, cfg, log, req.params.id, req.body?.position)); } catch (err) { response.badRequest(res, err.message); } },
   extractVideoFrame(req, res) { try { response.created(res, require('../services/omniFrameService').extractVideoGeneration(db, cfg, log, req.params.id, req.body?.position)); } catch (err) { response.badRequest(res, err.message); } },
-  get(req, res) { try { const job = omniVideoService.get(db, req.params.id); if (!job) return response.notFound(res, '全能视频任务不存在'); response.success(res, job); } catch (err) { response.internalError(res, err.message); } },
+  get(req, res) { try { const job = omniVideoService.get(db, req.params.id); if (!job || (Number(job.owner_user_id) !== Number(req.auth.id) && req.auth.role !== 'admin')) return response.notFound(res, '全能视频任务不存在'); response.success(res, job); } catch (err) { response.internalError(res, err.message); } },
   capabilities(req, res) { const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id); response.success(res, capabilityService.list(db, tenant ? { tenant_id: tenant.id } : {})); },
   listSequences(req, res) { try { response.success(res, sequenceService.list(db, { owner_user_id: req.auth.id })); } catch (err) { response.internalError(res, err.message); } },
   listDeletedSequences(req, res) { try { response.success(res, sequenceService.list(db, { deleted: true, owner_user_id: req.auth.id })); } catch (err) { response.internalError(res, err.message); } },
@@ -46,7 +46,7 @@ module.exports = function routes(db, log, cfg) { return {
   restoreSequence(req, res) { try { response.success(res, sequenceService.restoreSequence(db, req.params.id)); } catch (err) { response.badRequest(res, err.message); } },
   purgeSequence(req, res) { try { sequenceService.purgeSequence(db, req.params.id); response.success(res, { ok: true }); } catch (err) { response.badRequest(res, err.message); } },
   addShot(req, res) { try { response.created(res, sequenceService.createShot(db, req.params.id, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
-  updateShot(req, res) { try { response.success(res, sequenceService.updateShot(db, req.params.id, req.params.shotId, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
+  updateShot(req, res) { try { response.success(res, sequenceService.updateShot(db, req.params.id, req.params.shotId, req.body || {})); } catch (err) { if (err.code === 'VERSION_CONFLICT') return response.error(res, 409, 'VERSION_CONFLICT', err.message); response.badRequest(res, err.message); } },
   deleteShot(req, res) { try { sequenceService.deleteShot(db, req.params.id, req.params.shotId); response.success(res, { ok: true }); } catch (err) { response.badRequest(res, err.message); } },
   reorderShots(req, res) { try { response.success(res, sequenceService.reorder(db, req.params.id, req.body?.shot_ids)); } catch (err) { response.badRequest(res, err.message); } },
 }; };

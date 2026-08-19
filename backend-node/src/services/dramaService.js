@@ -287,7 +287,7 @@ function deleteDrama(db, log, dramaId) {
     const active = db.prepare(
       `SELECT COUNT(*) AS c FROM video_generations
         WHERE drama_id = ? AND deleted_at IS NULL
-          AND status IN ('processing','persisting','upscale_pending','upscaling','interpolation_pending','interpolating')`
+          AND status IN ('sd2_waiting','processing','persisting','upscale_pending','upscaling','interpolation_pending','interpolating')`
     ).get(id).c;
     if (active > 0) throw new Error(`项目还有 ${active} 个生成中的任务，请先等待完成或在全能创作中取消后再删除`);
   }

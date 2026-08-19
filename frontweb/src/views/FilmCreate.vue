@@ -2607,7 +2607,7 @@ import { taskAPI } from '@/api/task'
 import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
 import { omniVideoAPI } from '@/api/omniVideo'
-import { storyboardsAPI } from '@/api/storyboards'
+import { storyboardsAPI as rawStoryboardsAPI } from '@/api/storyboards'
 import { uploadAPI } from '@/api/upload'
 import { characterLibraryAPI } from '@/api/characterLibrary'
 import { sceneLibraryAPI } from '@/api/sceneLibrary'
@@ -2807,6 +2807,26 @@ const characters = computed(() => validRows(store.characters))
 const scenes = computed(() => validRows(store.scenes))
 const props = computed(() => validRows(store.props))
 const storyboards = computed(() => validRows(store.storyboards))
+
+// FilmCreate 与自由创作页可能同时编辑同一分镜。所有从本页发起的更新都携带
+// 当前快照版本，成功后回写服务端的新 updated_at，避免旧页面的整行保存覆盖新编辑。
+function findStoryboardForVersion(id) {
+  return (storyboards.value || []).find((item) => Number(item.id) === Number(id)) || null
+}
+
+const storyboardsAPI = {
+  ...rawStoryboardsAPI,
+  async update(id, data = {}) {
+    const row = findStoryboardForVersion(id)
+    const expectedUpdatedAt = data.expected_updated_at ?? row?.updated_at
+    const payload = expectedUpdatedAt != null
+      ? { ...data, expected_updated_at: expectedUpdatedAt }
+      : data
+    const updated = await rawStoryboardsAPI.update(id, payload)
+    if (row && updated && typeof updated === 'object') Object.assign(row, updated)
+    return updated
+  },
+}
 const WORKFLOW_STAGE_KEYS = ['script', 'resources', 'storyboard', 'merge']
 function normalizeWorkflowStage(value) {
   const stage = Array.isArray(value) ? value[0] : value
@@ -4911,7 +4931,10 @@ function setSbPropIds(sbId, v) {
 
 function onStoryboardPropChange(sbId) {
   const ids = sbPropIds.value[sbId] || []
-  storyboardsAPI.update(sbId, { prop_ids: ids }).catch(() => {})
+  storyboardsAPI.update(sbId, { prop_ids: ids }).catch(async (error) => {
+    ElMessage.error(error?.message || '道具选择保存失败，已恢复服务端数据')
+    await loadDrama().catch(() => {})
+  })
 }
 
 /** 当前分镜选中的场景对象（用于下方缩略图） */
@@ -4954,7 +4977,10 @@ function onLastFrameLayoutLockChange() {
 
 function onStoryboardSceneChange(sbId) {
   const sceneId = sbSceneId.value[sbId] ?? null
-  storyboardsAPI.update(sbId, { scene_id: sceneId }).catch(() => {})
+  storyboardsAPI.update(sbId, { scene_id: sceneId }).catch(async (error) => {
+    ElMessage.error(error?.message || '场景选择保存失败，已恢复服务端数据')
+    await loadDrama().catch(() => {})
+  })
 }
 
 /** 同镜号多行时只保留 id 最大的一条（与后端 dedupe 一致，避免「影响的分镜」重复 #N） */
@@ -7717,7 +7743,9 @@ async function onGenerateSbVideo(sb) {
     delete next[sb.id]
     sbSelectedVideoId.value = next
   }
-  storyboardsAPI.update(sb.id, { video_url: null }).catch(() => {})
+  storyboardsAPI.update(sb.id, { video_url: null }).catch((error) => {
+    ElMessage.warning(error?.message || '清除旧视频标记失败，生成完成后请刷新确认')
+  })
   try {
     let absoluteUrl = ''
     let referenceUrls = undefined
@@ -8198,7 +8226,9 @@ async function startBatchVideoGeneration() {
         try {
           generatingSbVideoIds.add(sb.id)
           // 批量生成时清除手动指定的视频，确保合成时使用最新生成记录
-          storyboardsAPI.update(sb.id, { video_url: null }).catch(() => {})
+          storyboardsAPI.update(sb.id, { video_url: null }).catch((error) => {
+            ElMessage.warning(error?.message || `分镜 #${sb.shot_number || sb.id} 清除旧视频标记失败`)
+          })
           if (sbSelectedVideoId.value[sb.id] != null) {
             const next = { ...sbSelectedVideoId.value }
             delete next[sb.id]

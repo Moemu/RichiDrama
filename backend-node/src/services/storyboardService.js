@@ -143,8 +143,11 @@ function activeOmniAssetIds(db, storyboardId, rawIds, ownerUserId, log) {
 }
 
 function updateStoryboard(db, log, id, req, ownerUserId = null) {
-  const row = db.prepare('SELECT id FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
+  const row = db.prepare('SELECT id, updated_at FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!row) return null;
+  if (req.expected_updated_at != null && String(req.expected_updated_at) !== String(row.updated_at || '')) {
+    const error = new Error('分镜已被其他编辑器修改，请刷新后再保存'); error.code = 'VERSION_CONFLICT'; throw error;
+  }
   const allowed = ['title', 'description', 'location', 'time', 'duration', 'dialogue', 'narration', 'action', 'result', 'atmosphere', 'image_prompt', 'polished_prompt', 'video_prompt', 'text_model', 'video_model', 'video_resolution', 'video_aspect_ratio', 'video_upscale_resolution', 'video_target_fps', 'scene_id', 'characters', 'composed_image', 'image_url', 'local_path', 'main_panel_idx', 'video_url', 'audio_local_path', 'narration_audio_local_path', 'status', 'shot_type', 'angle', 'angle_h', 'angle_v', 'angle_s', 'movement', 'segment_index', 'segment_title', 'creation_mode', 'universal_segment_text', 'layout_description', 'first_frame_image_id', 'last_frame_image_id', 'last_frame_image_url', 'last_frame_local_path', 'omni_asset_ids', 'audio_strategy', 'keep_original_audio', 'audio_volume', 'audio_fade_seconds', 'omni_creation_mode', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'omni_asset_usage_json'];
   const updates = [];
   const params = [];
@@ -194,6 +197,18 @@ function updateStoryboard(db, log, id, req, ownerUserId = null) {
 }
 
 function deleteStoryboard(db, log, id) {
+  // Do not orphan an in-flight generation: a soft-deleted storyboard used to
+  // disappear from the editor while its provider job continued billing and
+  // could only be rediscovered through history.  The user must first cancel
+  // an unsubmitted omni task (or wait for a submitted provider task).
+  try {
+    const active = db.prepare(`SELECT COUNT(*) AS count FROM video_generations
+      WHERE storyboard_id = ? AND deleted_at IS NULL
+        AND status IN ('sd2_waiting','processing','persisting','upscale_pending','upscaling','interpolation_pending','interpolating')`).get(Number(id));
+    if (Number(active?.count || 0) > 0) throw new Error(`该分镜仍有 ${active.count} 个生成任务，请先取消或等待完成后再删除`);
+  } catch (error) {
+    if (/该分镜仍有/.test(String(error.message || ''))) throw error;
+  }
   const now = new Date().toISOString();
   const result = db.prepare('UPDATE storyboards SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').run(now, Number(id));
   if (result.changes === 0) return false;

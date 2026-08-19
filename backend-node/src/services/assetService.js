@@ -200,6 +200,7 @@ function update(db, log, id, req, ownerUserId = null) {
 }
 
 function deleteById(db, log, id, ownerUserId = null) {
+  assertNotReferencedByEditableShot(db, id);
   const now = new Date().toISOString();
   const sql = ownerUserId == null
     ? 'UPDATE assets SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL'
@@ -211,6 +212,27 @@ function deleteById(db, log, id, ownerUserId = null) {
     ? db.prepare(sql).run(now, Number(id))
     : db.prepare(sql).run(now, Number(id), Number(ownerUserId), Number(ownerUserId));
   return result.changes > 0;
+}
+
+// Generation history deliberately keeps snapshots, but an asset selected in
+// an editable shot is a live dependency.  Allowing its deletion made the next
+// storyboard save silently drop that selection.
+function assertNotReferencedByEditableShot(db, assetId) {
+  const target = Number(assetId);
+  if (!Number.isInteger(target) || target <= 0) return;
+  const refs = [];
+  const contains = (raw) => { try { return JSON.parse(raw || '[]').map(Number).includes(target); } catch (_) { return false; } };
+  try {
+    for (const row of db.prepare(`SELECT id, storyboard_number, omni_asset_ids, omni_first_frame_asset_id, omni_last_frame_asset_id FROM storyboards WHERE deleted_at IS NULL`).all()) {
+      if (contains(row.omni_asset_ids) || Number(row.omni_first_frame_asset_id) === target || Number(row.omni_last_frame_asset_id) === target) refs.push(`分镜 #${row.storyboard_number || row.id}`);
+    }
+  } catch (_) {}
+  try {
+    for (const row of db.prepare(`SELECT s.id, s.title, s.assets_json FROM omni_video_sequence_shots s JOIN omni_video_sequences q ON q.id=s.sequence_id WHERE s.deleted_at IS NULL AND q.deleted_at IS NULL`).all()) {
+      if (contains(row.assets_json)) refs.push(`自由创作镜头「${row.title || row.id}」`);
+    }
+  } catch (_) {}
+  if (refs.length) throw new Error(`素材正在被${refs.slice(0, 3).join('、')}引用；请先在镜头中替换或移除引用后再删除`);
 }
 
 // Logical deletion is intentional: an asset can be referenced by existing
@@ -235,6 +257,7 @@ function deleteMany(db, log, { ids, owner_user_id, type, keyword, favorite } = {
     params.push(value, value);
   }
   if (String(favorite || '') === '1' || String(favorite || '').toLowerCase() === 'true') where += ' AND is_favorite = 1';
+  db.prepare(`SELECT id FROM assets WHERE ${where}`).all(...params).forEach((row) => assertNotReferencedByEditableShot(db, row.id));
   const result = db.prepare(`UPDATE assets SET deleted_at = ?, updated_at = ? WHERE ${where}`)
     .run(new Date().toISOString(), new Date().toISOString(), ...params);
   log.info('Assets soft deleted in bulk', { owner_user_id: ownerId, count: result.changes, all_matching: normalizedIds.length === 0 });
@@ -280,6 +303,7 @@ module.exports = {
   update,
   deleteById,
   deleteMany,
+  assertNotReferencedByEditableShot,
   importFromImage,
   importFromVideo,
 };

@@ -320,7 +320,7 @@ test('成片操作栏不会覆盖视频，嵌入分镜保持三栏创作节奏',
   assert.ok(videoStageStart >= 0 && frameActionsStart > videoStageStart, 'the frame actions must follow the video stage')
   assert.doesNotMatch(free.slice(videoStageStart, frameActionsStart), /<div class="frame-actions"/)
   assert.match(free, /\.frame-actions\{display:flex;flex:0 0 auto/)
-  assert.match(film, /storyboard breakpoints are\n   based on the remaining work area/)
+  assert.match(film, /storyboard breakpoints are\r?\n   based on the remaining work area/)
   assert.match(free, /project-storyboard-page \.creation-panel\{grid-column:1;grid-row:1/)
   assert.match(free, /project-storyboard-page \.center-stage\{grid-column:2;grid-row:1/)
   assert.match(free, /project-storyboard-page \.shot-panel\{grid-column:3;grid-row:1/)

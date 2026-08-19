@@ -306,17 +306,18 @@ function routes(db, log) {
         response.success(res, sb);
       } catch (err) {
         log.error('storyboards update', { error: err.message });
+        if (err.code === 'VERSION_CONFLICT') return response.error(res, 409, 'VERSION_CONFLICT', err.message);
         response.internalError(res, err.message);
       }
     },
-    delete: (req, res) => {
+      delete: (req, res) => {
       try {
         const ok = storyboardService.deleteStoryboard(db, log, req.params.id);
         if (!ok) return response.notFound(res, '分镜不存在');
         response.success(res, { message: '删除成功' });
-      } catch (err) {
-        log.error('storyboards delete', { error: err.message });
-        response.internalError(res, err.message);
+        } catch (err) {
+          log.error('storyboards delete', { error: err.message });
+          response.badRequest(res, err.message);
       }
     },
     framePrompt: (req, res) => {

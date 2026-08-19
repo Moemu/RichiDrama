@@ -375,6 +375,8 @@ function get(db, id) {
     FROM video_generations v LEFT JOIN async_tasks t ON t.id=v.task_id AND t.deleted_at IS NULL WHERE v.id = ?`).get(job.video_generation_id);
   const assets = db.prepare('SELECT * FROM omni_video_job_assets WHERE omni_job_id = ? ORDER BY ordinal').all(job.id);
   const safeGeneration = generation ? { ...generation, video_url: videoService.publicVideoUrl(generation.video_url, generation.local_path) } : null;
+  let actualPoints = null;
+  try { actualPoints = db.prepare('SELECT charged_micro / 10000.0 AS amount FROM billing_usage_logs WHERE authorization_id = ? LIMIT 1').get(generation?.billing_authorization_id)?.amount ?? null; } catch (_) {}
   let isCurrent = false;
   if (generation?.storyboard_id) {
     try {
@@ -383,14 +385,14 @@ function get(db, id) {
         || (!storyboard?.active_video_generation_id && String(storyboard?.local_path || '') === String(generation.local_path || ''));
     } catch (_) {}
   }
-  return { ...job, is_current: isCurrent, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), generation: safeGeneration };
+  return { ...job, is_current: isCurrent, actual_points: actualPoints, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), generation: safeGeneration };
 }
 function list(db, query = {}) {
   const storyboardId = Number(query.storyboard_id);
   const shotId = Number(query.shot_id);
   let sql = `SELECT j.*, v.status, v.video_url, v.local_path, v.poster_local_path, v.source_local_path, v.upscale_local_path,
     v.resolution, v.aspect_ratio, v.upscale_resolution, v.target_fps, v.upscale_status, v.interpolation_status,
-    v.output_width, v.output_height, v.output_resolution, v.output_fps, v.output_duration_ms, v.error_msg, v.task_id, t.progress AS task_progress, t.message AS task_message, t.updated_at AS task_updated_at,
+    v.output_width, v.output_height, v.output_resolution, v.output_fps, v.output_duration_ms, v.error_msg, v.task_id, v.provider_task_id, (SELECT charged_micro / 10000.0 FROM billing_usage_logs u WHERE u.authorization_id=v.billing_authorization_id LIMIT 1) AS actual_points, t.progress AS task_progress, t.message AS task_message, t.updated_at AS task_updated_at,
     s.active_video_generation_id, s.local_path AS storyboard_local_path
     FROM omni_video_jobs j JOIN video_generations v ON v.id = j.video_generation_id
     LEFT JOIN async_tasks t ON t.id=v.task_id AND t.deleted_at IS NULL
@@ -421,7 +423,7 @@ function list(db, query = {}) {
 }
 
 function assertOwnedJob(db, omniJobId, actor) {
-  const job = db.prepare(`SELECT j.id AS omni_job_id, j.owner_user_id AS job_owner_user_id, v.id AS video_generation_id, v.* FROM omni_video_jobs j
+  const job = db.prepare(`SELECT j.*, j.id AS omni_job_id, j.owner_user_id AS job_owner_user_id, v.id AS video_generation_id, v.* FROM omni_video_jobs j
     JOIN video_generations v ON v.id=j.video_generation_id
     WHERE j.id=? AND v.deleted_at IS NULL`).get(Number(omniJobId));
   if (!job || (Number(job.job_owner_user_id) !== Number(actor?.id) && actor?.role !== 'admin')) throw new Error('视频任务不存在或无权操作');
@@ -517,8 +519,7 @@ function adoptCompletedVersion(db, omniJobId, actor) {
   return get(db, job.omni_job_id);
 }
 function retry(db, log, id, billingUser) {
-  const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
-  if (!job) throw new Error('全能视频任务不存在');
+  const job = assertOwnedJob(db, id, billingUser);
   const generation = db.prepare('SELECT status, drama_id, storyboard_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
   if (!generation || generation.status !== 'retryable') throw new Error('只有重启中断且可重试的任务可以重试');
   const snapshot = parse(job.request_snapshot_json);

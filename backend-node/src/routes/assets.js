@@ -93,7 +93,7 @@ function routes(db, log, cfg) {
         response.success(res, { message: '删除成功' });
       } catch (err) {
         log.error('assets delete', { error: err.message });
-        response.internalError(res, err.message);
+        response.badRequest(res, err.message);
       }
     },
     restoreProjectResource: (req, res) => {
@@ -132,7 +132,7 @@ function routes(db, log, cfg) {
         response.success(res, { count, message: count ? `已删除 ${count} 个素材` : '没有可删除的素材' });
       } catch (err) {
         log.error('assets batch delete', { error: err.message });
-        response.internalError(res, err.message);
+        response.badRequest(res, err.message);
       }
     },
     importImage: (req, res) => {
