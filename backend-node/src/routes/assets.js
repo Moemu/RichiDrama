@@ -85,8 +85,10 @@ function routes(db, log, cfg) {
         const current = assetService.getByIdForOwner(db, req.params.id, req.auth.id);
         if (current?.source_type === 'project_resource') {
           const detached = require('../services/assetMappingService').detachProjectResource(db, current.id, req.auth.id);
-          if (!detached) return response.notFound(res, '资源关联不存在');
-          return response.success(res, { message: '已解除项目资源关联，历史分镜引用保持不变', detached: true });
+          if (detached) return response.success(res, { message: '已解除项目资源关联，历史分镜引用保持不变', detached: true });
+          // 旧版分镜页曾直接写入 source_type=project_resource 的素材，未同步
+          // asset_resource_links。将它误判为不存在会导致前端 DELETE 收到 404；
+          // 此处回退为普通软删除，且仍会先执行分镜引用保护。
         }
         const ok = assetService.deleteById(db, log, req.params.id, req.auth.id);
         if (!ok) return response.notFound(res, '资源不存在');

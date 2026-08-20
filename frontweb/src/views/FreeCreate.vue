@@ -638,10 +638,10 @@ async function ensureProjectResourceAssets(project, mediaItems) {
       const exists = all.find((asset) => (localPath && asset.local_path === localPath) || (!localPath && url && asset.url === url))
       if (exists) continue
       try {
-        const asset = await omniVideoAPI.createAsset({
-          drama_id: projectDramaId.value, name: entry.name || entry.location || `${kind} ${entry.id}`, type: 'image',
-          url: url || '', local_path: localPath, source_type: 'project_resource', processing_status: 'ready',
-          metadata: { resource_type: kind, resource_id: entry.id },
+        // 必须经项目资源映射创建素材：映射记录会保留“已解除”状态，避免用户删除后
+        // 页面重载又把同一角色/场景/道具图自动加回素材库。
+        const asset = await omniVideoAPI.linkProjectResource({
+          drama_id: projectDramaId.value, resource_type: kind, resource_id: entry.id,
         })
         if (asset) all.unshift(asset)
       } catch (_) {

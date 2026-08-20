@@ -62,6 +62,7 @@ test('分镜素材池可直接删除未被镜头引用的真实素材', async ()
   assert.match(freeSource, /@pointerdown\.stop @click\.stop="deleteMaterialAsset\(asset\)"/)
   assert.match(freeSource, /async function deleteMaterialAsset\(asset\)/)
   assert.match(freeSource, /await omniVideoAPI\.deleteAsset\(asset\.id\)/)
+  assert.match(freeSource, /await omniVideoAPI\.linkProjectResource\(\{/)
 })
 
 test('工作台不以镜头时长重复模拟生成进度', async () => {

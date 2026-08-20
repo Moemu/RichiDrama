@@ -8,6 +8,7 @@ const { runMigrationsAndEnsure } = require('../src/db/migrate');
 const auth = require('../src/services/authService');
 const drama = require('../src/services/dramaService');
 const assets = require('../src/services/assetService');
+const assetRoutes = require('../src/routes/assets');
 
 function setup() {
   const dbPath = path.join(os.tmpdir(), `local-mini-drama-assets-${Date.now()}-${Math.random()}.db`);
@@ -47,5 +48,22 @@ test('asset lineage is owner-scoped and cannot reveal another user current or de
     assert.equal(lineage.current.id, root.id);
     assert.deepEqual(lineage.descendants, []);
     assert.equal(assets.getByIdForOwner(db, foreignChild.id, owner.id), null);
+  } finally { teardown(dbPath); }
+});
+
+test('legacy unmapped project-resource asset deletion falls back to protected soft deletion instead of 404', () => {
+  const { db, dbPath, log, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'legacy-project-asset-owner', password: 'creator123' }, admin.id);
+    const project = drama.createDrama(db, log, { title: '兼容项目素材', owner_user_id: user.id });
+    const asset = assets.create(db, log, {
+      owner_user_id: user.id, drama_id: project.id, name: '旧版项目资源图', type: 'image', source_type: 'project_resource',
+      metadata: { resource_type: 'character', resource_id: 999 },
+    });
+    const response = { statusCode: null, payload: null, status(code) { this.statusCode = code; return this; }, json(payload) { this.payload = payload; return this; } };
+    assetRoutes(db, log, {}).delete({ params: { id: asset.id }, auth: { id: user.id } }, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.payload.success, true);
+    assert.equal(assets.getByIdForOwner(db, asset.id, user.id), null);
   } finally { teardown(dbPath); }
 });
