@@ -47,6 +47,23 @@ test('分镜生成操作保留 main 的紫色可用与禁用层级', async () =>
   assert.match(source, /border-color:color-mix\(in srgb,var\(--studio-accent\) 52%,var\(--border-color\)\)!important/)
 })
 
+test('分镜素材池可直接删除未被镜头引用的真实素材', async () => {
+  const [filmSource, freeSource] = await Promise.all([
+    readSource('../src/views/FilmCreate.vue'),
+    readSource('../src/views/FreeCreate.vue'),
+  ])
+
+  assert.match(filmSource, /class="sb-omni-material-delete"/)
+  assert.match(filmSource, /v-if="item\.poolType === 'asset'"/)
+  assert.match(filmSource, /@click\.stop="deleteSbOmniPoolAsset\(activeSb, item\)"/)
+  assert.match(filmSource, /async function deleteSbOmniPoolAsset\(_sb, item\)/)
+  assert.match(filmSource, /await deleteResourceMedia\(item\)/)
+  assert.match(freeSource, /class="material-delete"/)
+  assert.match(freeSource, /@pointerdown\.stop @click\.stop="deleteMaterialAsset\(asset\)"/)
+  assert.match(freeSource, /async function deleteMaterialAsset\(asset\)/)
+  assert.match(freeSource, /await omniVideoAPI\.deleteAsset\(asset\.id\)/)
+})
+
 test('工作台不以镜头时长重复模拟生成进度', async () => {
   const source = await readSource('../src/views/FreeCreate.vue')
 

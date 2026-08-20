@@ -75,7 +75,7 @@
         <div class="dropzone" @click="pickFiles" @dragover.prevent @drop.prevent="dropFiles"><el-icon><Upload /></el-icon>拖入图片、视频或音频</div>
         <small class="upload-limit-note">{{ limitSummary }}</small>
         <div class="material-pool">
-          <article v-for="asset in visibleAssets" :key="asset.id" class="material-card" draggable="false" @dragstart.prevent :class="{ selected: selected.has(asset.id) }" :aria-pressed="selected.has(asset.id)" @pointerdown="beginAssetPointerDrag($event, asset)" @click="onMaterialCardClick(asset)"><img v-if="asset.type === 'image'" :src="assetUrl(asset)" alt="" draggable="false"/><img v-else-if="asset.type === 'video' && assetThumbnailUrl(asset)" :src="assetThumbnailUrl(asset)" alt="" draggable="false"/><span v-else-if="asset.type === 'video'" class="material-video-placeholder"><el-icon><VideoCamera /></el-icon></span><span v-else>🎵</span><small>{{ asset.alias || asset.name }}</small><button type="button" class="insert-at-caret" :aria-label="`将 ${asset.alias || asset.name} 插入光标处`" title="插入光标处" @click.stop="promptEditorRef?.insertAtCaret(asset)">插入此处</button><em v-if="asset.drama_id" class="asset-scope-label">项目</em><em v-else class="asset-scope-label">全局</em></article>
+          <article v-for="asset in visibleAssets" :key="asset.id" class="material-card" draggable="false" @dragstart.prevent :class="{ selected: selected.has(asset.id) }" :aria-pressed="selected.has(asset.id)" @pointerdown="beginAssetPointerDrag($event, asset)" @click="onMaterialCardClick(asset)"><img v-if="asset.type === 'image'" :src="assetUrl(asset)" alt="" draggable="false"/><img v-else-if="asset.type === 'video' && assetThumbnailUrl(asset)" :src="assetThumbnailUrl(asset)" alt="" draggable="false"/><span v-else-if="asset.type === 'video'" class="material-video-placeholder"><el-icon><VideoCamera /></el-icon></span><span v-else>🎵</span><small>{{ asset.alias || asset.name }}</small><button type="button" class="material-delete" :aria-label="`删除素材 ${asset.alias || asset.name}`" title="删除素材" @pointerdown.stop @click.stop="deleteMaterialAsset(asset)">×</button><button type="button" class="insert-at-caret" :aria-label="`将 ${asset.alias || asset.name} 插入光标处`" title="插入光标处" @click.stop="promptEditorRef?.insertAtCaret(asset)">插入此处</button><em v-if="asset.drama_id" class="asset-scope-label">项目</em><em v-else class="asset-scope-label">全局</em></article>
         </div>
 
         <div class="selected-assets">
@@ -803,6 +803,24 @@ function onShotListWheel(event) {
 function toggle(asset) { const next = new Set(selected.value); if (next.has(asset.id)) { next.delete(asset.id); selectedOrder.value = selectedOrder.value.filter((id) => id !== asset.id) } else { const typeCount = selectionCounts.value[asset.type] || 0; if (chosenAssets.value.length >= shotLimits.value.total || typeCount >= shotLimits.value[asset.type]) { ElMessage.warning(`当前镜头最多选择 ${shotLimits.value[asset.type]} 个${typeName(asset.type)}，总数最多 ${shotLimits.value.total} 个`); return } next.add(asset.id); selectedOrder.value = [...selectedOrder.value, asset.id]; asset.usage ||= asset.type === 'image' ? 'reference' : asset.type === 'video' ? 'motion' : 'ambience' } selected.value = next; scheduleSave() }
 function onMaterialCardClick(asset) { if (!shouldSuppressAssetClick()) promptEditorRef.value?.insertAtCaret(asset) }
 function remove(id) { const next = new Set(selected.value); next.delete(id); selected.value = next; selectedOrder.value = selectedOrder.value.filter((item) => item !== id); scheduleSave() }
+async function deleteMaterialAsset(asset) {
+  if (!asset?.id) return
+  const isProjectAsset = Number(asset.drama_id) > 0
+  try {
+    await ElMessageBox.confirm(
+      isProjectAsset
+        ? `确定删除当前项目中的“${asset.alias || asset.name || `素材 ${asset.id}`}”？`
+        : `确定从我的全局素材库删除“${asset.alias || asset.name || `素材 ${asset.id}`}”？其他项目将不再看到该素材。`,
+      isProjectAsset ? '删除项目素材' : '删除全局素材',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '保留' },
+    )
+    await omniVideoAPI.deleteAsset(asset.id)
+    assets.value = assets.value.filter((item) => Number(item.id) !== Number(asset.id))
+    ElMessage.success('素材已删除')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close' && error?.action !== 'cancel' && error?.action !== 'close') ElMessage.error(error?.message || '删除素材失败')
+  }
+}
 function clearSelectedAssets() { selected.value = new Set(); selectedOrder.value = []; scheduleSave(); ElMessage.success('已清空本镜素材；历史生成记录保持不变') }
 function dropSelectedAsset(targetId) { if (!draggedAssetId.value || draggedAssetId.value === targetId) return; const order = [...selectedOrder.value], from = order.indexOf(draggedAssetId.value), to = order.indexOf(targetId); const [moved] = order.splice(from, 1); order.splice(to, 0, moved); selectedOrder.value = order; draggedAssetId.value = null; scheduleSave() }
 function onPickFromEditor(asset) { if (asset && !selected.value.has(asset.id)) toggle(asset) }
@@ -1016,6 +1034,8 @@ onMounted(() => {
 .frame-actions{display:flex;flex:0 0 auto;align-items:center;justify-content:flex-end;gap:6px;min-width:0;padding:8px 12px;border-top:1px solid #45433f;background:#181818;color:#dedbd4;overflow-x:auto;scrollbar-width:thin}.frame-actions .el-button{flex:0 0 auto;margin:0!important}.generation-history{display:grid;gap:7px;margin-top:12px;padding-top:10px;border-top:1px solid #45433f}.generation-history-head{display:flex;align-items:baseline;justify-content:space-between}.generation-history-head b{font-size:12px}.generation-history-head small,.generation-history-empty{margin:0;color:#aaa69e;font-size:11px}.generation-history-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.generation-history-item{position:relative;display:grid;grid-template-rows:92px auto;gap:5px;min-width:0;padding:4px;border:1px solid #4b4944;border-radius:6px;background:#202020;color:#dedbd4;text-align:left;cursor:pointer;font:inherit;overflow:hidden}.generation-history-item video,.history-video-empty{display:block;width:100%;height:92px;object-fit:cover;border-radius:4px;background:#0b0b0b}.history-video-empty{display:grid;place-items:center;color:#96928a;font-size:11px}.generation-history-item:hover,.generation-history-item.active{border-color:#f0eee8;background:#30302e}.generation-history-item.active{box-shadow:inset 0 0 0 1px #f0eee8}.history-card-meta{display:grid;gap:2px;min-width:0;padding:0 2px 2px}.history-card-meta b,.history-card-meta small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-card-meta b{font-size:10px}.history-card-meta small{color:#c4c1ba;font-size:10px}.history-dot{position:absolute;top:8px;right:8px;width:7px;height:7px;border:1px solid #111;border-radius:50%;background:#8b8983}.history-dot.completed{background:#7eae85}.history-dot.processing{background:#d6a854}.history-dot.failed,.history-dot.retryable{background:#d66b6b}@media(max-width:520px){.generation-history-grid{grid-template-columns:1fr}.frame-actions{gap:3px;padding:6px 8px}.frame-actions .el-button{font-size:11px}}
 .asset-scope{width:92px;margin-right:4px}.material-card .asset-scope-label{position:absolute;left:3px;top:3px;padding:1px 3px;border-radius:3px;background:#111c;color:#dbe7f2;font-size:9px;font-style:normal;line-height:1.2}
 .material-card .insert-at-caret{position:absolute;right:5px;bottom:4px;z-index:2;border:1px solid color-mix(in srgb,var(--accent) 55%,var(--border-color));border-radius:999px;padding:2px 7px;background:color-mix(in srgb,var(--bg-elevated) 92%,transparent);color:var(--text-primary);font-size:10px;line-height:1.35;cursor:pointer;box-shadow:var(--shadow-sm)}
+.material-card .material-delete{position:absolute;right:5px;top:5px;z-index:3;display:grid;place-items:center;width:24px;height:24px;padding:0;border:1px solid rgba(255,255,255,.78);border-radius:50%;background:rgba(27,31,42,.9);color:#fff;font-size:17px;line-height:1;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.4)}
+.material-card .material-delete:hover,.material-card .material-delete:focus-visible{border-color:#fff;background:var(--el-color-danger);outline:2px solid color-mix(in srgb,var(--el-color-danger) 58%,transparent);outline-offset:1px}
 .material-card .insert-at-caret:hover,.material-card .insert-at-caret:focus-visible{border-color:var(--accent);background:var(--accent);color:var(--text-on-accent);outline:none}
 .material-card>small{padding-right:68px!important}
 /* 素材池以图片识别为主：两列大缩略图，避免四列小图难以判断内容。 */

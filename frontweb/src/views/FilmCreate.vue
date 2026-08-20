@@ -441,6 +441,16 @@
                 >
                   <img v-if="item.type === 'image'" :src="item.thumbUrl || sbOmniAssetUrl(item)" alt="" />
                   <span v-else class="sb-omni-material-card-icon">{{ item.type === 'audio' ? '🎵' : '🎬' }}</span>
+                  <el-button
+                    v-if="item.poolType === 'asset'"
+                    class="sb-omni-material-delete"
+                    size="small"
+                    type="danger"
+                    circle
+                    :aria-label="`删除素材 ${item.name || item.id}`"
+                    @pointerdown.stop
+                    @click.stop="deleteSbOmniPoolAsset(activeSb, item)"
+                  >×</el-button>
                   <small>{{ item.name }}</small>
                 </div>
                 <div v-if="!sbOmniPoolItems(activeSb).length" class="sb-omni-material-pool-empty">暂无素材，请返回「统一资源管理」上传或生成素材。</div>
@@ -6155,6 +6165,13 @@ async function deleteResourceMedia(asset) {
   }
 }
 
+// 仅允许删除真实素材库记录；场景、角色、道具的虚拟候选仍在其资源卡片中管理。
+// 服务端会阻止删除任何仍被可编辑镜头引用的素材。
+async function deleteSbOmniPoolAsset(_sb, item) {
+  if (item?.poolType !== 'asset') return
+  await deleteResourceMedia(item)
+}
+
 async function onSbOmniFileInputChange(e) {
   const files = e.target?.files
   const target = sbOmniUploadTargetId.value
@@ -11856,4 +11873,6 @@ html.light .frame-layout-anchor {
   .film-create>.main{width:100%;max-width:none;min-width:0;padding-inline:clamp(.75rem,2vw,2rem)}
   .storyboard-stage-active .main{max-width:none;padding-inline:clamp(.5rem,1.5vw,1.5rem)}
 }
+.sb-omni-material-delete{position:absolute;z-index:2;top:6px;right:6px;min-width:24px!important;width:24px;height:24px;padding:0!important;border:1px solid rgba(255,255,255,.76)!important;background:rgba(30,36,54,.88)!important;color:#fff!important;box-shadow:0 1px 5px rgba(0,0,0,.38)}
+.sb-omni-material-delete:hover,.sb-omni-material-delete:focus-visible{border-color:#fff!important;background:var(--el-color-danger)!important;outline:2px solid color-mix(in srgb,var(--el-color-danger) 58%,transparent);outline-offset:1px}
 </style>
