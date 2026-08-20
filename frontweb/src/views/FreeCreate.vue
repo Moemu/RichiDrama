@@ -44,6 +44,10 @@
       <aside class="panel creation-panel" aria-label="创作输入与生成设置">
         <div class="panel-title"><b>视频生成方式</b><el-tag size="small" type="info">{{ creationMode === 'first_last_frame' ? '首尾帧生视频' : '多参考生视频' }}</el-tag></div>
         <el-radio-group v-model="creationMode" size="small" class="mode-switch"><el-radio-button value="multi_reference">多参考生视频</el-radio-button><el-radio-button value="first_last_frame">首尾帧生视频</el-radio-button></el-radio-group>
+        <section v-if="!isProjectMode" class="billing-project-field" aria-labelledby="billing-project-title">
+          <div><b id="billing-project-title">计费归属项目</b><small>{{ sequence?.drama_id ? '本全能创作已锁定此项目，后续生成与积分均归属这里。' : '请选择本次全能创作的计费项目。首次生成后将锁定，避免跨项目混账。' }}</small></div>
+          <el-select v-model="freeProjectId" filterable :disabled="!!sequence?.drama_id" placeholder="选择计费项目" aria-label="选择计费归属项目"><el-option v-for="project in projects" :key="project.id" :label="project.title" :value="project.id"/></el-select>
+        </section>
         <small class="mode-note">{{ creationMode === 'first_last_frame' ? '必须设置一张首帧（必填），尾帧可选；模型不支持时不可提交。' : '图片、视频、音频可按用途自由编排，按模型能力自动路由。' }}</small>
         <el-alert v-if="!currentCapability" class="model-config-alert" type="warning" :closable="false" title="尚未配置可用的视频模型" description="请联系运营管理员为当前项目组绑定已验证的视频模型；配置后本工作台会自动读取它的素材能力与限制。" />
         <div class="creation-generate-dock" aria-label="当前镜头生成操作">
@@ -70,7 +74,7 @@
           <div class="parameters"><label>音频<el-select v-model="audioStrategy" size="small"><el-option label="音频参考" value="reference_only"/><el-option label="成片混音" value="post_mix"/></el-select></label></div>
         </section>
 
-        <div class="materials-title"><b>当前镜头素材</b><div><el-select v-if="!isProjectMode" v-model="freeProjectId" class="asset-scope" size="small" filterable :disabled="!!sequence?.drama_id" placeholder="选择计费项目" aria-label="选择计费归属项目"><el-option v-for="project in projects" :key="project.id" :label="project.title" :value="project.id"/></el-select><el-select v-model="assetScope" size="small" class="asset-scope" :aria-label="isProjectMode ? '筛选当前项目或全局素材' : '选择素材来源'"><template v-if="isProjectMode"><el-option label="全部素材（本项目 + 全局）" value="all"/><el-option label="本项目素材" value="project"/><el-option label="我的全局素材" value="global"/></template><template v-else><el-option label="我的全局素材" value="global"/><el-option label="项目素材" value="project"/></template></el-select><el-button text size="small" @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
+        <div class="materials-title"><b>当前镜头素材</b><div><el-select v-model="assetScope" size="small" class="asset-scope" :aria-label="isProjectMode ? '筛选当前项目或全局素材' : '选择素材来源'"><template v-if="isProjectMode"><el-option label="全部素材（本项目 + 全局）" value="all"/><el-option label="本项目素材" value="project"/><el-option label="我的全局素材" value="global"/></template><template v-else><el-option label="我的全局素材" value="global"/><el-option label="项目素材" value="project"/></template></el-select><el-button text size="small" @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
         <input ref="fileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="uploadFiles" />
         <div class="dropzone" @click="pickFiles" @dragover.prevent @drop.prevent="dropFiles"><el-icon><Upload /></el-icon>拖入图片、视频或音频</div>
         <small class="upload-limit-note">{{ limitSummary }}</small>
@@ -1257,4 +1261,5 @@ onMounted(() => {
 :global(html body #app .omni-page .material-card.selected){border:2px solid #fff!important;background:var(--bg-raised)!important;box-shadow:0 0 0 2px rgb(255 255 255 / 58%),0 0 14px rgb(84 234 212 / 42%)!important}
 :global(html body #app .omni-page .material-card.selected small){position:relative;padding-left:24px!important;background:#fff!important;color:#111827!important;font-weight:750!important}
 :global(html body #app .omni-page .material-card.selected small::before){content:'✓';position:absolute;left:7px;top:50%;transform:translateY(-50%);font-size:12px;font-weight:900;color:#111827}
+.billing-project-field{display:grid;grid-template-columns:minmax(0,1fr) minmax(156px,44%);gap:10px;align-items:center;margin:12px 0;padding:10px;border:1px solid color-mix(in srgb,var(--studio-accent) 52%,var(--border-color));border-radius:8px;background:color-mix(in srgb,var(--studio-accent) 10%,var(--bg-raised))}.billing-project-field b{display:block;color:var(--text-primary);font-size:13px}.billing-project-field small{display:block;margin-top:4px;color:var(--text-muted);line-height:1.45;font-size:11px}.billing-project-field :deep(.el-select__wrapper){min-height:34px;border-color:color-mix(in srgb,var(--studio-accent) 58%,var(--border-color))}@media(max-width:1080px){.billing-project-field{grid-template-columns:1fr}.billing-project-field :deep(.el-select){width:100%}}
 </style>

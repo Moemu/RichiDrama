@@ -149,6 +149,8 @@ test('每次工具与自由全能生成都要求并传递唯一的计费归属�
     assert.match(source, /drama_id:\s*Number\(dramaId\.value\)/)
   }
   assert.match(freeCreate, /placeholder="选择计费项目" aria-label="选择计费归属项目"/)
+  assert.match(freeCreate, /class="billing-project-field" aria-labelledby="billing-project-title"/)
+  assert.match(freeCreate, /首次生成后将锁定，避免跨项目混账/)
   assert.match(freeCreate, /drama_id:\s*Number\(freeProjectId\.value\)/)
   assert.match(freeCreate, /:disabled="!!sequence\?\.drama_id"/)
   assert.match(freeCreate, /if \(Number\(seq\?\.drama_id\)\) freeProjectId\.value = Number\(seq\.drama_id\)/)
