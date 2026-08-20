@@ -47,6 +47,24 @@ test('分镜生成操作保留 main 的紫色可用与禁用层级', async () =>
   assert.match(source, /border-color:color-mix\(in srgb,var\(--studio-accent\) 52%,var\(--border-color\)\)!important/)
 })
 
+test('分镜素材池可直接删除未被镜头引用的真实素材', async () => {
+  const [filmSource, freeSource] = await Promise.all([
+    readSource('../src/views/FilmCreate.vue'),
+    readSource('../src/views/FreeCreate.vue'),
+  ])
+
+  assert.match(filmSource, /class="sb-omni-material-delete"/)
+  assert.match(filmSource, /v-if="item\.poolType === 'asset'"/)
+  assert.match(filmSource, /@click\.stop="deleteSbOmniPoolAsset\(activeSb, item\)"/)
+  assert.match(filmSource, /async function deleteSbOmniPoolAsset\(_sb, item\)/)
+  assert.match(filmSource, /await deleteResourceMedia\(item\)/)
+  assert.match(freeSource, /class="material-delete"/)
+  assert.match(freeSource, /@pointerdown\.stop @click\.stop="deleteMaterialAsset\(asset\)"/)
+  assert.match(freeSource, /async function deleteMaterialAsset\(asset\)/)
+  assert.match(freeSource, /await omniVideoAPI\.deleteAsset\(asset\.id\)/)
+  assert.match(freeSource, /await omniVideoAPI\.linkProjectResource\(\{/)
+})
+
 test('工作台不以镜头时长重复模拟生成进度', async () => {
   const source = await readSource('../src/views/FreeCreate.vue')
 
@@ -93,7 +111,9 @@ test('workbench and media library expose the premium entry surfaces', async () =
 
   assert.match(tools, /class="tool-manifesto"/)
   assert.match(tools, /class="directory-list"/)
-  assert.match(tools, /AI<br \/><em>工具箱<\/em>/)
+  // 标题改为单行展示，不再强制换行。
+  assert.match(tools, /<h1>AI <em>工具箱<\/em><\/h1>/)
+  assert.match(tools, /manifesto-copy h1 \{[^}]*white-space:nowrap/)
   assert.doesNotMatch(tools, /灵感不该|困在工具里/)
   assert.doesNotMatch(tools, /class="tool-grid"/)
   assert.match(library, /class="page-header library-header"/)
@@ -246,7 +266,7 @@ test('工作区在缩放时让舞台优先收缩，运营导航提供图标语�
   assert.match(free, /缩放与窄屏：三栏按可用宽度收缩/)
   assert.match(free, /grid-template-columns:minmax\(196px,230px\) minmax\(0,1fr\) minmax\(292px,350px\)/)
   assert.match(free, /project-storyboard-page \.workbench\{height:min\(820px,calc\(100dvh - 120px\)\)/)
-  assert.match(film, /width:calc\(100% - 214px\);max-width:none/)
+  assert.match(film, /\.film-create>\.main\{width:100%;max-width:none/)
   assert.match(film, /A restrained sense of motion keeps the production flow visually alive/)
   assert.match(film, /@keyframes workflow-orbit/)
   assert.doesNotMatch(film, /storyboard-workbench-toolbar/)
@@ -320,7 +340,7 @@ test('成片操作栏不会覆盖视频，嵌入分镜保持三栏创作节奏',
   assert.ok(videoStageStart >= 0 && frameActionsStart > videoStageStart, 'the frame actions must follow the video stage')
   assert.doesNotMatch(free.slice(videoStageStart, frameActionsStart), /<div class="frame-actions"/)
   assert.match(free, /\.frame-actions\{display:flex;flex:0 0 auto/)
-  assert.match(film, /storyboard breakpoints are\n   based on the remaining work area/)
+  assert.match(film, /左侧导航栏已移除，工作区占满整个视口宽度/)
   assert.match(free, /project-storyboard-page \.creation-panel\{grid-column:1;grid-row:1/)
   assert.match(free, /project-storyboard-page \.center-stage\{grid-column:2;grid-row:1/)
   assert.match(free, /project-storyboard-page \.shot-panel\{grid-column:3;grid-row:1/)

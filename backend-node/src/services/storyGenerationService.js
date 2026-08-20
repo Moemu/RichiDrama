@@ -157,9 +157,21 @@ function startStoryGeneration(db, log, req) {
     return existing.id;
   }
 
-  const task = taskService.createTask(db, log, 'story_generation', dramaId);
+  // Preserve the request scope explicitly: this task runs after the HTTP
+  // response and its bill must keep the project snapshot selected by the user.
+  const billingContext = require('./billingRequestContext');
+  const requestBillingContext = billingContext.current();
+  const task = taskService.createTask(
+    db, log, 'story_generation', dramaId,
+    requestBillingContext?.actor?.id || null,
+    requestBillingContext?.tenant_id || null
+  );
   setImmediate(() => {
-    processStoryGeneration(db, log, task.id, req).catch((err) => {
+    const execute = () => processStoryGeneration(db, log, task.id, req);
+    const processing = requestBillingContext
+      ? billingContext.run(requestBillingContext, execute)
+      : execute();
+    processing.catch((err) => {
       log.error('processStoryGeneration fatal', { error: err.message, task_id: task.id });
       taskService.updateTaskError(db, task.id, err.message || '故事生成失败');
     });

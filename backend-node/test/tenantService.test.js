@@ -122,3 +122,28 @@ test('tenant-owned AI and SD2 configs cannot bleed into another tenant', () => {
     assert.throws(() => tenants.bindOwnedConfig(db, groupA.id, ownB), /本分组/);
   } finally { teardown(dbPath); }
 });
+
+test('new users auto-join the group marked as new-user default', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const marked = tenants.writeTenant(db, admin.id, { name: '标准价目组', is_new_user_default: true });
+    assert.equal(marked.is_new_user_default, 1);
+    const before = auth.createUser(db, { username: 'default-group-user', password: 'user123456' }, admin.id);
+    let tenant = tenants.tenantForUser(db, before.id);
+    assert.equal(tenant.name, '标准价目组');
+
+    // 单默认约束：标记其它分组会取消前一个
+    const other = tenants.writeTenant(db, admin.id, { name: '另一个组', is_new_user_default: true });
+    assert.equal(tenants.newUserDefaultTenant(db).id, other.id);
+    const after = auth.createUser(db, { username: 'second-default-user', password: 'user123456' }, admin.id);
+    tenant = tenants.tenantForUser(db, after.id);
+    assert.equal(tenant.name, '另一个组');
+
+    // 已有成员不被迁移：把默认标记指回“标准价目组”不移动存量成员
+    tenants.writeTenant(db, admin.id, { name: '另一个组', is_new_user_default: false }, other.id);
+    const member = auth.createUser(db, { username: 'third-user', password: 'user123456' }, admin.id);
+    tenants.setMember(db, other.id, member.id, 'creator');
+    tenants.writeTenant(db, admin.id, { name: '标准价目组', is_new_user_default: true }, marked.id);
+    assert.equal(tenants.tenantForUser(db, member.id).name, '另一个组');
+  } finally { teardown(dbPath); }
+});

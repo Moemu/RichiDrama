@@ -63,7 +63,7 @@ function routes(db, log) {
         const authorization = billing.createAuthorization(db, req.auth, {
           idempotency_key: String(body.idempotency_key).trim(),
           service_type: body.service_type || 'video', model: billingTarget.billing_key,
-          usage, pricing_context: { has_video_input: !!body.video_url, resolution: body.resolution || '480p', has_audio: !!body.audio_url }, reference_type: 'video_generation', reference_id: body.drama_id || null,
+          usage, pricing_context: { has_video_input: !!body.video_url, resolution: body.resolution || '480p', has_audio: !!body.audio_url }, reference_type: 'video_generation', reference_id: body.drama_id || null, drama_id: body.drama_id || null, source_kind: 'video_generation', source_id: body.storyboard_id || null,
         });
         const task = taskService.createTask(db, log, 'video_generation', String(body.drama_id || ''), req.auth.id, tenant?.id || null);
         const now = new Date().toISOString();

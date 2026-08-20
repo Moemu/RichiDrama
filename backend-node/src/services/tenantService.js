@@ -102,12 +102,15 @@ function writeTenant(db, actorId, input, id) {
   if (!name) throw new Error('分组名称必填');
   const status = input.status === 'disabled' ? 'disabled' : 'active';
   const at = new Date().toISOString();
+  const wantsDefault = input.is_new_user_default === true;
   if (id) {
     const changed = db.prepare('UPDATE tenants SET name=?, status=?, updated_at=? WHERE id=?').run(name, status, at, Number(id));
     if (!changed.changes) return null;
+    if (input.is_new_user_default !== undefined) applyNewUserDefault(db, Number(id), wantsDefault, at);
     return tenantDetail(db, Number(id));
   }
   const info = db.prepare('INSERT INTO tenants (name,status,created_by,created_at,updated_at) VALUES (?,?,?,?,?)').run(name, status, actorId, at, at);
+  if (wantsDefault) applyNewUserDefault(db, Number(info.lastInsertRowid), true, at);
   const tenantId = Number(info.lastInsertRowid);
   seedOwnedConfigTemplates(db, tenantId, actorId);
   return tenantDetail(db, tenantId);
@@ -152,6 +155,35 @@ function seedOwnedConfigTemplates(db, tenantId, actorId) {
     });
     bindOwnedConfig(db, tenantId, created, { is_default: !!row.is_default, priority: row.priority });
   }
+}
+
+// 新用户默认分组：全平台最多一个；用于创建账号时自动入组，
+// 管理员不必再逐个调整分组。未标记任何分组时回退到“默认项目组”。
+function applyNewUserDefault(db, tenantId, enabled, at) {
+  if (enabled) db.prepare('UPDATE tenants SET is_new_user_default=0, updated_at=? WHERE id != ?').run(at, Number(tenantId));
+  db.prepare('UPDATE tenants SET is_new_user_default=?, updated_at=? WHERE id=?').run(enabled ? 1 : 0, at, Number(tenantId));
+}
+
+function newUserDefaultTenant(db) {
+  if (!hasTable(db, 'tenants')) return null;
+  return db.prepare("SELECT * FROM tenants WHERE status='active' AND is_new_user_default=1").get()
+    || db.prepare("SELECT * FROM tenants WHERE status='active' AND name='默认项目组'").get()
+    || null;
+}
+
+function ensureNewUserMembership(db, userId) {
+  if (!hasTable(db, 'tenant_memberships')) return;
+  const marked = db.prepare("SELECT * FROM tenants WHERE status='active' AND is_new_user_default=1").get();
+  // 未标记任何分组时，ensureDefaultTenant 的默认组收编已是最终结果。
+  if (!marked) return;
+  const fallback = db.prepare("SELECT id FROM tenants WHERE name='默认项目组'").get();
+  const current = db.prepare('SELECT tenant_id FROM tenant_memberships WHERE user_id=?').get(Number(userId));
+  // 只在“尚无分组”或“刚被默认组自动收编”时接管；已在其它分组的成员不动。
+  if (current && (!fallback || Number(current.tenant_id) !== Number(fallback.id))) return;
+  const at = new Date().toISOString();
+  db.prepare(`INSERT INTO tenant_memberships (tenant_id,user_id,role,created_at,updated_at) VALUES (?,?,?,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET tenant_id=excluded.tenant_id, updated_at=excluded.updated_at`)
+    .run(marked.id, Number(userId), 'creator', at, at);
 }
 
 function setMember(db, tenantId, userId, role = 'creator') {
@@ -241,4 +273,4 @@ function replaceBindings(db, tenantId, input) {
   return tenantDetail(db, target.id);
 }
 
-module.exports = { hasTable, tenantForUser, configIdsForService, configIdsForTenant, usesLegacyGlobalConfigs, priceBookForUser, ensureDefaultTenant, listTenants, tenantDetail, writeTenant, setMember, bindOwnedConfig, replaceBindings };
+module.exports = { hasTable, tenantForUser, configIdsForService, configIdsForTenant, usesLegacyGlobalConfigs, priceBookForUser, ensureDefaultTenant, listTenants, tenantDetail, writeTenant, setMember, bindOwnedConfig, replaceBindings, newUserDefaultTenant, ensureNewUserMembership };

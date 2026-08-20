@@ -317,6 +317,21 @@ function ensureAllColumns(database) {
     { name: 'deleted_at',   type: 'TEXT' },
   ]);
 
+  // --- tenants ---（兜底列：新用户默认分组标记，见 migrations/61）
+  try {
+    database.exec(`CREATE TABLE IF NOT EXISTS tenants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_by INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`);
+  } catch (_) {}
+  ensureColumns(database, 'tenants', [
+    { name: 'is_new_user_default', type: 'INTEGER DEFAULT 0' },
+  ]);
+
   // --- ai_service_configs ---（兜底建表：旧版 01_init.sql 可能未包含此表）
   try {
     database.exec(`CREATE TABLE IF NOT EXISTS ai_service_configs (
@@ -457,6 +472,7 @@ function ensureAllColumns(database) {
 
   ensureColumns(database, 'storyboards', [
     { name: 'active_video_generation_id', type: 'INTEGER' },
+    { name: 'omni_asset_send_policy', type: "TEXT NOT NULL DEFAULT 'all_selected'" },
   ]);
 
   ensureColumns(database, 'video_interpolation_jobs', [
@@ -522,6 +538,24 @@ function ensureAllColumns(database) {
     { name: 'deleted_at',   type: 'TEXT' },
   ]);
 
+  // --- billing project attribution snapshots ---
+  ensureColumns(database, 'billing_transactions', [
+    { name: 'drama_id', type: 'INTEGER' },
+    { name: 'project_title_snapshot', type: 'TEXT' },
+    { name: 'source_kind', type: 'TEXT' },
+    { name: 'source_id', type: 'TEXT' },
+  ]);
+  ensureColumns(database, 'billing_usage_logs', [
+    { name: 'drama_id', type: 'INTEGER' },
+    { name: 'project_title_snapshot', type: 'TEXT' },
+    { name: 'source_kind', type: 'TEXT' },
+    { name: 'source_id', type: 'TEXT' },
+  ]);
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_billing_usage_project_created ON billing_usage_logs(drama_id, created_at DESC)');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_billing_usage_user_created ON billing_usage_logs(user_id, created_at DESC)');
+  } catch (_) {}
+
   // --- omni_video_jobs ---
   try {
     database.exec(`CREATE TABLE IF NOT EXISTS omni_video_jobs (
@@ -543,7 +577,10 @@ function ensureAllColumns(database) {
       { name: 'sequence_id', type: 'INTEGER' },
       { name: 'shot_id', type: 'INTEGER' },
       { name: 'storyboard_id', type: 'INTEGER' },
+      { name: 'hidden_at', type: 'TEXT' },
+      { name: 'hidden_by_user_id', type: 'INTEGER' },
     ]);
+    database.exec('CREATE INDEX IF NOT EXISTS idx_omni_jobs_owner_visible ON omni_video_jobs(owner_user_id, hidden_at, id DESC)');
   } catch (_) {}
 
   // --- character_libraries ---

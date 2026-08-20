@@ -46,7 +46,8 @@ test('classic storyboard persists per-shot text and video generation settings', 
     CREATE TABLE characters (id INTEGER PRIMARY KEY, name TEXT, deleted_at TEXT);
     CREATE TABLE character_libraries (id INTEGER PRIMARY KEY, name TEXT, drama_id INTEGER, deleted_at TEXT);`);
   db.prepare('INSERT INTO storyboards (id, episode_id, title, duration) VALUES (1, 1, ?, 5)').run('shot');
-  const updated = storyboardService.updateStoryboard(db, log, 1, { text_model: 'gpt-text', video_model: 'seedance-2', video_resolution: '1080p', video_aspect_ratio: '9:16', duration: 10 });
+  // expected_updated_at 已不再作为乐观锁：过期时间戳也允许直接保存（单人使用场景）。
+  const updated = storyboardService.updateStoryboard(db, log, 1, { text_model: 'gpt-text', video_model: 'seedance-2', video_resolution: '1080p', video_aspect_ratio: '9:16', duration: 10, expected_updated_at: '2000-01-01T00:00:00.000Z' });
   assert.equal(updated.text_model, 'gpt-text');
   assert.equal(updated.video_model, 'seedance-2');
   assert.equal(updated.video_resolution, '1080p');

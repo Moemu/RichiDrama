@@ -39,7 +39,7 @@
 
     <section class="story-stage" aria-labelledby="story-title">
       <p class="story-kicker"><span></span> AI 原生短剧创作产品</p>
-      <h1 id="story-title">本地短剧<br><em>制作平台</em></h1>
+      <h1 id="story-title">瑞池传媒<br><em>短剧平台</em></h1>
 
       <ol class="creation-track" aria-label="短剧创作流程">
         <li v-for="(step, index) in creationSteps" :key="step.label" :class="{ active: activeStep === index }">

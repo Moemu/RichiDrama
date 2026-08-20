@@ -53,6 +53,57 @@ test('billing settles real provider usage above the authorization when the relea
   } finally { teardown(dbPath); }
 });
 
+test('usage summary keeps project attribution as an authorization-time snapshot and separates unassigned history', () => {
+  const { db, dbPath, admin, log } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'project-usage', password: 'creator123' }, admin.id);
+    const actor = { id: user.id, role: 'user' };
+    billing.savePriceBook(db, admin.id, { name: 'project-usage-book', status: 'published', items: [{ service_type: 'image', model: 'project-image', meter: 'image', unit_price: 10 }] });
+    billing.adjustBalance(db, admin.id, user.id, 100, 'test points');
+    const alpha = drama.createDrama(db, log, { title: '项目 Alpha', owner_user_id: user.id });
+    const beta = drama.createDrama(db, log, { title: '项目 Beta', owner_user_id: user.id });
+    const first = billing.createAuthorization(db, actor, { idempotency_key: 'project-alpha', service_type: 'image', model: 'project-image', usage: { image: 1 }, drama_id: alpha.id, source_kind: 'image_generation', source_id: 'a-1' });
+    const second = billing.createAuthorization(db, actor, { idempotency_key: 'project-beta', service_type: 'image', model: 'project-image', usage: { image: 1 }, drama_id: beta.id, source_kind: 'image_generation', source_id: 'b-1' });
+    const legacy = billing.createAuthorization(db, actor, { idempotency_key: 'project-legacy', service_type: 'image', model: 'project-image', usage: { image: 1 } });
+    billing.settleAuthorization(db, actor, first.authorization_id, { usage: { image: 1 } });
+    billing.settleAuthorization(db, actor, second.authorization_id, { usage: { image: 1 } });
+    billing.settleAuthorization(db, actor, legacy.authorization_id, { usage: { image: 1 } });
+    db.prepare('UPDATE dramas SET title=? WHERE id=?').run('项目 Alpha 已改名', alpha.id);
+    const summary = billing.usageSummary(db, { user_id: user.id });
+    assert.equal(summary.summary.charged, 30);
+    assert.equal(summary.summary.projects, 2);
+    assert.equal(summary.unassigned.charged, 10);
+    assert.equal(summary.user_project_breakdown.find((row) => row.drama_id === alpha.id).project_title, '项目 Alpha');
+    assert.equal(summary.user_project_breakdown.find((row) => row.drama_id === beta.id).charged, 10);
+  } finally { teardown(dbPath); }
+});
+
+test('project snapshot backfill only restores an unambiguous owned generation', () => {
+  const { db, dbPath, admin, log } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'snapshot-backfill', password: 'creator123' }, admin.id);
+    const actor = { id: user.id, role: 'user' };
+    billing.savePriceBook(db, admin.id, { name: 'snapshot-backfill-book', status: 'published', items: [{ service_type: 'video', model: 'snapshot-video', meter: 'second', unit_price: 1 }] });
+    billing.adjustBalance(db, admin.id, user.id, 100, 'test points');
+    const project = drama.createDrama(db, log, { title: '可安全回填项目', owner_user_id: user.id });
+    const authorization = billing.createAuthorization(db, actor, { idempotency_key: 'snapshot-backfill-auth', service_type: 'video', model: 'snapshot-video', usage: { second: 1 }, drama_id: project.id });
+    billing.settleAuthorization(db, actor, authorization.authorization_id, { usage: { second: 1 } });
+    db.prepare('UPDATE billing_usage_logs SET drama_id=NULL, project_title_snapshot=NULL, source_kind=NULL, source_id=NULL WHERE authorization_id=?').run(authorization.authorization_id);
+    db.prepare('UPDATE billing_transactions SET drama_id=NULL, project_title_snapshot=NULL, source_kind=NULL, source_id=NULL WHERE id=? OR authorization_id=?').run(authorization.authorization_id, authorization.authorization_id);
+    db.prepare('INSERT INTO video_generations (owner_user_id, drama_id, billing_authorization_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(user.id, project.id, authorization.authorization_id, 'completed', new Date().toISOString(), new Date().toISOString());
+
+    const result = billing.backfillProjectSnapshots(db, admin.id, 'snapshot-backfill-run');
+    assert.equal(result.usage_logs, 1);
+    assert.equal(result.projects, 1);
+    const usage = db.prepare('SELECT drama_id, project_title_snapshot FROM billing_usage_logs WHERE authorization_id=?').get(authorization.authorization_id);
+    assert.deepEqual(usage, { drama_id: project.id, project_title_snapshot: '可安全回填项目' });
+    assert.equal(db.prepare("SELECT COUNT(*) count FROM billing_audit_logs WHERE action='billing.project_snapshot.backfill'").get().count, 1);
+    assert.equal(billing.backfillProjectSnapshots(db, admin.id, 'snapshot-backfill-run').reused, true);
+    assert.equal(db.prepare("SELECT COUNT(*) count FROM billing_audit_logs WHERE action='billing.project_snapshot.backfill'").get().count, 1);
+  } finally { teardown(dbPath); }
+});
+
 test('billing keeps the authorization frozen for reconciliation when actual usage exceeds releasable balance', () => {
   const { db, dbPath, admin } = setup();
   try {
@@ -487,11 +538,17 @@ test('authenticated text calls settle exact provider usage and hold missing usag
       { service_type: 'text', model: 'metered-text-key', meter: 'output_token', unit_price: 3 },
     ] });
     billing.adjustBalance(db, admin.id, user.id, 1000, 'test points');
-    const result = await billingContext.run({ actor: { id: user.id, role: 'user' }, db, log }, () => aiClient.generateText(db, log, 'text', 'hello', 'system', { max_tokens: 100 }));
+    const project = drama.createDrama(db, log, { title: '文本计费项目', owner_user_id: user.id });
+    const result = await billingContext.run({
+      actor: { id: user.id, role: 'user' }, db, log,
+      drama_id: project.id, billing_source_kind: 'story_generation', billing_source_id: String(project.id),
+    }, () => aiClient.generateText(db, log, 'text', 'hello', 'system', { max_tokens: 100 }));
     assert.equal(result, 'ok');
     const usage = billing.listUsage(db, { user_id: user.id });
     assert.deepEqual(usage[0].usage, { input_token: 10, output_token: 5 });
     assert.equal(usage[0].charged_micro, 350000);
+    assert.equal(usage[0].drama_id, project.id);
+    assert.equal(usage[0].project_title_snapshot, '文本计费项目');
     assert.equal(billing.account(db, user.id).frozen_micro, 0);
     sendUsage = false;
     await billingContext.run({ actor: { id: user.id, role: 'user' }, db, log }, () => aiClient.generateText(db, log, 'text', 'missing', 'system', { max_tokens: 100 }));

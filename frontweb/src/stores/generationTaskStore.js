@@ -179,6 +179,9 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
         await taskAPI.cancel(taskId, { reason })
       } catch (e) {
         console.warn('[generationTaskStore] cancel API failed:', e?.message)
+        // Do not turn a still-running remote task into a locally fake
+        // "cancelled" state.  Callers display the API error and leave polling intact.
+        throw e
       }
       stopPollingTask(taskId, reason)
       return

@@ -62,7 +62,7 @@ test('asset mention menus are teleported translucent overlays with bounded inter
   assert.match(promptEditor, /loading="lazy" decoding="async"/)
 })
 
-test('asset drag keeps prompt text visible and supports whitespace-only line targets', () => {
+test('asset drag shows an exact text-boundary caret and rejects whitespace-only lines', () => {
   assert.match(dragPreview, /setDragImage\(transparentPreview, 0, 0\)/)
   assert.match(freeCreate, /@pointerdown="beginAssetPointerDrag\(\$event, asset\)"/)
   assert.match(pointerDrag, /Math\.hypot\([\s\S]*< 6/)
@@ -71,7 +71,10 @@ test('asset drag keeps prompt text visible and supports whitespace-only line tar
   assert.match(promptEditor, /window\.addEventListener\(ASSET_POINTER_MOVE/)
   assert.match(promptEditor, /insertAsset\(detail\.asset, \{ offset: point\.offset \}\)/)
   assert.match(filmCreate, /setTransparentDragPreview\(e\)/)
-  assert.match(promptEditor, /blankLine/)
+  assert.match(promptEditor, /caretRect = range\.getBoundingClientRect\(\)/)
+  assert.match(promptEditor, /source\.slice\(lineStart, lineEnd\)\.trim\(\)/)
+  assert.match(promptEditor, /rejected: true/)
+  assert.match(promptEditor, /point && !point\.rejected/)
   assert.match(promptEditor, /source\[i\] === '\\n'/)
   assert.match(universalEditor, /blankLineDropMeta/)
   assert.match(universalEditor, /omni-drop-indicator/)

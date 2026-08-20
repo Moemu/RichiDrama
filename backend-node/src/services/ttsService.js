@@ -236,9 +236,14 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
   // provider or persistence failure the reservation is released.
   let billingAuthorization = null;
   let billingActor = billing_actor || null;
+  let billingDramaId = null;
   if (!billingActor && storyboard_id) {
     const owner = db.prepare('SELECT d.owner_user_id FROM storyboards s JOIN dramas d ON d.id=s.drama_id WHERE s.id=?').get(Number(storyboard_id));
     if (owner?.owner_user_id) billingActor = { id: owner.owner_user_id, role: 'user' };
+  }
+  if (storyboard_id) {
+    const storyboard = db.prepare('SELECT drama_id FROM storyboards WHERE id=? AND deleted_at IS NULL').get(Number(storyboard_id));
+    billingDramaId = storyboard?.drama_id || null;
   }
   const billingTarget = aiConfigService.resolveBillingTarget(db, 'tts', ttsModel, ttsConfig.id);
   const billing = require('./billingService');
@@ -250,6 +255,7 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
     idempotency_key: `tts:${billingActor.id}:${randomUUID()}`,
     service_type: 'tts', model: billingTarget.billing_key, usage: { character: characters },
     reference_type: billing_reference?.type || 'tts', reference_id: billing_reference?.id || storyboard_id || null,
+    drama_id: billingDramaId, source_kind: 'storyboard_tts', source_id: storyboard_id || null,
   });
   let audioBuffer;
 

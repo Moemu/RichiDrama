@@ -26,6 +26,7 @@ function createAuthorization(db, row, resolution, retryNonce = '') {
     usage: { millisecond: durationMs },
     pricing_context: { resolution_tier: resolution, fps_tier: fpsTier(reserveFps) },
     reference_type: 'video_upscale', reference_id: row.id,
+    drama_id: row.drama_id || null, source_kind: 'video_upscale', source_id: row.id,
   });
 }
 

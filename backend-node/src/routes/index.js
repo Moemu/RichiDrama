@@ -49,6 +49,26 @@ function setupRouter(cfg, db, log) {
   r.patch('/auth/username', auth.changeUsername);
   r.patch('/auth/display-name', auth.changeDisplayName);
   r.use(ownershipGuard(db));
+  // A project id supplied to any authenticated business API establishes the
+  // default scope for downstream text-model calls.  Direct image/video routes
+  // also pass it explicitly, while this covers project subflows such as prompt
+  // polishing and extraction without trusting an unverified client id.
+  r.use((req, res, next) => {
+    const rawDramaId = req.body?.drama_id ?? req.query?.drama_id;
+    if (rawDramaId == null || rawDramaId === '') return next();
+    const dramaId = Number(rawDramaId);
+    if (!Number.isInteger(dramaId) || dramaId <= 0) return next();
+    const owned = db.prepare('SELECT 1 FROM dramas WHERE id=? AND owner_user_id=? AND deleted_at IS NULL')
+      .get(dramaId, req.auth.id);
+    if (!owned) return next();
+    const billingRequestContext = require('../services/billingRequestContext');
+    return billingRequestContext.run({
+      ...(billingRequestContext.current() || {}),
+      drama_id: dramaId,
+      billing_source_kind: 'project_text_generation',
+      billing_source_id: String(dramaId),
+    }, next);
+  });
   const drama = dramaRoutes(db, cfg, log);
   const task = taskRoutes(db, log);
   const settings = settingsRoutes(db, cfg, log);
@@ -114,6 +134,8 @@ function setupRouter(cfg, db, log) {
   adminRouter.patch('/price-books/:id', admin.updatePriceBook);
   adminRouter.get('/transactions', admin.transactions);
   adminRouter.get('/usage', admin.usage);
+  adminRouter.get('/usage-summary', admin.usageSummary);
+  adminRouter.post('/usage-project-snapshots/backfill', admin.backfillProjectUsage);
   adminRouter.get('/overview', admin.overview);
   adminRouter.get('/operations-alert-settings', admin.alertSettings);
   adminRouter.patch('/operations-alert-settings', admin.saveAlertSettings);
@@ -212,8 +234,22 @@ function setupRouter(cfg, db, log) {
     try {
       const body = req.body || {};
       if (body.drama_id) {
-        const taskId = storyGenerationService.startStoryGeneration(db, log, body);
-        return response.success(res, { task_id: taskId, status: 'pending' });
+        const dramaId = Number(body.drama_id);
+        const ownsDrama = Number.isInteger(dramaId) && dramaId > 0 && db.prepare(
+          'SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL'
+        ).get(dramaId, req.auth.id);
+        if (!ownsDrama) return response.notFound(res, '项目不存在或无权限');
+        const billingRequestContext = require('../services/billingRequestContext');
+        const parentContext = billingRequestContext.current() || {};
+        return billingRequestContext.run({
+          ...parentContext,
+          drama_id: dramaId,
+          billing_source_kind: 'story_generation',
+          billing_source_id: String(dramaId),
+        }, () => {
+          const taskId = storyGenerationService.startStoryGeneration(db, log, { ...body, drama_id: dramaId });
+          return response.success(res, { task_id: taskId, status: 'pending' });
+        });
       }
       const result = await storyGenerationService.generateStory(db, log, body);
       response.success(res, result);
@@ -332,6 +368,7 @@ function setupRouter(cfg, db, log) {
   r.post('/omni-video-jobs/polish-prompt', omniVideo.polishPrompt);
   r.post('/omni-video-jobs/:id/retry', omniVideo.retry);
   r.post('/omni-video-jobs/:id/cancel', omniVideo.cancel);
+  r.delete('/omni-video-jobs/:id', omniVideo.hide);
   r.post('/omni-video-jobs/:id/retry-postprocess', omniVideo.retryPostprocess);
   r.post('/omni-video-jobs/:id/adopt-source', omniVideo.adoptSource);
   r.post('/omni-video-jobs/:id/adopt', omniVideo.adopt);

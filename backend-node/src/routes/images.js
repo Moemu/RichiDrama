@@ -41,7 +41,7 @@ function routes(db, cfg, log) {
         const authorization = billing.createAuthorization(db, req.auth, {
           idempotency_key: String(body.idempotency_key).trim(),
           service_type: body.service_type || 'image', model: billingTarget.billing_key,
-          usage: { image: 1 }, reference_type: 'image_generation', reference_id: body.drama_id || null,
+          usage: { image: 1 }, reference_type: 'image_generation', reference_id: body.drama_id || null, drama_id: body.drama_id || null, source_kind: 'image_generation', source_id: body.storyboard_id || null,
         });
         const rec = imageService.create(db, log, { ...body, model, owner_user_id: req.auth.id, tenant_id: tenant?.id || null, billing_authorization_id: authorization.authorization_id });
         response.created(res, rec);

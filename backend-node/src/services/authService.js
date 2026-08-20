@@ -161,6 +161,9 @@ function createUser(db, input, actorId) {
   const id = Number(info.lastInsertRowid);
   db.prepare('INSERT INTO billing_accounts (user_id, updated_at) VALUES (?, ?)').run(id, at);
   try { require('./tenantService').ensureDefaultTenant(db, actorId); } catch (_) {}
+  // 新账号自动加入“新用户默认分组”（未标记时回退默认项目组），
+  // 管理端显式指定的分组在路由层随后覆盖。
+  try { require('./tenantService').ensureNewUserMembership(db, id); } catch (_) {}
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 

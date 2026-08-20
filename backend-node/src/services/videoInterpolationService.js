@@ -37,6 +37,7 @@ function createAuthorization(db, row, targetFps, retryNonce = '') {
     service_type: 'video_postprocess', model: BILLING_MODEL, usage: { millisecond: durationMs },
     pricing_context: { resolution_tier: resolutionTier(row.upscale_resolution || row.resolution), fps_tier: fpsTier(targetFps) },
     reference_type: 'video_interpolation', reference_id: row.id,
+    drama_id: row.drama_id || null, source_kind: 'video_interpolation', source_id: row.id,
   });
 }
 
