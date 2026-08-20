@@ -1,7 +1,7 @@
 <template>
   <div ref="editorRoot" class="editor" :class="{ dragging }" @dragenter.prevent="onDragEnter" @dragover.prevent="onDragOver" @dragleave="onDragLeave" @drop.prevent="onDrop">
     <div class="drop-status" :class="{ active: dragging }" role="status" aria-live="polite">
-      <span v-if="dragging">移动到目标文字间隙，紫色光标就是插入位置</span>
+      <span v-if="dragging">{{ dropCaret.rejected ? '空白行不能插入，请移动到某个字前后' : '已定位到文字间隙，松开即可插入' }}</span>
     </div>
     <div
       ref="editorRef"
@@ -19,10 +19,9 @@
       @drop.prevent.stop="onDrop"
     ></div>
     <span
-      v-if="dropCaret.visible"
+      v-if="dropCaret.visible && !dropCaret.rejected"
       class="drop-caret"
-      :class="{ 'blank-line': dropCaret.blankLine }"
-      :style="{ left: `${dropCaret.x}px`, top: `${dropCaret.y}px`, height: `${dropCaret.height}px`, width: dropCaret.blankLine ? `${dropCaret.width}px` : undefined }"
+      :style="{ left: `${dropCaret.x}px`, top: `${dropCaret.y}px`, height: `${dropCaret.height}px` }"
       aria-hidden="true"
     ></span>
     <teleport to="body">
@@ -62,7 +61,7 @@ const editorRoot = ref(null)
 const text = ref(props.modelValue)
 const showPicker = ref(false)
 const dragging = ref(false)
-const dropCaret = ref({ visible: false, offset: 0, x: 0, y: 0, height: 18, width: 0, blankLine: false })
+const dropCaret = ref({ visible: false, offset: 0, x: 0, y: 0, height: 18, rejected: false })
 const pickerStyle = ref({})
 let dragCounter = 0
 let lastCaretOffset = 0
@@ -334,13 +333,28 @@ function ensureLayoutCache() {
 }
 
 function textareaPointFromEvent(event) {
-  if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return { offset: lastCaretOffset, x: 0, y: 0, height: 18 }
+  if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return { offset: lastCaretOffset, x: 0, y: 0, height: 18, rejected: true }
   const range = document.caretRangeFromPoint?.(event.clientX, event.clientY)
   if (range && editorRef.value?.contains(range.startContainer)) {
     const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range)
     lastCaretOffset = caretOffset()
-    const rect = editorRef.value.getBoundingClientRect()
-    return { offset: lastCaretOffset, x: Math.max(0, event.clientX - rect.left), y: Math.max(0, event.clientY - rect.top - 9), height: 20, width: 3 }
+    const source = String(text.value || '')
+    const lineStart = source.lastIndexOf('\n', Math.max(0, lastCaretOffset - 1)) + 1
+    const nextBreak = source.indexOf('\n', lastCaretOffset)
+    const lineEnd = nextBreak < 0 ? source.length : nextBreak
+    // 空白行没有可辨识的文字前后。拒绝该落点而非把素材塞进空行，避免拖放
+    // 看似成功却难以判断实际插入位置。
+    if (!source.slice(lineStart, lineEnd).trim()) return { offset: lastCaretOffset, x: 0, y: 0, height: 18, rejected: true }
+    const rootRect = editorRoot.value?.getBoundingClientRect() || editorRef.value.getBoundingClientRect()
+    const caretRect = range.getBoundingClientRect()
+    const lineHeight = Number.parseFloat(getComputedStyle(editorRef.value).lineHeight) || 20
+    return {
+      offset: lastCaretOffset,
+      x: Math.max(0, Math.min(rootRect.width - 3, caretRect.left - rootRect.left)),
+      y: Math.max(0, caretRect.top - rootRect.top),
+      height: Math.max(16, caretRect.height || lineHeight),
+      rejected: false,
+    }
   }
   const cache = ensureLayoutCache()
   if (!cache) return { offset: lastCaretOffset, x: 0, y: 0, height: 18 }
@@ -357,11 +371,10 @@ function textareaPointFromEvent(event) {
   const blankLine = cache.source.slice(lineStart, lineEnd).trim().length === 0
   return {
     offset: best.offset,
-    x: blankLine ? Math.max(8, best.x - cache.editorRect.left) : Math.max(0, Math.min(cache.editorRect.width - 2, best.x - cache.editorRect.left)),
+    x: Math.max(0, Math.min(cache.editorRect.width - 2, best.x - cache.editorRect.left)),
     y: Math.max(0, best.y - cache.editorRect.top),
-    height: blankLine ? 2 : best.height,
-    width: blankLine ? Math.max(32, cache.editorRect.width - Math.max(16, (best.x - cache.editorRect.left) * 2)) : 3,
-    blankLine,
+    height: best.height,
+    rejected: blankLine,
   }
 }
 
@@ -387,7 +400,7 @@ function onAssetPointerDrop(event) {
   dragging.value = false
   dropCaret.value.visible = false
   clearLayoutCache()
-  if (point && detail.asset?.id) insertAsset(detail.asset, { offset: point.offset })
+  if (point && !point.rejected && detail.asset?.id) insertAsset(detail.asset, { offset: point.offset })
 }
 
 function onAssetPointerCancel() {
@@ -413,7 +426,7 @@ function onDrop(e) {
   // 兼容 FilmCreate 分镜页旧原生拖拽的 payload 字段(assetId/entity):
   // entity 类素材(角色/场景/道具)没有素材库 id, 仅插入 @token 不加入创作。
   if (asset && asset.assetId != null && asset.id == null) asset.id = asset.assetId
-  if (asset && (asset.id != null || asset.entity)) insertAsset(asset, { offset: point.offset })
+  if (asset && !point?.rejected && (asset.id != null || asset.entity)) insertAsset(asset, { offset: point.offset })
 }
 </script>
 <style scoped>
@@ -433,8 +446,6 @@ function onDrop(e) {
 }
 .drop-status.active { color: var(--accent); font-weight: 600; }
 .drop-caret { position: absolute; width: 3px; min-height: 16px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-page) 70%, transparent), 0 0 12px var(--accent); pointer-events: none; z-index: 6; animation: drop-caret-pulse .8s ease-in-out infinite alternate; }
-.drop-caret.blank-line { min-height: 2px; transform: translateY(.7em); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-page) 70%, transparent), 0 0 10px color-mix(in srgb, var(--accent) 62%, transparent); }
-.drop-caret.blank-line::before { content: ''; position: absolute; inset-inline-start: -3px; inset-block-start: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 @keyframes drop-caret-pulse { to { opacity: .45; } }
 .asset-picker {
   z-index: 5000; overflow: auto; background: color-mix(in srgb,var(--bg-surface,#202020) 74%,transparent);
