@@ -18,6 +18,7 @@ function routes(db, cfg, log) {
     create: (req, res) => {
       try {
         const body = req.body || {};
+        if (!Number.isInteger(Number(body.drama_id)) || Number(body.drama_id) <= 0) return response.badRequest(res, '请选择计费归属项目后再生成');
         if (body.drama_id) {
           const own = db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id);
           if (!own) return response.notFound(res, '项目不存在');
