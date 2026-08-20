@@ -83,7 +83,7 @@ test('billing ledgers filter by Shanghai calendar day and user role without chan
     runMigrationsAndEnsure(db);
     const created = '2026-08-17T00:00:00.000Z';
     db.prepare("INSERT INTO users (username,password_hash,role,is_active,created_at,updated_at) VALUES ('ledger-admin','x','admin',1,?,?)").run(created, created);
-    db.prepare("INSERT INTO users (username,password_hash,role,is_active,created_at,updated_at) VALUES ('ledger-user','x','user',1,?,?)").run(created, created);
+    db.prepare("INSERT INTO users (username,password_hash,display_name,role,is_active,created_at,updated_at) VALUES ('ledger-user','x','账本用户','user',1,?,?)").run(created, created);
     const adminId = db.prepare("SELECT id FROM users WHERE username='ledger-admin'").get().id;
     const userId = db.prepare("SELECT id FROM users WHERE username='ledger-user'").get().id;
     const insertTransaction = db.prepare('INSERT INTO billing_transactions (id,user_id,type,amount_micro,balance_after_micro,frozen_after_micro,created_at) VALUES (?,?,?,?,?,?,?)');
@@ -101,6 +101,8 @@ test('billing ledgers filter by Shanghai calendar day and user role without chan
     const adminUsage = billing.pagedUsage(db, { page: 1, page_size: 20, role: 'admin', date_from: '2026-08-17', date_to: '2026-08-17' });
     assert.equal(adminUsage.total, 1);
     assert.equal(adminUsage.items[0].username, 'ledger-admin');
+    const userUsage = billing.pagedUsage(db, { page: 1, page_size: 20, role: 'user', date_from: '2026-08-17', date_to: '2026-08-17' });
+    assert.equal(userUsage.items[0].display_name, '账本用户');
     assert.equal(billing.listTransactions(db, { user_id: userId, role: 'admin', date_from: '2026-08-17', date_to: '2026-08-17' }).length, 0);
   } finally {
     closeDb();

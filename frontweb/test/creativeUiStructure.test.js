@@ -170,6 +170,14 @@ test('运营账本提供日期和角色筛选，列表操作保持中性层级',
   assert.match(source, /\.balance-adjust-action\)\{padding:\.28rem/)
 })
 
+test('运营模型用量同时显示账号与显示名，避免把账号误认为用户名称', async () => {
+  const source = await readSource('../src/views/AdminConsole.vue')
+
+  assert.match(source, /<el-table-column prop="username" label="账号" min-width="110"\/>/)
+  assert.match(source, /<el-table-column prop="display_name" label="显示名" min-width="110"\/>/)
+  assert.match(source, /<el-table-column prop="display_name" label="显示名" min-width="100"\/>/)
+})
+
 test('运营后台支持查看和调整用户项目分组', async () => {
   const source = await readSource('../src/views/AdminConsole.vue')
 
