@@ -82,7 +82,7 @@ function createSequence(db, body = {}) {
   const stamp = now();
   const name = String(body.name || '').trim().slice(0, 100) || '未命名全能项目';
   const out = hasOwnerColumn(db)
-    ? db.prepare('INSERT INTO omni_video_sequences (name, is_default, owner_user_id, created_at, updated_at) VALUES (?, 0, ?, ?, ?)').run(name, body.owner_user_id || null, stamp, stamp)
+    ? db.prepare('INSERT INTO omni_video_sequences (name, is_default, owner_user_id, drama_id, created_at, updated_at) VALUES (?, 0, ?, ?, ?, ?)').run(name, body.owner_user_id || null, Number(body.drama_id) || null, stamp, stamp)
     : db.prepare('INSERT INTO omni_video_sequences (name, is_default, created_at, updated_at) VALUES (?, 0, ?, ?)').run(name, stamp, stamp);
   createShot(db, out.lastInsertRowid, {});
   return get(db, out.lastInsertRowid);

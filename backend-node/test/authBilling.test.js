@@ -496,20 +496,24 @@ test('drama listing is scoped by owner', () => {
 });
 
 test('omni sequences and tool runs stay scoped and settle their authorization', () => {
-  const { db, dbPath, admin } = setup();
+  const { db, dbPath, admin, log } = setup();
   try {
     const first = auth.createUser(db, { username: 'omni-first', password: 'password1' }, admin.id);
     const second = auth.createUser(db, { username: 'omni-second', password: 'password2' }, admin.id);
+    const project = drama.createDrama(db, log, { title: '全能与工具计费项目', owner_user_id: first.id });
     const firstDefault = sequences.ensureDefault(db, first.id);
     sequences.ensureDefault(db, second.id);
-    assert.equal(sequences.list(db, { owner_user_id: first.id }).length, 1);
-    assert.equal(sequences.list(db, { owner_user_id: first.id })[0].id, firstDefault.id);
+    const boundSequence = sequences.createSequence(db, { name: '项目全能创作', owner_user_id: first.id, drama_id: project.id });
+    assert.equal(sequences.list(db, { owner_user_id: first.id }).length, 2);
+    assert.equal(sequences.list(db, { owner_user_id: first.id }).find((row) => row.id === firstDefault.id).id, firstDefault.id);
+    assert.equal(boundSequence.drama_id, project.id);
 
     billing.savePriceBook(db, admin.id, { name: 'tool prices', status: 'published', items: [{ service_type: 'text', model: 'text-model', meter: 'request', unit_price: 10 }] });
     billing.adjustBalance(db, admin.id, first.id, 100, 'test points');
     const actor = { id: first.id, role: 'user' };
-    const authorization = billing.createAuthorization(db, actor, { idempotency_key: 'tool-one', service_type: 'text', model: 'text-model', usage: { request: 1 } });
-    const run = tools.create(db, { tool_type: 'script_analysis', model: 'text-model', owner_user_id: first.id, billing_authorization_id: authorization.authorization_id, input: { script: 'test' } });
+    const authorization = billing.createAuthorization(db, actor, { idempotency_key: 'tool-one', service_type: 'text', model: 'text-model', usage: { request: 1 }, drama_id: project.id, source_kind: 'tool_run' });
+    const run = tools.create(db, { tool_type: 'script_analysis', model: 'text-model', owner_user_id: first.id, drama_id: project.id, billing_authorization_id: authorization.authorization_id, input: { script: 'test' } });
+    assert.equal(run.drama_id, project.id);
     tools.set(db, run.id, { status: 'completed', output: { ok: true } });
     assert.equal(billing.account(db, first.id).frozen_micro, 0);
     assert.equal(billing.listUsage(db, { user_id: first.id }).length, 1);

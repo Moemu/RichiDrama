@@ -6,8 +6,12 @@ module.exports = function routes(db, log, cfg) { return {
   list(req, res) { try { response.success(res, omniVideoService.list(db, { ...(req.query || {}), owner_user_id: req.auth.id })); } catch (err) { response.internalError(res, err.message); } },
   create(req, res) { try {
     const body = req.body || {};
-    if (body.drama_id && !db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id)) return response.notFound(res, '项目不存在');
-    if (body.sequence_id && !db.prepare('SELECT 1 FROM omni_video_sequences WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.sequence_id), req.auth.id)) return response.notFound(res, '全能创作项目不存在');
+    if (!Number.isInteger(Number(body.drama_id)) || Number(body.drama_id) <= 0) return response.badRequest(res, '请选择计费归属项目后再生成');
+    if (!db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id)) return response.notFound(res, '项目不存在');
+    const sequence = body.sequence_id ? db.prepare('SELECT * FROM omni_video_sequences WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.sequence_id), req.auth.id) : null;
+    if (body.sequence_id && !sequence) return response.notFound(res, '全能创作项目不存在');
+    if (sequence?.drama_id && Number(sequence.drama_id) !== Number(body.drama_id)) return response.badRequest(res, '该全能创作序列已绑定其他计费项目，请新建序列后再生成');
+    if (sequence && !sequence.drama_id) db.prepare('UPDATE omni_video_sequences SET drama_id=?, updated_at=? WHERE id=?').run(Number(body.drama_id), new Date().toISOString(), sequence.id);
     const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id);
     response.created(res, omniVideoService.create(db, log, { ...body, owner_user_id: req.auth.id, tenant_id: tenant?.id || null }, req.auth));
   } catch (err) { response.badRequest(res, err.message); } },

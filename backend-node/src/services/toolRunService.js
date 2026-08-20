@@ -31,7 +31,7 @@ function create(db, body) {
   const now = stamp(); const input = body.input || {};
   let out;
   try {
-    out = db.prepare('INSERT INTO tool_runs (tool_type,batch_id,title,model,language,status,input_json,owner_user_id,tenant_id,billing_authorization_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(body.tool_type, body.batch_id || null, body.title || '', body.model || null, body.language || 'zh', body.status || 'pending', JSON.stringify(input), body.owner_user_id || null, body.tenant_id || null, body.billing_authorization_id || null, now, now);
+    out = db.prepare('INSERT INTO tool_runs (tool_type,batch_id,title,model,language,status,input_json,owner_user_id,tenant_id,drama_id,billing_authorization_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(body.tool_type, body.batch_id || null, body.title || '', body.model || null, body.language || 'zh', body.status || 'pending', JSON.stringify(input), body.owner_user_id || null, body.tenant_id || null, Number(body.drama_id) || null, body.billing_authorization_id || null, now, now);
   } catch (error) {
     if (!String(error.message || '').includes('owner_user_id')) throw error;
     // Kept for standalone tests and older embedded databases; app startup migration adds these columns.

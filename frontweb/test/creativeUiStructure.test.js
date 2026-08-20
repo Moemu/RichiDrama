@@ -136,6 +136,25 @@ test('专项工具页沿用中文工作台标签和产品主色', async () => {
   assert.doesNotMatch(media, /OUTPUT PREVIEW/)
 })
 
+test('每次工具与自由全能生成都要求并传递唯一的计费归属项目', async () => {
+  const [workbench, media, freeCreate] = await Promise.all([
+    readSource('../src/views/ToolWorkbench.vue'),
+    readSource('../src/views/ToolMediaGeneration.vue'),
+    readSource('../src/views/FreeCreate.vue'),
+  ])
+
+  for (const source of [workbench, media]) {
+    assert.match(source, /计费归属项目/)
+    assert.match(source, /dramaAPI\.list\(\{\s*page_size:\s*100\s*\}\)/)
+    assert.match(source, /drama_id:\s*Number\(dramaId\.value\)/)
+  }
+  assert.match(freeCreate, /placeholder="选择计费项目" aria-label="选择计费归属项目"/)
+  assert.match(freeCreate, /drama_id:\s*Number\(freeProjectId\.value\)/)
+  assert.match(freeCreate, /:disabled="!!sequence\?\.drama_id"/)
+  assert.match(freeCreate, /if \(Number\(seq\?\.drama_id\)\) freeProjectId\.value = Number\(seq\.drama_id\)/)
+  assert.match(freeCreate, /请选择计费归属项目并补齐生成参数/)
+})
+
 test('generation settings keep configured model identifiers unchanged', async () => {
   const source = await readSource('../src/components/GenerationSettings.vue')
   assert.match(source, /return String\(model \|\| ''\) \|\| '未选择'/)

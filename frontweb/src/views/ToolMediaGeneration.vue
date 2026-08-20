@@ -9,6 +9,7 @@
       <aside class="control-panel">
         <h2><i>01</i> 创作输入</h2>
         <label>创作模式<el-select v-model="mode"><el-option v-for="item in modes" :key="item.value" :label="item.label" :value="item.value" /></el-select></label>
+        <label>计费归属项目<el-select v-model="dramaId" filterable placeholder="请选择项目"><el-option v-for="project in projects" :key="project.id" :label="project.title" :value="project.id" /></el-select></label>
         <p class="mode-info"><b>{{ selectedMode.hint }}</b><span>{{ selectedMode.rule }}</span></p>
         <label>提示词<el-input v-model="prompt" type="textarea" :autosize="{ minRows: 10, maxRows: 22 }" placeholder="描述主体、动作、场景、镜头和风格…" /></label>
         <label v-if="media === 'image'">模型<el-select v-model="model" clearable placeholder="默认（当前默认模型）"><el-option v-for="item in imageModelOptions" :key="item" :label="item" :value="item" /></el-select></label>
@@ -52,13 +53,14 @@ import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
+import { dramaAPI } from '@/api/drama'
 import ToolAssetSelector from '@/components/ToolAssetSelector.vue'
 import GenerationSettings from '@/components/GenerationSettings.vue'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import { formatChinaDateTime } from '@/utils/time'
 import { useModelOptions } from '@/composables/useModelOptions'
 const props = defineProps({ media: { type: String, required: true } })
-const router = useRouter(), prompt = ref(''), model = ref(''), reference = ref(''), selectedAssetId = ref(null), firstFrameAssetId = ref(null), lastFrameAssetId = ref(null), firstFrameAssetUrl = ref(''), lastFrameAssetUrl = ref(''), videoSettings = ref({ video_model: 'auto', duration: 15, resolution: '720p', aspect_ratio: '16:9' }), running = ref(false), importing = ref(false), items = ref([]), mode = ref('text'), featured = ref(null)
+const router = useRouter(), prompt = ref(''), model = ref(''), reference = ref(''), selectedAssetId = ref(null), firstFrameAssetId = ref(null), lastFrameAssetId = ref(null), firstFrameAssetUrl = ref(''), lastFrameAssetUrl = ref(''), videoSettings = ref({ video_model: 'auto', duration: 15, resolution: '720p', aspect_ratio: '16:9' }), running = ref(false), importing = ref(false), items = ref([]), mode = ref('text'), featured = ref(null), projects = ref([]), dramaId = ref(null)
 const imageModelOptions = useModelOptions('image')
 const modes = computed(() => props.media === 'image' ? [
   { label:'文生图', value:'text', hint:'从文字开始构图', rule:'不需要参考素材' }, { label:'单图生图', value:'image', hint:'基于一张图再创作', rule:'填写一张参考素材 URL' }, { label:'多参考生图', value:'multi', hint:'融合多个参考元素', rule:'用英文逗号分隔多个 URL' }, { label:'组生组图', value:'batch', hint:'共享风格批量出图', rule:'用提示词逐项创建' },
@@ -73,10 +75,10 @@ const applyFirstFrame = (asset) => { firstFrameAssetUrl.value = asset?.local_pat
 const applyLastFrame = (asset) => { lastFrameAssetUrl.value = asset?.local_path || asset?.url || '' }
 const formatDate = (value) => formatChinaDateTime(value)
 async function load() { const out = props.media === 'image' ? await imagesAPI.list({ page_size:30, drama_id:0 }) : await videosAPI.list({ page_size:30, drama_id:0 }); items.value = out.items || out || []; featured.value = items.value.find((item) => item.id === featured.value?.id) || featured.value || items.value[0] || null }
-async function submit() { if (!prompt.value.trim()) return ElMessage.warning('请输入提示词'); running.value = true; try { const refs = reference.value.split(',').map((item) => item.trim()).filter(Boolean); if (props.media === 'image') await imagesAPI.create({ drama_id:0, prompt:prompt.value, model:model.value || undefined, image_url:reference.value || undefined, reference_images:mode.value === 'multi' ? refs : undefined }); else { const settings = videoSettings.value || {}; const body = { drama_id:0, prompt:prompt.value, model:settings.video_model && settings.video_model !== 'auto' ? settings.video_model : undefined, duration:settings.duration, resolution:settings.resolution, aspect_ratio:settings.aspect_ratio }; if (mode.value === 'image') body.image_url = refs[0]; if (mode.value === 'multi') body.reference_image_urls = refs; if (mode.value === 'first_last') { const first = firstFrameAssetUrl.value || refs[0], last = lastFrameAssetUrl.value || refs[1]; if (!first || !last) throw new Error('请选择或填写首帧与尾帧素材'); body.first_frame_url = first; body.last_frame_url = last } await videosAPI.create(body) } ElMessage.success('任务已提交，记录已保存'); await load() } catch (error) { ElMessage.error(error.message) } finally { running.value = false } }
+async function submit() { if (!prompt.value.trim()) return ElMessage.warning('请输入提示词'); if (!Number(dramaId.value)) return ElMessage.warning('请选择计费归属项目'); running.value = true; try { const refs = reference.value.split(',').map((item) => item.trim()).filter(Boolean); if (props.media === 'image') await imagesAPI.create({ drama_id:Number(dramaId.value), prompt:prompt.value, model:model.value || undefined, image_url:reference.value || undefined, reference_images:mode.value === 'multi' ? refs : undefined }); else { const settings = videoSettings.value || {}; const body = { drama_id:Number(dramaId.value), prompt:prompt.value, model:settings.video_model && settings.video_model !== 'auto' ? settings.video_model : undefined, duration:settings.duration, resolution:settings.resolution, aspect_ratio:settings.aspect_ratio }; if (mode.value === 'image') body.image_url = refs[0]; if (mode.value === 'multi') body.reference_image_urls = refs; if (mode.value === 'first_last') { const first = firstFrameAssetUrl.value || refs[0], last = lastFrameAssetUrl.value || refs[1]; if (!first || !last) throw new Error('请选择或填写首帧与尾帧素材'); body.first_frame_url = first; body.last_frame_url = last } await videosAPI.create(body) } ElMessage.success('任务已提交，记录已保存'); await load() } catch (error) { ElMessage.error(error.message) } finally { running.value = false } }
 async function importAsset() { importing.value = true; try { const path = props.media === 'image' ? `/assets/import/image/${featured.value.id}` : `/assets/import/video/${featured.value.id}`; const asset = await request.post(path); ElMessage.success('已导入素材库'); return asset } catch (error) { ElMessage.error(error.message); return null } finally { importing.value = false } }
 async function continueOmni() { const asset = await importAsset(); if (asset?.id) router.push({ path:'/free-create', query:{ asset_id:asset.id } }) }
-watch(() => props.media, () => { featured.value = null; load() }); onMounted(load)
+watch(() => props.media, () => { featured.value = null; load() }); onMounted(async () => { const data = await dramaAPI.list({ page_size: 100 }); projects.value = data?.items || data || []; load() })
 </script>
 <style scoped>
 /* 与 ToolWorkbench 同一套工作台基线：同底色、同面板、同控件观感。 */
