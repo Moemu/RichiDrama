@@ -199,6 +199,17 @@ test('运营模型用量同时显示账号与显示名，避免把账号误认�
   assert.match(source, /<el-table-column prop="display_name" label="显示名" min-width="100"\/>/)
 })
 
+test('运营价目表展示条件费率，支持审计带视频和不带视频输入', async () => {
+  const source = await readSource('../src/views/AdminConsole.vue')
+
+  assert.match(source, /条件费率与审计说明/)
+  assert.match(source, /priceConditions\(row\)\.default_rate_id/)
+  assert.match(source, /has_video_input: \{ true: '带视频', false: '不带视频' \}/)
+  assert.match(source, /fps_tier: '帧率档'/)
+  assert.match(source, /pricing_note/)
+  assert.match(source, /来源：/)
+})
+
 test('运营后台支持查看和调整用户项目分组', async () => {
   const source = await readSource('../src/views/AdminConsole.vue')
 
