@@ -24,6 +24,7 @@ module.exports = function adminRoutes(db, log = console) {
     createUser: guarded((req, res) => {
       const user = auth.createUser(db, req.body || {}, req.auth.id);
       const tenantId = Number(req.body?.tenant_id);
+      // 未显式指定分组时，createUser 已自动加入新用户默认分组。
       if (Number.isSafeInteger(tenantId) && tenantId > 0) tenants.setMember(db, tenantId, user.id, req.body?.tenant_role);
       billing.audit(db, req.auth.id, 'user.create', 'user', user.id, { username: user.username, role: user.role, account_kind: user.account_kind || 'creator', tenant_id: tenantId || null });
       response.created(res, auth.publicUser(user));
@@ -83,6 +84,12 @@ module.exports = function adminRoutes(db, log = console) {
     updatePriceBook: guarded((req, res) => response.success(res, billing.savePriceBook(db, req.auth.id, req.body || {}, req.params.id))),
     transactions: (req, res) => response.success(res, billing.pagedTransactions(db, req.query)),
     usage: (req, res) => response.success(res, billing.pagedUsage(db, req.query)),
+    usageSummary: (req, res) => response.success(res, billing.usageSummary(db, req.query)),
+    backfillProjectUsage: guarded((req, res) => {
+      const body = confirmed(req);
+      const result = billing.backfillProjectSnapshots(db, req.auth.id, body.idempotency_key);
+      response.success(res, { ...result, reason: body.reason });
+    }),
     reconciliationCases: (req, res) => response.success(res, billing.pagedReconciliationCases(db, req.query)),
     overview: (req, res) => response.success(res, operations.overview(db, req.query)),
     alertSettings: (_req, res) => response.success(res, operations.alertSettings(db)),

@@ -326,6 +326,12 @@ function createAutomaticTextAuthorization(db, config, model, userPrompt, systemP
   const authorization = billing.createAuthorization(db, context.actor, {
     idempotency_key: `text:${context.actor.id}:${require('crypto').randomUUID()}`,
     service_type: billingServiceType, model: target.billing_key, usage, reference_type: 'text_generation',
+    // Project-scoped text flows place this data in the request context before
+    // their asynchronous work starts. The authorization snapshot is then the
+    // single source used by ledger, usage logs and administrator rollups.
+    drama_id: context.drama_id || null,
+    source_kind: context.billing_source_kind || 'text_generation',
+    source_id: context.billing_source_id || null,
   });
   return { db, billing, actor: context.actor, authorization };
 }

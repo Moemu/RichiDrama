@@ -49,10 +49,11 @@ function ensureAsset(db, log, entityType, entity) {
     // rebinding, or manual cleanup.
     return existing ? assetService.getById(db, existing.id) : null;
   }
-  const payload = { drama_id: Number(entity.drama_id), name: config.name(entity), type: 'image', url: url || '', local_path: localPath, source_type: 'project_resource', processing_status: 'ready', metadata: { resource_type: entityType, resource_id: Number(entity.id) } };
+  let owner = null;
+  try { owner = db.prepare('SELECT owner_user_id FROM dramas WHERE id = ? AND deleted_at IS NULL').get(Number(entity.drama_id)); } catch (_) {}
+  const payload = { drama_id: Number(entity.drama_id), owner_user_id: owner?.owner_user_id || null, name: config.name(entity), type: 'image', url: url || '', local_path: localPath, source_type: 'project_resource', processing_status: 'ready', metadata: { resource_type: entityType, resource_id: Number(entity.id) } };
   const mapped = existing ? assetService.update(db, log, existing.id, payload) : assetService.create(db, log, payload);
   try {
-    const owner = db.prepare('SELECT owner_user_id FROM dramas WHERE id = ? AND deleted_at IS NULL').get(Number(entity.drama_id));
     if (owner?.owner_user_id) db.prepare(`INSERT INTO asset_resource_links
       (owner_user_id, drama_id, resource_type, resource_id, role, asset_id, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'primary_image', ?, 'active', ?, ?)

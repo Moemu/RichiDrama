@@ -31,8 +31,8 @@ let modelOptionsPromise = null
 const value = computed(() => props.modelValue || {})
 const duration = computed(() => Math.min(props.maxDuration, Math.max(4, Number(value.value.duration) || 15)))
 const durationOptions = computed(() => Array.from({ length: Math.max(0, props.maxDuration - 3) }, (_, index) => index + 4))
-const textModelOptions = computed(() => [{ label: '自动选择', description: '使用当前默认文本模型', value: 'auto' }, ...textModels.value.map((item) => ({ label: displayModelName(item), description: '已启用文本模型', value: item }))])
-const videoModelOptions = computed(() => videoModels.value.map((item) => ({ label: displayModelName(item.model), description: item.is_default ? '默认模型' : '已启用视频模型', value: item.model })))
+const textModelOptions = computed(() => [{ label: '自动选择', description: '使用当前默认文本模型', value: 'auto' }, ...textModels.value.map((item) => ({ label: displayModelName(item), value: item }))])
+const videoModelOptions = computed(() => videoModels.value.map((item) => ({ label: displayModelName(item.model), description: item.is_default ? '默认模型' : '', value: item.model })))
 const resolutionOptions = [{ label: '480p', value: '480p' }, { label: '720p', value: '720p' }, { label: '1080p', value: '1080p' }]
 const fpsOptions = [{ label: '不插帧', description: '保持原始帧率', value: '' }, { label: '60 fps', value: 60 }, { label: '120 fps', value: 120 }]
 const aspectRatioOptions = ['16:9', '9:16', '1:1', '3:4', '4:3', '3:2', '2:3', '21:9'].map((item) => ({ label: item, value: item }))
@@ -95,9 +95,9 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.generation-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;width:100%;padding:14px;border:1px solid var(--ui-line-1);border-radius:var(--ui-radius-panel);background:var(--ui-surface-1)}.duration-setting{grid-column:span 1}.postprocess-quote{grid-column:1/-1;padding:10px 12px;border:1px solid color-mix(in srgb,var(--ui-accent) 24%,var(--ui-line-1));border-radius:var(--ui-radius-control);background:color-mix(in srgb,var(--ui-accent) 9%,var(--ui-surface-2));color:var(--ui-text-2);font-size:13px;line-height:1.55}.postprocess-quote b{color:var(--ui-text-1)}.postprocess-quote small{display:block;margin-top:5px;color:var(--ui-text-3);line-height:1.5}
-/* 右侧或左侧窄栏的宽度不足以承载三列，必须按容器而非按屏幕宽度折行。 */
-:global(.creation-panel .generation-settings){grid-template-columns:1fr;gap:12px;padding:14px}
+.generation-settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:12px;width:100%;padding:14px;border:1px solid var(--ui-line-1);border-radius:var(--ui-radius-panel);background:var(--ui-surface-1)}.duration-setting{grid-column:span 1}.postprocess-quote{grid-column:1/-1;padding:10px 12px;border:1px solid color-mix(in srgb,var(--ui-accent) 24%,var(--ui-line-1));border-radius:var(--ui-radius-control);background:color-mix(in srgb,var(--ui-accent) 9%,var(--ui-surface-2));color:var(--ui-text-2);font-size:13px;line-height:1.55}.postprocess-quote b{color:var(--ui-text-1)}.postprocess-quote small{display:block;margin-top:5px;color:var(--ui-text-3);line-height:1.5}
+/* 窄容器（AI 工具箱控制栏、创作面板）里一律单列，避免选择器被压成 72px。 */
+:global(.creation-panel .generation-settings),:global(.control-panel .generation-settings){grid-template-columns:1fr;gap:12px;padding:14px}
 :global(.creation-panel .generation-settings .duration-setting){grid-column:1}
 :global(.creation-panel .generation-settings .duration-controls){grid-template-columns:minmax(0,1fr) 88px;align-items:center}
 :global(.creation-panel .generation-settings .duration-controls .el-input-number){max-width:none}

@@ -27,6 +27,7 @@ export const adminAPI = {
   updatePriceBook: (id, data) => request.patch(`/admin/price-books/${id}`, data),
   transactions: (params) => request.get('/admin/transactions', { params }),
   usage: (params) => request.get('/admin/usage', { params }),
+  usageSummary: (params) => request.get('/admin/usage-summary', { params }),
   overview: (params) => request.get('/admin/overview', { params }),
   operationAlertSettings: () => request.get('/admin/operations-alert-settings'),
   saveOperationAlertSettings: (data) => request.patch('/admin/operations-alert-settings', data),

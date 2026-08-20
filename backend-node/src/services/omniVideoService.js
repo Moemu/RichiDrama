@@ -39,11 +39,18 @@ function create(db, log, body, billingUser) {
   body.resolution = postprocessPolicy.resolution;
   body.upscale_resolution = postprocessPolicy.upscale_resolution;
   body.target_fps = postprocessPolicy.target_fps;
-  const input = Array.isArray(body.assets) ? body.assets : [];
+  let input = Array.isArray(body.assets) ? body.assets : [];
   const payer = billingUser || { id: body.owner_user_id, role: 'admin' };
   if (!payer?.id) throw new Error('缺少生成任务所属账号');
   const tenantId = Number(body.tenant_id) || require('./tenantService').tenantForUser(db, payer.id)?.id || null;
   const tenantOptions = tenantId ? { tenant_id: tenantId } : {};
+  const assetSelectionPolicy = body.asset_selection_policy === 'prompt_references' ? 'prompt_references' : 'all_selected';
+  if (assetSelectionPolicy === 'prompt_references') {
+    const references = promptReferenceEntries(body.prompt_document, prompt);
+    const referencedIds = new Set(references.map((entry) => Number(entry.asset_id)).filter(Number.isInteger));
+    if (!referencedIds.size) throw new Error('“仅提示词 @ 素材”模式下必须提供可解析的 @ 素材引用');
+    input = input.filter((entry) => referencedIds.has(Number(entry.asset_id)));
+  }
   if (input.length > 50) throw new Error('一次创作最多使用 50 个素材');
   const assets = prioritizePromptReferenceAssets(input.map((entry, ordinal) => resolveAsset(db, entry, ordinal, body.owner_user_id)), body.prompt_document, prompt);
   const capability = capabilityService.resolve(db, body.model, assets, tenantOptions);
@@ -74,7 +81,7 @@ function create(db, log, body, billingUser) {
   const authorization = waitingForSd2 ? null : billing.createAuthorization(db, payer, {
     idempotency_key: String(body.idempotency_key).trim(),
     service_type: 'video', model: billingTarget.billing_key, usage,
-    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || null,
+    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || null, drama_id: body.drama_id || null, source_kind: body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.storyboard_id || body.shot_id || null,
   });
   let task = null;
   let videoGenerationId = null;
@@ -101,7 +108,7 @@ function create(db, log, body, billingUser) {
     videoGenerationId = Number(result.lastInsertRowid);
   }
   const postProcess = { keep_original_audio: !!body.keep_original_audio, audio_volume: clamp(body.audio_volume, 0, 2, 1), audio_fade_seconds: clamp(body.audio_fade_seconds, 0, 10, 0) };
-  const requestSnapshot = { prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
+  const requestSnapshot = { prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, asset_selection_policy: assetSelectionPolicy, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
   const job = !existingWaitingId ? db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, owner_user_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, storyboard_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(videoGenerationId, body.owner_user_id || payer.id, modelPrompt, body.negative_prompt || null, body.model || 'auto', capability.model,
@@ -398,7 +405,7 @@ function list(db, query = {}) {
     LEFT JOIN async_tasks t ON t.id=v.task_id AND t.deleted_at IS NULL
     LEFT JOIN storyboards s ON s.id = v.storyboard_id AND s.deleted_at IS NULL`;
   const params = [];
-  const filters = [];
+  const filters = ['j.hidden_at IS NULL'];
   if (query.owner_user_id) { filters.push('j.owner_user_id = ?'); params.push(Number(query.owner_user_id)); }
   if (Number.isInteger(storyboardId) && storyboardId > 0) {
     // Older jobs predate omni_video_jobs.storyboard_id; recover them through
@@ -420,6 +427,15 @@ function list(db, query = {}) {
     postprocess_chain: `${require('./videoPostprocessPolicy').describe(item)} → 本地规范 ${item.aspect_ratio || '原画幅'}`,
     request_snapshot: safeSnapshot(parse(item.request_snapshot_json)),
   }));
+}
+
+function hide(db, id, actor) {
+  const job = assertOwnedJob(db, id, actor);
+  if (['sd2_waiting', 'processing', 'upscale_pending', 'upscaling', 'interpolation_pending', 'interpolating', 'persisting'].includes(job.status)) throw new Error('生成中的任务不能隐藏；请等待任务完成或取消未提交任务');
+  const now = new Date().toISOString();
+  db.prepare('UPDATE omni_video_jobs SET hidden_at = ?, hidden_by_user_id = ?, updated_at = ? WHERE id = ? AND hidden_at IS NULL')
+    .run(now, Number(actor.id), now, Number(job.omni_job_id));
+  return { ok: true, id: Number(job.omni_job_id) };
 }
 
 function assertOwnedJob(db, omniJobId, actor) {
@@ -639,4 +655,4 @@ function cancelJob(db, log, jobId, user) {
   return get(db, jobId);
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };

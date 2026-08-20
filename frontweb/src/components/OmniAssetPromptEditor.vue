@@ -1,21 +1,23 @@
 <template>
-  <div ref="editorRoot" class="editor" @dragenter.prevent="onDragEnter" @dragover.prevent="onDragOver" @dragleave="onDragLeave" @drop.prevent="onDrop">
+  <div ref="editorRoot" class="editor" :class="{ dragging }" @dragenter.prevent="onDragEnter" @dragover.prevent="onDragOver" @dragleave="onDragLeave" @drop.prevent="onDrop">
     <div class="drop-status" :class="{ active: dragging }" role="status" aria-live="polite">
       <span v-if="dragging">移动到目标文字间隙，紫色光标就是插入位置</span>
     </div>
-    <el-input
-      ref="inputRef"
-      v-model="text"
-      type="textarea"
-      :rows="7"
-      placeholder="描述你要生成的视频；输入 @ 引用素材，或直接把左侧素材拖入此处"
+    <div
+      ref="editorRef"
+      class="prompt-rich-editor"
+      contenteditable="true"
+      role="textbox"
+      aria-multiline="true"
+      aria-label="镜头提示词"
+      data-placeholder="描述你要生成的视频；输入 @ 引用素材，或直接把左侧素材拖入此处"
       @input="onInput"
       @keyup="onCursorChange"
       @click="onCursorChange"
       @focus="onCursorChange"
       @dragover.prevent="onDragOver"
       @drop.prevent.stop="onDrop"
-    />
+    ></div>
     <span
       v-if="dropCaret.visible"
       class="drop-caret"
@@ -55,7 +57,7 @@ const props = defineProps({
   chosenIds: { type: Set, default: () => new Set() },
 })
 const emit = defineEmits(['update:modelValue', 'pick', 'references'])
-const inputRef = ref(null)
+const editorRef = ref(null)
 const editorRoot = ref(null)
 const text = ref(props.modelValue)
 const showPicker = ref(false)
@@ -68,10 +70,11 @@ let layoutCache = null
 let dragRaf = 0
 let latestDragPoint = null
 
-watch(() => props.modelValue, (value) => { if (value !== text.value) text.value = value; syncReferences(value || '') })
-watch(() => props.assets, () => syncReferences(text.value), { deep: false })
+watch(() => props.modelValue, (value) => { if (value !== text.value) { text.value = value; nextTick(() => renderEditor(value)) }; syncReferences(value || '') })
+watch(() => props.assets, () => { syncReferences(text.value); nextTick(() => renderEditor(text.value)) }, { deep: false })
 onMounted(() => {
   syncReferences(text.value)
+  nextTick(() => renderEditor(text.value))
   window.addEventListener(ASSET_POINTER_MOVE, onAssetPointerMove)
   window.addEventListener(ASSET_POINTER_DROP, onAssetPointerDrop)
   window.addEventListener(ASSET_POINTER_CANCEL, onAssetPointerCancel)
@@ -98,10 +101,11 @@ const unresolved = computed(() => referencesFromText(text.value).flatMap((alias)
   return matches.length > 1 ? [{ alias, candidates: matches.map((asset) => asset.id) }] : []
 }))
 
-function onInput(value) {
+function onInput() {
   clearLayoutCache()
-  emit('update:modelValue', value)
-  syncReferences(value)
+  text.value = serializeEditor()
+  emit('update:modelValue', text.value)
+  syncReferences(text.value)
   nextTick(onCursorChange)
 }
 
@@ -111,8 +115,7 @@ function onInput(value) {
  * of treating only a trailing @ as an active mention.
  */
 function activeMentionRange(value = text.value) {
-  const textarea = inputRef.value?.textarea
-  const cursor = Number.isInteger(textarea?.selectionStart) ? textarea.selectionStart : String(value || '').length
+  const cursor = lastCaretOffset
   const source = String(value || '')
   const before = source.slice(0, cursor)
   const at = before.lastIndexOf('@')
@@ -122,8 +125,7 @@ function activeMentionRange(value = text.value) {
   return { start: at, end: cursor, query: source.slice(at + 1, cursor) }
 }
 function onCursorChange() {
-  const textarea = inputRef.value?.textarea
-  if (Number.isInteger(textarea?.selectionStart)) lastCaretOffset = textarea.selectionStart
+  lastCaretOffset = caretOffset()
   showPicker.value = !!activeMentionRange()
   if (showPicker.value) nextTick(positionPickerAndMention)
 }
@@ -135,9 +137,8 @@ onBeforeUnmount(() => {
 })
 
 function positionPickerAndMention() {
-  const textarea = inputRef.value?.textarea
-  if (!textarea) return
-  const rect = textarea.getBoundingClientRect()
+  const rect = editorRef.value?.getBoundingClientRect()
+  if (!rect) return
   const width = Math.min(Math.max(280, window.innerWidth - 16), Math.max(420, Math.min(760, rect.width)))
   const height = Math.min(260, Math.max(180, window.innerHeight - 24))
   const top = rect.top >= height + 12 ? rect.top - height - 8 : rect.bottom + 8
@@ -168,22 +169,20 @@ function insertAsset(asset, opts = {}) {
     const inserted = insertTokenAtOffset(text.value, token, explicitOffset)
     text.value = inserted.text
     lastCaretOffset = inserted.caret
-    nextTick(() => {
-      inputRef.value?.textarea?.focus()
-      inputRef.value?.textarea?.setSelectionRange(inserted.caret, inserted.caret)
-    })
+    nextTick(() => { renderEditor(text.value, true); focusEditorEnd() })
   } else if (mention) {
     // Replace exactly the @ token around the caret, including one in the
     // middle of a sentence, then leave the cursor immediately after it.
     const suffix = text.value.slice(mention.end)
     const separator = suffix && !/^\s/.test(suffix) ? ' ' : ''
     text.value = `${text.value.slice(0, mention.start)}${token}${separator}${suffix}`
-    nextTick(() => inputRef.value?.textarea?.setSelectionRange(mention.start + token.length + separator.length, mention.start + token.length + separator.length))
+    nextTick(() => { renderEditor(text.value, true); focusEditorEnd() })
   } else if (opts.append) {
     text.value = `${text.value}${text.value && !/\s$/.test(text.value) ? ' ' : ''}${token} `
   } else return
   emit('update:modelValue', text.value)
   syncReferences(text.value)
+  nextTick(() => { renderEditor(text.value, true); focusEditorEnd() })
   showPicker.value = false
 }
 
@@ -204,6 +203,57 @@ function thumbUrl(asset) {
   if (!t) return ''
   if (/^https?:\/\//i.test(t) || t.startsWith('data:')) return t
   return '/static/' + String(t).replace(/^\/+/, '')
+}
+
+function matchingAsset(alias) {
+  const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.name) === alias)
+  return matches.length === 1 ? matches[0] : null
+}
+function serializeNode(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || ''
+  if (node.nodeType !== Node.ELEMENT_NODE) return ''
+  if (node.dataset?.token) return node.dataset.token
+  if (node.tagName === 'BR') return '\n'
+  return [...node.childNodes].map(serializeNode).join('')
+}
+function serializeEditor() { return [...(editorRef.value?.childNodes || [])].map(serializeNode).join('') }
+function renderEditor(value, force = false) {
+  const el = editorRef.value
+  if (!el || (!force && document.activeElement === el)) return
+  el.replaceChildren()
+  const source = String(value || '')
+  const matcher = /@([^\s@]+)/g
+  let last = 0; let found
+  while ((found = matcher.exec(source))) {
+    if (found.index > last) el.append(document.createTextNode(source.slice(last, found.index)))
+    const alias = found[1]; const asset = matchingAsset(alias)
+    if (!asset) el.append(document.createTextNode(found[0]))
+    else {
+      const chip = document.createElement('span')
+      chip.className = 'prompt-asset-chip'; chip.contentEditable = 'false'; chip.dataset.token = found[0]
+      chip.setAttribute('role', 'img'); chip.setAttribute('aria-label', `引用素材：${alias}`)
+      const url = thumbUrl(asset)
+      if (url && asset.type !== 'audio') { const image = document.createElement('img'); image.src = url; image.alt = ''; chip.append(image) }
+      else { const icon = document.createElement('span'); icon.textContent = iconForAsset(asset.type); icon.setAttribute('aria-hidden', 'true'); chip.append(icon) }
+      const name = document.createElement('b'); name.textContent = alias; chip.append(name)
+      el.append(chip)
+    }
+    last = found.index + found[0].length
+  }
+  if (last < source.length) el.append(document.createTextNode(source.slice(last)))
+}
+function iconForAsset(type) { return type === 'video' ? '🎬' : type === 'audio' ? '🎵' : '🖼️' }
+function caretOffset() {
+  const el = editorRef.value; const selection = window.getSelection()
+  if (!el || !selection?.rangeCount || !el.contains(selection.anchorNode)) return String(text.value || '').length
+  const range = selection.getRangeAt(0).cloneRange(); range.selectNodeContents(el); range.setEnd(selection.anchorNode, selection.anchorOffset)
+  const holder = document.createElement('div'); holder.append(range.cloneContents())
+  return [...holder.childNodes].map(serializeNode).join('').length
+}
+function focusEditorEnd() {
+  const el = editorRef.value; if (!el) return; el.focus()
+  const range = document.createRange(); range.selectNodeContents(el); range.collapse(false)
+  const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); lastCaretOffset = String(text.value || '').length
 }
 
 // ===== 拖拽支持 =====
@@ -234,9 +284,8 @@ function clearLayoutCache() {
 }
 
 function ensureLayoutCache() {
-  const textarea = inputRef.value?.textarea
-  const editor = textarea?.closest('.editor')
-  if (!textarea || !editor) return null
+  return null
+  /* istanbul ignore next -- retained below as reference for the former textarea layout algorithm.
   const source = String(text.value || '')
   const rect = textarea.getBoundingClientRect()
   // 缓存键必须包含视口位置: 页面/面板滚动后 rect.top 变化而 source/width/scrollTop 不变, 旧缓存的 boundaries 是过期视口坐标, 造成拖拽光标错乱或不显示(时灵时不灵的根因)
@@ -281,12 +330,20 @@ function ensureLayoutCache() {
   } catch (_) {}
   if (!boundaries.length) boundaries.push({ offset: 0, x: rect.left + Number.parseFloat(style.paddingLeft || 0), y: rect.top + Number.parseFloat(style.paddingTop || 0), height: fallbackHeight })
   layoutCache = { source, width: rect.width, scrollTop: textarea.scrollTop, rectTop: rect.top, rectLeft: rect.left, mirror, boundaries, editorRect }
-  return layoutCache
+  return layoutCache */
 }
 
 function textareaPointFromEvent(event) {
+  if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return { offset: lastCaretOffset, x: 0, y: 0, height: 18 }
+  const range = document.caretRangeFromPoint?.(event.clientX, event.clientY)
+  if (range && editorRef.value?.contains(range.startContainer)) {
+    const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range)
+    lastCaretOffset = caretOffset()
+    const rect = editorRef.value.getBoundingClientRect()
+    return { offset: lastCaretOffset, x: Math.max(0, event.clientX - rect.left), y: Math.max(0, event.clientY - rect.top - 9), height: 20, width: 3 }
+  }
   const cache = ensureLayoutCache()
-  if (!cache || !Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return { offset: lastCaretOffset, x: 0, y: 0, height: 18 }
+  if (!cache) return { offset: lastCaretOffset, x: 0, y: 0, height: 18 }
   let best = { ...cache.boundaries[0], score: Number.POSITIVE_INFINITY }
   for (const boundary of cache.boundaries) {
     const bottom = boundary.y + boundary.height
@@ -361,10 +418,15 @@ function onDrop(e) {
 </script>
 <style scoped>
 .editor { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 188px; }
-/* textarea 区作为主体撑满 editor 剩余高度；@选择器/引用标签为兄弟元素，按内容自适应 */
-.editor :deep(.el-input) { flex: 1; min-height: 0; display: flex; }
-.editor :deep(.el-textarea) { flex: 1; min-height: 0; display: flex; }
-.editor :deep(.el-textarea__inner) { flex: 1; height: 100% !important; min-height: 160px; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; resize: none; transition: border-color 0.2s, background 0.2s; }
+.prompt-rich-editor { flex:1; min-height:160px; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-raised); color:var(--text-primary); font:inherit; line-height:1.65; white-space:pre-wrap; overflow-wrap:anywhere; outline:none; }
+.prompt-rich-editor:empty::before { content:attr(data-placeholder); color:var(--text-muted); pointer-events:none; }
+.prompt-rich-editor:focus-visible { border-color:var(--studio-teal,var(--accent)); box-shadow:0 0 0 2px color-mix(in srgb,var(--studio-teal,var(--accent)) 32%,transparent); }
+/* 拖入时只显示自定义落点光标，避免与 contenteditable 的原生光标重叠。 */
+.editor.dragging .prompt-rich-editor { caret-color:transparent; }
+:deep(.prompt-asset-chip) { display:inline-flex; vertical-align:baseline; align-items:center; gap:3px; max-width:132px; margin:0 1px; padding:1px 4px 1px 2px; border:1px solid #54ead4; border-radius:4px; background:color-mix(in srgb,#54ead4 12%,var(--bg-raised)); color:var(--text-primary); line-height:1; user-select:all; }
+:deep(.prompt-asset-chip img),:deep(.prompt-asset-chip>span) { width:24px; height:24px; flex:none; border-radius:3px; object-fit:cover; background:var(--bg-hover); }
+:deep(.prompt-asset-chip>span) { display:grid; place-items:center; font-size:10px; }
+:deep(.prompt-asset-chip b) { overflow:hidden; font-size:11px; font-weight:650; text-overflow:ellipsis; white-space:nowrap; }
 .drop-status {
   flex: 0 0 26px; min-width: 0; display: flex; align-items: center; justify-content: flex-end;
   padding: 0 4px; color: var(--text-muted); font-size: 12px; line-height: 1; pointer-events: none;

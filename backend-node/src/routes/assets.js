@@ -62,7 +62,7 @@ function routes(db, log, cfg) {
     },
     lineage: (req, res) => {
       try {
-        const lineage = assetService.getLineage(db, req.params.id);
+        const lineage = assetService.getLineage(db, req.params.id, req.auth.id);
         if (!lineage) return response.notFound(res, '资源不存在');
         response.success(res, lineage);
       } catch (err) {
@@ -117,12 +117,20 @@ function routes(db, log, cfg) {
       try {
         const body = req.body || {};
         const ids = Array.isArray(body.ids) ? body.ids : [];
+        const scope = String(body.scope || '').toLowerCase();
+        if (!['global', 'project'].includes(scope)) return response.badRequest(res, '批量删除必须明确指定 global 或 project 素材范围');
+        const dramaId = scope === 'project' ? Number(body.drama_id) : null;
+        if (scope === 'project' && (!Number.isInteger(dramaId) || dramaId <= 0 || !db.prepare('SELECT 1 FROM dramas WHERE id=? AND owner_user_id=? AND deleted_at IS NULL').get(dramaId, req.auth.id))) {
+          return response.notFound(res, '项目不存在');
+        }
         // all_matching is deliberately explicit so an empty selected list can
         // never erase a library by accident.
         if (!ids.length && body.all_matching !== true) return response.badRequest(res, '请至少选择一个素材，或明确指定清空素材库');
         const count = assetService.deleteMany(db, log, {
           ids,
           owner_user_id: req.auth.id,
+          scope,
+          drama_id: dramaId,
           ...(body.all_matching === true ? {
             type: body.type,
             keyword: body.keyword,
@@ -137,7 +145,7 @@ function routes(db, log, cfg) {
     },
     importImage: (req, res) => {
       try {
-        const item = assetService.importFromImage(db, log, req.params.image_gen_id);
+        const item = assetService.importFromImage(db, log, req.params.image_gen_id, req.auth.id);
         if (!item) return response.notFound(res, '图片生成记录不存在');
         response.created(res, item);
       } catch (err) {
@@ -147,7 +155,7 @@ function routes(db, log, cfg) {
     },
     importVideo: (req, res) => {
       try {
-        const item = assetService.importFromVideo(db, log, req.params.video_gen_id);
+        const item = assetService.importFromVideo(db, log, req.params.video_gen_id, req.auth.id);
         if (!item) return response.notFound(res, '视频生成记录不存在');
         response.created(res, item);
       } catch (err) {
@@ -157,7 +165,7 @@ function routes(db, log, cfg) {
     },
     trim: (req, res) => {
       try {
-        const source = assetService.getById(db, req.params.id);
+        const source = assetService.getByIdForOwner(db, req.params.id, req.auth.id);
         if (!source) return response.notFound(res, '资源不存在');
         const item = require('../services/omniMediaProcessService').trimVideoAsset(db, log, source, req.body || {});
         response.created(res, item);
@@ -170,7 +178,7 @@ function routes(db, log, cfg) {
       try {
         const ids = Array.isArray(req.body?.asset_ids) ? req.body.asset_ids.map(Number).filter((id) => id > 0) : [];
         if (ids.length < 2) return response.badRequest(res, '请至少选择两段视频进行拼接');
-        const sources = ids.map((id) => assetService.getById(db, id));
+        const sources = ids.map((id) => assetService.getByIdForOwner(db, id, req.auth.id));
         if (sources.some((item) => !item)) return response.badRequest(res, '所选素材中包含不存在或已删除的项目');
         const item = require('../services/omniMediaProcessService').concatVideoAssets(db, log, sources);
         response.created(res, item);

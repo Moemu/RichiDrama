@@ -7,11 +7,12 @@
           <el-icon><ArrowLeft /></el-icon>
           返回
         </el-button>
-        <div><p class="library-kicker">素材 · {{ total }} 项</p><h2 class="page-title">媒体素材库</h2><p class="library-subtitle">图片 · 视频 · 音频</p></div>
+        <div><p class="library-kicker">素材 · {{ total }} 项</p><h2 class="page-title">{{ projectDramaId ? '项目媒体素材库' : '媒体素材库' }}</h2><p class="library-subtitle">{{ projectDramaId ? '仅显示当前项目可用素材' : '图片 · 视频 · 音频' }}</p></div>
       </div>
       <div class="header-actions">
         <AccountBalanceBadge />
-        <el-button type="danger" plain :disabled="!total" @click="clearLibrary">一键清空素材库</el-button>
+        <el-button type="danger" plain :disabled="!selectedIds.size" @click="batchDelete">批量删除{{ selectedIds.size ? `（${selectedIds.size}）` : '' }}</el-button>
+        <el-button type="danger" plain :disabled="!total" @click="clearLibrary">一键清空{{ projectDramaId ? '项目素材' : '素材库' }}</el-button>
         <el-button type="primary" plain @click="triggerUpload">
           <el-icon><Upload /></el-icon>
           上传素材
@@ -51,7 +52,7 @@
     <div v-if="failedUploads.length" class="upload-progress"><span>失败 {{ failedUploads.length }} 个</span><el-button size="small" @click="retryFailedUploads">重新上传失败项</el-button></div>
 
     <!-- 媒体网格 -->
-    <div v-loading="loading" class="media-grid" :class="{ 'sparse-library': mediaItems.length > 0 && mediaItems.length <= 3 }">
+    <div v-loading="loading" class="media-grid">
       <div
         v-for="item in mediaItems"
         :key="item.id"
@@ -71,16 +72,18 @@
                 size="small"
                 plain
                 class="preview-btn"
+                aria-label="预览素材"
                 @click.stop="openPreview(item)"
               >
                 <el-icon><ZoomIn /></el-icon>
               </el-button>
-              <el-button size="small" plain title="重命名素材" @click.stop="renameItem(item)"><el-icon><Edit /></el-icon></el-button>
-              <el-button size="small" plain :type="item.is_favorite ? 'warning' : 'info'" :title="item.is_favorite ? '取消收藏' : '收藏素材'" @click.stop="toggleFavorite(item)"><el-icon><StarFilled v-if="item.is_favorite" /><Star v-else /></el-icon></el-button>
+              <el-button size="small" plain title="重命名素材" aria-label="重命名素材" @click.stop="renameItem(item)"><el-icon><Edit /></el-icon></el-button>
+              <el-button size="small" plain :type="item.is_favorite ? 'warning' : 'info'" :title="item.is_favorite ? '取消收藏' : '收藏素材'" :aria-label="item.is_favorite ? '取消收藏素材' : '收藏素材'" @click.stop="toggleFavorite(item)"><el-icon><StarFilled v-if="item.is_favorite" /><Star v-else /></el-icon></el-button>
               <el-button
                 size="small"
                 type="danger"
                 plain
+                aria-label="删除素材"
                 @click.stop="deleteItem(item)"
               >
                 <el-icon><Delete /></el-icon>
@@ -94,17 +97,6 @@
           <div v-if="item.tags?.length" class="media-tags"><el-tag v-for="tag in item.tags.slice(0, 3)" :key="tag" size="small" effect="plain">{{ tag }}</el-tag></div>
         </div>
       </div>
-
-      <aside v-if="!loading && mediaItems.length > 0 && mediaItems.length <= 3" class="sparse-library-guide">
-        <div><p class="sparse-kicker">当前素材 · {{ String(mediaItems.length).padStart(2, '0') }}</p><h3>素材操作</h3><p>预览确认后，可直接带入自由创作。</p></div>
-        <div class="sparse-asset-facts">
-          <span><small>当前焦点</small><b>{{ mediaItems[0]?.name || '未命名素材' }}</b></span>
-          <span><small>素材类型</small><b>{{ assetTypeLabel(mediaItems[0]?.type) }}</b></span>
-          <span><small>可用位置</small><b>自由创作 · 项目分镜</b></span>
-        </div>
-        <div class="sparse-flow"><span>预览</span><i></i><span>带入创作</span><i></i><span>复用成片</span></div>
-        <div class="sparse-actions"><button type="button" @click="openPreview(mediaItems[0])">打开素材预览</button><button type="button" class="primary" @click="createWithItem(mediaItems[0])">用它开始创作 ↗</button></div>
-      </aside>
 
       <div v-if="!loading && mediaItems.length === 0" class="empty-media">
         <el-icon class="empty-icon"><Files /></el-icon>
@@ -127,7 +119,7 @@
     <!-- 批量操作 -->
     <div v-if="selectedIds.size > 0" class="batch-bar">
       <span>已选 {{ selectedIds.size }} 项</span>
-      <el-button size="small" @click="selectCurrentPage">全选当前页图片</el-button>
+      <el-button size="small" @click="selectCurrentPage">全选当前页素材</el-button>
       <el-button size="small" @click="selectedIds.clear()">取消选择</el-button>
       <el-button size="small" type="primary" plain @click="batchCertifyRealPeople">批量标记含真人并认证</el-button>
       <el-button size="small" type="danger" plain @click="batchDelete">批量删除</el-button>
@@ -178,7 +170,7 @@ import {
   ZoomIn, Delete, Edit, Files, Star, StarFilled, VideoCamera
 } from '@element-plus/icons-vue'
 import { omniVideoAPI } from '@/api/omniVideo'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
 import AudioWaveform from '@/components/AudioWaveform.vue'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
@@ -207,6 +199,9 @@ const uploadPercent = computed(() => uploadProgress.value.total
   ? Math.round(uploadProgress.value.current / uploadProgress.value.total * 100)
   : 0)
 const router = useRouter()
+const route = useRoute()
+const projectDramaId = computed(() => { const id = Number(route.query.drama_id); return Number.isInteger(id) && id > 0 ? id : null })
+const assetScope = computed(() => projectDramaId.value ? 'project' : 'global')
 let keywordTimer = null
 
 function triggerUpload() {
@@ -228,7 +223,7 @@ async function onUpload(e) {
       if (!type) throw new Error('仅支持图片、视频或音频文件')
       // 报价/限制接口不可用时仍交给上传接口校验，不能把网络故障伪装成文件超限。
       if (maxMb > 0 && file.size > maxMb * 1024 * 1024) throw new Error(`文件超过 ${maxMb}MB 限制`)
-      const item = await omniVideoAPI.upload(file)
+      const item = await omniVideoAPI.upload(file, projectDramaId.value ? { drama_id: projectDramaId.value } : {})
       uploadProgress.value.current++
       uploadedCount++
       if (item?.deduplicated) ElMessage.info(`${file.name} 已存在，已复用素材记录`)
@@ -263,7 +258,8 @@ async function loadMedia() {
     const params = {
       page: page.value,
       page_size: pageSize.value,
-      scope: 'global',
+      scope: assetScope.value,
+      ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}),
     }
     if (mediaType.value !== 'all') params.type = mediaType.value
     if (keyword.value) params.keyword = keyword.value
@@ -447,9 +443,10 @@ async function setIdentity(item, value) {
 
 async function batchDelete() {
   const count = selectedIds.size
-  await ElMessageBox.confirm(`确定删除选中的 ${count} 个素材？`, '批量删除', { type: 'warning' })
+  const scopeLabel = projectDramaId.value ? '当前项目' : '全局素材库'
+  await ElMessageBox.confirm(`确定删除选中的 ${count} 个素材？将只影响${scopeLabel}，历史作品与生成记录保持可追溯。`, '批量删除', { type: 'warning', confirmButtonText: '删除选中素材', cancelButtonText: '取消' })
   try {
-    const result = await request.post('/assets/batch-delete', { ids: [...selectedIds] })
+    const result = await request.post('/assets/batch-delete', { ids: [...selectedIds], scope: assetScope.value, ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}) })
     selectedIds.clear()
     ElMessage.success(result?.message || `${count} 个素材已删除`)
     loadMedia()
@@ -457,7 +454,7 @@ async function batchDelete() {
 }
 
 function selectCurrentPage() {
-  mediaItems.value.filter((item) => item.type === 'image').forEach((item) => selectedIds.add(item.id))
+  mediaItems.value.forEach((item) => selectedIds.add(item.id))
 }
 
 async function batchCertifyRealPeople() {
@@ -475,15 +472,18 @@ async function batchCertifyRealPeople() {
 
 async function clearLibrary() {
   try {
+    const isProjectLibrary = Boolean(projectDramaId.value)
     await ElMessageBox.confirm(
-      '将清空你有权限访问的全部媒体素材。该操作会从素材库隐藏记录，但不会立即物理删除本地或 OSS 文件，以保证已有作品可追溯。',
-      '一键清空素材库',
+      isProjectLibrary
+        ? '将只清空当前项目素材。全局素材及其他项目素材不会受到影响；该操作只从素材库隐藏记录，不会立即物理删除本地或 OSS 文件，以保证已有作品可追溯。'
+        : '将只清空“我的全局素材”。项目素材不会受到影响；该操作只从素材库隐藏记录，不会立即物理删除本地或 OSS 文件，以保证已有作品可追溯。',
+      isProjectLibrary ? '一键清空项目素材' : '一键清空素材库',
       { type: 'warning', confirmButtonText: '确认清空', cancelButtonText: '取消' }
     )
-    const result = await request.post('/assets/batch-delete', { all_matching: true })
+    const result = await request.post('/assets/batch-delete', { all_matching: true, scope: assetScope.value, ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}), type: mediaType.value === 'all' ? undefined : mediaType.value, keyword: keyword.value || undefined, favorite: favoriteOnly.value ? 1 : undefined })
     selectedIds.clear()
     showPreview.value = false
-    ElMessage.success(result?.message || '素材库已清空')
+    ElMessage.success(result?.message || (isProjectLibrary ? '项目素材已清空' : '素材库已清空'))
     await resetAndLoad()
   } catch (error) {
     if (error !== 'cancel' && error?.message !== 'cancel') ElMessage.error(error.message || '清空素材库失败')

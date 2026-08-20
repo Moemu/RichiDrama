@@ -95,14 +95,19 @@ function getByIdForOwner(db, id, ownerUserId) {
   return r ? rowToItem(r) : null;
 }
 
-function getLineage(db, id) {
-  const current = db.prepare('SELECT * FROM assets WHERE id = ?').get(Number(id));
+function getLineage(db, id, ownerUserId = null) {
+  const ownedClause = ownerUserId == null ? '' : ` AND (owner_user_id = ${Number(ownerUserId)} OR drama_id IN (SELECT id FROM dramas WHERE owner_user_id = ${Number(ownerUserId)} AND deleted_at IS NULL))`;
+  // Unscoped service callers are retained for maintenance/history tools and
+  // may inspect tombstones. Authenticated HTTP callers always provide owner
+  // scope and therefore cannot use lineage to discover another user's data.
+  const visibleClause = ownerUserId == null ? '' : ' AND deleted_at IS NULL';
+  const current = db.prepare(`SELECT * FROM assets WHERE id = ?${visibleClause}${ownedClause}`).get(Number(id));
   if (!current) return null;
   const visited = new Set([Number(current.id)]);
   const ancestors = [];
   let parentId = current.parent_asset_id;
   while (parentId && !visited.has(Number(parentId)) && ancestors.length < 20) {
-    const parent = db.prepare('SELECT * FROM assets WHERE id = ?').get(Number(parentId));
+    const parent = db.prepare(`SELECT * FROM assets WHERE id = ?${visibleClause}${ownedClause}`).get(Number(parentId));
     if (!parent) break;
     visited.add(Number(parent.id));
     ancestors.unshift(rowToItem(parent));
@@ -113,7 +118,7 @@ function getLineage(db, id) {
   const queue = [Number(current.id)];
   while (queue.length && descendants.length < 100) {
     const sourceId = queue.shift();
-    const children = db.prepare('SELECT * FROM assets WHERE parent_asset_id = ? ORDER BY created_at ASC, id ASC').all(sourceId);
+    const children = db.prepare(`SELECT * FROM assets WHERE parent_asset_id = ?${visibleClause}${ownedClause} ORDER BY created_at ASC, id ASC`).all(sourceId);
     for (const child of children) {
       if (visited.has(Number(child.id))) continue;
       visited.add(Number(child.id));
@@ -200,7 +205,7 @@ function update(db, log, id, req, ownerUserId = null) {
 }
 
 function deleteById(db, log, id, ownerUserId = null) {
-  assertNotReferencedByEditableShot(db, id);
+  assertNotReferencedByEditableShot(db, id, ownerUserId);
   const now = new Date().toISOString();
   const sql = ownerUserId == null
     ? 'UPDATE assets SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL'
@@ -217,18 +222,22 @@ function deleteById(db, log, id, ownerUserId = null) {
 // Generation history deliberately keeps snapshots, but an asset selected in
 // an editable shot is a live dependency.  Allowing its deletion made the next
 // storyboard save silently drop that selection.
-function assertNotReferencedByEditableShot(db, assetId) {
+function assertNotReferencedByEditableShot(db, assetId, ownerUserId = null) {
   const target = Number(assetId);
   if (!Number.isInteger(target) || target <= 0) return;
   const refs = [];
   const contains = (raw) => { try { return JSON.parse(raw || '[]').map(Number).includes(target); } catch (_) { return false; } };
   try {
-    for (const row of db.prepare(`SELECT id, storyboard_number, omni_asset_ids, omni_first_frame_asset_id, omni_last_frame_asset_id FROM storyboards WHERE deleted_at IS NULL`).all()) {
+    const owned = ownerUserId == null ? '' : ' AND e.drama_id IN (SELECT id FROM dramas WHERE owner_user_id=? AND deleted_at IS NULL)';
+    const args = ownerUserId == null ? [] : [Number(ownerUserId)];
+    for (const row of db.prepare(`SELECT s.id, s.storyboard_number, s.omni_asset_ids, s.omni_first_frame_asset_id, s.omni_last_frame_asset_id FROM storyboards s JOIN episodes e ON e.id=s.episode_id WHERE s.deleted_at IS NULL${owned}`).all(...args)) {
       if (contains(row.omni_asset_ids) || Number(row.omni_first_frame_asset_id) === target || Number(row.omni_last_frame_asset_id) === target) refs.push(`分镜 #${row.storyboard_number || row.id}`);
     }
   } catch (_) {}
   try {
-    for (const row of db.prepare(`SELECT s.id, s.title, s.assets_json FROM omni_video_sequence_shots s JOIN omni_video_sequences q ON q.id=s.sequence_id WHERE s.deleted_at IS NULL AND q.deleted_at IS NULL`).all()) {
+    const owned = ownerUserId == null ? '' : ' AND q.owner_user_id=?';
+    const args = ownerUserId == null ? [] : [Number(ownerUserId)];
+    for (const row of db.prepare(`SELECT s.id, s.title, s.assets_json FROM omni_video_sequence_shots s JOIN omni_video_sequences q ON q.id=s.sequence_id WHERE s.deleted_at IS NULL AND q.deleted_at IS NULL${owned}`).all(...args)) {
       if (contains(row.assets_json)) refs.push(`自由创作镜头「${row.title || row.id}」`);
     }
   } catch (_) {}
@@ -238,7 +247,7 @@ function assertNotReferencedByEditableShot(db, assetId) {
 // Logical deletion is intentional: an asset can be referenced by existing
 // generation history. Physical local/OSS cleanup is handled separately by the
 // retention job, after the record is no longer recoverable from the product.
-function deleteMany(db, log, { ids, owner_user_id, type, keyword, favorite } = {}) {
+function deleteMany(db, log, { ids, owner_user_id, scope, drama_id, type, keyword, favorite } = {}) {
   const ownerId = Number(owner_user_id);
   if (!Number.isInteger(ownerId) || ownerId <= 0) throw new Error('缺少素材所有者');
   const normalizedIds = [...new Set((Array.isArray(ids) ? ids : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
@@ -246,6 +255,12 @@ function deleteMany(db, log, { ids, owner_user_id, type, keyword, favorite } = {
     SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL
   ))`;
   const params = [ownerId, ownerId];
+  // The HTTP route requires an explicit scope. Keep the old service-level
+  // default for trusted internal callers/tests that historically meant
+  // "everything the owner can manage".
+  if (scope === 'global') where += ' AND drama_id IS NULL';
+  else if (scope === 'project') { where += ' AND drama_id = ?'; params.push(Number(drama_id)); }
+  else if (scope && scope !== 'all') throw new Error('批量删除范围无效');
   if (normalizedIds.length) {
     where += ` AND id IN (${normalizedIds.map(() => '?').join(', ')})`;
     params.push(...normalizedIds);
@@ -257,15 +272,31 @@ function deleteMany(db, log, { ids, owner_user_id, type, keyword, favorite } = {
     params.push(value, value);
   }
   if (String(favorite || '') === '1' || String(favorite || '').toLowerCase() === 'true') where += ' AND is_favorite = 1';
-  db.prepare(`SELECT id FROM assets WHERE ${where}`).all(...params).forEach((row) => assertNotReferencedByEditableShot(db, row.id));
-  const result = db.prepare(`UPDATE assets SET deleted_at = ?, updated_at = ? WHERE ${where}`)
-    .run(new Date().toISOString(), new Date().toISOString(), ...params);
-  log.info('Assets soft deleted in bulk', { owner_user_id: ownerId, count: result.changes, all_matching: normalizedIds.length === 0 });
-  return result.changes;
+  let candidates;
+  try { candidates = db.prepare(`SELECT id, source_type FROM assets WHERE ${where}`).all(...params); }
+  catch (_) { candidates = db.prepare(`SELECT id FROM assets WHERE ${where}`).all(...params); }
+  candidates.forEach((row) => assertNotReferencedByEditableShot(db, row.id, ownerId));
+  const at = new Date().toISOString();
+  const remove = db.transaction(() => {
+    let count = 0;
+    for (const row of candidates) {
+      if (row.source_type === 'project_resource') {
+        if (require('./assetMappingService').detachProjectResource(db, row.id, ownerId)) count += 1;
+      } else {
+        count += db.prepare('UPDATE assets SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL').run(at, at, row.id).changes;
+      }
+    }
+    return count;
+  });
+  const count = remove();
+  log.info('Assets soft deleted in bulk', { owner_user_id: ownerId, scope, drama_id: drama_id || null, count, all_matching: normalizedIds.length === 0 });
+  return count;
 }
 
-function importFromImage(db, log, imageGenId) {
-  const img = db.prepare('SELECT * FROM image_generations WHERE id = ? AND deleted_at IS NULL').get(Number(imageGenId));
+function importFromImage(db, log, imageGenId, ownerUserId = null) {
+  const img = ownerUserId == null
+    ? db.prepare('SELECT * FROM image_generations WHERE id = ? AND deleted_at IS NULL').get(Number(imageGenId))
+    : db.prepare('SELECT * FROM image_generations WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(imageGenId), Number(ownerUserId));
   if (!img) return null;
   return create(db, log, {
     drama_id: img.drama_id,
@@ -278,8 +309,10 @@ function importFromImage(db, log, imageGenId) {
   });
 }
 
-function importFromVideo(db, log, videoGenId) {
-  const vid = db.prepare('SELECT * FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(Number(videoGenId));
+function importFromVideo(db, log, videoGenId, ownerUserId = null) {
+  const vid = ownerUserId == null
+    ? db.prepare('SELECT * FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(Number(videoGenId))
+    : db.prepare('SELECT * FROM video_generations WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(videoGenId), Number(ownerUserId));
   // Do not convert a provider's expiring signed URL into a persistent asset.
   if (!vid || vid.status !== 'completed' || !String(vid.local_path || '').trim()) return null;
   return create(db, log, {

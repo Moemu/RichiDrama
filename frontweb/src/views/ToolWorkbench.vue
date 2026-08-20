@@ -5,7 +5,7 @@
       <form class="tool-form" @submit.prevent="run"><div class="panel-kicker"><span>01</span><div><b>创作输入</b><small>运行参数会随历史记录保存</small></div></div>
         <label>运行标题<el-input v-model="title" :placeholder="`${config.title} · ${formatChinaDate(new Date())}`" /></label>
         <label>语言<el-select v-model="language"><el-option label="中文" value="zh"/><el-option label="English" value="en"/><el-option v-if="kind === 'reverse_prompt'" label="双语" value="bilingual"/></el-select></label>
-        <label v-if="kind !== 'reverse_prompt'">模型（可选）<el-input v-model="model" placeholder="留空使用默认文本模型" /></label>
+        <label>模型<el-select v-model="model" clearable placeholder="默认（自动选择）"><el-option v-for="item in modelOptions" :key="item" :label="item" :value="item" /></el-select></label>
         <label v-if="kind === 'script_analysis' || kind === 'script_analysis_stream'">项目资料<el-input v-model="projectInfo" type="textarea" :rows="3" placeholder="题材、受众、已有设定（可选）" /></label>
         <label v-if="kind === 'script_analysis' || kind === 'script_analysis_stream'">剧本资料<el-input v-model="content" type="textarea" :rows="12" placeholder="粘贴 UTF-8 剧本文本。流式分析可逐步保存输出。" /></label>
         <label v-if="kind === 'script_analysis_stream'">导入 UTF-8 TXT（≤2MB）<input type="file" accept="text/plain,.txt" @change="readTxt" /></label>
@@ -26,7 +26,9 @@ import ToolAssetSelector from '@/components/ToolAssetSelector.vue'
 import ToolResultRenderer from '@/components/ToolResultRenderer.vue'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import { formatChinaDate, formatChinaDateTime } from '@/utils/time'
+import { useModelOptions } from '@/composables/useModelOptions'
 const props=defineProps({ kind:{type:String,required:true} })
+const modelOptions=useModelOptions('text')
 const configs={script_analysis:{symbol:'◎',title:'剧本分析',description:'将剧本拆解为项目、角色、场景、道具与镜头建议。',action:'开始分析'},script_analysis_stream:{symbol:'≋',title:'剧本分析（流式）',description:'持续保存增量输出；断线后可从历史继续查看。',action:'开始流式分析'},script_writing:{symbol:'✦',title:'剧本创作',description:'从创意生成分集短剧正文，可再导入项目。',action:'生成剧本'},reverse_prompt:{symbol:'◌',title:'反推提示词',description:'分析图片的主体、构图、镜头、光影与完整提示词。',action:'开始反推'}}
 const config=computed(()=>configs[props.kind]||configs.script_analysis),runs=ref([]),active=ref(null),running=ref(false),title=ref(''),language=ref('zh'),model=ref(''),projectInfo=ref(''),content=ref(''),genre=ref(''),episodeCount=ref(1),assetId=ref(''),timer=ref(null)
 const showRaw=ref(false)

@@ -143,6 +143,14 @@ function quote(db, user, input) {
   return { user_id: user.id, service_type: serviceType, model, usage, pricing_context: input.pricing_context || {}, amount_micro: amountMicro, amount: microToCredits(amountMicro), rates, quoted_at: now() };
 }
 
+function projectSnapshot(db, userId, input = {}) {
+  const dramaId = Number(input.drama_id);
+  if (!Number.isInteger(dramaId) || dramaId <= 0) return { drama_id: null, project_title_snapshot: null };
+  const row = db.prepare('SELECT id, title FROM dramas WHERE id=? AND owner_user_id=? AND deleted_at IS NULL').get(dramaId, Number(userId));
+  if (!row) throw new Error('项目不存在或无权计费到该项目');
+  return { drama_id: row.id, project_title_snapshot: String(row.title || '').trim() || `项目 #${row.id}` };
+}
+
 function createAuthorization(db, user, input) {
   const idempotencyKey = String(input.idempotency_key || '').trim(); if (!idempotencyKey) throw new Error('idempotency_key 必填');
   const existing = db.prepare("SELECT * FROM billing_transactions WHERE user_id = ? AND idempotency_key = ? AND type = 'authorization'").get(user.id, idempotencyKey);
@@ -150,15 +158,18 @@ function createAuthorization(db, user, input) {
   assertReconciliationLimit(db, user.id, input.service_type, input.model);
   const priced = quote(db, user, input); const at = now(); const id = uuid();
   const tenantId = require('./tenantService').tenantForUser(db, user.id)?.id || null;
+  const project = projectSnapshot(db, user.id, input);
   const execute = db.transaction(() => {
     const acct = account(db, user.id); const available = acct.balance_micro - acct.frozen_micro;
     if (available < priced.amount_micro) throw new Error('余额不足');
     const frozenAfter = acct.frozen_micro + priced.amount_micro;
     db.prepare('UPDATE billing_accounts SET frozen_micro = ?, updated_at = ? WHERE user_id = ?').run(frozenAfter, at, user.id);
-    const snapshot = { ...priced, tenant_id: tenantId, reference_type: input.reference_type || null, reference_id: input.reference_id || null };
-    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, idempotency_key, reference_type, reference_id, reason, snapshot_json, created_at)
-      VALUES (?, ?, ?, 'authorization', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, user.id, tenantId, priced.amount_micro, acct.balance_micro, frozenAfter, id, idempotencyKey, input.reference_type || null, input.reference_id || null, input.reason || null, json(snapshot), at);
+    const sourceKind = input.source_kind || input.reference_type || null;
+    const sourceId = input.source_id ?? input.reference_id ?? null;
+    const snapshot = { ...priced, tenant_id: tenantId, ...project, source_kind: sourceKind, source_id: sourceId, reference_type: input.reference_type || null, reference_id: input.reference_id || null };
+    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, drama_id, project_title_snapshot, source_kind, source_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, idempotency_key, reference_type, reference_id, reason, snapshot_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'authorization', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, user.id, tenantId, project.drama_id, project.project_title_snapshot, sourceKind, sourceId == null ? null : String(sourceId), priced.amount_micro, acct.balance_micro, frozenAfter, id, idempotencyKey, input.reference_type || null, input.reference_id || null, input.reason || null, json(snapshot), at);
   });
   execute();
   return { authorization_id: id, amount_micro: priced.amount_micro, amount: microToCredits(priced.amount_micro), snapshot: priced };
@@ -211,12 +222,12 @@ function settleAuthorization(db, user, authorizationId, input = {}) {
     const balanceAfter = acct.balance_micro - chargedMicro; const frozenAfter = acct.frozen_micro - auth.amount_micro;
     db.prepare(`UPDATE billing_accounts SET balance_micro = ?, frozen_micro = ?, total_consumed_micro = total_consumed_micro + ?, updated_at = ? WHERE user_id = ?`)
       .run(balanceAfter, frozenAfter, chargedMicro, at, auth.user_id);
-    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, reference_type, reference_id, reason, snapshot_json, created_at)
-      VALUES (?, ?, ?, 'settlement', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, auth.user_id, auth.tenant_id || null, -chargedMicro, balanceAfter, frozenAfter, authorizationId, auth.reference_type, auth.reference_id, input.reason || null, json({ ...snapshot, actual_usage: actual.usage, authorized_micro: auth.amount_micro, charged_micro: chargedMicro, supplemental_charged_micro: supplementalMicro, overage_micro: supplementalMicro }), at);
-    db.prepare(`INSERT INTO billing_usage_logs (id, user_id, tenant_id, transaction_id, authorization_id, service_type, model, usage_json, charged_micro, provider_request_id, reference_type, reference_id, snapshot_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(uuid(), auth.user_id, auth.tenant_id || null, id, authorizationId, snapshot.service_type, snapshot.model, json(actual.usage), chargedMicro, input.provider_request_id || null, auth.reference_type, auth.reference_id, json(snapshot), at);
+    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, drama_id, project_title_snapshot, source_kind, source_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, reference_type, reference_id, reason, snapshot_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'settlement', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, auth.user_id, auth.tenant_id || null, auth.drama_id || null, auth.project_title_snapshot || null, auth.source_kind || auth.reference_type || null, auth.source_id || auth.reference_id || null, -chargedMicro, balanceAfter, frozenAfter, authorizationId, auth.reference_type, auth.reference_id, input.reason || null, json({ ...snapshot, actual_usage: actual.usage, authorized_micro: auth.amount_micro, charged_micro: chargedMicro, supplemental_charged_micro: supplementalMicro, overage_micro: supplementalMicro }), at);
+    db.prepare(`INSERT INTO billing_usage_logs (id, user_id, tenant_id, drama_id, project_title_snapshot, source_kind, source_id, transaction_id, authorization_id, service_type, model, usage_json, charged_micro, provider_request_id, reference_type, reference_id, snapshot_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(uuid(), auth.user_id, auth.tenant_id || null, auth.drama_id || null, auth.project_title_snapshot || null, auth.source_kind || auth.reference_type || null, auth.source_id || auth.reference_id || null, id, authorizationId, snapshot.service_type, snapshot.model, json(actual.usage), chargedMicro, input.provider_request_id || null, auth.reference_type, auth.reference_id, json(snapshot), at);
   });
   execute(); return { transaction_id: id, charged_micro: chargedMicro, charged: microToCredits(chargedMicro), supplemental_charged_micro: supplementalMicro, overage_micro: supplementalMicro, reused: false };
 }
@@ -757,6 +768,11 @@ function appendLedgerFilters(where, params, tableAlias, userAlias, filters = {})
   const to = shanghaiDayBoundary(filters.date_to, true);
   if (from) { where += ` AND ${tableAlias}.created_at >= ?`; params.push(from); }
   if (to) { where += ` AND ${tableAlias}.created_at <= ?`; params.push(to); }
+  if (filters.drama_id !== undefined && filters.drama_id !== null && String(filters.drama_id) !== '') {
+    const dramaId = Number(filters.drama_id);
+    if (dramaId === 0) where += ` AND ${tableAlias}.drama_id IS NULL`;
+    else if (Number.isInteger(dramaId) && dramaId > 0) { where += ` AND ${tableAlias}.drama_id = ?`; params.push(dramaId); }
+  }
   return where;
 }
 
@@ -820,6 +836,8 @@ function pagedUsage(db, filters = {}) {
   let where = 'WHERE 1=1', params = [];
   if (filters.user_id) { where += ' AND l.user_id = ?'; params.push(Number(filters.user_id)); }
   where = appendLedgerFilters(where, params, 'l', 'u', filters);
+  if (filters.service_type) { where += ' AND l.service_type=?'; params.push(String(filters.service_type)); }
+  if (filters.model) { where += ' AND l.model=?'; params.push(String(filters.model)); }
   const meta = pagination(filters);
   const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_usage_logs l JOIN users u ON u.id = l.user_id ${where}`).get(...params)?.total || 0);
   const rows = db.prepare(`SELECT l.*, u.username, u.role, tn.name AS tenant_name FROM billing_usage_logs l JOIN users u ON u.id = l.user_id LEFT JOIN tenants tn ON tn.id = l.tenant_id ${where} ORDER BY l.created_at DESC, l.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
@@ -828,6 +846,66 @@ function pagedUsage(db, filters = {}) {
     total,
     page: meta.page,
     page_size: meta.page_size,
+  };
+}
+
+// Only fill a historical project snapshot when its authorization ID resolves
+// to one still-owned project generation. Ambiguous and free/global history is
+// intentionally left untouched rather than guessed.
+function backfillProjectSnapshots(db, actorId, idempotencyKey = null) {
+  if (idempotencyKey) {
+    const previous = db.prepare("SELECT detail_json FROM billing_audit_logs WHERE actor_user_id=? AND action='billing.project_snapshot.backfill' ORDER BY created_at DESC").all(actorId)
+      .map((row) => parse(row.detail_json, null)).find((detail) => detail?.idempotency_key === idempotencyKey);
+    if (previous) return { ...previous, reused: true };
+  }
+  const candidates = db.prepare(`
+    SELECT l.id AS usage_log_id, l.authorization_id, l.user_id, v.drama_id, d.title AS project_title, 'video_generation' AS source_kind
+      FROM billing_usage_logs l JOIN video_generations v
+        ON l.authorization_id IN (v.billing_authorization_id, v.upscale_billing_authorization_id, v.interpolation_billing_authorization_id)
+      JOIN dramas d ON d.id=v.drama_id AND d.deleted_at IS NULL AND d.owner_user_id=v.owner_user_id
+     WHERE l.drama_id IS NULL AND v.drama_id>0 AND l.user_id=v.owner_user_id
+    UNION ALL
+    SELECT l.id AS usage_log_id, l.authorization_id, l.user_id, i.drama_id, d.title AS project_title, 'image_generation' AS source_kind
+      FROM billing_usage_logs l JOIN image_generations i ON i.billing_authorization_id=l.authorization_id
+      JOIN dramas d ON d.id=i.drama_id AND d.deleted_at IS NULL AND d.owner_user_id=i.owner_user_id
+     WHERE l.drama_id IS NULL AND i.drama_id>0 AND l.user_id=i.owner_user_id
+  `).all();
+  const choices = new Map();
+  for (const row of candidates) {
+    const rows = choices.get(row.usage_log_id) || new Map();
+    rows.set(`${row.drama_id}:${row.project_title}`, row);
+    choices.set(row.usage_log_id, rows);
+  }
+  const safe = [...choices.values()].flatMap((rows) => rows.size === 1 ? [...rows.values()] : []);
+  const summary = db.transaction(() => {
+    const usage = db.prepare('UPDATE billing_usage_logs SET drama_id=?, project_title_snapshot=?, source_kind=COALESCE(source_kind, ?), source_id=COALESCE(source_id, ?) WHERE id=? AND drama_id IS NULL');
+    const transactions = db.prepare('UPDATE billing_transactions SET drama_id=?, project_title_snapshot=?, source_kind=COALESCE(source_kind, ?), source_id=COALESCE(source_id, ?) WHERE user_id=? AND drama_id IS NULL AND (id=? OR authorization_id=?)');
+    let usageLogs = 0, ledgerRows = 0;
+    for (const row of safe) {
+      usageLogs += usage.run(row.drama_id, row.project_title, row.source_kind, String(row.usage_log_id), row.usage_log_id).changes;
+      ledgerRows += transactions.run(row.drama_id, row.project_title, row.source_kind, String(row.usage_log_id), row.user_id, row.authorization_id, row.authorization_id).changes;
+    }
+    return { usage_logs: usageLogs, transactions: ledgerRows, candidates: candidates.length, safe_records: safe.length, ambiguous_or_duplicate: candidates.length - safe.length, projects: new Set(safe.map((row) => row.drama_id)).size };
+  })();
+  audit(db, actorId, 'billing.project_snapshot.backfill', 'billing', 'historical-project-snapshots', { ...summary, idempotency_key: idempotencyKey });
+  return summary;
+}
+
+function usageSummary(db, filters = {}) {
+  let where = 'WHERE 1=1', params = [];
+  if (filters.user_id) { where += ' AND l.user_id=?'; params.push(Number(filters.user_id)); }
+  where = appendLedgerFilters(where, params, 'l', 'u', filters);
+  if (filters.service_type) { where += ' AND l.service_type=?'; params.push(String(filters.service_type)); }
+  if (filters.model) { where += ' AND l.model=?'; params.push(String(filters.model)); }
+  const totals = db.prepare(`SELECT COALESCE(SUM(l.charged_micro),0) charged_micro, COUNT(*) calls, COUNT(DISTINCT l.user_id) users, COUNT(DISTINCT l.drama_id) projects FROM billing_usage_logs l JOIN users u ON u.id=l.user_id ${where}`).get(...params);
+  const timeSeries = db.prepare(`SELECT substr(datetime(l.created_at, '+8 hours'), 1, 10) day, COALESCE(SUM(l.charged_micro),0) charged_micro, COUNT(*) calls FROM billing_usage_logs l JOIN users u ON u.id=l.user_id ${where} GROUP BY day ORDER BY day`).all(...params);
+  const breakdown = db.prepare(`SELECT l.user_id, u.username, l.drama_id, COALESCE(l.project_title_snapshot, CASE WHEN l.drama_id IS NULL THEN '未关联项目（历史/全局）' ELSE '项目名称快照缺失' END) project_title, COALESCE(SUM(l.charged_micro),0) charged_micro, COUNT(*) calls FROM billing_usage_logs l JOIN users u ON u.id=l.user_id ${where} GROUP BY l.user_id, u.username, l.drama_id, project_title ORDER BY charged_micro DESC, l.user_id`).all(...params);
+  const unassigned = db.prepare(`SELECT COALESCE(SUM(l.charged_micro),0) charged_micro, COUNT(*) calls FROM billing_usage_logs l JOIN users u ON u.id=l.user_id ${where} AND l.drama_id IS NULL`).get(...params);
+  return {
+    summary: { ...totals, charged: microToCredits(totals.charged_micro) },
+    time_series: timeSeries.map((row) => ({ ...row, charged: microToCredits(row.charged_micro) })),
+    user_project_breakdown: breakdown.map((row) => ({ ...row, charged: microToCredits(row.charged_micro) })),
+    unassigned: { ...unassigned, charged: microToCredits(unassigned.charged_micro) },
   };
 }
 
@@ -840,4 +918,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { account, publicAccount, audit, backfillTenantSnapshots, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, pagedAuditLogs };
+module.exports = { account, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, pagedAuditLogs };

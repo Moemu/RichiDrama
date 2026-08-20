@@ -1,5 +1,5 @@
 <template>
-  <div class="film-create" :class="{ 'sidebar-collapsed': navCollapsed, 'script-stage-active': workflowStage === 'script', 'resources-stage-active': workflowStage === 'resources', 'storyboard-stage-active': workflowStage === 'storyboard', 'merge-stage-active': workflowStage === 'merge' }">
+  <div class="film-create" :class="{ 'script-stage-active': workflowStage === 'script', 'resources-stage-active': workflowStage === 'resources', 'storyboard-stage-active': workflowStage === 'storyboard', 'merge-stage-active': workflowStage === 'merge' }">
     <!-- 全能素材上传：上传素材 / 首尾帧参考图（共享隐藏 input） -->
     <input ref="sbOmniFileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="onSbOmniFileInputChange" />
     <input ref="sbOmniFrameFileInput" hidden type="file" accept="image/*" @change="onSbOmniFrameFileInputChange" />
@@ -51,137 +51,6 @@
     </header>
 
     <!-- 左侧固定侧边栏 -->
-    <nav class="quick-nav" :class="{ collapsed: navCollapsed }" aria-label="快捷导航">
-      <div class="nav-sidebar-header">
-        <span v-if="!navCollapsed" class="nav-sidebar-title">导航</span>
-        <div class="nav-toggle" :title="navCollapsed ? '展开导航' : '收起导航'" @click="toggleNav()">
-          <el-icon><Expand v-if="navCollapsed" /><Fold v-else /></el-icon>
-        </div>
-      </div>
-
-      <!-- 步骤列表 -->
-      <div class="nav-steps">
-        <div
-          v-for="(step, idx) in navSteps"
-          :key="step.key"
-          class="nav-step"
-          :class="['status-' + step.status]"
-          @click="navigateWorkflowStep(step.key)"
-        >
-          <!-- 左侧连接线 -->
-          <div class="step-connector-wrap">
-            <div v-if="idx > 0" class="step-line step-line-top" :class="{ filled: navSteps[idx - 1].status === 'done' }" />
-            <div
-              class="step-dot"
-              :class="['dot-' + step.status]"
-            >
-              <el-icon v-if="step.status === 'done'" class="dot-icon"><Check /></el-icon>
-              <el-icon v-else-if="step.status === 'generating'" class="dot-icon spin"><Loading /></el-icon>
-              <span v-else class="dot-num">{{ idx + 1 }}</span>
-            </div>
-            <div v-if="idx < navSteps.length - 1" class="step-line step-line-bottom" :class="{ filled: step.status === 'done' }" />
-          </div>
-
-          <!-- 右侧文字 + 状态徽章 -->
-          <div class="step-body">
-            <span class="step-label">{{ step.label }}</span>
-            <span v-if="step.count > 0 && step.status !== 'done'" class="step-count">{{ step.count }}</span>
-            <span v-if="step.status === 'partial'" class="step-badge partial-badge" title="部分完成">
-              <el-icon><WarningFilled /></el-icon>
-            </span>
-            <span v-else-if="step.status === 'generating'" class="step-badge gen-badge" title="生成中">
-              <el-icon class="spin"><Loading /></el-icon>
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 分镜子列表 -->
-      <div v-if="!navCollapsed && storyboards.length > 0" class="nav-group">
-        <div class="nav-sub-toggle" @click="storyboardMenuExpanded = !storyboardMenuExpanded">
-          <el-icon><Minus v-if="storyboardMenuExpanded" /><Plus v-else /></el-icon>
-          <span>分镜列表</span>
-        </div>
-        <div v-show="storyboardMenuExpanded" class="nav-sub-list">
-          <template v-for="(sb, i) in storyboards" :key="sb.id">
-            <!-- 段落标题行 -->
-            <div
-              v-if="sb.segment_title && (i === 0 || sb.segment_index !== storyboards[i - 1].segment_index)"
-              class="nav-segment-label"
-            >
-              <span class="nav-segment-dot" />
-              {{ sb.segment_title }}
-            </div>
-            <div
-              class="nav-sub-item"
-              :class="{ 'sb-nav-dragging': navDragSbId === sb.id, 'sb-nav-over': navDragOverSbId === sb.id }"
-              :title="sb.title || '分镜 ' + (i + 1)"
-              draggable="true"
-              @dragstart="onSbNavDragStart(sb)"
-              @dragend="onSbNavDragEnd"
-              @dragover.prevent="onSbNavDragOver(sb)"
-              @dragleave="navDragOverSbId = null"
-              @drop.prevent="onSbNavDrop(sb)"
-              @click="scrollToAnchor('sb-' + sb.id)"
-            >
-              <span class="nav-sb-title">{{ i + 1 }}. {{ sb.title || '分镜' }}</span>
-              <span class="nav-sb-move">
-                <el-button text size="small" :disabled="i === 0" @click.stop="moveSbOrder(sb, -1)">↑</el-button>
-                <el-button text size="small" :disabled="i === storyboards.length - 1" @click.stop="moveSbOrder(sb, 1)">↓</el-button>
-              </span>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- 当前任务面板 -->
-      <div v-if="allActiveTaskItems.length > 0" class="atp-panel">
-        <!-- 折叠态：只显示旋转点和数量 -->
-        <div v-if="navCollapsed" class="atp-collapsed-badge" :title="allActiveTaskLabels.join('\n')">
-          <span class="atp-spin-dot" />
-          <span class="atp-collapsed-count">{{ allActiveTaskItems.length }}</span>
-        </div>
-        <!-- 展开态：标题 + 任务列表 -->
-        <template v-else>
-          <div class="atp-header">
-            <span class="atp-spin-dot" />
-            <span class="atp-title">进行中</span>
-            <span class="atp-count-badge">{{ allActiveTaskItems.length }}</span>
-          </div>
-          <div class="atp-list">
-            <div
-              v-for="item in allActiveTaskItems.slice(0, 8)"
-              :key="item.id"
-              class="atp-item"
-            >
-              <span class="atp-item-dot" />
-              <el-tooltip :content="item.label" placement="right" :show-after="300" :enterable="false">
-                <span class="atp-item-label">{{ item.label }}</span>
-              </el-tooltip>
-              <button
-                type="button"
-                class="atp-item-close"
-                title="取消任务"
-                aria-label="取消任务"
-                @click.stop="cancelActiveTask(item)"
-              >
-                <el-icon :size="12"><Close /></el-icon>
-              </button>
-            </div>
-            <el-tooltip
-              v-if="allActiveTaskItems.length > 8"
-              :content="allActiveTaskItems.slice(8).map((t) => t.label).join('\n')"
-              placement="right"
-              :show-after="200"
-            >
-              <div class="atp-more">
-                还有 {{ allActiveTaskItems.length - 8 }} 个任务...
-              </div>
-            </el-tooltip>
-          </div>
-        </template>
-      </div>
-    </nav>
 
     <main class="main">
       <section class="workflow-shell" aria-label="短剧制作工作流">
@@ -499,26 +368,26 @@
         <div class="resource-center-grid">
           <article class="resource-center-group">
             <header><b>角色</b><span>{{ characters.length }}</span></header>
-            <div class="resource-center-actions"><el-button size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button><el-button size="small" @click="openAddCharacter">添加角色</el-button><el-button v-if="characters.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'character'" @click="onGenerateMissingResourceImages('character')">生成缺图</el-button></div>
-            <div v-if="characters.length" class="resource-center-list"><div v-for="char in characters" :key="char.id" class="resource-center-item"><img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" alt="" /><span v-else class="resource-center-placeholder">角色</span><div><b>{{ char.name }}</b><small>{{ char.appearance || char.description || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editCharacter(char)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('character', char)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `char-${char.id}`" @click="onUploadResourceClick('character', char.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteCharacter(char)">删除</el-button></div></div></div>
+            <div class="resource-center-actions"><el-button size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button><el-button size="small" @click="openAddCharacter">添加角色</el-button><el-button v-if="characters.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'character'" @click="onGenerateMissingResourceImages('character')">生成缺图</el-button><el-button v-if="characters.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.character.size" @click="batchDeleteUnifiedResources('character')">批量删除{{ unifiedResourceSelection.character.size ? `（${unifiedResourceSelection.character.size}）` : '' }}</el-button></div>
+            <div v-if="characters.length" class="resource-center-list"><div v-for="char in characters" :key="char.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('character', char.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('character', char.id)" :aria-label="`选择角色 ${char.name || char.id}`" @click.stop @change="toggleUnifiedResourceSelection('character', char.id)" /><img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" alt="" /><span v-else class="resource-center-placeholder">角色</span><div><b>{{ char.name }}</b><small>{{ char.appearance || char.description || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editCharacter(char)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('character', char)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `char-${char.id}`" @click="onUploadResourceClick('character', char.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteCharacter(char)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从剧本提取角色，或手动添加。</p>
           </article>
           <article class="resource-center-group">
             <header><b>场景</b><span>{{ scenes.length }}</span></header>
-            <div class="resource-center-actions"><el-button size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button><el-button size="small" @click="openAddScene">添加场景</el-button><el-button v-if="scenes.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'scene'" @click="onGenerateMissingResourceImages('scene')">生成缺图</el-button></div>
-            <div v-if="scenes.length" class="resource-center-list"><div v-for="scene in scenes" :key="scene.id" class="resource-center-item"><img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" alt="" /><span v-else class="resource-center-placeholder">场景</span><div><b>{{ scene.location }}</b><small>{{ scene.description || scene.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editScene(scene)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('scene', scene)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `scene-${scene.id}`" @click="onUploadResourceClick('scene', scene.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteScene(scene)">删除</el-button></div></div></div>
+            <div class="resource-center-actions"><el-button size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button><el-button size="small" @click="openAddScene">添加场景</el-button><el-button v-if="scenes.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'scene'" @click="onGenerateMissingResourceImages('scene')">生成缺图</el-button><el-button v-if="scenes.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.scene.size" @click="batchDeleteUnifiedResources('scene')">批量删除{{ unifiedResourceSelection.scene.size ? `（${unifiedResourceSelection.scene.size}）` : '' }}</el-button></div>
+            <div v-if="scenes.length" class="resource-center-list"><div v-for="scene in scenes" :key="scene.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('scene', scene.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('scene', scene.id)" :aria-label="`选择场景 ${scene.location || scene.id}`" @click.stop @change="toggleUnifiedResourceSelection('scene', scene.id)" /><img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" alt="" /><span v-else class="resource-center-placeholder">场景</span><div><b>{{ scene.location }}</b><small>{{ scene.description || scene.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editScene(scene)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('scene', scene)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `scene-${scene.id}`" @click="onUploadResourceClick('scene', scene.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteScene(scene)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从当前剧本提取场景。</p>
           </article>
           <article class="resource-center-group">
             <header><b>道具</b><span>{{ props.length }}</span></header>
-            <div class="resource-center-actions"><el-button size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button><el-button size="small" @click="showAddProp = true">添加道具</el-button><el-button v-if="props.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'prop'" @click="onGenerateMissingResourceImages('prop')">生成缺图</el-button></div>
-            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item"><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editProp(prop)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('prop', prop)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `prop-${prop.id}`" @click="onUploadResourceClick('prop', prop.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteProp(prop)">删除</el-button></div></div></div>
+            <div class="resource-center-actions"><el-button size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button><el-button size="small" @click="showAddProp = true">添加道具</el-button><el-button v-if="props.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'prop'" @click="onGenerateMissingResourceImages('prop')">生成缺图</el-button><el-button v-if="props.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.prop.size" @click="batchDeleteUnifiedResources('prop')">批量删除{{ unifiedResourceSelection.prop.size ? `（${unifiedResourceSelection.prop.size}）` : '' }}</el-button></div>
+            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('prop', prop.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('prop', prop.id)" :aria-label="`选择道具 ${prop.name || prop.id}`" @click.stop @change="toggleUnifiedResourceSelection('prop', prop.id)" /><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editProp(prop)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('prop', prop)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `prop-${prop.id}`" @click="onUploadResourceClick('prop', prop.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteProp(prop)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从当前剧本提取道具。</p>
           </article>
         </div>
         <div class="resource-media-library">
-          <header><div><b>媒体素材库</b><small>上传的图片、视频、音频会在分镜引用区统一可用。</small></div><div class="resource-media-header-actions"><el-button size="small" @click="router.push('/media-library')">管理媒体库</el-button><span>{{ universalLibraryAssets.length }} 项</span></div></header>
-          <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card"><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><small>{{ asset.name || `素材 ${asset.id}` }}</small><small>{{ asset.library_scope === 'global' ? '我的全局素材' : '当前项目素材' }}</small><div class="resource-media-card-actions"><el-button size="small" text @click="renameResourceMedia(asset)">重命名</el-button><el-button size="small" type="danger" text @click="deleteResourceMedia(asset)">{{ asset.source_type === 'project_resource' ? '解除素材' : '删除' }}</el-button></div><small v-if="asset.source_type === 'project_resource'">关联资源：解除后不会被自动重建</small></article></div>
+          <header><div><b>媒体素材库</b><small>上传的图片、视频、音频会在分镜引用区统一可用。</small></div><div class="resource-media-header-actions"><el-button size="small" type="danger" plain :disabled="!unifiedResourceSelection.media.size" @click="batchDeleteUnifiedResources('media')">批量删除{{ unifiedResourceSelection.media.size ? `（${unifiedResourceSelection.media.size}）` : '' }}</el-button><el-button size="small" @click="router.push({ path: '/media-library', query: { drama_id: dramaId } })">管理当前项目素材</el-button><span>{{ universalLibraryAssets.length }} 项</span></div></header>
+          <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card" :class="{ selected: isUnifiedResourceSelected('media', asset.id) }"><el-checkbox class="resource-media-select" :model-value="isUnifiedResourceSelected('media', asset.id)" :aria-label="`选择媒体素材 ${asset.name || asset.id}`" @click.stop @change="toggleUnifiedResourceSelection('media', asset.id)" /><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><el-button class="resource-media-delete" size="small" type="danger" circle :aria-label="asset.source_type === 'project_resource' ? '解除项目素材' : asset.library_scope === 'global' ? '删除全局素材' : '删除项目素材'" @click="deleteResourceMedia(asset)">×</el-button><small>{{ asset.name || `素材 ${asset.id}` }}</small><small>{{ asset.library_scope === 'global' ? '我的全局素材' : '当前项目素材' }}</small><div class="resource-media-card-actions"><el-button size="small" text @click="renameResourceMedia(asset)">重命名</el-button><el-button size="small" type="danger" text @click="deleteResourceMedia(asset)">{{ asset.source_type === 'project_resource' ? '解除素材' : '删除' }}</el-button></div><small v-if="asset.source_type === 'project_resource'">关联资源：解除后不会被自动重建</small></article></div>
           <div v-if="detachedResourceLinks.length" class="resource-media-grid"><article v-for="link in detachedResourceLinks" :key="`detached-${link.id}`" class="resource-media-card"><span>已解除</span><small>{{ link.asset_name || `${link.resource_type} #${link.resource_id}` }}</small><small>历史分镜引用仍保留</small><el-button size="small" type="primary" text @click="restoreResourceMedia(link)">恢复关联</el-button></article></div>
           <p v-else class="resource-center-empty">还没有上传媒体素材。</p>
         </div>
@@ -573,7 +442,6 @@
                   <img v-if="item.type === 'image'" :src="item.thumbUrl || sbOmniAssetUrl(item)" alt="" />
                   <span v-else class="sb-omni-material-card-icon">{{ item.type === 'audio' ? '🎵' : '🎬' }}</span>
                   <small>{{ item.name }}</small>
-                  <span v-if="sbOmniPoolItemSelected(activeSb, item)" class="sb-omni-material-card-check">✓</span>
                 </div>
                 <div v-if="!sbOmniPoolItems(activeSb).length" class="sb-omni-material-pool-empty">暂无素材，请返回「统一资源管理」上传或生成素材。</div>
               </div>
@@ -2631,7 +2499,6 @@ import {
   backfillDramaStylePromptMetadataIfNeeded,
 } from '@/constants/styleOptions'
 import { MAX_IMAGE_SIZE_MB, checkImageFile } from '@/constants/uploadLimits'
-import { useNavigation } from '@/composables/filmCreate/useNavigation'
 import { runGenerateStoryFromPremise } from '@/composables/useStoryGeneration'
 import { useCharacters } from '@/composables/filmCreate/useCharacters'
 import { useProps as usePropsComposable } from '@/composables/filmCreate/useProps'
@@ -2646,7 +2513,6 @@ const { videoResolution: storeVideoResolution } = storeToRefs(store)
 const isAdmin = computed(() => JSON.parse(localStorage.getItem('lmd_auth_user') || 'null')?.console_access === true)
 
 // ── Composable: Navigation ─────────────────────────────
-const { navCollapsed, storyboardMenuExpanded, toggleNav, scrollToTop, scrollToAnchor } = useNavigation()
 
 function goList() {
   router.push('/')
@@ -2712,6 +2578,7 @@ const projectUpscaleResolution = ref('1080p')
 const projectTargetFps = ref(null)
 const universalLibraryAssets = ref([])
 const detachedResourceLinks = ref([])
+const unifiedResourceSelection = reactive({ character: new Set(), scene: new Set(), prop: new Set(), media: new Set() })
 /** 全能素材库：上传 / 拖拽 / 首尾帧上传 共享状态 */
 const sbOmniFileInput = ref(null)
 const sbOmniFrameFileInput = ref(null)
@@ -2858,14 +2725,6 @@ function setWorkflowStage(stage) {
 watch(() => route.query.stage, (stage) => {
   workflowStage.value = normalizeWorkflowStage(stage)
 })
-function navigateWorkflowStep(step) {
-  setWorkflowStage(step)
-  nextTick(() => {
-    const anchor = step === 'script' ? 'anchor-script' : step === 'storyboard' ? 'anchor-storyboard' : step === 'merge' ? 'anchor-video' : null
-    if (anchor) scrollToAnchor(anchor)
-    else window.scrollTo({ top: 0, behavior: 'smooth' })
-  })
-}
 /** 当前操作分镜（左侧素材编排面板作用目标）：默认第一个分镜，点击分镜卡片切换 */
 const activeSbId = ref(null)
 const sbAutoPlayId = ref(null)
@@ -3117,167 +2976,7 @@ const sceneUseQuadGrid = ref(false)
 const propUseQuadGrid = ref(false)  // 道具四视图（与场景四宫格同级选项）
 
 // 分镜行内编辑状态（按 storyboard id 存储）
-// navCollapsed/storyboardMenuExpanded/toggleNav → 已移至 useNavigation composable
 
-/** 左侧导航各步骤状态 */
-const navSteps = computed(() => {
-  const epRunning = genStore.getRunningForEpisode(dramaId.value, currentEpisodeId.value)
-  // 剧本
-  const hasScript = !!(scriptContent?.value?.trim())
-  const scriptStatus = isStoryGenRunning.value
-    ? 'generating'
-    : hasScript ? 'done' : 'pending'
-
-  // 角色
-  const charList = characters.value || []
-  const charDone = charList.length > 0 && charList.every(c => hasAssetImage(c))
-  const charGen = charactersGenerating.value || generatingCharIds.size > 0
-    || epRunning.some((t) => t.resourceType === GEN_RESOURCE.CHAR_IMAGE || t.resourceType === GEN_RESOURCE.EXTRACT_CHARACTERS)
-  const charStatus = charGen ? 'generating' : charDone ? 'done' : charList.length > 0 ? 'partial' : 'pending'
-
-  // 道具
-  const propList = props.value || []
-  const propDone = propList.length > 0 && propList.every(p => hasAssetImage(p))
-  const propGen = propsExtracting.value || generatingPropIds.size > 0
-    || epRunning.some((t) => t.resourceType === GEN_RESOURCE.PROP_IMAGE || t.resourceType === GEN_RESOURCE.EXTRACT_PROPS)
-  const propStatus = propGen ? 'generating' : propDone ? 'done' : propList.length > 0 ? 'partial' : 'pending'
-
-  // 场景
-  const sceneList = scenes.value || []
-  const sceneDone = sceneList.length > 0 && sceneList.every(s => hasAssetImage(s))
-  const sceneGen = scenesExtracting.value || generatingSceneIds.size > 0
-    || epRunning.some((t) => t.resourceType === GEN_RESOURCE.SCENE_IMAGE || t.resourceType === GEN_RESOURCE.EXTRACT_SCENES)
-  const sceneStatus = sceneGen ? 'generating' : sceneDone ? 'done' : sceneList.length > 0 ? 'partial' : 'pending'
-
-  // 分镜脚本
-  const sbList = storyboards.value || []
-  const sbScriptDone = sbList.length > 0
-  const sbScriptGen = storyboardGenerating.value || universalOmniPolishRunning.value
-    || epRunning.some((t) => t.resourceType === GEN_RESOURCE.GENERATE_STORYBOARD)
-  const sbScriptStatus = sbScriptGen ? 'generating' : sbScriptDone ? 'done' : 'pending'
-
-  // 分镜图
-  const sbImgDone = sbList.length > 0 && sbList.every(sb => hasSbImage(sb))
-  const sbImgGen = generatingSbImageIds.size > 0 || batchImageRunning.value || epRunning.some((t) =>
-    t.resourceType === GEN_RESOURCE.SB_IMAGE
-    || t.resourceType === GEN_RESOURCE.SB_FIRST_IMAGE
-    || t.resourceType === GEN_RESOURCE.SB_LAST_IMAGE
-  )
-  const sbImgStatus = sbImgGen ? 'generating' : sbImgDone ? 'done' : sbList.length > 0 ? 'partial' : 'pending'
-
-  // 视频
-  const sbVideoAllDone = sbList.length > 0 && sbList.every(sb => getSbAllVideos(sb.id).length > 0)
-  const sbVideoSome = sbList.some(sb => getSbAllVideos(sb.id).length > 0)
-  const sbVideoGen = batchVideoRunning.value || generatingSbVideoIds.size > 0
-    || epRunning.some((t) => t.resourceType === GEN_RESOURCE.SB_VIDEO)
-  const videoStatus = sbVideoGen ? 'generating' : sbVideoAllDone ? 'done' : sbVideoSome ? 'partial' : 'pending'
-
-  const resourcesGenerating = charGen || propGen || sceneGen
-  const resourceCount = charList.length + propList.length + sceneList.length + universalLibraryAssets.value.length
-  const resourcesReady = charStatus === 'done' && propStatus === 'done' && sceneStatus === 'done'
-  return [
-    { key: 'script', label: '剧本管理', status: scriptStatus, count: hasScript ? 1 : 0 },
-    { key: 'resources', label: '统一资源', status: resourcesGenerating ? 'generating' : resourcesReady ? 'done' : resourceCount ? 'partial' : 'pending', count: resourceCount },
-    { key: 'storyboard', label: '分镜管理', status: sbScriptGen || sbImgGen || sbVideoGen ? 'generating' : sbVideoAllDone ? 'done' : (sbList.length ? 'partial' : 'pending'), count: sbList.length },
-    { key: 'merge', label: '视频合成', status: videoStatus === 'generating' ? 'generating' : currentEpisodeVideoUrl.value ? 'done' : sbVideoSome ? 'partial' : 'pending', count: 0 },
-  ]
-})
-
-/** 聚合所有当前正在运行的任务，用于悬浮任务面板（含跨剧跨集） */
-const allActiveTaskItems = computed(() => {
-  const items = []
-  const seen = new Set()
-  function addItem(item) {
-    const id = item.id || item.label
-    if (!id || seen.has(id)) return
-    seen.add(id)
-    items.push(item)
-  }
-  for (const t of genStore.getAllRunningTasks()) {
-    addItem({
-      id: `gen:${t.key || t.taskId || t.label}`,
-      label: t.label || '任务进行中...',
-      kind: 'genStore',
-      task: t,
-    })
-  }
-  if (pipelineRunning.value) {
-    const step = pipelineCurrentStep.value
-    addItem({
-      id: 'pipeline',
-      label: step ? step.replace(/^\[步骤 \d+\/\d+\] /, '') : '一键全流程运行中...',
-      kind: 'pipeline',
-    })
-  }
-  if (isStoryGenRunning.value && !genStore.getAllRunningTasks().some((t) => t.resourceType === GEN_RESOURCE.GENERATE_STORY)) {
-    addItem({ id: 'story-gen-local', label: '生成剧本...', kind: 'storyGenLocal' })
-  }
-  if (universalOmniPolishRunning.value) {
-    const p = universalOmniPolishProgress.value
-    addItem({
-      id: 'universal-omni-polish',
-      label: `润色全能分镜 ${p.current}/${p.total}${p.label ? ' ' + p.label : ''}`,
-      kind: 'universalOmniPolish',
-    })
-  }
-  if (batchImageRunning.value) {
-    addItem({ id: 'batch-image', label: '批量生成分镜图...', kind: 'batchImage' })
-  }
-  if (batchVideoRunning.value) {
-    const p = batchVideoProgress.value
-    const suffix = p?.total ? ` ${p.current}/${p.total}` : ''
-    addItem({ id: 'batch-video', label: `批量生成分镜视频${suffix}...`, kind: 'batchVideo' })
-  }
-  return items
-})
-
-const allActiveTaskLabels = computed(() => allActiveTaskItems.value.map((t) => t.label))
-
-async function cancelActiveTask(item) {
-  if (!item) return
-  try {
-    if (item.kind === 'genStore' && item.task) {
-      await genStore.cancelTask(item.task)
-      ElMessage.success('任务已取消')
-      return
-    }
-    if (item.kind === 'pipeline') {
-      pipelineAbortRequested.value = true
-      pipelineRunning.value = false
-      pipelinePaused.value = false
-      for (const t of genStore.getAllRunningTasks()) {
-        if (t.taskId) await genStore.cancelTask(t)
-      }
-      ElMessage.success('已停止全流程')
-      return
-    }
-    if (item.kind === 'storyGenLocal') {
-      storyGenerating.value = false
-      scriptGenerating.value = false
-      const storyTask = genStore.getAllRunningTasks().find((t) => t.resourceType === GEN_RESOURCE.GENERATE_STORY)
-      if (storyTask) await genStore.cancelTask(storyTask)
-      ElMessage.success('已取消剧本生成')
-      return
-    }
-    if (item.kind === 'universalOmniPolish') {
-      universalOmniPolishAbort.value = true
-      ElMessage.success('正在停止润色...')
-      return
-    }
-    if (item.kind === 'batchImage') {
-      batchImageStopping.value = true
-      ElMessage.info('正在停止批量生图...')
-      return
-    }
-    if (item.kind === 'batchVideo') {
-      batchVideoStopping.value = true
-      ElMessage.info('正在停止批量生视频...')
-      return
-    }
-  } catch (e) {
-    ElMessage.error(e?.message || '取消失败')
-  }
-}
 const sbCharacterIds = ref({})  // sbId -> number[] 多选角色
 const sbPropIds = ref({})       // sbId -> number[] 多选物品
 const sbSceneId = ref({})
@@ -6387,12 +6086,66 @@ async function renameResourceMedia(asset) {
   } catch (_) {}
 }
 
+function isUnifiedResourceSelected(type, id) {
+  return unifiedResourceSelection[type]?.has(Number(id)) || false
+}
+
+function toggleUnifiedResourceSelection(type, id) {
+  const selected = unifiedResourceSelection[type]
+  const normalizedId = Number(id)
+  if (!selected || !Number.isInteger(normalizedId)) return
+  if (selected.has(normalizedId)) selected.delete(normalizedId)
+  else selected.add(normalizedId)
+}
+
+async function batchDeleteUnifiedResources(type) {
+  const selected = unifiedResourceSelection[type]
+  const ids = selected ? [...selected] : []
+  if (!ids.length) return
+  const labels = { character: '角色', scene: '场景', prop: '道具', media: '媒体素材' }
+  const label = labels[type] || '资源'
+  const globalMediaCount = type === 'media'
+    ? universalLibraryAssets.value.filter((asset) => ids.includes(Number(asset.id)) && asset.library_scope === 'global').length
+    : 0
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${ids.length} 个${label}？${globalMediaCount ? `其中 ${globalMediaCount} 个为全局素材，删除后其他项目也将不可见。` : ''}历史分镜与已生成作品保持可追溯。`,
+      `批量删除${label}`,
+      { type: 'warning', confirmButtonText: '删除选中项', cancelButtonText: '取消' }
+    )
+    const removeByType = {
+      character: (id) => characterAPI.delete(id),
+      scene: (id) => sceneAPI.delete(id),
+      prop: (id) => propAPI.delete(id),
+      // 逐个走资源删除路由：项目资源会被正确解除关联，不能用素材表批删绕开这条语义。
+      media: (id) => omniVideoAPI.deleteAsset(id),
+    }
+    const results = await Promise.allSettled(ids.map((id) => removeByType[type](id)))
+    const succeeded = ids.filter((_, index) => results[index].status === 'fulfilled')
+    succeeded.forEach((id) => selected.delete(id))
+    const failed = ids.length - succeeded.length
+    if (type === 'media') {
+      universalLibraryAssets.value = universalLibraryAssets.value.filter((asset) => !succeeded.includes(Number(asset.id)))
+      await loadDetachedResourceLinks()
+    } else {
+      await loadDrama()
+    }
+    if (failed) ElMessage.warning(`已处理 ${succeeded.length} 个${label}，${failed} 个删除失败，请重试`)
+    else ElMessage.success(`已删除 ${succeeded.length} 个${label}`)
+  } catch (err) {
+    if (err !== 'cancel' && err?.action !== 'cancel') ElMessage.error(err?.message || `批量删除${label}失败`)
+  }
+}
+
 async function deleteResourceMedia(asset) {
   try {
     const linked = asset.source_type === 'project_resource'
+    const globalAsset = asset.library_scope === 'global'
     await ElMessageBox.confirm(linked
       ? `确定解除“${asset.name || `素材 ${asset.id}`}”的媒体库关联？历史分镜不会被删除。`
-      : `确定删除“${asset.name || `素材 ${asset.id}`}”？`, linked ? '解除素材关联' : '删除素材', { type: 'warning' })
+      : globalAsset
+        ? `确定从全局素材库删除“${asset.name || `素材 ${asset.id}`}”？其他项目将不再看到该素材。`
+        : `确定删除“${asset.name || `素材 ${asset.id}`}”？`, linked ? '解除素材关联' : globalAsset ? '删除全局素材' : '删除项目素材', { type: 'warning' })
     await omniVideoAPI.deleteAsset(asset.id)
     universalLibraryAssets.value = universalLibraryAssets.value.filter((item) => Number(item.id) !== Number(asset.id))
     if (linked) await loadDetachedResourceLinks()
@@ -7915,48 +7668,6 @@ async function onUsePrevTailAsFirst(sb) {
 }
 
 /** 生成期间轻量刷新分镜列表（只更新指定集 storyboards，不重载整个 drama） */
-/** 分镜拖拽排序状态 */
-const navDragSbId = ref(null)
-const navDragOverSbId = ref(null)
-const sbReorderSaving = ref(false)
-
-function onSbNavDragStart(sb) {
-  navDragSbId.value = sb?.id ?? null
-}
-function onSbNavDragEnd() {
-  navDragSbId.value = null
-  navDragOverSbId.value = null
-}
-function onSbNavDragOver(sb) {
-  navDragOverSbId.value = sb?.id ?? null
-}
-
-/** 提交新顺序到后端（重写 sort_order），随后刷新分镜列表 */
-async function persistSbOrder(ids) {
-  const epId = currentEpisodeId.value
-  if (!epId || !Array.isArray(ids) || ids.length < 2) return
-  sbReorderSaving.value = true
-  try {
-    await storyboardsAPI.reorder({ episode_id: epId, ids })
-    await refreshStoryboardsForEpisode(epId)
-  } catch (err) {
-    ElMessage.error(err?.message || '分镜排序保存失败')
-  } finally {
-    sbReorderSaving.value = false
-  }
-}
-
-async function moveSbOrder(sb, dir) {
-  const list = storyboards.value || []
-  const from = list.findIndex((s) => Number(s.id) === Number(sb.id))
-  const to = from + dir
-  if (from < 0 || to < 0 || to >= list.length) return
-  const next = [...list]
-  const [moved] = next.splice(from, 1)
-  next.splice(to, 0, moved)
-  await persistSbOrder(next.map((s) => s.id))
-}
-
 async function onSbNavDrop(target) {
   const fromId = navDragSbId.value
   const toId = target?.id ?? null
@@ -9573,11 +9284,6 @@ html.light .film-create {
   top: 0;
   z-index: 200;
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15), 0 4px 20px rgba(0, 0, 0, 0.2);
-  margin-left: 180px;
-  transition: margin-left 0.25s cubic-bezier(.4,0,.2,1);
-}
-.sidebar-collapsed .header {
-  margin-left: 48px;
 }
 html.light .header {
   background: rgba(255, 255, 255, 0.82) !important;
@@ -9682,46 +9388,7 @@ html.light .btn-theme {
   --el-button-hover-border-color: rgba(99, 102, 241, 0.3);
   --el-button-hover-text-color: #4f46e5;
 }
-/* ===== 左侧固定侧边栏 ===== */
-.quick-nav {
-  position: fixed;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  z-index: 210;
-  display: flex;
-  flex-direction: column;
-  padding: 14px 0 10px;
-  background: linear-gradient(180deg, #131318 0%, #111116 50%, #0f0f14 100%);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  box-shadow: 1px 0 0 rgba(255,255,255,0.02), 4px 0 24px rgba(0, 0, 0, 0.4);
-  width: 180px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  transition: width 0.25s cubic-bezier(.4,0,.2,1), padding 0.25s cubic-bezier(.4,0,.2,1);
-}
-html.light .quick-nav {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 247, 255, 0.99) 100%);
-  border-right-color: rgba(139, 92, 246, 0.1);
-  box-shadow: 1px 0 0 rgba(139,92,246,0.06), 4px 0 20px rgba(139, 92, 246, 0.04);
-}
-.quick-nav::-webkit-scrollbar { width: 4px; }
-.quick-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
-.quick-nav::-webkit-scrollbar-track { background: transparent; }
-.quick-nav.collapsed {
-  width: 48px;
-  padding: 12px 0;
-}
-.quick-nav.collapsed .nav-steps,
-.quick-nav.collapsed .nav-group {
-  display: none;
-}
 @media (max-width: 768px) {
-  .quick-nav { width: 48px; padding: 12px 0; }
-  .quick-nav .nav-steps, .quick-nav .nav-group { display: none; }
-  .quick-nav .nav-sidebar-title { display: none; }
-  .quick-nav .nav-sidebar-header { justify-content: center; padding: 0 4px 8px; }
-  .header, .main { margin-left: 48px !important; }
   .main { padding: 16px 12px 48px; }
   .asset-list-two { grid-template-columns: 1fr; }
 }
@@ -9868,10 +9535,6 @@ html.light .atp-panel { border-top-color: rgba(139,92,246,0.15); }
   flex-shrink: 0;
 }
 html.light .nav-sidebar-header { border-bottom-color: rgba(139, 92, 246, 0.12); }
-.quick-nav.collapsed .nav-sidebar-header {
-  justify-content: center;
-  padding: 0 4px 8px;
-}
 .nav-sidebar-title {
   font-size: 13px;
   font-weight: 600;
@@ -10084,13 +9747,12 @@ html.light .nav-sub-item:hover { color: #1e1b4b; background: rgba(99,102,241,0.0
 html.light .nav-sub-item.sb-nav-over { background: rgba(99,102,241,0.10); }
 
 .main {
-  margin-left: 180px;
+  margin-left: 0;
   margin-right: 0;
   padding: 24px 32px 48px;
-  transition: margin-left 0.25s cubic-bezier(.4,0,.2,1);
 }
 .storyboard-stage-active{height:100dvh;overflow:hidden}
-.storyboard-stage-active .main{height:calc(100dvh - 58px);box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;padding:10px 32px}
+.storyboard-stage-active .main{max-width:none;height:calc(100dvh - 58px);box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;padding:10px 32px}
 .storyboard-stage-active .workflow-shell{flex:none;margin:0 0 8px;padding:8px 14px}
 .storyboard-stage-active .workflow-head{display:none}
 .storyboard-stage-active .workflow-steps{margin-top:0}
@@ -10098,9 +9760,6 @@ html.light .nav-sub-item.sb-nav-over { background: rgba(99,102,241,0.10); }
 .storyboard-stage-active .omni-page.embedded.project-storyboard-page .workbench{height:100%!important;min-height:0!important}
 .storyboard-stage-active .workflow-next-action{flex:none;margin:8px 0 0;padding:8px 12px}
 @media(max-width:960px){.storyboard-stage-active{height:auto;overflow:visible}.storyboard-stage-active .main{height:auto;overflow:visible;display:block;padding:16px 12px}.storyboard-stage-active .workflow-head{display:flex}.storyboard-stage-active .omni-page.embedded.project-storyboard-page{overflow:visible!important}}
-.sidebar-collapsed .main {
-  margin-left: 48px;
-}
 .section {
   margin-bottom: 24px;
 }
@@ -12087,7 +11746,7 @@ html.light .frame-layout-anchor {
 }
 .main-generation-controls{display:flex;align-items:center;gap:10px;flex:1;min-width:420px;padding:6px 10px;border:1px solid var(--el-border-color);border-radius:8px;background:var(--el-fill-color-light)}.main-generation-controls .generation-settings{flex:1;min-width:0;padding:0;border:0;background:transparent}.main-generation-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);white-space:nowrap}.sd2-resource-control{font-weight:600}.asset-btns{display:flex;flex-wrap:wrap;gap:6px}.asset-btns .sd2-resource-control{margin-left:0}@media(max-width:900px){.main-generation-controls{min-width:0;flex-wrap:wrap}.main-generation-controls .generation-settings{flex-basis:100%}}
 .sb-inline-generation-settings{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:8px 12px;border:1px solid var(--el-border-color);border-radius:8px;background:var(--el-fill-color-light)}.sb-inline-generation-settings .generation-settings{flex:1;min-width:0;padding:0;border:0;background:transparent}.sb-inline-generation-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);white-space:nowrap}.sb-inline-generation-hint{font-size:11px;color:var(--el-text-color-secondary);white-space:nowrap}@media(max-width:900px){.sb-inline-generation-settings{align-items:stretch;flex-wrap:wrap}.sb-inline-generation-settings .generation-settings{flex-basis:100%}.sb-inline-generation-hint{width:100%}}
-.sb-omni-controls{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:9px 10px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-blank)}.sb-omni-control-row,.sb-omni-frame-row,.sb-omni-frame-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sb-omni-control-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);min-width:48px}.sb-omni-control-hint{font-size:12px;color:var(--el-text-color-secondary)}.sb-omni-frame-slot{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--el-text-color-secondary);padding:4px 7px;background:var(--el-fill-color-light);border-radius:4px;max-width:100%;min-width:0}.sb-omni-frame-slot-label{font-weight:600;color:var(--el-text-color-primary);white-space:nowrap}.sb-omni-frame-thumb{width:34px;height:24px;object-fit:cover;border-radius:3px;flex:none}.sb-omni-frame-pick,.sb-omni-frame-upload{padding:0 4px;white-space:nowrap}.sb-universal-library-caret{margin-left:2px}.sb-universal-library-btn--static{font-size:12px;color:var(--el-text-color-secondary);padding:2px 8px;border:1px solid var(--el-border-color-lighter);border-radius:4px;white-space:nowrap}.sb-omni-left-sb-title{display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 8px;border:1px solid var(--el-border-color-lighter);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-left-sb-idx{font-size:11px;font-weight:700;color:#fff;background:#6366f1;border-radius:4px;padding:1px 5px;flex:none}.sb-omni-left-sb-name{font-size:13px;font-weight:600;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.sb-omni-left-hint{font-size:11px;color:var(--el-text-color-secondary)}.sb-omni-selected-strip{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:8px;padding:5px 8px;border:1px dashed var(--el-border-color);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-selected-strip-label{font-size:11px;font-weight:600;color:var(--el-text-color-secondary);flex:none}.sb-omni-selected-strip-item{display:inline-flex;align-items:center;gap:3px;border:1px solid var(--el-border-color-lighter);border-radius:4px;padding:1px 4px;background:var(--el-fill-color-blank)}.sb-omni-selected-strip-item img{width:20px;height:16px;object-fit:cover;border-radius:2px}.sb-omni-selected-strip-item em{font-size:10px;font-style:normal;color:var(--el-color-primary)}.sb-omni-material-panel{display:flex;flex-direction:column;gap:8px;margin-top:0;padding:10px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-blank);min-width:0}.sb-omni-material-dropzone{height:44px;display:flex;align-items:center;justify-content:center;gap:7px;border:1px dashed var(--el-color-primary);border-radius:7px;color:var(--el-color-primary);background:var(--el-color-primary-light-9);font-size:12px;text-align:center}.sb-omni-material-auto-refs{font-size:11px;line-height:1.5;color:var(--el-color-primary);padding:5px 8px;background:var(--el-color-primary-light-9);border-radius:5px}.sb-omni-material-upload-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sb-omni-material-drop-hint{font-size:11px;color:var(--el-text-color-secondary)}.sb-omni-material-note{font-size:11px;line-height:1.5;color:var(--el-text-color-secondary)}.sb-omni-material-summary{font-size:12px;line-height:1.5;color:var(--el-text-color-primary);padding:5px 8px;background:var(--el-fill-color-light);border-radius:5px}.sb-omni-material-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);margin-top:2px}.sb-omni-material-pool{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;max-height:240px;overflow:auto;padding-right:2px}.sb-omni-material-card{position:relative;border:1px solid var(--el-border-color);border-radius:6px;padding:3px;cursor:pointer;background:var(--el-fill-color-blank);overflow:hidden}.sb-omni-material-card:hover{border-color:var(--el-color-primary)}.sb-omni-material-card.selected{border-color:var(--el-color-primary);box-shadow:0 0 0 1px var(--el-color-primary)}.sb-omni-material-card img{width:100%;height:52px;object-fit:cover;border-radius:4px;display:block}.sb-omni-material-card-icon{display:flex;height:52px;align-items:center;justify-content:center;font-size:20px;background:var(--el-fill-color-light);border-radius:4px}.sb-omni-material-card small{display:block;margin-top:3px;font-size:10px;line-height:1.3;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-material-card-check{position:absolute;right:4px;top:4px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--el-color-primary);color:#fff;font-size:12px;font-weight:700}.sb-omni-material-pool-empty{grid-column:1/-1;font-size:12px;color:var(--el-text-color-secondary);padding:12px 0;text-align:center}.sb-omni-material-selected-list{display:flex;flex-direction:column;gap:5px;max-height:280px;overflow:auto;padding-right:2px}.sb-omni-material-selected-row{display:grid;grid-template-columns:34px minmax(0,1fr) 118px auto auto auto auto auto;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--el-border-color-lighter);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-material-selected-name{display:flex;align-items:center;gap:6px;min-width:0}.sb-omni-material-selected-name b{font-size:12px;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-material-at{font-size:10px;font-style:normal;color:var(--el-color-primary);background:var(--el-color-primary-light-9);padding:1px 5px;border-radius:3px;white-space:nowrap}.sb-universal-library-thumb{width:34px;height:24px;object-fit:cover;border-radius:3px}.sb-universal-library-type{display:inline-flex;width:34px;height:24px;align-items:center;justify-content:center;font-size:12px;color:var(--el-text-color-secondary);background:var(--el-fill-color-light);border-radius:3px;flex:none}.sb-universal-library-usage{width:118px;flex:none}.sb-universal-library-move{padding:0 4px}.sb-universal-library-sd2{padding:0 5px;font-size:10px;color:var(--el-text-color-secondary);white-space:nowrap;border-radius:4px}.sb-universal-library-sd2:hover{color:var(--el-color-primary)}.sb-universal-identity-row{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:8px;border:1px solid var(--el-border-color-lighter);border-radius:7px;background:var(--el-fill-color-light)}.sb-universal-identity-status{display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-size:11px;color:var(--el-text-color-secondary);line-height:1.4}.sb-universal-identity-status.is-active{color:var(--el-color-success)}.sb-universal-identity-status.is-processing{color:var(--el-color-warning)}.sb-universal-identity-status.is-failed,.sb-universal-identity-status.is-invalid{color:var(--el-color-danger)}.sb-universal-frame-actions{display:flex;flex-wrap:wrap;gap:6px}.sb-universal-frame-actions .el-button{margin:0}.sb-omni-frame-picker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;max-height:420px;overflow:auto}.sb-omni-frame-picker-card{border:1px solid var(--el-border-color);border-radius:7px;padding:5px;cursor:pointer;background:var(--el-fill-color-blank)}.sb-omni-frame-picker-card:hover{border-color:var(--el-color-primary)}.sb-omni-frame-picker-card.active{border-color:var(--el-color-primary);box-shadow:0 0 0 1px var(--el-color-primary)}.sb-omni-frame-picker-card img{width:100%;height:64px;object-fit:cover;border-radius:4px}.sb-omni-frame-picker-card small{display:block;margin-top:4px;font-size:11px;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-frame-picker-empty{font-size:12px;color:var(--el-text-color-secondary);text-align:center;padding:18px 0}@media(max-width:900px){.sb-omni-control-row{align-items:flex-start}.sb-omni-audio-row{flex-direction:column}.sb-omni-control-hint{width:100%}.sb-omni-frame-row{flex-direction:column;align-items:stretch}.sb-omni-frame-slot{justify-content:flex-start}.sb-omni-material-selected-row{grid-template-columns:34px minmax(0,1fr) auto auto auto}.sb-omni-material-selected-row .sb-universal-library-usage{grid-column:2 / -1;width:100%}}
+.sb-omni-controls{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:9px 10px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-blank)}.sb-omni-control-row,.sb-omni-frame-row,.sb-omni-frame-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sb-omni-control-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);min-width:48px}.sb-omni-control-hint{font-size:12px;color:var(--el-text-color-secondary)}.sb-omni-frame-slot{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--el-text-color-secondary);padding:4px 7px;background:var(--el-fill-color-light);border-radius:4px;max-width:100%;min-width:0}.sb-omni-frame-slot-label{font-weight:600;color:var(--el-text-color-primary);white-space:nowrap}.sb-omni-frame-thumb{width:34px;height:24px;object-fit:cover;border-radius:3px;flex:none}.sb-omni-frame-pick,.sb-omni-frame-upload{padding:0 4px;white-space:nowrap}.sb-universal-library-caret{margin-left:2px}.sb-universal-library-btn--static{font-size:12px;color:var(--el-text-color-secondary);padding:2px 8px;border:1px solid var(--el-border-color-lighter);border-radius:4px;white-space:nowrap}.sb-omni-left-sb-title{display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 8px;border:1px solid var(--el-border-color-lighter);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-left-sb-idx{font-size:11px;font-weight:700;color:#fff;background:#6366f1;border-radius:4px;padding:1px 5px;flex:none}.sb-omni-left-sb-name{font-size:13px;font-weight:600;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.sb-omni-left-hint{font-size:11px;color:var(--el-text-color-secondary)}.sb-omni-selected-strip{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:8px;padding:5px 8px;border:1px dashed var(--el-border-color);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-selected-strip-label{font-size:11px;font-weight:600;color:var(--el-text-color-secondary);flex:none}.sb-omni-selected-strip-item{display:inline-flex;align-items:center;gap:3px;border:1px solid var(--el-border-color-lighter);border-radius:4px;padding:1px 4px;background:var(--el-fill-color-blank)}.sb-omni-selected-strip-item img{width:20px;height:16px;object-fit:cover;border-radius:2px}.sb-omni-selected-strip-item em{font-size:10px;font-style:normal;color:var(--el-color-primary)}.sb-omni-material-panel{display:flex;flex-direction:column;gap:8px;margin-top:0;padding:10px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-blank);min-width:0}.sb-omni-material-dropzone{height:44px;display:flex;align-items:center;justify-content:center;gap:7px;border:1px dashed var(--el-color-primary);border-radius:7px;color:var(--el-color-primary);background:var(--el-color-primary-light-9);font-size:12px;text-align:center}.sb-omni-material-auto-refs{font-size:11px;line-height:1.5;color:var(--el-color-primary);padding:5px 8px;background:var(--el-color-primary-light-9);border-radius:5px}.sb-omni-material-upload-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sb-omni-material-drop-hint{font-size:11px;color:var(--el-text-color-secondary)}.sb-omni-material-note{font-size:11px;line-height:1.5;color:var(--el-text-color-secondary)}.sb-omni-material-summary{font-size:12px;line-height:1.5;color:var(--el-text-color-primary);padding:5px 8px;background:var(--el-fill-color-light);border-radius:5px}.sb-omni-material-label{font-size:12px;font-weight:600;color:var(--el-text-color-primary);margin-top:2px}.sb-omni-material-pool{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;max-height:240px;overflow:auto;padding-right:2px}.sb-omni-material-card{position:relative;border:1px solid var(--el-border-color);border-radius:6px;padding:3px;cursor:pointer;background:var(--el-fill-color-blank);overflow:hidden}.sb-omni-material-card:hover{border-color:var(--el-color-primary)}.sb-omni-material-card.selected{border:2px solid #54ead4;box-shadow:0 0 0 2px rgb(84 234 212 / 45%)}.sb-omni-material-card img{width:100%;height:52px;object-fit:cover;border-radius:4px;display:block}.sb-omni-material-card-icon{display:flex;height:52px;align-items:center;justify-content:center;font-size:20px;background:var(--el-fill-color-light);border-radius:4px}.sb-omni-material-card small{display:block;margin-top:3px;font-size:10px;line-height:1.3;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-material-pool-empty{grid-column:1/-1;font-size:12px;color:var(--el-text-color-secondary);padding:12px 0;text-align:center}.sb-omni-material-selected-list{display:flex;flex-direction:column;gap:5px;max-height:280px;overflow:auto;padding-right:2px}.sb-omni-material-selected-row{display:grid;grid-template-columns:34px minmax(0,1fr) 118px auto auto auto auto auto;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--el-border-color-lighter);border-radius:6px;background:var(--el-fill-color-light)}.sb-omni-material-selected-name{display:flex;align-items:center;gap:6px;min-width:0}.sb-omni-material-selected-name b{font-size:12px;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-material-at{font-size:10px;font-style:normal;color:var(--el-color-primary);background:var(--el-color-primary-light-9);padding:1px 5px;border-radius:3px;white-space:nowrap}.sb-universal-library-thumb{width:34px;height:24px;object-fit:cover;border-radius:3px}.sb-universal-library-type{display:inline-flex;width:34px;height:24px;align-items:center;justify-content:center;font-size:12px;color:var(--el-text-color-secondary);background:var(--el-fill-color-light);border-radius:3px;flex:none}.sb-universal-library-usage{width:118px;flex:none}.sb-universal-library-move{padding:0 4px}.sb-universal-library-sd2{padding:0 5px;font-size:10px;color:var(--el-text-color-secondary);white-space:nowrap;border-radius:4px}.sb-universal-library-sd2:hover{color:var(--el-color-primary)}.sb-universal-identity-row{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:8px;border:1px solid var(--el-border-color-lighter);border-radius:7px;background:var(--el-fill-color-light)}.sb-universal-identity-status{display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-size:11px;color:var(--el-text-color-secondary);line-height:1.4}.sb-universal-identity-status.is-active{color:var(--el-color-success)}.sb-universal-identity-status.is-processing{color:var(--el-color-warning)}.sb-universal-identity-status.is-failed,.sb-universal-identity-status.is-invalid{color:var(--el-color-danger)}.sb-universal-frame-actions{display:flex;flex-wrap:wrap;gap:6px}.sb-universal-frame-actions .el-button{margin:0}.sb-omni-frame-picker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;max-height:420px;overflow:auto}.sb-omni-frame-picker-card{border:1px solid var(--el-border-color);border-radius:7px;padding:5px;cursor:pointer;background:var(--el-fill-color-blank)}.sb-omni-frame-picker-card:hover{border-color:var(--el-color-primary)}.sb-omni-frame-picker-card.active{border-color:var(--el-color-primary);box-shadow:0 0 0 1px var(--el-color-primary)}.sb-omni-frame-picker-card img{width:100%;height:64px;object-fit:cover;border-radius:4px}.sb-omni-frame-picker-card small{display:block;margin-top:4px;font-size:11px;color:var(--el-text-color-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sb-omni-frame-picker-empty{font-size:12px;color:var(--el-text-color-secondary);text-align:center;padding:18px 0}@media(max-width:900px){.sb-omni-control-row{align-items:flex-start}.sb-omni-audio-row{flex-direction:column}.sb-omni-control-hint{width:100%}.sb-omni-frame-row{flex-direction:column;align-items:stretch}.sb-omni-frame-slot{justify-content:flex-start}.sb-omni-material-selected-row{grid-template-columns:34px minmax(0,1fr) auto auto auto}.sb-omni-material-selected-row .sb-universal-library-usage{grid-column:2 / -1;width:100%}}
 .workflow-shell{margin:0 0 18px;padding:22px 24px;border:1px solid #ded8ce;border-radius:14px;background:#fffdf9;box-shadow:0 8px 24px #372d2010}.workflow-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.workflow-head h2{margin:3px 0 4px;color:#28231d;font-size:22px}.workflow-head p{margin:0;color:#746c62;font-size:14px}.workflow-kicker{font-size:12px;font-weight:700;letter-spacing:.08em;color:#8c6a44}.workflow-episode{padding:6px 9px;border-radius:99px;background:#f5efe5;color:#6b5842;font-size:13px}.workflow-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:20px}.workflow-step{display:flex;align-items:center;justify-content:center;gap:8px;min-height:42px;border:1px solid #dfd8ce;border-radius:8px;background:#fff;color:#756c61;cursor:pointer;font:inherit;font-size:14px}.workflow-step span{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#eee9e1;color:#746b60;font-size:12px}.workflow-step:hover{border-color:#a68b68;color:#514333}.workflow-step.active{border-color:#755d43;background:#3d342a;color:#fff}.workflow-step.active span{background:#fff;color:#3d342a}.workflow-step.complete:not(.active) span{background:#d9e7da;color:#45624a}.resource-center{background:#fffdf9!important}.resource-center-heading,.resource-media-library>header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.resource-center-heading{margin-bottom:18px}.resource-center-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.resource-center-group,.resource-media-library{border:1px solid #e2ddd5;border-radius:10px;background:#fff;padding:14px}.resource-center-group>header,.resource-media-library>header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.resource-center-group>header b,.resource-media-library b{color:#302a23}.resource-center-group>header span,.resource-media-library>header>span{display:grid;place-items:center;min-width:24px;height:24px;border-radius:99px;background:#f0ebe3;color:#735e46;font-size:12px}.resource-center-actions{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.resource-center-list{display:grid;gap:9px;max-height:400px;overflow:auto}.resource-center-item{display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px;border-radius:7px;background:#faf8f5}.resource-center-item img,.resource-center-placeholder{width:76px;height:58px;border-radius:5px;object-fit:cover}.resource-center-placeholder{display:grid;place-items:center;background:#ece6dc;color:#8a7e6d;font-size:12px}.resource-center-item b,.resource-center-item small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-center-item b{font-size:14px;color:#3e372f}.resource-center-item small{margin-top:3px;color:#8a8176;font-size:13px}.resource-center-empty{margin:18px 0;color:#92877b;font-size:14px}.resource-media-library{margin-top:14px}.resource-media-library header small{display:block;margin-top:4px;color:#8c8378;font-size:14px}.resource-media-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.resource-media-card{overflow:hidden;border:1px solid #e7e2da;border-radius:7px;background:#faf8f5}.resource-media-card img,.resource-media-card>span{display:grid;width:100%;height:100px;object-fit:cover;place-items:center;background:#efe9df;color:#857765;font-size:14px}.resource-media-card small{display:block;padding:7px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#5c5247;font-size:13px}.storyboard-reference-panel{border-color:#e0d6c8!important;background:#fffdf9!important}@media(max-width:900px){.workflow-head{flex-direction:column}.workflow-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.resource-center-grid{grid-template-columns:1fr}}
 .workflow-next-action{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:12px 0 22px;padding:14px 16px;border:1px solid #ded8ce;border-radius:10px;background:#f9f5ee;color:#665b4e;font-size:13px}.merge-readiness{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 14px;padding:11px 13px;border:1px solid #ead6b1;border-radius:8px;background:#fff7e8;color:#89622c;font-size:13px}.merge-readiness.ready{border-color:#c9dfca;background:#f0f8ef;color:#426c46}.merge-readiness b{color:inherit}@media(max-width:680px){.workflow-next-action{align-items:stretch;flex-direction:column}.workflow-next-action .el-button{width:100%}}
 .storyboard-workspace{display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr);align-items:start;gap:16px}.storyboard-workspace .storyboard-reference-panel{position:sticky;top:16px;margin:0;max-height:calc(100dvh - 32px);overflow:auto}.storyboard-workspace .storyboard-editor-panel{margin:0;min-width:0}.sb-ctrl-bar{cursor:grab}.sb-ctrl-bar:active{cursor:grabbing}.sb-ctrl-bar--dragging{opacity:.45}.sb-ctrl-bar--dragover{box-shadow:inset 0 3px 0 #7c6248!important;background:#f4eee4!important}@media(max-width:1100px){.storyboard-workspace{grid-template-columns:230px minmax(0,1fr)}}@media(max-width:820px){.storyboard-workspace{display:flex;flex-direction:column}.storyboard-workspace .storyboard-reference-panel{position:static;width:100%;max-height:none}.storyboard-workspace .storyboard-editor-panel{width:100%}}
@@ -12111,6 +11770,8 @@ html.light .frame-layout-anchor {
 .resource-center-item b{color:var(--text-regular)}
 .resource-center-item small,.resource-media-card small{color:var(--text-muted)}
 .resource-center-item-actions{display:flex;align-items:center;gap:2px;white-space:nowrap}.resource-center-item-actions .el-button{margin:0}.prop-asset-picker-grid{max-height:440px;overflow:auto;padding:2px}.prop-asset-picker-card{padding:0;cursor:pointer;text-align:left;font:inherit}.prop-asset-picker-card:hover{border-color:var(--el-color-primary)}
+.resource-media-card{position:relative}.resource-media-delete{position:absolute!important;top:5px;right:5px;z-index:2;margin:0!important;min-width:24px!important;width:24px;height:24px;padding:0!important;background:#b84242!important;color:#fff!important;border-color:#f29a9a!important;font-weight:800}.resources-stage-active .resource-media-delete{display:grid!important;place-items:center}
+.resource-center-item{position:relative}.resource-select{position:absolute;top:8px;left:8px;z-index:3;padding:2px;border-radius:4px;background:color-mix(in srgb,var(--bg-surface) 82%,transparent)}.resource-center-item.selected{box-shadow:inset 0 0 0 2px var(--accent),0 0 0 1px color-mix(in srgb,var(--accent) 36%,transparent)}.resource-media-card.selected{border:2px solid var(--accent)!important;box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 48%,transparent)}.resource-media-select{position:absolute;top:6px;left:6px;z-index:3;padding:2px;border-radius:4px;background:color-mix(in srgb,var(--bg-surface) 82%,transparent)}
 .workflow-next-action{border-color:var(--border-color);background:var(--bg-raised);color:var(--text-regular)}
 .merge-readiness,.merge-readiness.ready{border-color:var(--border-color);background:var(--bg-hover);color:var(--text-regular)}
 .sb-ctrl-bar--dragover{box-shadow:inset 0 3px 0 var(--accent)!important;background:var(--bg-hover)!important}
@@ -12119,12 +11780,12 @@ html.light .frame-layout-anchor {
 /* Desktop studio pass: make the production flow read as one directed creative surface. */
 @media(min-width:961px){
   .film-create{background:var(--bg-page);background-image:radial-gradient(56% 46% at 18% -8%,color-mix(in srgb,var(--accent) 19%,transparent),transparent 72%),radial-gradient(32% 36% at 95% 15%,color-mix(in srgb,var(--accent-teal) 10%,transparent),transparent 70%),linear-gradient(180deg,color-mix(in srgb,var(--bg-page) 84%,#05070c),var(--bg-page) 42%)}
-  .quick-nav{width:214px;padding-top:18px;background:linear-gradient(180deg,color-mix(in srgb,var(--bg-surface) 97%,#070910),color-mix(in srgb,var(--bg-page) 94%,#03050a));border-right-color:var(--border-subtle);box-shadow:12px 0 38px rgba(0,0,0,.2)}.quick-nav::before{content:'创作流程';padding:0 14px 13px;color:var(--text-faint);font-size:10px;font-weight:800;letter-spacing:.18em}.quick-nav.collapsed{width:54px}.header,.main{margin-left:214px}.sidebar-collapsed .header,.sidebar-collapsed .main{margin-left:54px}
+
   .header{padding:12px 26px;background:color-mix(in srgb,var(--bg-surface) 88%,transparent)!important;border-bottom-color:var(--border-subtle)!important;box-shadow:var(--shadow-sm)!important}.header-inner{gap:12px;min-width:0}.logo{flex:0 0 165px;flex-direction:row;align-items:center;gap:8px;min-width:0}.richi-brand-copy{display:grid;min-width:0}.logo-main{overflow:visible;background:none;color:var(--text-primary);font-size:.88rem;line-height:1.15;white-space:nowrap;-webkit-text-fill-color:var(--text-primary)}.logo-sub{color:var(--text-muted);font-size:.62rem;letter-spacing:0;-webkit-text-fill-color:var(--text-muted)}.page-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-color:var(--border-subtle);border-radius:9px;background:color-mix(in srgb,var(--bg-raised) 80%,transparent);color:var(--text-regular)}
   .main{max-width:1680px;padding:34px 38px 64px}.workflow-shell{position:relative;overflow:hidden;margin-bottom:22px;padding:30px 32px;border-color:color-mix(in srgb,var(--accent) 36%,var(--border-color))!important;border-radius:20px;background:radial-gradient(circle at 92% 12%,color-mix(in srgb,var(--accent-teal) 19%,transparent),transparent 24%),linear-gradient(138deg,color-mix(in srgb,var(--accent) 13%,var(--bg-surface)),var(--bg-surface) 55%,color-mix(in srgb,var(--accent-teal) 7%,var(--bg-surface)))!important;box-shadow:var(--shadow-md)!important}.workflow-shell::after{content:'';position:absolute;right:-88px;bottom:-164px;width:390px;height:390px;border:1px solid color-mix(in srgb,var(--accent) 36%,transparent);border-radius:50%;box-shadow:0 0 0 38px color-mix(in srgb,var(--accent) 5%,transparent),0 0 0 78px color-mix(in srgb,var(--accent) 3%,transparent);pointer-events:none}.workflow-shell>*{position:relative;z-index:1}.workflow-kicker{color:var(--accent);font-size:10px;letter-spacing:.16em}.workflow-head h2{font-size:28px;letter-spacing:-.035em}.workflow-head p{max-width:58ch}.workflow-episode{border:1px solid color-mix(in srgb,var(--accent) 34%,var(--border-color));background:color-mix(in srgb,var(--bg-surface) 74%,transparent);color:var(--text-primary)}
   .workflow-steps{gap:10px;margin-top:27px}.workflow-step{min-height:54px;border-color:var(--border-subtle);border-radius:12px;background:color-mix(in srgb,var(--bg-page) 30%,transparent);font-weight:650;transition:transform .18s ease,border-color .18s ease,background .18s ease}.workflow-step:hover{transform:translateY(-2px);border-color:var(--border-strong);background:color-mix(in srgb,var(--bg-raised) 90%,transparent)}.workflow-step.active{border-color:transparent;background:linear-gradient(135deg,var(--accent),#6f61df);box-shadow:0 12px 26px color-mix(in srgb,var(--accent) 26%,transparent)}
   .section.card{position:relative;overflow:hidden;padding:28px 30px;border-color:var(--border-subtle);border-radius:18px;background:color-mix(in srgb,var(--bg-surface) 94%,transparent);box-shadow:var(--shadow-sm)}.section.card:hover{transform:none;border-color:color-mix(in srgb,var(--accent) 38%,var(--border-color));box-shadow:var(--shadow-md)}.script-workbench-unified::before{content:none}.section-title{color:var(--text-primary)!important;font-size:1.15rem!important;letter-spacing:-.02em}.section-desc{color:var(--text-muted)!important}.story-textarea :deep(.el-textarea__inner){background:color-mix(in srgb,var(--bg-page) 35%,transparent)!important;border-color:var(--border-subtle)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}.story-textarea :deep(.el-textarea__inner:focus){box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 68%,transparent)!important}.workflow-next-action{border-color:color-mix(in srgb,var(--accent) 30%,var(--border-color));border-radius:13px;background:color-mix(in srgb,var(--accent) 7%,var(--bg-raised));box-shadow:var(--shadow-sm)}
-  .nav-sidebar-header{padding:0 14px 12px;border-bottom-color:var(--border-subtle)}.nav-sidebar-title{color:var(--text-faint);font-size:10px;font-weight:800;letter-spacing:.15em}.nav-steps{padding-inline:13px}.nav-step{padding:7px 8px;border-radius:10px}.nav-step:hover{background:color-mix(in srgb,var(--accent) 8%,transparent)}.step-label{color:var(--text-regular);font-size:13px}.step-dot{width:25px;height:25px}.status-generating .step-label{color:var(--accent)}.status-done .step-label{color:var(--accent-teal)}.nav-group{margin-top:11px}.nav-sub-toggle{padding:8px 14px;color:var(--text-faint);border-top-color:var(--border-subtle)}
+
 }
 
 /* The production studio owns the viewport; only its active canvas scrolls. */
@@ -12153,14 +11814,14 @@ html.light .frame-layout-anchor {
   .resources-stage-active .workflow-shell{margin:0;padding:15px 22px;border-radius:16px}
   .resources-stage-active .workflow-head{align-items:center}.resources-stage-active .workflow-head h2{margin-block:2px;font-size:22px}.resources-stage-active .workflow-head p{font-size:12px}
   .resources-stage-active .workflow-steps{margin-top:12px}.resources-stage-active .workflow-step{min-height:38px}
-  .resources-stage-active .resource-center{display:grid;grid-template-rows:auto minmax(0,1fr) 9.5rem;gap:12px;min-height:0;padding:18px 22px;overflow:hidden}
+  .resources-stage-active .resource-center{display:grid;grid-template-rows:auto minmax(0,1fr) 14rem;gap:12px;min-height:0;padding:18px 22px;overflow:hidden}
   .resources-stage-active .resource-center-heading{margin:0}.resources-stage-active .resource-center-heading .section-title{margin-top:0}.resources-stage-active .resource-center-heading .section-desc{margin-bottom:0}
   .resources-stage-active .resource-center-grid{min-height:0}.resources-stage-active .resource-center-group{display:flex;flex-direction:column;min-height:0;overflow:hidden}
   .resources-stage-active .resource-center-list{flex:1;min-height:0;max-height:none;overflow:auto;scrollbar-width:thin}
   .resources-stage-active .resource-media-library{min-height:0;margin:0;padding:10px 12px;overflow:hidden}
   .resources-stage-active .resource-media-library>header{margin-bottom:7px}
-  .resources-stage-active .resource-media-grid{display:flex;gap:9px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
-  .resources-stage-active .resource-media-card{flex:0 0 9.5rem}.resources-stage-active .resource-media-card img,.resources-stage-active .resource-media-card>span{height:54px}.resources-stage-active .resource-media-card small{padding-block:4px}
+  .resources-stage-active .resource-media-grid{display:flex;gap:9px;max-height:calc(14rem - 3.1rem);overflow-x:auto;overflow-y:auto;scrollbar-width:thin}
+  .resources-stage-active .resource-media-card{flex:0 0 9.5rem;min-height:9.75rem}.resources-stage-active .resource-media-card img,.resources-stage-active .resource-media-card>span{height:72px}.resources-stage-active .resource-media-card small{padding-block:4px}
   .resources-stage-active .workflow-next-action{margin:0}
   .merge-stage-active>.main{display:grid;grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr);grid-template-rows:auto minmax(0,1fr);gap:16px;overflow:hidden;padding-top:18px;padding-bottom:18px}
   .merge-stage-active .workflow-shell{grid-column:1/-1;margin:0;padding:15px 22px;border-radius:16px}
@@ -12190,11 +11851,9 @@ html.light .frame-layout-anchor {
 @keyframes workflow-orbit{to{transform:translate3d(-1.5rem,-1rem,0) rotate(8deg)}}
 @keyframes workflow-current{50%{transform:translateY(-.12rem);box-shadow:0 .9rem 2rem color-mix(in srgb,var(--accent) 32%,transparent)}}
 @media(prefers-reduced-motion:reduce){.workflow-shell::after,.workflow-step.active{animation:none!important}}
-/* The film shell consumes a navigation rail, so storyboard breakpoints are
-   based on the remaining work area rather than the full browser width. */
+/* 左侧导航栏已移除，工作区占满整个视口宽度。 */
 @media(min-width:961px){
-  .film-create>.main{width:calc(100% - 214px);max-width:none;min-width:0;padding-inline:clamp(.75rem,2vw,2rem)}
-  .film-create.sidebar-collapsed>.main{width:calc(100% - 54px)}
-  .storyboard-stage-active .main{padding-inline:clamp(.5rem,1.5vw,1.5rem)}
+  .film-create>.main{width:100%;max-width:none;min-width:0;padding-inline:clamp(.75rem,2vw,2rem)}
+  .storyboard-stage-active .main{max-width:none;padding-inline:clamp(.5rem,1.5vw,1.5rem)}
 }
 </style>

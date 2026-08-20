@@ -117,9 +117,6 @@ function createShot(db, sequenceId, body) {
 function updateShot(db, sequenceId, shotId, body) {
   const shot = db.prepare('SELECT * FROM omni_video_sequence_shots WHERE id = ? AND sequence_id = ? AND deleted_at IS NULL').get(Number(shotId), Number(sequenceId));
   if (!shot) throw new Error('镜头不存在');
-  if (body.expected_updated_at != null && String(body.expected_updated_at) !== String(shot.updated_at || '')) {
-    const error = new Error('镜头已在另一编辑面修改，请刷新后再保存'); error.code = 'VERSION_CONFLICT'; throw error;
-  }
   const settings = normalizedShotSettings(body.settings !== undefined ? { ...parse(shot.settings_json, {}), ...body.settings } : parse(shot.settings_json, {}));
   // Persisted drafts may target Seedance 2.5 (4–30s). The actual generation
   // route applies the selected model's capability limit before submission.

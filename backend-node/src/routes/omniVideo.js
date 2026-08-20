@@ -29,6 +29,7 @@ module.exports = function routes(db, log, cfg) { return {
   },
   retry(req, res) { try { response.created(res, omniVideoService.retry(db, log, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
   cancel(req, res) { try { response.success(res, omniVideoService.cancelJob(db, log, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
+  hide(req, res) { try { response.success(res, omniVideoService.hide(db, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
   retryPostprocess(req, res) { try { response.created(res, omniVideoService.retryPostprocess(db, log, req.params.id, req.auth, req.body?.stage)); } catch (err) { response.badRequest(res, err.message); } },
   adoptSource(req, res) { try { response.success(res, omniVideoService.adoptSourceVideo(db, log, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
   adopt(req, res) { try { response.success(res, omniVideoService.adoptCompletedVersion(db, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
