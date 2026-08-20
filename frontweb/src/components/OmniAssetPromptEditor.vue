@@ -332,6 +332,47 @@ function ensureLayoutCache() {
   return layoutCache */
 }
 
+/**
+ * Chromium may report a zero-sized rectangle for a collapsed range inside a
+ * contenteditable element (especially beside a non-editable @素材 chip).
+ * Resolve a real text/chip boundary instead of falling back to the pointer
+ * coordinate, otherwise the visible insertion caret appears to float or
+ * vanish even though the calculated insertion offset is correct.
+ */
+function visualRectForCollapsedRange(range) {
+  const direct = range?.getBoundingClientRect?.()
+  if (direct && (direct.width > 0 || direct.height > 0)) return { left: direct.left, top: direct.top, height: direct.height }
+  const node = range?.startContainer
+  const offset = Number(range?.startOffset)
+  if (!node || !Number.isInteger(offset)) return null
+  const probe = document.createRange()
+  try {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const length = node.nodeValue?.length || 0
+      if (offset < length) {
+        probe.setStart(node, offset); probe.setEnd(node, offset + 1)
+        const rect = probe.getBoundingClientRect()
+        if (rect.width > 0 || rect.height > 0) return { left: rect.left, top: rect.top, height: rect.height }
+      }
+      if (offset > 0) {
+        probe.setStart(node, offset - 1); probe.setEnd(node, offset)
+        const rect = probe.getBoundingClientRect()
+        if (rect.width > 0 || rect.height > 0) return { left: rect.right, top: rect.top, height: rect.height }
+      }
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const children = node.childNodes || []
+      const next = children[offset]
+      const prev = children[offset - 1]
+      const nextRect = next && (next.nodeType === Node.TEXT_NODE ? null : next.getBoundingClientRect?.())
+      if (nextRect && (nextRect.width > 0 || nextRect.height > 0)) return { left: nextRect.left, top: nextRect.top, height: nextRect.height }
+      const prevRect = prev && (prev.nodeType === Node.TEXT_NODE ? null : prev.getBoundingClientRect?.())
+      if (prevRect && (prevRect.width > 0 || prevRect.height > 0)) return { left: prevRect.right, top: prevRect.top, height: prevRect.height }
+    }
+  } catch (_) {}
+  return null
+}
+
 function textareaPointFromEvent(event) {
   if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return { offset: lastCaretOffset, x: 0, y: 0, height: 18, rejected: true }
   const range = document.caretRangeFromPoint?.(event.clientX, event.clientY)
@@ -346,8 +387,9 @@ function textareaPointFromEvent(event) {
     // 看似成功却难以判断实际插入位置。
     if (!source.slice(lineStart, lineEnd).trim()) return { offset: lastCaretOffset, x: 0, y: 0, height: 18, rejected: true }
     const rootRect = editorRoot.value?.getBoundingClientRect() || editorRef.value.getBoundingClientRect()
-    const caretRect = range.getBoundingClientRect()
+    const caretRect = visualRectForCollapsedRange(range)
     const lineHeight = Number.parseFloat(getComputedStyle(editorRef.value).lineHeight) || 20
+    if (!caretRect) return { offset: lastCaretOffset, x: 0, y: 0, height: lineHeight, rejected: true }
     return {
       offset: lastCaretOffset,
       x: Math.max(0, Math.min(rootRect.width - 3, caretRect.left - rootRect.left)),
