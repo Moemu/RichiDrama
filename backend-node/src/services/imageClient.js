@@ -1641,15 +1641,31 @@ function createAndGenerateImage(db, log, opts) {
   const task = taskService.createTaskFromContext(db, log, 'image_generation', resourceId);
   const taskId = task.id;
 
+  // 资源图计费:与分镜图路由同口径(未定价即拒绝;后台链路无请求上下文不重复计费)
+  let imageBilling = null;
+  try {
+    imageBilling = require('./imageBillingService').createResourceImageBilling(db, {
+      model: model || undefined,
+      dramaId: dramaIdNum || null,
+      sourceId: resourceId,
+    });
+  } catch (billingErr) {
+    log.error('Resource image billing authorization failed', { resource_id: resourceId, error: billingErr.message });
+    throw billingErr;
+  }
+
   let imageGenId;
   try {
     const info = db.prepare(
-      `INSERT INTO image_generations (drama_id, character_id, scene_id, provider, prompt, negative_prompt, model, size, quality, status, task_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+      `INSERT INTO image_generations (drama_id, character_id, scene_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, negative_prompt, model, size, quality, status, task_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
     ).run(
       dramaIdNum,
       charIdNum,
       sceneIdNum,
+      imageBilling.authorizationId ? (require('./billingRequestContext').current()?.actor?.id ?? null) : null,
+      require('./billingRequestContext').current()?.tenant_id ?? null,
+      imageBilling.authorizationId,
       provider || 'openai',
       prompt || '',
       negRow,
@@ -1704,6 +1720,7 @@ function createAndGenerateImage(db, log, opts) {
           } catch (_) {}
         }
         log.error('Image generation failed', { image_gen_id: imageGenId, error: result.error });
+        imageBilling?.void(log, result.error);
         return;
       }
       let localPath = null;
@@ -1739,6 +1756,7 @@ function createAndGenerateImage(db, log, opts) {
         }
       }
       taskService.updateTaskResult(db, taskId, { image_generation_id: imageGenId, image_url: result.image_url, local_path: localPath, status: 'completed' });
+      imageBilling?.settle(log, `image-generation:${imageGenId}`);
       if (charIdNum != null) {
         try {
           // 旧图追加到 extra_images，与上传逻辑保持一致
@@ -1808,6 +1826,7 @@ function createAndGenerateImage(db, log, opts) {
     } catch (err) {
       const now2 = new Date().toISOString();
       const errMsg = (err && err.message) ? String(err.message).slice(0, 500) : 'Unknown error';
+      imageBilling?.void(log, errMsg);
       try {
         db.prepare(
           'UPDATE image_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?'

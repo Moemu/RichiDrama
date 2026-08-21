@@ -66,6 +66,23 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
   const preferredProvider = !model && cfg?.ai?.default_image_provider ? cfg.ai.default_image_provider : null;
   const userNeg = imageClient.resolveAssetUserNegativeForApi(model, prop.negative_prompt);
 
+  // 道具图计费:与分镜图/角色场景图同口径(未定价即拒绝)
+  let propBilling = null;
+  try {
+    propBilling = require('./imageBillingService').createResourceImageBilling(db, {
+      model: model || undefined,
+      dramaId: prop.drama_id || null,
+      sourceId: `prop_${propId}`,
+    });
+  } catch (billingErr) {
+    log.error('Prop image billing authorization failed', { prop_id: propId, error: billingErr.message });
+    taskService.updateTaskError(db, taskId, billingErr.message);
+    try {
+      db.prepare('UPDATE props SET error_msg = ?, updated_at = ? WHERE id = ?').run(billingErr.message, new Date().toISOString(), propId);
+    } catch (_) {}
+    return;
+  }
+
   let result;
   try {
     result = await imageClient.callImageApi(db, log, {
@@ -79,6 +96,7 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
   } catch (err) {
     const errMsg = '图片生成请求失败: ' + (err.message || '未知错误');
     log.error('Prop image API failed', { prop_id: propId, error: err.message });
+    propBilling?.void(log, errMsg);
     taskService.updateTaskError(db, taskId, errMsg);
     try {
       db.prepare('UPDATE props SET error_msg = ?, updated_at = ? WHERE id = ?').run(errMsg, new Date().toISOString(), propId);
@@ -87,6 +105,7 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
   }
 
   if (result.error) {
+    propBilling?.void(log, result.error);
     taskService.updateTaskError(db, taskId, result.error);
     try {
       db.prepare('UPDATE props SET error_msg = ?, updated_at = ? WHERE id = ?').run(result.error, new Date().toISOString(), propId);
@@ -95,6 +114,7 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
   }
   if (!result.image_url) {
     const errMsg = '未返回图片地址';
+    propBilling?.void(log, errMsg);
     taskService.updateTaskError(db, taskId, errMsg);
     try {
       db.prepare('UPDATE props SET error_msg = ?, updated_at = ? WHERE id = ?').run(errMsg, new Date().toISOString(), propId);
@@ -147,6 +167,7 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
     local_path: localPath,
     prop_id: propId,
   });
+  propBilling?.settle(log, `prop-image:${propId}`);
   try { require('./assetMappingService').syncEntities(db, log, 'prop', [propId]); } catch (_) {}
   log.info('Prop image generation completed', { prop_id: propId, image_url: result.image_url, local_path: localPath });
 }
