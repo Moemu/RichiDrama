@@ -1411,8 +1411,10 @@
       <div v-show="workflowStage === 'storyboard'" class="workflow-next-action sb-stage-actions">
         <span>{{ storyboards.length ? `已有 ${storyboards.length} 个分镜；生成完成后即可检查并合成。` : '请先生成至少一个分镜。' }}</span>
         <div class="sb-stage-gen-group">
-          <el-input-number v-model="storyboardCount" :min="1" :max="200" :step="5" placeholder="分镜数量·留空自动" size="small" style="width: 132px" />
-          <el-input-number v-model="videoDuration" :min="10" :max="600" :step="5" placeholder="总时长秒·留空自动" size="small" style="width: 142px" />
+          <span class="sb-stage-gen-label" title="留空由 AI 按剧本估算；填 1 会被当作明确只生成 1 镜">分镜数量</span>
+          <el-input-number v-model="storyboardCount" :min="1" :max="200" :step="5" placeholder="自动" size="small" controls-position="right" style="width: 96px" />
+          <span class="sb-stage-gen-label" title="留空由 AI 按剧本估算">总时长(秒)</span>
+          <el-input-number v-model="videoDuration" :min="10" :max="600" :step="5" placeholder="自动" size="small" controls-position="right" style="width: 96px" />
           <el-button
             type="success"
             :loading="storyboardGenerating || universalOmniPolishRunning"
@@ -9948,6 +9950,7 @@ html.light .nav-sub-item.sb-nav-over { background: rgba(99,102,241,0.10); }
 .storyboard-stage-active .omni-page.embedded.project-storyboard-page .workbench{height:100%!important;min-height:0!important}
 .storyboard-stage-active .workflow-next-action{flex:none;margin:8px 0 0;padding:8px 12px}
 .sb-stage-gen-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
+.sb-stage-gen-label{font-size:12px;color:var(--el-text-color-secondary);white-space:nowrap}
 .storyboard-stage-active .sb-stage-actions{flex-wrap:wrap;row-gap:8px}
 @media(max-width:960px){.storyboard-stage-active{height:auto;overflow:visible}.storyboard-stage-active .main{height:auto;overflow:visible;display:block;padding:16px 12px}.storyboard-stage-active .workflow-head{display:flex}.storyboard-stage-active .omni-page.embedded.project-storyboard-page{overflow:visible!important}}
 .section {
