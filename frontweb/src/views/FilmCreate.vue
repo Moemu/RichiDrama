@@ -264,10 +264,29 @@
         </div>
       </el-dialog>
 
-      <!-- 一键全流程生成 -->
-      <section v-if="workflowStage === 'script' && showLegacyPipeline" class="section card pipeline-section">
+      <!-- 一键全流程生成:默认收起为细条,避免挤压剧本编辑区 -->
+      <section v-if="workflowStage === 'script' && showLegacyPipeline" class="section card pipeline-section" :class="{ collapsed: !pipelinePanelExpanded }">
         <div class="one-click-actions">
           <span class="one-click-label">🚀 一键全流程</span>
+          <el-button
+            type="primary"
+            :loading="pipelineRunning && !pipelinePaused"
+            :disabled="!currentEpisodeId || pipelineRunning"
+            @click="startOneClickPipeline"
+          >
+            一键成片带图片视频
+          </el-button>
+          <el-button
+            :loading="pipelineRunning && !pipelinePaused"
+            :disabled="!currentEpisodeId || pipelineRunning"
+            title="仅提取角色、场景、道具与生成分镜文本，不生成图片与视频"
+            @click="startTextFrameworkPipeline"
+          >
+            生成文本框架
+          </el-button>
+          <el-button size="small" text @click="pipelinePanelExpanded = !pipelinePanelExpanded">
+            {{ pipelinePanelExpanded ? '收起配置 ▴' : '展开配置 ▾' }}
+          </el-button>
           <el-select v-if="false" v-model="projectAspectRatio" style="width: 130px" @change="() => saveProjectSettings(false)">
             <el-option label="16:9 横屏" value="16:9" />
             <el-option label="9:16 竖屏" value="9:16" />
@@ -286,33 +305,19 @@
             <el-option label="12秒/段" :value="12" />
             <el-option label="15秒/段" :value="15" />
           </el-select>
-          <GenerationSettings :model-value="projectGenerationSettings" :max-duration="15" @update:model-value="setProjectGenerationSettings" />
-          <el-button size="small" plain @click="applyProjectGenerationSettingsToStoryboards">应用到全部分镜</el-button>
-          <el-select v-model="scriptLanguage" placeholder="分镜语言" clearable style="width: 105px">
-            <el-option label="中文" value="zh" />
-            <el-option label="英文" value="en" />
-          </el-select>
-          <StylePickerButton
-            v-model="generationStyle"
-            :options="generationStyleOptions"
-            @change="() => saveProjectSettings(true)"
-          />
-          <el-button
-            type="primary"
-            :loading="pipelineRunning && !pipelinePaused"
-            :disabled="!currentEpisodeId || pipelineRunning"
-            @click="startOneClickPipeline"
-          >
-            一键成片带图片视频
-          </el-button>
-          <el-button
-            :loading="pipelineRunning && !pipelinePaused"
-            :disabled="!currentEpisodeId || pipelineRunning"
-            title="仅提取角色、场景、道具与生成分镜文本，不生成图片与视频"
-            @click="startTextFrameworkPipeline"
-          >
-            生成文本框架
-          </el-button>
+          <template v-if="pipelinePanelExpanded">
+            <GenerationSettings :model-value="projectGenerationSettings" :max-duration="15" @update:model-value="setProjectGenerationSettings" />
+            <el-button size="small" plain @click="applyProjectGenerationSettingsToStoryboards">应用到全部分镜</el-button>
+            <el-select v-model="scriptLanguage" placeholder="分镜语言" clearable style="width: 105px">
+              <el-option label="中文" value="zh" />
+              <el-option label="英文" value="en" />
+            </el-select>
+            <StylePickerButton
+              v-model="generationStyle"
+              :options="generationStyleOptions"
+              @change="() => saveProjectSettings(true)"
+            />
+          </template>
           <template v-if="pipelineRunning">
             <el-button v-if="!pipelinePaused" type="warning" @click="pipelinePaused = true">⏸ 暂停</el-button>
             <el-button v-else type="success" @click="onPipelineResume">▶ 继续</el-button>
@@ -1403,8 +1408,39 @@
       </section>
       </div>
 
-      <div v-show="workflowStage === 'storyboard'" class="workflow-next-action">
+      <div v-show="workflowStage === 'storyboard'" class="workflow-next-action sb-stage-actions">
         <span>{{ storyboards.length ? `已有 ${storyboards.length} 个分镜；生成完成后即可检查并合成。` : '请先生成至少一个分镜。' }}</span>
+        <div class="sb-stage-gen-group">
+          <el-input-number v-model="storyboardCount" :min="1" :max="200" :step="5" placeholder="分镜数量·留空自动" size="small" style="width: 132px" />
+          <el-input-number v-model="videoDuration" :min="10" :max="600" :step="5" placeholder="总时长秒·留空自动" size="small" style="width: 142px" />
+          <el-button
+            type="success"
+            :loading="storyboardGenerating || universalOmniPolishRunning"
+            :disabled="!currentEpisodeId || storyboardGenerating || universalOmniPolishRunning"
+            @click="onGenerateStoryboard"
+          >
+            {{ storyboards.length ? '重新生成分镜' : 'AI 生成分镜' }}
+          </el-button>
+          <template v-if="storyboards.length > 0">
+            <el-button
+              plain
+              :loading="batchImageRunning"
+              :disabled="!currentEpisodeId || batchImageRunning || batchVideoRunning || pipelineRunning"
+              @click="startBatchImageGeneration"
+            >
+              批量生成分镜图
+            </el-button>
+            <el-button
+              type="warning"
+              plain
+              :loading="batchVideoRunning"
+              :disabled="!currentEpisodeId || batchImageRunning || batchVideoRunning || pipelineRunning"
+              @click="startBatchVideoGeneration"
+            >
+              批量生成分镜视频
+            </el-button>
+          </template>
+        </div>
         <el-button type="primary" :disabled="!storyboards.length" @click="setWorkflowStage('merge')">进入视频合成</el-button>
       </div>
 
@@ -2808,6 +2844,8 @@ const workflowStage = ref(normalizeWorkflowStage(route.query.stage))
 // (提取角色/场景/道具 → 分镜 → 三类资源图 → 分镜图 → 视频 → 合成)，
 // 每步自动跳过已有产物，支持暂停/恢复。
 const showLegacyPipeline = ref(true)
+// 默认收起为一条细横条(仅保留两个执行按钮),避免挤压剧本编辑区
+const pipelinePanelExpanded = ref(false)
 const resourceMediaFileInput = ref(null)
 const resourceMediaUploading = ref(false)
 const workflowStages = computed(() => [
@@ -9895,6 +9933,8 @@ html.light .nav-sub-item.sb-nav-over { background: rgba(99,102,241,0.10); }
 .storyboard-stage-active .omni-page.embedded.project-storyboard-page{position:static!important;top:auto;height:auto!important;min-height:0!important;overflow:hidden!important;flex:1;z-index:auto}
 .storyboard-stage-active .omni-page.embedded.project-storyboard-page .workbench{height:100%!important;min-height:0!important}
 .storyboard-stage-active .workflow-next-action{flex:none;margin:8px 0 0;padding:8px 12px}
+.sb-stage-gen-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
+.storyboard-stage-active .sb-stage-actions{flex-wrap:wrap;row-gap:8px}
 @media(max-width:960px){.storyboard-stage-active{height:auto;overflow:visible}.storyboard-stage-active .main{height:auto;overflow:visible;display:block;padding:16px 12px}.storyboard-stage-active .workflow-head{display:flex}.storyboard-stage-active .omni-page.embedded.project-storyboard-page{overflow:visible!important}}
 .section {
   margin-bottom: 24px;
@@ -9932,6 +9972,9 @@ html.light .card:hover {
 html.light .section-title { color: #1e1b4b; }
 .pipeline-section {
   padding: 12px 16px !important;
+}
+.pipeline-section.collapsed {
+  padding: 6px 16px !important;
 }
 .one-click-actions {
   display: flex;
@@ -11930,7 +11973,7 @@ html.light .frame-layout-anchor {
 .film-create > .header { position:relative; height:3.75rem; box-sizing:border-box; }
 .film-create > .main { height:calc(100vh - 3.75rem); height:calc(100dvh - 3.75rem); box-sizing:border-box; padding-bottom:2rem; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
 @media(min-width:961px){
-  .script-stage-active>.main{display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:14px;overflow:hidden;padding-top:18px;padding-bottom:18px}
+  .script-stage-active>.main{display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;gap:14px;overflow:hidden;padding-top:18px;padding-bottom:18px}
   .script-stage-active .workflow-shell{margin:0;padding:15px 22px;border-radius:16px}
   .script-stage-active .workflow-head{align-items:center}.script-stage-active .workflow-head h2{margin-block:2px;font-size:22px}.script-stage-active .workflow-head p{font-size:12px}
   .script-stage-active .workflow-steps{margin-top:12px}.script-stage-active .workflow-step{min-height:38px}
