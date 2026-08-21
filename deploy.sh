@@ -78,6 +78,28 @@ if [[ -n "${APP_CID}" ]]; then
   if [[ "${APP_STATE}" != "running" ]]; then
     log "⚠️ app 容器状态异常: ${APP_STATE},最近错误日志(过滤):"
     docker logs --tail 300 local-minidrama 2>&1 | grep -iE "error|fatal|killed|sqlite|exception|cannot|undefined" | tail -40 || true
+    # 崩溃循环的死锁:修复在待部署镜像里,但备份进不了容器、镜像换不掉。
+    # 用当前镜像跑一次性容器修数据:清理「绑定的配置已不是全局默认」的过期
+    # 默认标记——这是旧镜像迁移66重放时撞部分唯一索引的根源。修完旧镜像
+    # 才能启动,备份/构建/新镜像部署才能继续。
+    log "尝试自动修复绑定表过期默认标记并恢复容器..."
+    docker compose -f "${COMPOSE_FILE}" run --rm --no-deps app node -e '
+      const db = require("better-sqlite3")("/app/backend-node/data/drama_generator.db");
+      const info = db.prepare("UPDATE tenant_ai_config_bindings SET is_default=0 WHERE is_default=1 AND ai_config_id NOT IN (SELECT id FROM ai_service_configs WHERE deleted_at IS NULL AND is_default=1)").run();
+      db.pragma("wal_checkpoint(TRUNCATE)"); db.close();
+      console.log("repaired stale default bindings:", info.changes);
+    ' || log "⚠️ 自动修复脚本执行失败,继续尝试"
+    docker compose -f "${COMPOSE_FILE}" up -d >/dev/null 2>&1 || true
+    for _ in $(seq 1 18); do
+      sleep 5
+      APP_HEALTH="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${APP_CID}" 2>/dev/null || true)"
+      [[ "${APP_HEALTH}" == "healthy" ]] && break
+    done
+    if [[ "${APP_HEALTH}" == "healthy" ]]; then
+      log "✅ 容器已恢复健康,继续部署"
+    else
+      log "⚠️ 容器仍未恢复(${APP_HEALTH}),备份步骤可能再次中止"
+    fi
   fi
 fi
 
