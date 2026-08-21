@@ -3,6 +3,19 @@ const fs = require('fs');
 const path = require('path');
 const { normalizeMaterialHubToken } = require('./jimengMaterialHubService');
 
+// 对外回显掩码：仅保留前 4 位与后 4 位，中间以 **** 代替。
+// 内部调用（aiClient / testConnection 等）仍使用真实 api_key，仅路由层回显时脱敏。
+function maskApiKey(key) {
+  if (key == null || key === '') return '';
+  const s = String(key);
+  if (s.length <= 8) return '****';
+  return s.slice(0, 4) + '****' + s.slice(-4);
+}
+
+function isMaskedApiKey(key) {
+  return typeof key === 'string' && key.includes('****');
+}
+
 function normalizeApiKeyForService(serviceType, apiKey) {
   if (serviceType === 'jimeng2_character_auth' && apiKey != null) {
     return normalizeMaterialHubToken(apiKey);
@@ -175,6 +188,8 @@ function createConfig(db, log, req) {
     }
   }
   const defaultModel = req.default_model != null ? String(req.default_model).trim() || null : null;
+  // 从脱敏导出文件导入的掩码 Key 不是真实凭据，不能原样入库
+  const rawApiKey = isMaskedApiKey(req.api_key) ? '' : (req.api_key || '');
   const info = db.prepare(
     `INSERT INTO ai_service_configs (service_type, provider, api_protocol, name, base_url, api_key, model, default_model, billing_key, endpoint, query_endpoint, priority, is_default, is_active, settings, owner_tenant_id, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
@@ -184,7 +199,7 @@ function createConfig(db, log, req) {
     req.api_protocol || '',
     req.name || '',
     req.base_url || '',
-    normalizeApiKeyForService(req.service_type, req.api_key || ''),
+    normalizeApiKeyForService(req.service_type, rawApiKey),
     model,
     defaultModel,
     req.billing_key != null ? String(req.billing_key).trim() || null : null,
@@ -224,7 +239,8 @@ function updateConfig(db, log, id, req) {
     updates.push('base_url = ?');
     params.push(req.base_url);
   }
-  if (req.api_key != null) {
+  // 掩码值（未修改的回显）不覆盖已保存的真实 Key；只有用户输入新 Key 才更新
+  if (req.api_key != null && !isMaskedApiKey(req.api_key)) {
     updates.push('api_key = ?');
     const st = req.service_type != null ? req.service_type : existing.service_type;
     params.push(normalizeApiKeyForService(st, req.api_key));
@@ -651,6 +667,8 @@ module.exports = {
   updateConfig,
   deleteConfig,
   testConnection,
+  maskApiKey,
+  isMaskedApiKey,
   getVendorLockStatus,
   applyVendorLock,
   bulkUpdateApiKey,
