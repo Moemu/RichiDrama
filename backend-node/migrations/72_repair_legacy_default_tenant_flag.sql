@@ -10,8 +10,11 @@ WHERE name = '默认项目组'
 -- 回填:legacy 组一旦有绑定就只看绑定表,而 ensureDefaultTenant 只在
 -- 领养时同步存量配置。把已有全局配置补绑给所有 legacy 组,消除"添加成功
 -- 但列表不显示、生成/计费选不到"的存量隐形配置。
-INSERT INTO tenant_ai_config_bindings (tenant_id, service_type, ai_config_id, is_active, priority, is_default, created_at, updated_at)
-SELECT t.id, c.service_type, c.id, 1, c.priority, c.is_default,
+-- is_default 恒为 0:部分唯一索引 (tenant_id,service_type) WHERE is_default=1
+-- 禁止同组同类型两条默认,回填行若带默认会撞索引导致启动崩溃,
+-- 组内默认仍由既有绑定/用户选择决定。
+INSERT OR IGNORE INTO tenant_ai_config_bindings (tenant_id, service_type, ai_config_id, is_active, priority, is_default, created_at, updated_at)
+SELECT t.id, c.service_type, c.id, 1, c.priority, 0,
        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 FROM tenants t
 JOIN ai_service_configs c

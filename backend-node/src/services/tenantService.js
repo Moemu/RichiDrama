@@ -152,6 +152,10 @@ function sanitizeTemplateSettings(raw) {
 // 新分组直接继承平台已验证的服务结构、模型、端点和默认项；所有
 // 凭据与 SD2 私有参数保持为空，运营人员只需补齐本组密钥即可启用。
 function seedOwnedConfigTemplates(db, tenantId, actorId) {
+  // 幂等保护:该组已有任何绑定时不再重播模板。此函数在每次启动的
+  // ensureDefaultTenant 中都会被调用,重播会重复创建配置并可能撞
+  // (tenant_id,service_type) WHERE is_default=1 的部分唯一索引。
+  if (db.prepare('SELECT 1 FROM tenant_ai_config_bindings WHERE tenant_id=? LIMIT 1').get(Number(tenantId))) return;
   const templates = db.prepare(`SELECT * FROM ai_service_configs
     WHERE deleted_at IS NULL AND owner_tenant_id IS NULL AND is_active=1
     ORDER BY service_type, is_default DESC, priority DESC, id`).all();
