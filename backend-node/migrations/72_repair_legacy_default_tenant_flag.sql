@@ -18,9 +18,14 @@ SELECT t.id, c.service_type, c.id, 1, c.priority, 0,
        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 FROM tenants t
 JOIN ai_service_configs c
-  ON c.deleted_at IS NULL AND c.is_active = 1 AND c.owner_tenant_id IS NULL
+  ON c.deleted_at IS NULL AND c.is_active = 1 AND COALESCE(c.owner_tenant_id, 0) = 0
 WHERE t.status = 'active' AND COALESCE(t.uses_legacy_global_configs, 0) = 1
   AND NOT EXISTS (
     SELECT 1 FROM tenant_ai_config_bindings b
     WHERE b.tenant_id = t.id AND b.ai_config_id = c.id
   );
+
+-- 归一化:createConfig 曾把"全局"写成 owner_tenant_id=0(Number(null)=0
+-- 通过了安全整数校验),导致所有 IS NULL 判断匹配不到全局配置。
+-- 统一为 NULL 语义,存量 0 一并修正。
+UPDATE ai_service_configs SET owner_tenant_id = NULL WHERE COALESCE(owner_tenant_id, 0) = 0;
