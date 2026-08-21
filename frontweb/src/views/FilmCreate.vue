@@ -385,6 +385,19 @@
               <button v-for="filter in resourceCatalogFilters" :key="filter.key" type="button" :class="{ active: resourceCatalogFilter === filter.key }" :aria-pressed="resourceCatalogFilter === filter.key" @click="resourceCatalogFilter = filter.key">{{ filter.label }}</button>
             </div>
             <div class="resource-browser-actions">
+              <el-select
+                v-if="resourceCatalogType !== 'media'"
+                v-model="resourceImageModel"
+                size="small"
+                filterable
+                clearable
+                placeholder="图像模型·默认"
+                style="width: 190px"
+                title="生成角色/场景/道具图使用的模型;留空按 AI 配置的默认图片模型"
+              >
+                <el-option label="默认(按AI配置)" value="" />
+                <el-option v-for="m in resourceImageModels" :key="m" :label="m" :value="m" />
+              </el-select>
               <el-button v-if="resourceCatalogType === 'character'" size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button>
               <el-button v-if="resourceCatalogType === 'scene'" size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button>
               <el-button v-if="resourceCatalogType === 'prop'" size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button>
@@ -415,19 +428,19 @@
           <article class="resource-center-group">
             <header><b>角色</b><span>{{ characters.length }}</span></header>
             <div class="resource-center-actions"><el-button size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button><el-button size="small" @click="openAddCharacter">添加角色</el-button><el-button v-if="characters.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'character'" @click="onGenerateMissingResourceImages('character')">生成缺图</el-button><el-button v-if="characters.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.character.size" @click="batchDeleteUnifiedResources('character')">批量删除{{ unifiedResourceSelection.character.size ? `（${unifiedResourceSelection.character.size}）` : '' }}</el-button></div>
-            <div v-if="characters.length" class="resource-center-list"><div v-for="char in characters" :key="char.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('character', char.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('character', char.id)" :aria-label="`选择角色 ${char.name || char.id}`" @click.stop @change="toggleUnifiedResourceSelection('character', char.id)" /><img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" alt="" /><span v-else class="resource-center-placeholder">角色</span><div><b>{{ char.name }}</b><small>{{ char.appearance || char.description || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editCharacter(char)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('character', char)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `char-${char.id}`" @click="onUploadResourceClick('character', char.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteCharacter(char)">删除</el-button></div></div></div>
+            <div v-if="characters.length" class="resource-center-list"><div v-for="char in characters" :key="char.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('character', char.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('character', char.id)" :aria-label="`选择角色 ${char.name || char.id}`" @click.stop @change="toggleUnifiedResourceSelection('character', char.id)" /><img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" alt="" /><span v-else class="resource-center-placeholder">角色</span><div><b>{{ char.name }}</b><small>{{ char.appearance || char.description || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editCharacter(char)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('character', char)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `char-${char.id}`" @click="onUploadResourceClick('character', char.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char, resourceImageModel || undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteCharacter(char)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从剧本提取角色，或手动添加。</p>
           </article>
           <article class="resource-center-group">
             <header><b>场景</b><span>{{ scenes.length }}</span></header>
             <div class="resource-center-actions"><el-button size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button><el-button size="small" @click="openAddScene">添加场景</el-button><el-button v-if="scenes.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'scene'" @click="onGenerateMissingResourceImages('scene')">生成缺图</el-button><el-button v-if="scenes.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.scene.size" @click="batchDeleteUnifiedResources('scene')">批量删除{{ unifiedResourceSelection.scene.size ? `（${unifiedResourceSelection.scene.size}）` : '' }}</el-button></div>
-            <div v-if="scenes.length" class="resource-center-list"><div v-for="scene in scenes" :key="scene.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('scene', scene.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('scene', scene.id)" :aria-label="`选择场景 ${scene.location || scene.id}`" @click.stop @change="toggleUnifiedResourceSelection('scene', scene.id)" /><img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" alt="" /><span v-else class="resource-center-placeholder">场景</span><div><b>{{ scene.location }}</b><small>{{ scene.description || scene.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editScene(scene)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('scene', scene)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `scene-${scene.id}`" @click="onUploadResourceClick('scene', scene.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteScene(scene)">删除</el-button></div></div></div>
+            <div v-if="scenes.length" class="resource-center-list"><div v-for="scene in scenes" :key="scene.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('scene', scene.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('scene', scene.id)" :aria-label="`选择场景 ${scene.location || scene.id}`" @click.stop @change="toggleUnifiedResourceSelection('scene', scene.id)" /><img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" alt="" /><span v-else class="resource-center-placeholder">场景</span><div><b>{{ scene.location }}</b><small>{{ scene.description || scene.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editScene(scene)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('scene', scene)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `scene-${scene.id}`" @click="onUploadResourceClick('scene', scene.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid, resourceImageModel || undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteScene(scene)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从当前剧本提取场景。</p>
           </article>
           <article class="resource-center-group">
             <header><b>道具</b><span>{{ props.length }}</span></header>
             <div class="resource-center-actions"><el-button size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button><el-button size="small" @click="showAddProp = true">添加道具</el-button><el-button v-if="props.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'prop'" @click="onGenerateMissingResourceImages('prop')">生成缺图</el-button><el-button v-if="props.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.prop.size" @click="batchDeleteUnifiedResources('prop')">批量删除{{ unifiedResourceSelection.prop.size ? `（${unifiedResourceSelection.prop.size}）` : '' }}</el-button></div>
-            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('prop', prop.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('prop', prop.id)" :aria-label="`选择道具 ${prop.name || prop.id}`" @click.stop @change="toggleUnifiedResourceSelection('prop', prop.id)" /><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editProp(prop)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('prop', prop)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `prop-${prop.id}`" @click="onUploadResourceClick('prop', prop.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteProp(prop)">删除</el-button></div></div></div>
+            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('prop', prop.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('prop', prop.id)" :aria-label="`选择道具 ${prop.name || prop.id}`" @click.stop @change="toggleUnifiedResourceSelection('prop', prop.id)" /><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editProp(prop)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('prop', prop)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `prop-${prop.id}`" @click="onUploadResourceClick('prop', prop.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid, resourceImageModel || undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteProp(prop)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从当前剧本提取道具。</p>
           </article>
         </div>
@@ -2596,6 +2609,7 @@ import { runGenerateStoryFromPremise } from '@/composables/useStoryGeneration'
 import { useCharacters } from '@/composables/filmCreate/useCharacters'
 import { useProps as usePropsComposable } from '@/composables/filmCreate/useProps'
 import { useScenes } from '@/composables/filmCreate/useScenes'
+import { useModelOptions } from '@/composables/useModelOptions'
 
 const route = useRoute()
 const router = useRouter()
@@ -2848,6 +2862,9 @@ function normalizeWorkflowStage(value) {
 const workflowStage = ref(normalizeWorkflowStage(route.query.stage))
 // 嵌入的分镜工作台(FreeCreate)实例:外部 AI 生成分镜时调用其 refreshProjectShots 实时渲染
 const freeCreateRef = ref(null)
+// 资源阶段生成角色/场景/道具图使用的图像模型(留空走 AI 配置默认)
+const resourceImageModels = useModelOptions('image')
+const resourceImageModel = ref('')
 // 一键全流程入口：在「剧本管理」阶段展示 10 步流水线面板
 // (提取角色/场景/道具 → 分镜 → 三类资源图 → 分镜图 → 视频 → 合成)，
 // 每步自动跳过已有产物，支持暂停/恢复。
@@ -5439,9 +5456,10 @@ async function onGenerateMissingResourceImages(type) {
   resourceBatchGenerating.value = type
   try {
     for (const item of missing) {
-      if (type === 'character') await onGenerateCharacterImage(item)
-      else if (type === 'scene') await onGenerateSceneImage(item, sceneUseQuadGrid.value)
-      else await onGeneratePropImage(item, propUseQuadGrid.value)
+      const model = resourceImageModel.value || undefined
+      if (type === 'character') await onGenerateCharacterImage(item, model)
+      else if (type === 'scene') await onGenerateSceneImage(item, sceneUseQuadGrid.value, model)
+      else await onGeneratePropImage(item, propUseQuadGrid.value, model)
     }
   } finally {
     resourceBatchGenerating.value = null
@@ -5465,9 +5483,10 @@ function resourceCatalogGenerating(item) {
 }
 
 async function generateResourceCatalogItem(item) {
-  if (resourceCatalogType.value === 'character') return onGenerateCharacterImage(item)
-  if (resourceCatalogType.value === 'scene') return onGenerateSceneImage(item, sceneUseQuadGrid.value)
-  return onGeneratePropImage(item, propUseQuadGrid.value)
+  const model = resourceImageModel.value || undefined
+  if (resourceCatalogType.value === 'character') return onGenerateCharacterImage(item, model)
+  if (resourceCatalogType.value === 'scene') return onGenerateSceneImage(item, sceneUseQuadGrid.value, model)
+  return onGeneratePropImage(item, propUseQuadGrid.value, model)
 }
 
 async function deleteResourceCatalogItem(item) {
