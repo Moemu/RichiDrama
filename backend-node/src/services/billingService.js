@@ -926,6 +926,31 @@ function projectUsageWhere(filters = {}) {
   return { where, params };
 }
 
+function unassignedProjectUsageWhere(filters = {}) {
+  let where = 'WHERE l.drama_id IS NULL', params = [];
+  if (filters.tenant_id !== undefined && filters.tenant_id !== null && String(filters.tenant_id) !== '') { where += ' AND l.tenant_id=?'; params.push(Number(filters.tenant_id)); }
+  if (filters.service_type) { where += ' AND l.service_type=?'; params.push(String(filters.service_type)); }
+  if (filters.model) { where += ' AND l.model=?'; params.push(String(filters.model)); }
+  const keyword = String(filters.keyword || '').trim();
+  if (keyword) { const term = `%${keyword}%`; where += ' AND (u.username LIKE ? OR u.display_name LIKE ?)'; params.push(term, term); }
+  const from = shanghaiDayBoundary(filters.date_from), to = shanghaiDayBoundary(filters.date_to, true);
+  if (from) { where += ' AND l.created_at>=?'; params.push(from); }
+  if (to) { where += ' AND l.created_at<=?'; params.push(to); }
+  return { where, params };
+}
+
+function unassignedProjectUsageSummary(db, filters = {}) {
+  const { where, params } = unassignedProjectUsageWhere(filters);
+  const summary = db.prepare(`SELECT COUNT(*) records, COUNT(DISTINCT l.user_id) users, COALESCE(SUM(l.charged_micro),0) charged_micro, MAX(l.created_at) last_activity_at FROM billing_usage_logs l JOIN users u ON u.id=l.user_id ${where}`).get(...params);
+  const byUser = db.prepare(`SELECT l.user_id,u.username,u.display_name,COALESCE(SUM(l.charged_micro),0) charged_micro,MAX(l.created_at) last_activity_at FROM billing_usage_logs l JOIN users u ON u.id=l.user_id ${where} GROUP BY l.user_id,u.username,u.display_name ORDER BY charged_micro DESC,l.user_id LIMIT 8`).all(...params);
+  const bySource = db.prepare(`SELECT COALESCE(l.source_kind,'other') source_kind,l.service_type,COALESCE(SUM(l.charged_micro),0) charged_micro FROM billing_usage_logs l JOIN users u ON u.id=l.user_id ${where} GROUP BY source_kind,l.service_type ORDER BY charged_micro DESC,source_kind LIMIT 8`).all(...params);
+  return {
+    summary: { ...summary, charged: microToCredits(summary.charged_micro) },
+    by_user: byUser.map((row) => ({ ...row, charged: microToCredits(row.charged_micro) })),
+    by_source: bySource.map((row) => ({ ...row, charged: microToCredits(row.charged_micro) })),
+  };
+}
+
 function parseProjectMetadata(value) {
   if (!value || typeof value === 'object') return value || {};
   try { return JSON.parse(value) || {}; } catch (_) { return {}; }
@@ -997,8 +1022,8 @@ function projectUsage(db, filters = {}) {
     ORDER BY charged_micro DESC, last_activity_at DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset)
     .map((row) => ({ ...projectProfile(row), charged: microToCredits(row.charged_micro), frozen: microToCredits(row.frozen_micro), average: microToCredits(Math.round(Number(row.charged_micro || 0) / Math.max(1, Number(row.calls || 0)))), source_breakdown: { workflow: microToCredits(row.workflow_micro), omni: microToCredits(row.omni_micro), tools: microToCredits(row.tool_micro) } }));
   const summary = db.prepare(`SELECT COUNT(DISTINCT l.drama_id) projects, COUNT(*) calls, COALESCE(SUM(l.charged_micro),0) charged_micro FROM billing_usage_logs l JOIN dramas d ON d.id=l.drama_id JOIN users u ON u.id=l.user_id ${where}`).get(...params);
-  const unassigned = db.prepare(`SELECT COUNT(*) calls, COALESCE(SUM(l.charged_micro),0) charged_micro FROM billing_usage_logs l JOIN users u ON u.id=l.user_id WHERE l.drama_id IS NULL`).get();
-  return { items, total, page: meta.page, page_size: meta.page_size, summary: { ...summary, charged: microToCredits(summary.charged_micro) }, historical_unassigned: { ...unassigned, charged: microToCredits(unassigned.charged_micro) } };
+  const unassigned = unassignedProjectUsageSummary(db, filters).summary;
+  return { items, total, page: meta.page, page_size: meta.page_size, summary: { ...summary, charged: microToCredits(summary.charged_micro) }, historical_unassigned: unassigned };
 }
 
 function projectUsageDetail(db, dramaId, filters = {}) {
@@ -1014,15 +1039,10 @@ function projectUsageDetail(db, dramaId, filters = {}) {
 }
 
 function unassignedProjectUsage(db, filters = {}) {
-  let where = 'WHERE l.drama_id IS NULL', params = [];
-  if (filters.tenant_id !== undefined && filters.tenant_id !== null && String(filters.tenant_id) !== '') { where += ' AND l.tenant_id=?'; params.push(Number(filters.tenant_id)); }
-  if (filters.service_type) { where += ' AND l.service_type=?'; params.push(String(filters.service_type)); }
-  if (filters.model) { where += ' AND l.model=?'; params.push(String(filters.model)); }
-  const from = shanghaiDayBoundary(filters.date_from), to = shanghaiDayBoundary(filters.date_to, true);
-  if (from) { where += ' AND l.created_at>=?'; params.push(from); }
-  if (to) { where += ' AND l.created_at<=?'; params.push(to); }
+  const { where, params } = unassignedProjectUsageWhere(filters);
+  const overview = unassignedProjectUsageSummary(db, filters);
   const rows = db.prepare(`SELECT l.id,l.created_at,l.service_type,l.model,l.source_kind,l.source_id,l.charged_micro,u.username,u.display_name FROM billing_usage_logs l JOIN users u ON u.id=l.user_id ${where} ORDER BY l.created_at DESC LIMIT 100`).all(...params).map((r) => ({ ...r, charged: microToCredits(r.charged_micro), category: r.source_kind ? '历史待治理' : '全局/历史操作' }));
-  return { items: rows, total: rows.length };
+  return { ...overview, items: rows, total: overview.summary.records };
 }
 
 function projectUsageSection(db, dramaId, filters, section) {
