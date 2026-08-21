@@ -666,9 +666,23 @@ function applyProjectVideoSources(storyboards, videos) {
     return video ? { ...job, videoUrl: localVideoUrl(video), generation: { ...(job.generation || {}), ...video } } : job
   })
 }
-async function refreshProjectShots(preferredId = activeShotId.value) {
+async function refreshProjectShots(preferredId = activeShotId.value, { light = false } = {}) {
   const [result, generationContract] = await Promise.all([dramaAPI.getStoryboards(projectEpisodeId.value), storyboardsAPI.getEpisodeGenerationSettings(projectEpisodeId.value)])
   const storyboards = result?.storyboards || []
+  if (light) {
+    // 高频轮询(如外部 AI 生成分镜期间)跳过逐镜视频查询,沿用已加载的 video_url,
+    // 只让新解析出的分镜实时出现在镜头列表中
+    const prevVideoUrls = new Map(shots.value.map((shot) => [Number(shot.id), shot.video_url]))
+    shots.value = storyboards.map((storyboard) => {
+      const shot = projectShot(storyboard)
+      return { ...shot, video_url: prevVideoUrls.get(Number(storyboard.id)) || shot.video_url }
+    })
+    applyGenerationContract(generationContract)
+    const target = shots.value.find((shot) => Number(shot.id) === Number(preferredId)) || shots.value[0] || null
+    if (target && Number(target.id) !== Number(activeShotId.value)) loadShot(target)
+    else if (!target) activeShotId.value = null
+    return
+  }
   applyProjectVideoSources(storyboards, await loadProjectVideos(storyboards))
   applyGenerationContract(generationContract)
   const target = shots.value.find((shot) => Number(shot.id) === Number(preferredId)) || shots.value[0] || null
@@ -1119,6 +1133,10 @@ onMounted(() => {
     stop()
   }, { deep: true })
 })
+
+// 供宿主页(FilmCreate)在 AI 生成分镜等外部流程中实时刷新镜头列表:
+// light 模式仅重拉分镜与生成合同,不触发逐镜视频查询
+defineExpose({ refreshProjectShots })
 </script>
 
 <style scoped>

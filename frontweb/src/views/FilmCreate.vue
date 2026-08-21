@@ -454,7 +454,7 @@
         <el-button type="primary" :disabled="!currentEpisodeId" @click="setWorkflowStage('storyboard')">进入分镜管理</el-button>
       </div>
 
-      <FreeCreate v-if="workflowStage === 'storyboard' && currentEpisodeId" :project-episode-id="currentEpisodeId" :project-drama-id="dramaId" embedded @reordered="loadDrama" @changed="loadDrama" />
+      <FreeCreate v-if="workflowStage === 'storyboard' && currentEpisodeId" ref="freeCreateRef" :project-episode-id="currentEpisodeId" :project-drama-id="dramaId" embedded @reordered="loadDrama" @changed="loadDrama" />
 
       <div v-if="false" class="storyboard-workspace">
       <section class="section card resource-panel storyboard-reference-panel">
@@ -2840,6 +2840,8 @@ function normalizeWorkflowStage(value) {
   return WORKFLOW_STAGE_KEYS.includes(stage) ? stage : 'script'
 }
 const workflowStage = ref(normalizeWorkflowStage(route.query.stage))
+// 嵌入的分镜工作台(FreeCreate)实例:外部 AI 生成分镜时调用其 refreshProjectShots 实时渲染
+const freeCreateRef = ref(null)
 // 一键全流程入口：在「剧本管理」阶段展示 10 步流水线面板
 // (提取角色/场景/道具 → 分镜 → 三类资源图 → 分镜图 → 视频 → 合成)，
 // 每步自动跳过已有产物，支持暂停/恢复。
@@ -7886,7 +7888,17 @@ async function onGenerateStoryboard() {
   const meta = buildExtractTaskMeta(store, dramaId.value, epId, GEN_RESOURCE.GENERATE_STORYBOARD, 'AI生成分镜')
   genStore.markRunning(meta)
   // 生成期间每 2 秒刷新该集分镜列表，让已解析的分镜逐步出现（切集后仍更新原集缓存）
-  const refreshTimer = setInterval(() => refreshStoryboardsForEpisode(epId), 2000)
+  // 分镜工作台(FreeCreate)自持镜头状态,不会响应 store 变化:
+  // 生成期间用轻量刷新(仅分镜+生成合同)让新镜头实时渲染,结束时全量刷新(含视频)
+  let fcRefreshInFlight = false
+  const refreshEmbeddedWorkbench = async (light) => {
+    if (fcRefreshInFlight) return
+    const fc = freeCreateRef.value
+    if (!fc?.refreshProjectShots) return
+    fcRefreshInFlight = true
+    try { await fc.refreshProjectShots(undefined, { light }) } catch (_) {} finally { fcRefreshInFlight = false }
+  }
+  const refreshTimer = setInterval(() => { refreshStoryboardsForEpisode(epId); refreshEmbeddedWorkbench(true) }, 2000)
   try {
     const res = await dramaAPI.generateStoryboard(epId, {
       model: undefined,
@@ -7928,6 +7940,8 @@ async function onGenerateStoryboard() {
   } finally {
     clearInterval(refreshTimer)
     genStore.markDone(meta)
+    // 成功/失败/超时都同步一次嵌入工作台(全量,含视频),确保镜头最终状态可见
+    refreshEmbeddedWorkbench(false)
   }
 }
 
