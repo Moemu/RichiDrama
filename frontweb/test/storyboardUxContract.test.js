@@ -65,7 +65,7 @@ test('asset mention menus are teleported translucent overlays with bounded inter
 
 test('asset drag shows an exact text-boundary caret and rejects whitespace-only lines', () => {
   assert.match(dragPreview, /setDragImage\(transparentPreview, 0, 0\)/)
-  assert.match(freeCreate, /@pointerdown="beginAssetPointerDrag\(\$event, asset\)"/)
+  assert.match(freeCreate, /@pointerdown="beginAssetPointerDrag\(\$event, promptAssetFor\(asset\)\)"/)
   assert.match(pointerDrag, /Math\.hypot\([\s\S]*< 6/)
   assert.match(pointerDrag, /ASSET_POINTER_MOVE/)
   assert.match(pointerDrag, /ASSET_POINTER_DROP/)
