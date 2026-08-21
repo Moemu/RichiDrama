@@ -135,6 +135,13 @@ function setupRouter(cfg, db, log) {
   adminRouter.get('/transactions', admin.transactions);
   adminRouter.get('/usage', admin.usage);
   adminRouter.get('/usage-summary', admin.usageSummary);
+  adminRouter.get('/project-usage', admin.projectUsage);
+  adminRouter.get('/project-usage/unassigned', admin.unassignedProjectUsage);
+  adminRouter.get('/project-usage/:dramaId/timeline', admin.projectUsageSection('timeline'));
+  adminRouter.get('/project-usage/:dramaId/breakdown', admin.projectUsageSection('breakdown'));
+  adminRouter.get('/project-usage/:dramaId/workflows', admin.projectUsageSection('workflows'));
+  adminRouter.get('/project-usage/:dramaId/members', admin.projectUsageSection('members'));
+  adminRouter.get('/project-usage/:dramaId', admin.projectUsageDetail);
   adminRouter.post('/usage-project-snapshots/backfill', admin.backfillProjectUsage);
   adminRouter.get('/overview', admin.overview);
   adminRouter.get('/operations-alert-settings', admin.alertSettings);

@@ -85,6 +85,16 @@ module.exports = function adminRoutes(db, log = console) {
     transactions: (req, res) => response.success(res, billing.pagedTransactions(db, req.query)),
     usage: (req, res) => response.success(res, billing.pagedUsage(db, req.query)),
     usageSummary: (req, res) => response.success(res, billing.usageSummary(db, req.query)),
+    projectUsage: (req, res) => response.success(res, billing.projectUsage(db, req.query)),
+    projectUsageDetail: (req, res) => {
+      const result = billing.projectUsageDetail(db, req.params.dramaId, req.query);
+      return result ? response.success(res, result) : response.notFound(res, '项目不存在');
+    },
+    projectUsageSection: (section) => (req, res) => {
+      const result = billing.projectUsageSection(db, req.params.dramaId, req.query, section);
+      return result ? response.success(res, result) : response.notFound(res, '项目不存在');
+    },
+    unassignedProjectUsage: (req, res) => response.success(res, billing.unassignedProjectUsage(db, req.query)),
     backfillProjectUsage: guarded((req, res) => {
       const body = confirmed(req);
       const result = billing.backfillProjectSnapshots(db, req.auth.id, body.idempotency_key);

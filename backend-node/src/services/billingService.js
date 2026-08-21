@@ -909,6 +909,132 @@ function usageSummary(db, filters = {}) {
   };
 }
 
+// Project usage is deliberately derived from settled usage logs plus still-open
+// authorization rows. It never infers a project from the user's recent work.
+function projectUsageWhere(filters = {}) {
+  let where = 'WHERE l.drama_id IS NOT NULL', params = [];
+  if (filters.owner_user_id) { where += ' AND d.owner_user_id=?'; params.push(Number(filters.owner_user_id)); }
+  if (filters.tenant_id !== undefined && filters.tenant_id !== null && String(filters.tenant_id) !== '') { where += ' AND l.tenant_id=?'; params.push(Number(filters.tenant_id)); }
+  if (filters.service_type) { where += ' AND l.service_type=?'; params.push(String(filters.service_type)); }
+  if (filters.model) { where += ' AND l.model=?'; params.push(String(filters.model)); }
+  if (filters.source_kind) { where += ' AND COALESCE(l.source_kind, "other")=?'; params.push(String(filters.source_kind)); }
+  const keyword = String(filters.keyword || '').trim();
+  if (keyword) { where += ' AND (d.title LIKE ? OR u.username LIKE ? OR u.display_name LIKE ?)'; const term = `%${keyword}%`; params.push(term, term, term); }
+  const from = shanghaiDayBoundary(filters.date_from), to = shanghaiDayBoundary(filters.date_to, true);
+  if (from) { where += ' AND l.created_at>=?'; params.push(from); }
+  if (to) { where += ' AND l.created_at<=?'; params.push(to); }
+  return { where, params };
+}
+
+function parseProjectMetadata(value) {
+  if (!value || typeof value === 'object') return value || {};
+  try { return JSON.parse(value) || {}; } catch (_) { return {}; }
+}
+
+// Project facts deliberately come from project/workflow tables, never from the
+// billing ledger.  This keeps the progress display useful without turning it
+// into a billing inference or changing historical settlement semantics.
+function projectProfile(row) {
+  const metadata = parseProjectMetadata(row.metadata);
+  const resources = Number(row.character_count || 0) + Number(row.scene_count || 0) + Number(row.prop_count || 0);
+  const storyboardCount = Number(row.storyboard_count || 0);
+  const progress = storyboardCount > 0 ? Math.round(Number(row.shot_delivery_points || 0) / storyboardCount) : 0;
+  return {
+    ...row,
+    metadata: undefined,
+    aspect_ratio: metadata.aspect_ratio || row.storyboard_aspect_ratio || '—',
+    workflow_step: metadata.current_step || null,
+    progress_percent: progress,
+    progress_source: 'shot_delivery',
+    resource_count: resources,
+  };
+}
+
+function shotDeliveryStageSql() {
+  const prompt = `(TRIM(COALESCE(sb.video_prompt,'')) <> '' OR TRIM(COALESCE(sb.universal_segment_text,'')) <> '' OR TRIM(COALESCE(sb.omni_prompt_document_json,'')) NOT IN ('','{}','null'))`;
+  const visual = `(TRIM(COALESCE(sb.image_url,'')) <> '' OR TRIM(COALESCE(sb.composed_image,'')) <> '' OR EXISTS (SELECT 1 FROM image_generations ig WHERE ig.storyboard_id=sb.id AND ig.status='completed' AND ig.deleted_at IS NULL))`;
+  const completed = `((sb.status='completed' AND (TRIM(COALESCE(sb.video_url,'')) <> '' OR TRIM(COALESCE(sb.local_path,'')) <> '')) OR EXISTS (SELECT 1 FROM video_generations vg WHERE vg.storyboard_id=sb.id AND vg.status='completed' AND TRIM(COALESCE(vg.local_path,'')) <> '' AND vg.deleted_at IS NULL))`;
+  const processing = `(sb.status IN ('processing','sd2_waiting','upscale_pending','upscaling','interpolation_pending','interpolating','persisting') OR EXISTS (SELECT 1 FROM video_generations vg WHERE vg.storyboard_id=sb.id AND vg.status IN ('processing','sd2_waiting','upscale_pending','upscaling','interpolation_pending','interpolating','persisting') AND vg.deleted_at IS NULL))`;
+  return `CASE WHEN ${completed} THEN 'video_completed' WHEN ${processing} THEN 'video_processing' WHEN ${visual} THEN 'visual_ready' WHEN ${prompt} THEN 'prompt_ready' WHEN sb.status IN ('failed','invalid','cancelled') THEN 'failed' ELSE 'not_started' END`;
+}
+
+function shotDeliveryCountSql(stage) {
+  return `(SELECT COUNT(*) FROM (SELECT ${shotDeliveryStageSql()} delivery_stage FROM storyboards sb JOIN episodes se ON se.id=sb.episode_id WHERE se.drama_id=d.id AND se.deleted_at IS NULL AND sb.deleted_at IS NULL) shot_stats WHERE delivery_stage='${stage}')`;
+}
+
+function projectProfileSql() {
+  return `d.description, d.style, d.status project_status, d.metadata, d.updated_at project_updated_at,
+    (SELECT COUNT(*) FROM episodes e WHERE e.drama_id=d.id AND e.deleted_at IS NULL) episode_count,
+    (SELECT COUNT(*) FROM episodes e WHERE e.drama_id=d.id AND e.deleted_at IS NULL AND TRIM(COALESCE(e.script_content,'')) <> '') script_ready_episode_count,
+    (SELECT COUNT(*) FROM characters c WHERE c.drama_id=d.id AND c.deleted_at IS NULL) character_count,
+    (SELECT COUNT(*) FROM scenes s WHERE s.drama_id=d.id AND s.deleted_at IS NULL) scene_count,
+    (SELECT COUNT(*) FROM props p WHERE p.drama_id=d.id AND p.deleted_at IS NULL) prop_count,
+    ${shotDeliveryCountSql('not_started')} shot_not_started_count,
+    ${shotDeliveryCountSql('prompt_ready')} shot_prompt_ready_count,
+    ${shotDeliveryCountSql('visual_ready')} shot_visual_ready_count,
+    ${shotDeliveryCountSql('video_processing')} shot_video_processing_count,
+    ${shotDeliveryCountSql('video_completed')} video_completed_count,
+    ${shotDeliveryCountSql('failed')} shot_failed_count,
+    (SELECT COALESCE(SUM(CASE ${shotDeliveryStageSql()} WHEN 'prompt_ready' THEN 25 WHEN 'visual_ready' THEN 45 WHEN 'video_processing' THEN 70 WHEN 'video_completed' THEN 100 ELSE 0 END),0) FROM storyboards sb JOIN episodes se ON se.id=sb.episode_id WHERE se.drama_id=d.id AND se.deleted_at IS NULL AND sb.deleted_at IS NULL) shot_delivery_points,
+    (SELECT COUNT(*) FROM storyboards sb JOIN episodes se ON se.id=sb.episode_id WHERE se.drama_id=d.id AND se.deleted_at IS NULL AND sb.deleted_at IS NULL) storyboard_count,
+    (SELECT MAX(NULLIF(sb.video_aspect_ratio,'')) FROM storyboards sb JOIN episodes se ON se.id=sb.episode_id WHERE se.drama_id=d.id AND se.deleted_at IS NULL AND sb.deleted_at IS NULL) storyboard_aspect_ratio`;
+}
+
+function projectUsage(db, filters = {}) {
+  const { where, params } = projectUsageWhere(filters); const meta = pagination(filters);
+  const total = Number(db.prepare(`SELECT COUNT(DISTINCT l.drama_id) total FROM billing_usage_logs l JOIN dramas d ON d.id=l.drama_id JOIN users u ON u.id=d.owner_user_id ${where}`).get(...params)?.total || 0);
+  const items = db.prepare(`SELECT l.drama_id, COALESCE(d.title, l.project_title_snapshot, '项目 #' || l.drama_id) title,
+    d.owner_user_id, owner.username owner_username, owner.display_name owner_display_name,
+    MAX(l.created_at) last_activity_at, MIN(d.created_at) created_at, ${projectProfileSql()}, COUNT(*) calls,
+    COALESCE(SUM(l.charged_micro),0) charged_micro,
+    COUNT(DISTINCT l.model) model_count,
+    SUM(CASE WHEN COALESCE(l.source_kind,'other')='omni_video' THEN l.charged_micro ELSE 0 END) omni_micro,
+    SUM(CASE WHEN COALESCE(l.source_kind,'other') IN ('video_generation','image_generation') THEN l.charged_micro ELSE 0 END) workflow_micro,
+    SUM(CASE WHEN COALESCE(l.source_kind,'other')='tool_run' THEN l.charged_micro ELSE 0 END) tool_micro,
+    COALESCE((SELECT SUM(a.amount_micro) FROM billing_transactions a WHERE a.drama_id=l.drama_id AND a.type='authorization' AND NOT EXISTS (SELECT 1 FROM billing_transactions done WHERE done.authorization_id=a.id AND done.type IN ('void','charge','settlement'))),0) frozen_micro
+    FROM billing_usage_logs l JOIN dramas d ON d.id=l.drama_id LEFT JOIN users u ON u.id=l.user_id LEFT JOIN users owner ON owner.id=d.owner_user_id ${where}
+    GROUP BY l.drama_id, title, d.owner_user_id, owner.username, owner.display_name, d.description, d.style, d.status, d.metadata, d.updated_at
+    ORDER BY charged_micro DESC, last_activity_at DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset)
+    .map((row) => ({ ...projectProfile(row), charged: microToCredits(row.charged_micro), frozen: microToCredits(row.frozen_micro), average: microToCredits(Math.round(Number(row.charged_micro || 0) / Math.max(1, Number(row.calls || 0)))), source_breakdown: { workflow: microToCredits(row.workflow_micro), omni: microToCredits(row.omni_micro), tools: microToCredits(row.tool_micro) } }));
+  const summary = db.prepare(`SELECT COUNT(DISTINCT l.drama_id) projects, COUNT(*) calls, COALESCE(SUM(l.charged_micro),0) charged_micro FROM billing_usage_logs l JOIN dramas d ON d.id=l.drama_id JOIN users u ON u.id=l.user_id ${where}`).get(...params);
+  const unassigned = db.prepare(`SELECT COUNT(*) calls, COALESCE(SUM(l.charged_micro),0) charged_micro FROM billing_usage_logs l JOIN users u ON u.id=l.user_id WHERE l.drama_id IS NULL`).get();
+  return { items, total, page: meta.page, page_size: meta.page_size, summary: { ...summary, charged: microToCredits(summary.charged_micro) }, historical_unassigned: { ...unassigned, charged: microToCredits(unassigned.charged_micro) } };
+}
+
+function projectUsageDetail(db, dramaId, filters = {}) {
+  const id = Number(dramaId); const rawProject = db.prepare(`SELECT d.id, d.title, d.created_at, d.updated_at, d.owner_user_id, u.username owner_username, u.display_name owner_display_name, ${projectProfileSql()} FROM dramas d LEFT JOIN users u ON u.id=d.owner_user_id WHERE d.id=? AND d.deleted_at IS NULL`).get(id);
+  const project = rawProject ? projectProfile(rawProject) : null;
+  if (!project) return null;
+  const scoped = projectUsageWhere({ ...filters }); let where = scoped.where + ' AND l.drama_id=?', params = [...scoped.params, id];
+  const summary = db.prepare(`SELECT COUNT(*) calls, COALESCE(SUM(l.charged_micro),0) charged_micro, COUNT(DISTINCT l.model) model_count, MAX(l.created_at) last_activity_at FROM billing_usage_logs l JOIN dramas d ON d.id=l.drama_id JOIN users u ON u.id=l.user_id ${where}`).get(...params);
+  const breakdown = db.prepare(`SELECT COALESCE(l.source_kind,'other') source_kind, l.service_type, l.model, COUNT(*) calls, COALESCE(SUM(l.charged_micro),0) charged_micro, MAX(l.created_at) last_activity_at FROM billing_usage_logs l JOIN dramas d ON d.id=l.drama_id JOIN users u ON u.id=l.user_id ${where} GROUP BY source_kind,l.service_type,l.model ORDER BY charged_micro DESC`).all(...params).map((r) => ({ ...r, charged: microToCredits(r.charged_micro) }));
+  const members = db.prepare(`SELECT l.user_id, u.username, u.display_name, u.role, COUNT(*) calls, COALESCE(SUM(l.charged_micro),0) charged_micro, MAX(l.created_at) last_activity_at FROM billing_usage_logs l JOIN dramas d ON d.id=l.drama_id JOIN users u ON u.id=l.user_id ${where} GROUP BY l.user_id,u.username,u.display_name,u.role ORDER BY charged_micro DESC LIMIT 5`).all(...params).map((r) => ({ ...r, charged: microToCredits(r.charged_micro) }));
+  const recent = db.prepare(`SELECT l.id,l.created_at,l.service_type,l.model,l.source_kind,l.source_id,l.charged_micro,u.username,u.display_name FROM billing_usage_logs l JOIN dramas d ON d.id=l.drama_id JOIN users u ON u.id=l.user_id ${where} ORDER BY l.created_at DESC LIMIT 5`).all(...params).map((r) => ({ ...r, charged: microToCredits(r.charged_micro) }));
+  return { project, summary: { ...summary, charged: microToCredits(summary.charged_micro) }, breakdown, members, recent };
+}
+
+function unassignedProjectUsage(db, filters = {}) {
+  let where = 'WHERE l.drama_id IS NULL', params = [];
+  if (filters.tenant_id !== undefined && filters.tenant_id !== null && String(filters.tenant_id) !== '') { where += ' AND l.tenant_id=?'; params.push(Number(filters.tenant_id)); }
+  if (filters.service_type) { where += ' AND l.service_type=?'; params.push(String(filters.service_type)); }
+  if (filters.model) { where += ' AND l.model=?'; params.push(String(filters.model)); }
+  const from = shanghaiDayBoundary(filters.date_from), to = shanghaiDayBoundary(filters.date_to, true);
+  if (from) { where += ' AND l.created_at>=?'; params.push(from); }
+  if (to) { where += ' AND l.created_at<=?'; params.push(to); }
+  const rows = db.prepare(`SELECT l.id,l.created_at,l.service_type,l.model,l.source_kind,l.source_id,l.charged_micro,u.username,u.display_name FROM billing_usage_logs l JOIN users u ON u.id=l.user_id ${where} ORDER BY l.created_at DESC LIMIT 100`).all(...params).map((r) => ({ ...r, charged: microToCredits(r.charged_micro), category: r.source_kind ? '历史待治理' : '全局/历史操作' }));
+  return { items: rows, total: rows.length };
+}
+
+function projectUsageSection(db, dramaId, filters, section) {
+  const detail = projectUsageDetail(db, dramaId, filters); if (!detail) return null;
+  if (section === 'breakdown') return { items: detail.breakdown };
+  if (section === 'members') return { items: detail.members };
+  if (section === 'workflows') return { items: detail.recent };
+  const scoped = projectUsageWhere(filters); const where = scoped.where + ' AND l.drama_id=?';
+  const items = db.prepare(`SELECT substr(datetime(l.created_at, '+8 hours'),1,10) day, COUNT(*) calls, COALESCE(SUM(l.charged_micro),0) charged_micro FROM billing_usage_logs l JOIN dramas d ON d.id=l.drama_id JOIN users u ON u.id=l.user_id ${where} GROUP BY day ORDER BY day`).all(...scoped.params, Number(dramaId)).map((row) => ({ ...row, charged: microToCredits(row.charged_micro) }));
+  return { items };
+}
+
 function pagedAuditLogs(db, filters = {}) {
   const meta = pagination(filters);
   const total = Number(db.prepare('SELECT COUNT(*) total FROM billing_audit_logs').get()?.total || 0);
@@ -918,4 +1044,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { account, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, pagedAuditLogs };
+module.exports = { account, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };
