@@ -32,6 +32,7 @@ export const omniVideoAPI = {
   restoreResourceLink(id) { return request.post(`/asset-resource-links/${id}/restore`) },
   updateAsset(id, body) { return request.put(`/assets/${id}`, body) },
   deleteAsset(id) { return request.delete(`/assets/${id}`) },
+  forceDetachAsset(id) { return request.post(`/assets/${id}/force-detach`) },
   assetLineage(id) { return request.get(`/assets/${id}/lineage`) },
   trimAsset(id, body) { return request.post(`/assets/${id}/trim`, body) },
   concatAssets(assetIds) { return request.post('/assets/concat', { asset_ids: assetIds }) },

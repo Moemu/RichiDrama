@@ -51,7 +51,7 @@ test('asset lineage is owner-scoped and cannot reveal another user current or de
   } finally { teardown(dbPath); }
 });
 
-test('legacy unmapped project-resource asset deletion falls back to protected soft deletion instead of 404', () => {
+test('legacy unmapped project-resource asset archiving remains available without detaching its existing references', () => {
   const { db, dbPath, log, admin } = setup();
   try {
     const user = auth.createUser(db, { username: 'legacy-project-asset-owner', password: 'creator123' }, admin.id);
@@ -64,6 +64,7 @@ test('legacy unmapped project-resource asset deletion falls back to protected so
     assetRoutes(db, log, {}).delete({ params: { id: asset.id }, auth: { id: user.id } }, response);
     assert.equal(response.statusCode, 200);
     assert.equal(response.payload.success, true);
-    assert.equal(assets.getByIdForOwner(db, asset.id, user.id), null);
+    assert.equal(assets.getByIdForOwner(db, asset.id, user.id).archived_at != null, true);
+    assert.equal(assets.list(db, { owner_user_id: user.id, scope: 'project', drama_id: project.id }).total, 0);
   } finally { teardown(dbPath); }
 });

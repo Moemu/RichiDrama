@@ -445,6 +445,7 @@ function setupRouter(cfg, db, log) {
   r.post('/assets/import/video/:video_gen_id', assets.importVideo);
   r.post('/assets/concat', assets.concat);
   r.post('/assets/batch-delete', assets.batchDelete);
+  r.post('/assets/:id/force-detach', assets.forceDetach);
   r.post('/assets/sd2-certify/batch', assets.sd2BatchCertify);
   r.post('/assets/:id/trim', assets.trim);
   r.post('/assets/:id/sd2-certify', assets.sd2Certify);

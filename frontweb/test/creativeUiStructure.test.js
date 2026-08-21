@@ -47,10 +47,12 @@ test('分镜生成操作保留 main 的紫色可用与禁用层级', async () =>
   assert.match(source, /border-color:color-mix\(in srgb,var\(--studio-accent\) 52%,var\(--border-color\)\)!important/)
 })
 
-test('分镜素材池可直接删除未被镜头引用的真实素材', async () => {
-  const [filmSource, freeSource] = await Promise.all([
+test('镜头素材仅移出本镜，项目素材归档与全局解除引用分离', async () => {
+  const [filmSource, freeSource, librarySource, apiSource] = await Promise.all([
     readSource('../src/views/FilmCreate.vue'),
     readSource('../src/views/FreeCreate.vue'),
+    readSource('../src/views/MediaLibrary.vue'),
+    readSource('../src/api/omniVideo.js'),
   ])
 
   assert.match(filmSource, /class="sb-omni-material-delete"/)
@@ -59,10 +61,136 @@ test('分镜素材池可直接删除未被镜头引用的真实素材', async ()
   assert.match(filmSource, /async function deleteSbOmniPoolAsset\(_sb, item\)/)
   assert.match(filmSource, /await deleteResourceMedia\(item\)/)
   assert.match(freeSource, /class="material-delete"/)
-  assert.match(freeSource, /@pointerdown\.stop @click\.stop="deleteMaterialAsset\(asset\)"/)
-  assert.match(freeSource, /async function deleteMaterialAsset\(asset\)/)
-  assert.match(freeSource, /await omniVideoAPI\.deleteAsset\(asset\.id\)/)
+  assert.match(freeSource, /title="移出当前镜头"/)
+  assert.match(freeSource, /@click\.stop="remove\(asset\.id\)"/)
+  assert.match(freeSource, /当前镜头的“移出”是一个完整的镜头级动作/)
+  assert.match(freeSource, /refs: \(promptDocument\.value\?\.refs \|\| \[\]\)\.filter\(\(ref\) => Number\(ref\.asset_id\) !== Number\(id\)\)/)
+  assert.doesNotMatch(freeSource, /function deleteMaterialAsset/)
+  assert.match(freeSource, /!asset\.archived_at/)
   assert.match(freeSource, /await omniVideoAPI\.linkProjectResource\(\{/)
+  assert.match(librarySource, /确定归档该素材/)
+  assert.match(librarySource, /一键归档/)
+  assert.match(librarySource, /从全部可编辑镜头解除并归档/)
+  assert.match(librarySource, /async function forceDetachItem/)
+  assert.match(apiSource, /forceDetachAsset\(id\)/)
+})
+
+test('角色资源卡提供音色绑定、更换与试听入口', async () => {
+  const source = await readSource('../src/views/FilmCreate.vue')
+
+  assert.match(source, /绑定音色/)
+  assert.match(source, /音色已绑定/)
+  assert.match(source, /更换音色/)
+  assert.match(source, /试听/)
+  assert.match(source, /onSd2VoicePrimaryAction\(item\)/)
+  assert.match(source, /onSd2VoiceReplace\(item\)/)
+  assert.match(source, /playSd2Voice\(item\)/)
+})
+
+test('统一资源浏览器的卡片操作会换行，资源页可纵向滚动', async () => {
+  const source = await readSource('../src/views/FilmCreate.vue')
+
+  assert.match(source, /\.resource-browser-card-actions\{display:flex;flex-wrap:wrap/)
+  assert.match(source, /\.resources-stage-active>\.main\{display:block;overflow-y:auto/)
+  assert.match(source, /\.resources-stage-active \.resource-browser-grid\{min-height:15rem;max-height:min\(52dvh,34rem\);overflow:auto\}/)
+})
+
+test('提示词富文本编辑器优先处理滚轮，不被工作台外层取消', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+
+  assert.match(source, /textarea\.el-textarea__inner, \.prompt-rich-editor/)
+  assert.match(source, /promptEditor\.scrollHeight <= promptEditor\.clientHeight/)
+})
+
+test('提示词引用使用稳定素材别名并展示更清晰的缩略图', async () => {
+  const [workbench, editor] = await Promise.all([
+    readSource('../src/views/FreeCreate.vue'),
+    readSource('../src/components/OmniAssetPromptEditor.vue'),
+  ])
+
+  assert.match(workbench, /reference_alias \|\| asset\?\.alias \|\| asset\?\.name/)
+  assert.match(workbench, /:reference-document="promptDocument"/)
+  assert.match(editor, /referenceDocument/)
+  assert.match(editor, /width:30px; height:30px/)
+})
+
+test('提示词引用只解析当前镜头工作集，不能借用其他镜头素材', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+
+  assert.match(source, /<OmniAssetPromptEditor[\s\S]*:assets="chosenAssets"/)
+  assert.match(source, /项目库素材必须先“加入本镜”/)
+})
+
+test('新建项目镜头先切换到服务端返回的空素材工作集', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+
+  assert.match(source, /const newShot = projectShot\(shot\)/)
+  assert.match(source, /shots\.value = list\s*loadShot\(newShot\)\s*await persistShotOrder\(list\)/)
+  assert.match(source, /不能在排序、视频列表等[\s\S]*错误显示“已加入本镜”/)
+})
+
+test('统一资源中心以可搜索的单一资源浏览器代替三列长列表', async () => {
+  const source = await readSource('../src/views/FilmCreate.vue')
+
+  for (const marker of [
+    'class="resource-browser-tabs"',
+    'class="resource-browser"',
+    'const resourceCatalogTabs = computed',
+    'const filteredResourceCatalogItems = computed',
+    '搜索${resourceCatalogMeta.label}名称或描述',
+    'key: \'with-image\'',
+    'key: \'missing-image\'',
+    'class="resource-browser-grid"',
+  ]) {
+    assert.ok(source.includes(marker), `missing resource browser marker: ${marker}`)
+  }
+  assert.match(source, /项目素材.*分镜中按需加入/)
+  assert.match(source, /\.resource-center-grid,\.resource-media-library\{display:none\}/)
+})
+
+test('分镜素材区默认只展示本镜工作集，项目素材通过检索面板按需加入', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+
+  assert.match(source, /仅显示本镜已加入的素材；上传后会自动加入本镜/)
+  assert.match(source, /v-for="asset in chosenAssets"/)
+  assert.match(source, /current-shot-material-pool/)
+  assert.match(source, /projectLibraryOpen = ref\(false\)/)
+  assert.match(source, /从项目素材库加入本镜/)
+  assert.match(source, /const filteredProjectLibraryAssets = computed/)
+  assert.match(source, /\$\{typeName\(asset\.type\)\}/)
+  assert.match(source, /v-for="asset in filteredProjectLibraryAssets"/)
+  assert.match(source, /点击素材即可加入或移出当前镜头/)
+  assert.match(source, /project-asset-library-grid/)
+})
+
+test('提示词引用只改变勾选态，不清空已加入本镜的素材', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+
+  assert.match(source, /勾选只代表提示词中的 @ 引用；本镜已加入素材由 selectedOrder 独立保存/)
+  assert.match(source, /selected\.value = new Set\(referencedIds\)/)
+  const handler = source.slice(source.indexOf('function setPromptReferences'), source.indexOf('function showCertificationError'))
+  assert.match(handler, /selected\.value = new Set\(referencedIds\)/)
+  assert.doesNotMatch(handler, /selectedOrder\.value/)
+  assert.match(source, /const referencedAssets = computed\(\(\) => chosenAssets\.value\.filter/)
+  assert.match(source, /v-for="asset in referencedAssets"/)
+})
+
+test('从项目素材库加入本镜不会自动改写提示词', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+  const handler = source.slice(source.indexOf('function toggleProjectLibraryAsset'), source.indexOf('function onMaterialCardClick'))
+
+  assert.match(handler, /addShotMaterial\(asset\)/)
+  assert.doesNotMatch(handler, /selected\.value\.add/)
+  assert.doesNotMatch(handler, /insertAtCaret/)
+})
+
+test('镜头素材集合从镜头保存的 assets 恢复，未引用素材不丢失', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+  const handler = source.slice(source.indexOf('function loadShot'), source.indexOf('async function loadShotHistory'))
+
+  assert.match(handler, /const materialIds = \(shot\.assets \|\| \[\]\)\.map/)
+  assert.match(handler, /selectedOrder\.value = \[\.\.\.new Set\(materialIds\)\]/)
+  assert.match(source, /:class="\{ selected: selected\.has\(asset\.id\) \}"/)
 })
 
 test('工作台不以镜头时长重复模拟生成进度', async () => {
