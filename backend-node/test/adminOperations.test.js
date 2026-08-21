@@ -109,3 +109,35 @@ test('billing ledgers filter by Shanghai calendar day and user role without chan
     for (const suffix of ['', '-wal', '-shm']) try { fs.unlinkSync(dbPath + suffix); } catch (_) {}
   }
 });
+
+test('historical unassigned usage provides a filter-scoped owner and source overview', () => {
+  const dbPath = path.join(os.tmpdir(), `lmd-historical-usage-${Date.now()}.db`);
+  const db = getDb({ path: dbPath, type: 'sqlite' });
+  try {
+    runMigrationsAndEnsure(db);
+    const created = '2026-08-17T00:00:00.000Z';
+    db.prepare("INSERT INTO users (username,password_hash,display_name,role,is_active,created_at,updated_at) VALUES ('history-a','x','历史甲','user',1,?,?)").run(created, created);
+    db.prepare("INSERT INTO users (username,password_hash,display_name,role,is_active,created_at,updated_at) VALUES ('history-b','x','历史乙','user',1,?,?)").run(created, created);
+    const userA = db.prepare("SELECT id FROM users WHERE username='history-a'").get().id;
+    const userB = db.prepare("SELECT id FROM users WHERE username='history-b'").get().id;
+    const insertUsage = db.prepare('INSERT INTO billing_usage_logs (id,user_id,drama_id,source_kind,service_type,model,usage_json,charged_micro,snapshot_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)');
+    insertUsage.run('history-a-17', userA, null, 'tool_run', 'image', 'model-a', '{}', 100000, '{}', '2026-08-17T01:00:00.000Z');
+    insertUsage.run('history-b-17', userB, null, 'omni_video', 'video', 'model-b', '{}', 300000, '{}', '2026-08-17T02:00:00.000Z');
+    insertUsage.run('history-a-18', userA, null, 'tool_run', 'image', 'model-a', '{}', 900000, '{}', '2026-08-18T01:00:00.000Z');
+
+    const overview = billing.unassignedProjectUsage(db, { date_from: '2026-08-17', date_to: '2026-08-17' });
+    assert.equal(overview.summary.records, 2);
+    assert.equal(overview.summary.users, 2);
+    assert.equal(overview.summary.charged, 40);
+    assert.equal(overview.by_user[0].display_name, '历史乙');
+    assert.equal(overview.by_user[0].charged, 30);
+    assert.equal(overview.by_source.find((row) => row.source_kind === 'tool_run').charged, 10);
+    assert.equal(overview.items.length, 2);
+
+    const projectPage = billing.projectUsage(db, { date_from: '2026-08-17', date_to: '2026-08-17' });
+    assert.equal(projectPage.historical_unassigned.charged, 40);
+  } finally {
+    closeDb();
+    for (const suffix of ['', '-wal', '-shm']) try { fs.unlinkSync(dbPath + suffix); } catch (_) {}
+  }
+});
