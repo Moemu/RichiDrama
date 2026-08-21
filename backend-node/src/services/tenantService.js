@@ -82,6 +82,11 @@ function bindGlobalConfigToLegacyTenants(db, config) {
   );
   for (const tenant of tenants) {
     if (exists.get(tenant.id, config.id)) continue;
+    // 部分唯一索引 (tenant_id,service_type) WHERE is_default=1:插入新默认前
+    // 先清同组同类型旧默认,与 bindOwnedConfig 语义一致
+    if (config.is_default) {
+      db.prepare('UPDATE tenant_ai_config_bindings SET is_default=0, updated_at=? WHERE tenant_id=? AND service_type=?').run(at, tenant.id, config.service_type);
+    }
     insert.run(tenant.id, config.service_type, config.id, 1, config.priority ?? 0, config.is_default ? 1 : 0, at, at);
   }
 }
