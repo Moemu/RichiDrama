@@ -71,6 +71,9 @@ function create(db, log, cfg) {
         model: body.model ?? [],
       });
       if (tenantId) require('../services/tenantService').bindOwnedConfig(db, tenantId, config, { is_default: body.is_default !== false, priority: body.priority });
+      // 新建的全局配置要立即补绑到 legacy 项目组,否则在这些组里不可见,
+      // 生成与计费解析也选不到它(表现:添加成功但列表不显示、模型不走计费)。
+      else require('../services/tenantService').bindGlobalConfigToLegacyTenants(db, config);
       response.created(res, maskConfig(config));
     } catch (err) {
       log.errorw('Create AI config failed', { error: err.message });
