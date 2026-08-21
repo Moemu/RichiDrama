@@ -70,6 +70,17 @@ if [[ ! -f "${DATA_DIR}/drama_generator.db" && -f "${LEGACY_DATA_DIR}/drama_gene
   log "旧数据迁移完成"
 fi
 
+# 容器异常(崩溃重启循环)时,备份前的 exec 会失败且原因不可见。
+# 把最近的错误行带进部署日志便于远程定位;只取错误关键词,避免凭据外泄。
+APP_CID="$(docker compose -f "${COMPOSE_FILE}" ps -q app 2>/dev/null || true)"
+if [[ -n "${APP_CID}" ]]; then
+  APP_STATE="$(docker inspect --format '{{.State.Status}}' "${APP_CID}" 2>/dev/null || true)"
+  if [[ "${APP_STATE}" != "running" ]]; then
+    log "⚠️ app 容器状态异常: ${APP_STATE},最近错误日志(过滤):"
+    docker logs --tail 300 local-minidrama 2>&1 | grep -iE "error|fatal|killed|sqlite|exception|cannot|undefined" | tail -40 || true
+  fi
+fi
+
 # 发布只保留一致的 SQLite 快照；全部媒体必须已在 OSS 持久化。
 # 本地热副本的全量归档由离峰定时任务负责，避免小改动被数 GB 媒体拖慢。
 log "[3/6] 创建发布级账本快照并校验 OSS 归档..."
