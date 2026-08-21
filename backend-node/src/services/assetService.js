@@ -1,6 +1,7 @@
 function list(db, query) {
   let sql = 'FROM assets WHERE deleted_at IS NULL';
   const params = [];
+  if (String(query.include_archived || '') !== '1' && String(query.include_archived || '').toLowerCase() !== 'true') sql += ' AND archived_at IS NULL';
   if (query.owner_user_id) {
     sql += ' AND (owner_user_id = ? OR drama_id IN (SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL))';
     params.push(Number(query.owner_user_id), Number(query.owner_user_id));
@@ -53,6 +54,7 @@ function rowToItem(r) {
     id: r.id,
     drama_id: r.drama_id,
     name: r.name,
+    reference_alias: r.reference_alias || referenceAliasFor(r.type, r.id),
     type: r.type,
     category: r.category,
     url: publicUrl,
@@ -76,6 +78,7 @@ function rowToItem(r) {
     video_gen_id: r.video_gen_id,
     created_at: r.created_at,
     updated_at: r.updated_at,
+    archived_at: r.archived_at || null,
     deleted_at: r.deleted_at || null,
   };
 }
@@ -136,13 +139,13 @@ function findByChecksum(db, checksum, dramaId = null, ownerUserId = null) {
   // is shared only within its owner account: otherwise a duplicate upload can
   // return an asset that the uploader cannot list, edit, or delete.
   const row = dramaId
-    ? db.prepare(`SELECT * FROM assets WHERE deleted_at IS NULL AND checksum = ? AND drama_id = ? ORDER BY id DESC LIMIT 1`)
+    ? db.prepare(`SELECT * FROM assets WHERE deleted_at IS NULL AND archived_at IS NULL AND checksum = ? AND drama_id = ? ORDER BY id DESC LIMIT 1`)
       .get(checksum, Number(dramaId))
     : ownerUserId != null
-      ? db.prepare(`SELECT * FROM assets WHERE deleted_at IS NULL AND checksum = ? AND drama_id IS NULL AND owner_user_id = ? ORDER BY id DESC LIMIT 1`)
+      ? db.prepare(`SELECT * FROM assets WHERE deleted_at IS NULL AND archived_at IS NULL AND checksum = ? AND drama_id IS NULL AND owner_user_id = ? ORDER BY id DESC LIMIT 1`)
         .get(checksum, Number(ownerUserId))
       // Kept for internal callers that have no authenticated scope.
-      : db.prepare(`SELECT * FROM assets WHERE deleted_at IS NULL AND checksum = ? AND drama_id IS NULL ORDER BY id DESC LIMIT 1`)
+      : db.prepare(`SELECT * FROM assets WHERE deleted_at IS NULL AND archived_at IS NULL AND checksum = ? AND drama_id IS NULL ORDER BY id DESC LIMIT 1`)
         .get(checksum);
   return row ? rowToItem(row) : null;
 }
@@ -150,12 +153,13 @@ function findByChecksum(db, checksum, dramaId = null, ownerUserId = null) {
 function create(db, log, req) {
   const now = new Date().toISOString();
   const info = db.prepare(
-    `INSERT INTO assets (drama_id, owner_user_id, name, type, category, url, local_path, file_size, mime_type, width, height, duration, image_gen_id, video_gen_id, source_type, parent_asset_id, thumbnail_local_path, metadata_json, tags_json, checksum, processing_status, error_msg, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO assets (drama_id, owner_user_id, name, reference_alias, type, category, url, local_path, file_size, mime_type, width, height, duration, image_gen_id, video_gen_id, source_type, parent_asset_id, thumbnail_local_path, metadata_json, tags_json, checksum, processing_status, error_msg, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     req.drama_id ?? null,
     req.owner_user_id ?? null,
     req.name || '未命名',
+    req.reference_alias || null,
     req.type || 'image',
     req.category ?? null,
     req.url || '',
@@ -173,6 +177,11 @@ function create(db, log, req) {
     now,
     now
   );
+  // 文件名可重名，不能直接作为 @ 引用。用生成后的素材 ID 创建稳定别名；
+  // 原文件名仍保存在 name 中，供素材库浏览、搜索和下载使用。
+  if (!req.reference_alias) {
+    db.prepare('UPDATE assets SET reference_alias = ? WHERE id = ?').run(referenceAliasFor(req.type || 'image', info.lastInsertRowid), info.lastInsertRowid);
+  }
   return getById(db, info.lastInsertRowid);
 }
 
@@ -205,7 +214,6 @@ function update(db, log, id, req, ownerUserId = null) {
 }
 
 function deleteById(db, log, id, ownerUserId = null) {
-  assertNotReferencedByEditableShot(db, id, ownerUserId);
   const now = new Date().toISOString();
   const sql = ownerUserId == null
     ? 'UPDATE assets SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL'
@@ -213,35 +221,108 @@ function deleteById(db, log, id, ownerUserId = null) {
       AND (owner_user_id = ? OR drama_id IN (
         SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL
       ))`;
+  const remove = db.transaction(() => {
+    detachEditableShotReferences(db, [id], ownerUserId, now);
+    const result = ownerUserId == null
+      ? db.prepare(sql).run(now, Number(id))
+      : db.prepare(sql).run(now, Number(id), Number(ownerUserId), Number(ownerUserId));
+    return result.changes > 0;
+  });
+  return remove();
+}
+
+function referenceAliasFor(type, id) {
+  const prefix = type === 'video' ? '视频' : type === 'audio' ? '音频' : '图片';
+  return `${prefix}${Number(id)}`;
+}
+
+// Archiving removes an asset from future library selection without mutating
+// any editable shot. Existing shots keep their asset_id and local media path.
+function archiveById(db, log, id, ownerUserId = null) {
+  const now = new Date().toISOString();
+  const sql = ownerUserId == null
+    ? 'UPDATE assets SET archived_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL AND archived_at IS NULL'
+    : `UPDATE assets SET archived_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL AND archived_at IS NULL
+      AND (owner_user_id = ? OR drama_id IN (SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL))`;
   const result = ownerUserId == null
-    ? db.prepare(sql).run(now, Number(id))
-    : db.prepare(sql).run(now, Number(id), Number(ownerUserId), Number(ownerUserId));
+    ? db.prepare(sql).run(now, now, Number(id))
+    : db.prepare(sql).run(now, now, Number(id), Number(ownerUserId), Number(ownerUserId));
   return result.changes > 0;
 }
 
-// Generation history deliberately keeps snapshots, but an asset selected in
-// an editable shot is a live dependency.  Allowing its deletion made the next
-// storyboard save silently drop that selection.
-function assertNotReferencedByEditableShot(db, assetId, ownerUserId = null) {
-  const target = Number(assetId);
-  if (!Number.isInteger(target) || target <= 0) return;
-  const refs = [];
-  const contains = (raw) => { try { return JSON.parse(raw || '[]').map(Number).includes(target); } catch (_) { return false; } };
+function parseJson(value, fallback) {
+  try { const parsed = JSON.parse(value || ''); return parsed == null ? fallback : parsed; } catch (_) { return fallback; }
+}
+
+function assetIdFromReference(value) {
+  if (value && typeof value === 'object') return Number(value.asset_id ?? value.id);
+  return Number(value);
+}
+
+function rebaseStoryboardPromptReferences(prompt, originalIds, targets) {
+  if (typeof prompt !== 'string' || !originalIds.length) return prompt;
+  return prompt.replace(/@图片(\d+)/g, (token, rawIndex) => {
+    const index = Number(rawIndex) - 1;
+    if (index < 0 || index >= originalIds.length) return token;
+    if (targets.has(originalIds[index])) return '';
+    const removedBefore = originalIds.slice(0, index).filter((id) => targets.has(id)).length;
+    return `@图片${index + 1 - removedBefore}`;
+  });
+}
+
+// Deleting a library item must not force a user to visit every storyboard.
+// Editable shots are live UI state, so remove the selection and its prompt
+// token transactionally; submitted jobs keep their own immutable snapshots.
+function detachEditableShotReferences(db, assetIds, ownerUserId = null, at = new Date().toISOString()) {
+  const targets = new Set((Array.isArray(assetIds) ? assetIds : [assetIds]).map(Number).filter((id) => Number.isInteger(id) && id > 0));
+  if (!targets.size) return { storyboards: 0, freeShots: 0 };
+  let storyboards = 0;
+  let freeShots = 0;
   try {
     const owned = ownerUserId == null ? '' : ' AND e.drama_id IN (SELECT id FROM dramas WHERE owner_user_id=? AND deleted_at IS NULL)';
     const args = ownerUserId == null ? [] : [Number(ownerUserId)];
-    for (const row of db.prepare(`SELECT s.id, s.storyboard_number, s.omni_asset_ids, s.omni_first_frame_asset_id, s.omni_last_frame_asset_id FROM storyboards s JOIN episodes e ON e.id=s.episode_id WHERE s.deleted_at IS NULL${owned}`).all(...args)) {
-      if (contains(row.omni_asset_ids) || Number(row.omni_first_frame_asset_id) === target || Number(row.omni_last_frame_asset_id) === target) refs.push(`分镜 #${row.storyboard_number || row.id}`);
+    const rows = db.prepare(`SELECT s.id, s.omni_asset_ids, s.omni_first_frame_asset_id, s.omni_last_frame_asset_id, s.omni_asset_usage_json, s.universal_segment_text, s.omni_prompt_document_json FROM storyboards s JOIN episodes e ON e.id=s.episode_id WHERE s.deleted_at IS NULL${owned}`).all(...args);
+    for (const row of rows) {
+      const original = parseJson(row.omni_asset_ids, []);
+      const originalIds = Array.isArray(original) ? original.map(assetIdFromReference).filter(Number.isInteger) : [];
+      const remaining = Array.isArray(original) ? original.filter((value) => !targets.has(assetIdFromReference(value))) : original;
+      const usage = parseJson(row.omni_asset_usage_json, {});
+      const nextUsage = usage && typeof usage === 'object' && !Array.isArray(usage) ? { ...usage } : usage;
+      if (nextUsage && typeof nextUsage === 'object' && !Array.isArray(nextUsage)) for (const id of targets) delete nextUsage[id];
+      const first = targets.has(Number(row.omni_first_frame_asset_id)) ? null : row.omni_first_frame_asset_id;
+      const last = targets.has(Number(row.omni_last_frame_asset_id)) ? null : row.omni_last_frame_asset_id;
+      const document = parseJson(row.omni_prompt_document_json, null);
+      const removedAliases = Array.isArray(document?.refs) ? document.refs.filter((ref) => targets.has(Number(ref.asset_id))).map((ref) => String(ref.alias || '')).filter(Boolean) : [];
+      const nextDocument = document && typeof document === 'object' ? { ...document, refs: Array.isArray(document.refs) ? document.refs.filter((ref) => !targets.has(Number(ref.asset_id))) : [] } : document;
+      let prompt = document ? (row.universal_segment_text || '') : rebaseStoryboardPromptReferences(row.universal_segment_text, originalIds, targets);
+      for (const alias of removedAliases) prompt = prompt.replace(new RegExp(`@${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), '');
+      const changed = JSON.stringify(original) !== JSON.stringify(remaining) || first !== row.omni_first_frame_asset_id || last !== row.omni_last_frame_asset_id || JSON.stringify(usage) !== JSON.stringify(nextUsage) || prompt !== row.universal_segment_text || JSON.stringify(document) !== JSON.stringify(nextDocument);
+      if (!changed) continue;
+      db.prepare('UPDATE storyboards SET omni_asset_ids=?, omni_first_frame_asset_id=?, omni_last_frame_asset_id=?, omni_asset_usage_json=?, universal_segment_text=?, omni_prompt_document_json=?, updated_at=? WHERE id=?')
+        .run(JSON.stringify(remaining), first, last, JSON.stringify(nextUsage || {}), prompt || '', nextDocument ? JSON.stringify(nextDocument) : null, at, row.id);
+      storyboards += 1;
     }
-  } catch (_) {}
+  } catch (_) { /* Older schemas without Omni columns remain deletable. */ }
   try {
     const owned = ownerUserId == null ? '' : ' AND q.owner_user_id=?';
     const args = ownerUserId == null ? [] : [Number(ownerUserId)];
-    for (const row of db.prepare(`SELECT s.id, s.title, s.assets_json FROM omni_video_sequence_shots s JOIN omni_video_sequences q ON q.id=s.sequence_id WHERE s.deleted_at IS NULL AND q.deleted_at IS NULL${owned}`).all(...args)) {
-      if (contains(row.assets_json)) refs.push(`自由创作镜头「${row.title || row.id}」`);
+    const rows = db.prepare(`SELECT s.id, s.assets_json, s.prompt, s.prompt_document_json FROM omni_video_sequence_shots s JOIN omni_video_sequences q ON q.id=s.sequence_id WHERE s.deleted_at IS NULL AND q.deleted_at IS NULL${owned}`).all(...args);
+    for (const row of rows) {
+      const assets = parseJson(row.assets_json, []);
+      const nextAssets = Array.isArray(assets) ? assets.filter((value) => !targets.has(assetIdFromReference(value))) : assets;
+      const doc = parseJson(row.prompt_document_json, null);
+      const removedAliases = Array.isArray(doc?.refs) ? doc.refs.filter((ref) => targets.has(Number(ref.asset_id))).map((ref) => String(ref.alias || '')).filter(Boolean) : [];
+      const nextDoc = doc && typeof doc === 'object' ? { ...doc, refs: Array.isArray(doc.refs) ? doc.refs.filter((ref) => !targets.has(Number(ref.asset_id))) : [] } : doc;
+      let prompt = row.prompt || '';
+      for (const alias of removedAliases) prompt = prompt.replace(new RegExp(`@${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), '');
+      const changed = JSON.stringify(assets) !== JSON.stringify(nextAssets) || JSON.stringify(doc) !== JSON.stringify(nextDoc) || prompt !== row.prompt;
+      if (!changed) continue;
+      db.prepare('UPDATE omni_video_sequence_shots SET assets_json=?, prompt=?, prompt_document_json=?, updated_at=? WHERE id=?')
+        .run(JSON.stringify(nextAssets), prompt, nextDoc == null ? null : JSON.stringify(nextDoc), at, row.id);
+      freeShots += 1;
     }
-  } catch (_) {}
-  if (refs.length) throw new Error(`素材正在被${refs.slice(0, 3).join('、')}引用；请先在镜头中替换或移除引用后再删除`);
+  } catch (_) { /* Free-create tables are optional in older installations. */ }
+  return { storyboards, freeShots };
 }
 
 // Logical deletion is intentional: an asset can be referenced by existing
@@ -275,9 +356,9 @@ function deleteMany(db, log, { ids, owner_user_id, scope, drama_id, type, keywor
   let candidates;
   try { candidates = db.prepare(`SELECT id, source_type FROM assets WHERE ${where}`).all(...params); }
   catch (_) { candidates = db.prepare(`SELECT id FROM assets WHERE ${where}`).all(...params); }
-  candidates.forEach((row) => assertNotReferencedByEditableShot(db, row.id, ownerId));
   const at = new Date().toISOString();
   const remove = db.transaction(() => {
+    detachEditableShotReferences(db, candidates.map((row) => row.id), ownerId, at);
     let count = 0;
     for (const row of candidates) {
       if (row.source_type === 'project_resource') {
@@ -290,6 +371,25 @@ function deleteMany(db, log, { ids, owner_user_id, scope, drama_id, type, keywor
   });
   const count = remove();
   log.info('Assets soft deleted in bulk', { owner_user_id: ownerId, scope, drama_id: drama_id || null, count, all_matching: normalizedIds.length === 0 });
+  return count;
+}
+
+function archiveMany(db, log, options = {}) {
+  const ownerId = Number(options.owner_user_id);
+  if (!Number.isInteger(ownerId) || ownerId <= 0) throw new Error('缺少素材所有者');
+  const normalizedIds = [...new Set((Array.isArray(options.ids) ? options.ids : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+  let where = `deleted_at IS NULL AND archived_at IS NULL AND (owner_user_id = ? OR drama_id IN (SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL))`;
+  const params = [ownerId, ownerId];
+  if (options.scope === 'global') where += ' AND drama_id IS NULL';
+  else if (options.scope === 'project') { where += ' AND drama_id = ?'; params.push(Number(options.drama_id)); }
+  else if (options.scope && options.scope !== 'all') throw new Error('批量归档范围无效');
+  if (normalizedIds.length) { where += ` AND id IN (${normalizedIds.map(() => '?').join(', ')})`; params.push(...normalizedIds); }
+  if (options.type) { where += ' AND type = ?'; params.push(String(options.type)); }
+  if (options.keyword) { const value = `%${String(options.keyword).trim()}%`; where += ' AND (name LIKE ? OR tags_json LIKE ?)'; params.push(value, value); }
+  if (String(options.favorite || '') === '1' || String(options.favorite || '').toLowerCase() === 'true') where += ' AND is_favorite = 1';
+  const now = new Date().toISOString();
+  const count = db.prepare(`UPDATE assets SET archived_at=?, updated_at=? WHERE id IN (SELECT id FROM assets WHERE ${where})`).run(now, now, ...params).changes;
+  log.info('Assets archived in bulk', { owner_user_id: ownerId, scope: options.scope, drama_id: options.drama_id || null, count });
   return count;
 }
 
@@ -334,9 +434,11 @@ module.exports = {
   findByChecksum,
   create,
   update,
+  archiveById,
   deleteById,
+  archiveMany,
   deleteMany,
-  assertNotReferencedByEditableShot,
+  detachEditableShotReferences,
   importFromImage,
   importFromVideo,
 };

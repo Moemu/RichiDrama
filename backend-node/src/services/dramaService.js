@@ -24,6 +24,11 @@ function parseJsonColumn(value) {
   }
 }
 
+function safeParseJsonObject(value) {
+  const parsed = parseJsonColumn(value);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+}
+
 function createDrama(db, log, req) {
   const now = new Date().toISOString();
   let meta = {};
@@ -396,6 +401,7 @@ function rowToStoryboard(r) {
       segment_title: r.segment_title ?? null,
       creation_mode: r.creation_mode === 'universal' ? 'universal' : 'classic',
       universal_segment_text: r.universal_segment_text ?? null,
+      omni_prompt_document: safeParseJsonObject(r.omni_prompt_document_json),
       first_frame_image_id: r.first_frame_image_id ?? null,
       last_frame_image_id: r.last_frame_image_id ?? null,
       last_frame_image_url: sanitizeImageUrl(r.last_frame_image_url),

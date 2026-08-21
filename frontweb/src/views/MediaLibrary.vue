@@ -11,8 +11,8 @@
       </div>
       <div class="header-actions">
         <AccountBalanceBadge />
-        <el-button type="danger" plain :disabled="!selectedIds.size" @click="batchDelete">批量删除{{ selectedIds.size ? `（${selectedIds.size}）` : '' }}</el-button>
-        <el-button type="danger" plain :disabled="!total" @click="clearLibrary">一键清空{{ projectDramaId ? '项目素材' : '素材库' }}</el-button>
+        <el-button type="warning" plain :disabled="!selectedIds.size" @click="batchDelete">批量归档{{ selectedIds.size ? `（${selectedIds.size}）` : '' }}</el-button>
+        <el-button type="danger" plain :disabled="!total" @click="clearLibrary">一键归档{{ projectDramaId ? '项目素材' : '素材库' }}</el-button>
         <el-button type="primary" plain @click="triggerUpload">
           <el-icon><Upload /></el-icon>
           上传素材
@@ -83,7 +83,7 @@
                 size="small"
                 type="danger"
                 plain
-                aria-label="删除素材"
+                aria-label="归档素材"
                 @click.stop="deleteItem(item)"
               >
                 <el-icon><Delete /></el-icon>
@@ -158,6 +158,7 @@
           </template>
         </section>
       </div>
+      <template #footer><el-button v-if="previewItem" type="danger" plain @click="forceDetachItem(previewItem)">从全部可编辑镜头解除并归档</el-button><el-button @click="showPreview = false">关闭</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -404,13 +405,25 @@ async function toggleFavorite(item) {
 }
 
 async function deleteItem(item) {
-  await ElMessageBox.confirm('确定删除该素材？', '删除确认', { type: 'warning' })
+  await ElMessageBox.confirm('确定归档该素材？它将不再供新镜头选择；已有镜头和生成记录保持不变。', '归档确认', { type: 'warning' })
   try {
     await request.delete(`/assets/${item.id}`)
-    ElMessage.success('已删除')
+    ElMessage.success('已归档；已有镜头引用保持不变')
     loadMedia()
   } catch (err) {
     ElMessage.error(err.message || '删除失败')
+  }
+}
+
+async function forceDetachItem(item) {
+  try {
+    await ElMessageBox.confirm(`确定从全部可编辑分镜和自由创作镜头中解除“${item.name || `素材 ${item.id}`}”的引用并归档？此操作会移除对应 @ 引用。`, '危险操作', { type: 'error', confirmButtonText: '解除全部引用并归档', cancelButtonText: '取消' })
+    const result = await omniVideoAPI.forceDetachAsset(item.id)
+    ElMessage.success(result?.message || '已解除全部可编辑镜头引用并归档')
+    showPreview.value = false
+    await loadMedia()
+  } catch (err) {
+    if (err !== 'cancel' && err !== 'close') ElMessage.error(err.message || '解除引用失败')
   }
 }
 
@@ -444,11 +457,11 @@ async function setIdentity(item, value) {
 async function batchDelete() {
   const count = selectedIds.size
   const scopeLabel = projectDramaId.value ? '当前项目' : '全局素材库'
-  await ElMessageBox.confirm(`确定删除选中的 ${count} 个素材？将只影响${scopeLabel}，历史作品与生成记录保持可追溯。`, '批量删除', { type: 'warning', confirmButtonText: '删除选中素材', cancelButtonText: '取消' })
+  await ElMessageBox.confirm(`确定归档选中的 ${count} 个素材？它们将不再供新镜头选择；已有镜头及生成记录保持不变。范围：${scopeLabel}。`, '批量归档', { type: 'warning', confirmButtonText: '归档选中素材', cancelButtonText: '取消' })
   try {
     const result = await request.post('/assets/batch-delete', { ids: [...selectedIds], scope: assetScope.value, ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}) })
     selectedIds.clear()
-    ElMessage.success(result?.message || `${count} 个素材已删除`)
+    ElMessage.success(result?.message || `${count} 个素材已归档`)
     loadMedia()
   } catch (error) { ElMessage.error(error.message || '批量删除失败') }
 }
@@ -475,18 +488,18 @@ async function clearLibrary() {
     const isProjectLibrary = Boolean(projectDramaId.value)
     await ElMessageBox.confirm(
       isProjectLibrary
-        ? '将只清空当前项目素材。全局素材及其他项目素材不会受到影响；该操作只从素材库隐藏记录，不会立即物理删除本地或 OSS 文件，以保证已有作品可追溯。'
-        : '将只清空“我的全局素材”。项目素材不会受到影响；该操作只从素材库隐藏记录，不会立即物理删除本地或 OSS 文件，以保证已有作品可追溯。',
-      isProjectLibrary ? '一键清空项目素材' : '一键清空素材库',
-      { type: 'warning', confirmButtonText: '确认清空', cancelButtonText: '取消' }
+        ? '将归档当前筛选范围内的项目素材。全局素材及其他项目素材不会受到影响；新镜头不可再选，已有镜头和历史记录保持不变。'
+        : '将归档当前筛选范围内的“我的全局素材”。项目素材不会受到影响；新镜头不可再选，已有镜头和历史记录保持不变。',
+      isProjectLibrary ? '一键归档项目素材' : '一键归档素材库',
+      { type: 'warning', confirmButtonText: '确认归档', cancelButtonText: '取消' }
     )
     const result = await request.post('/assets/batch-delete', { all_matching: true, scope: assetScope.value, ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}), type: mediaType.value === 'all' ? undefined : mediaType.value, keyword: keyword.value || undefined, favorite: favoriteOnly.value ? 1 : undefined })
     selectedIds.clear()
     showPreview.value = false
-    ElMessage.success(result?.message || (isProjectLibrary ? '项目素材已清空' : '素材库已清空'))
+    ElMessage.success(result?.message || (isProjectLibrary ? '项目素材已归档' : '素材库已归档'))
     await resetAndLoad()
   } catch (error) {
-    if (error !== 'cancel' && error?.message !== 'cancel') ElMessage.error(error.message || '清空素材库失败')
+    if (error !== 'cancel' && error?.message !== 'cancel') ElMessage.error(error.message || '归档素材库失败')
   }
 }
 

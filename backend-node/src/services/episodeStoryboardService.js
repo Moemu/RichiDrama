@@ -269,6 +269,7 @@ function getStoryboardsForEpisode(db, episodeId) {
       segment_title: r.segment_title ?? null,
       creation_mode: r.creation_mode === 'universal' ? 'universal' : 'classic',
       universal_segment_text: r.universal_segment_text ?? null,
+      omni_prompt_document: safeParseJsonObject(r.omni_prompt_document_json),
       // 项目分镜工作台依赖这些字段恢复已选择的 @ 素材。此前列表接口遗漏它们，
       // 导致素材虽已保存到数据库，但重新加载分镜时会表现为“引用丢失”。
       omni_asset_ids: safeParseJsonArray(r.omni_asset_ids),

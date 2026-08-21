@@ -39,7 +39,8 @@ assert.match(freeCreate, /\.shot-panel\{overflow:hidden\}\.shot-list\{flex:1 1 a
 
 test('long prompt text keeps an independently scrollable textarea', () => {
   const promptEditor = readFileSync(new URL('../src/components/OmniAssetPromptEditor.vue', import.meta.url), 'utf8')
-  assert.match(freeCreate, /const textarea = event\.target\.closest\('textarea\.el-textarea__inner'\)/)
+  assert.match(freeCreate, /const promptEditor = event\.target\.closest\('textarea\.el-textarea__inner, \.prompt-rich-editor'\)/)
+  assert.match(freeCreate, /promptEditor\.scrollHeight <= promptEditor\.clientHeight/)
   assert.match(freeCreate, /event\.target\.closest\('\.shot-list, \.creation-panel, \.shot-script,/)
   assert.match(promptEditor, /overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable/)
 })
@@ -73,6 +74,11 @@ test('asset drag shows an exact text-boundary caret and rejects whitespace-only 
   assert.match(filmCreate, /setTransparentDragPreview\(e\)/)
   assert.match(promptEditor, /caretRect = visualRectForCollapsedRange\(range\)/)
   assert.match(promptEditor, /function visualRectForCollapsedRange\(range\)/)
+  assert.match(promptEditor, /function offsetForRange\(range\)/)
+  assert.match(promptEditor, /document\.caretPositionFromPoint/)
+  assert.match(promptEditor, /不要改写原生 Selection/)
+  assert.match(promptEditor, /const rect = editorRef\.value\?\.getBoundingClientRect\(\)/)
+  assert.match(promptEditor, /释放位置才是最终意图/)
   assert.match(promptEditor, /node\.nodeType === Node\.TEXT_NODE/)
   assert.match(promptEditor, /prevRect\.right/)
   assert.match(promptEditor, /source\.slice\(lineStart, lineEnd\)\.trim\(\)/)
@@ -83,6 +89,14 @@ test('asset drag shows an exact text-boundary caret and rejects whitespace-only 
   assert.match(universalEditor, /omni-drop-indicator/)
   assert.doesNotMatch(promptEditor, /class="mention-anchor"/)
   assert.doesNotMatch(promptEditor, /el-tag v-for="asset in referenced"/)
+})
+
+test('在长提示词中插入素材只重绘一次并保持编辑器滚动位置', () => {
+  assert.match(promptEditor, /const scrollPosition = \{ top: editorRef\.value\?\.scrollTop \|\| 0/)
+  assert.match(promptEditor, /nextTick\(\(\) => restoreEditorAfterInsert\(caret, scrollPosition\)\)/)
+  assert.match(promptEditor, /function focusEditorAtOffset\(offset, scrollPosition\)/)
+  assert.match(promptEditor, /el\.focus\(\{ preventScroll: true \}\)/)
+  assert.match(promptEditor, /el\.scrollTop = scrollPosition\?\.top \|\| 0/)
 })
 
 test('billing adjustment explanation is explicitly optional', () => {

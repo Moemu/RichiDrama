@@ -16,17 +16,31 @@ function createDb() {
       drama_id INTEGER,
       owner_user_id INTEGER,
       name TEXT,
+      reference_alias TEXT,
       type TEXT,
+      category TEXT,
       url TEXT,
       local_path TEXT,
+      file_size INTEGER,
+      mime_type TEXT,
+      width INTEGER,
+      height INTEGER,
+      duration REAL,
+      image_gen_id INTEGER,
+      video_gen_id INTEGER,
+      source_type TEXT,
+      thumbnail_local_path TEXT,
       metadata_json TEXT,
       tags_json TEXT,
       checksum TEXT,
+      processing_status TEXT,
+      error_msg TEXT,
       seedance2_asset TEXT,
       parent_asset_id INTEGER,
       requires_sd2_identity INTEGER NOT NULL DEFAULT 0,
       created_at TEXT,
       updated_at TEXT,
+      archived_at TEXT,
       deleted_at TEXT
     );
     CREATE TABLE dramas (id INTEGER PRIMARY KEY, owner_user_id INTEGER, deleted_at TEXT);
@@ -128,6 +142,61 @@ test('project owner retains CRUD access when a legacy asset has a stale direct o
   assert.equal(assetService.getByIdForOwner(db, 1, 7).id, 1);
   assert.equal(assetService.update(db, log, 1, { name: 'recovered-project-asset' }, 7).name, 'recovered-project-asset');
   assert.equal(assetService.deleteById(db, log, 1, 7), true);
+});
+
+test('new assets receive a stable type-prefixed reference alias while retaining the original file name', () => {
+  const db = createDb();
+  const item = assetService.create(db, log, { name: '老师.png', type: 'image', owner_user_id: 1 });
+
+  assert.equal(item.name, '老师.png');
+  assert.equal(item.reference_alias, `图片${item.id}`);
+  assert.equal(db.prepare('SELECT reference_alias FROM assets WHERE id = ?').get(item.id).reference_alias, `图片${item.id}`);
+});
+
+test('deleting an asset automatically removes editable storyboard and free-create references', () => {
+  const db = createDb();
+  db.exec(`
+    CREATE TABLE episodes (id INTEGER PRIMARY KEY, drama_id INTEGER, deleted_at TEXT);
+    CREATE TABLE storyboards (id INTEGER PRIMARY KEY, episode_id INTEGER, omni_asset_ids TEXT, omni_first_frame_asset_id INTEGER, omni_last_frame_asset_id INTEGER, omni_asset_usage_json TEXT, universal_segment_text TEXT, omni_prompt_document_json TEXT, updated_at TEXT, deleted_at TEXT);
+    CREATE TABLE omni_video_sequences (id INTEGER PRIMARY KEY, owner_user_id INTEGER, deleted_at TEXT);
+    CREATE TABLE omni_video_sequence_shots (id INTEGER PRIMARY KEY, sequence_id INTEGER, assets_json TEXT, prompt TEXT, prompt_document_json TEXT, updated_at TEXT, deleted_at TEXT);
+  `);
+  db.prepare('INSERT INTO dramas (id, owner_user_id) VALUES (?, ?)').run(9, 7);
+  db.prepare('UPDATE assets SET owner_user_id=?, drama_id=? WHERE id=1').run(7, 9);
+  db.prepare('INSERT INTO assets (id, owner_user_id, drama_id, name, type, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(2, 7, 9, 'keep.png', 'image', '2026-08-21T00:00:00.000Z');
+  db.prepare('INSERT INTO episodes (id, drama_id) VALUES (?, ?)').run(1, 9);
+  db.prepare('INSERT INTO storyboards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(1, 1, '[1,2]', 1, 2, '{"1":"reference","2":"reference"}', '开头 @图片1 中间 @图片2', null, '2026-08-21T00:00:00.000Z', null);
+  db.prepare('INSERT INTO omni_video_sequences VALUES (?, ?, ?)').run(1, 7, null);
+  db.prepare('INSERT INTO omni_video_sequence_shots VALUES (?, ?, ?, ?, ?, ?, ?)').run(1, 1, '[{"asset_id":1},{"asset_id":2}]', '前 @被删素材 后 @保留素材', '{"refs":[{"asset_id":1,"alias":"被删素材"},{"asset_id":2,"alias":"保留素材"}]}', '2026-08-21T00:00:00.000Z', null);
+
+  assert.equal(assetService.deleteById(db, log, 1, 7), true);
+  const storyboard = db.prepare('SELECT * FROM storyboards WHERE id=1').get();
+  assert.equal(storyboard.omni_asset_ids, '[2]');
+  assert.equal(storyboard.omni_first_frame_asset_id, null);
+  assert.equal(storyboard.omni_last_frame_asset_id, 2);
+  assert.equal(storyboard.omni_asset_usage_json, '{"2":"reference"}');
+  assert.equal(storyboard.universal_segment_text, '开头  中间 @图片1');
+  const shot = db.prepare('SELECT * FROM omni_video_sequence_shots WHERE id=1').get();
+  assert.equal(shot.assets_json, '[{"asset_id":2}]');
+  assert.equal(shot.prompt, '前  后 @保留素材');
+  assert.deepEqual(JSON.parse(shot.prompt_document_json).refs, [{ asset_id: 2, alias: '保留素材' }]);
+  assert.ok(db.prepare('SELECT deleted_at FROM assets WHERE id=1').get().deleted_at);
+});
+
+test('archiving a project asset hides it from new library selection without changing editable shot references', () => {
+  const db = createDb();
+  db.exec(`CREATE TABLE episodes (id INTEGER PRIMARY KEY, drama_id INTEGER, deleted_at TEXT);
+    CREATE TABLE storyboards (id INTEGER PRIMARY KEY, episode_id INTEGER, omni_asset_ids TEXT, universal_segment_text TEXT, updated_at TEXT, deleted_at TEXT);`);
+  db.prepare('INSERT INTO dramas (id, owner_user_id) VALUES (?, ?)').run(9, 7);
+  db.prepare('UPDATE assets SET owner_user_id=?, drama_id=? WHERE id=1').run(7, 9);
+  db.prepare('INSERT INTO episodes (id, drama_id) VALUES (?, ?)').run(1, 9);
+  db.prepare('INSERT INTO storyboards VALUES (?, ?, ?, ?, ?, ?)').run(1, 1, '[1]', '使用 @图片1', '2026-08-21T00:00:00.000Z', null);
+
+  assert.equal(assetService.archiveById(db, log, 1, 7), true);
+  assert.equal(assetService.list(db, { owner_user_id: 7, scope: 'project', drama_id: 9 }).total, 0);
+  assert.equal(assetService.list(db, { owner_user_id: 7, scope: 'project', drama_id: 9, include_archived: 1 }).items[0].archived_at != null, true);
+  assert.equal(db.prepare('SELECT omni_asset_ids, universal_segment_text FROM storyboards WHERE id=1').get().omni_asset_ids, '[1]');
+  assert.equal(db.prepare('SELECT universal_segment_text FROM storyboards WHERE id=1').get().universal_segment_text, '使用 @图片1');
 });
 
 test('bulk asset deletion is scoped to the current user and includes their project assets', () => {

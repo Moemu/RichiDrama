@@ -54,6 +54,8 @@ const props = defineProps({
   assets: { type: Array, default: () => [] },
   /** 已选素材 id 集合，用于在 @ 选择器里标记"已选" */
   chosenIds: { type: Set, default: () => new Set() },
+  /** 结构化引用：素材 ID + 文本位置。重名素材不再仅靠文件名猜测。 */
+  referenceDocument: { type: Object, default: () => ({ refs: [] }) },
 })
 const emit = defineEmits(['update:modelValue', 'pick', 'references'])
 const editorRef = ref(null)
@@ -68,9 +70,11 @@ let lastCaretOffset = 0
 let layoutCache = null
 let dragRaf = 0
 let latestDragPoint = null
+let emittedReferenceSignature = ''
 
 watch(() => props.modelValue, (value) => { if (value !== text.value) { text.value = value; nextTick(() => renderEditor(value)) }; syncReferences(value || '') })
 watch(() => props.assets, () => { syncReferences(text.value); nextTick(() => renderEditor(text.value)) }, { deep: false })
+watch(() => props.referenceDocument, () => { syncReferences(text.value); nextTick(() => renderEditor(text.value)) }, { deep: true })
 onMounted(() => {
   syncReferences(text.value)
   nextTick(() => renderEditor(text.value))
@@ -88,17 +92,8 @@ const pickerMatches = computed(() =>
 )
 const pickerAssets = computed(() => pickerMatches.value.slice(0, 30))
 const pickerMatchCount = computed(() => pickerMatches.value.length)
-const referenced = computed(() => {
-  const tokens = referencesFromText(text.value)
-  return tokens.flatMap((alias) => {
-    const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.name) === alias)
-    return matches.length === 1 ? matches : []
-  })
-})
-const unresolved = computed(() => referencesFromText(text.value).flatMap((alias) => {
-  const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.name) === alias)
-  return matches.length > 1 ? [{ alias, candidates: matches.map((asset) => asset.id) }] : []
-}))
+const resolvedReferences = ref([])
+const unresolved = ref([])
 
 function onInput() {
   clearLayoutCache()
@@ -148,13 +143,25 @@ function referencesFromText(value) {
   return [...new Set([...String(value || '').matchAll(/@([^\s@]+)/g)].map((match) => match[1]))]
 }
 function syncReferences(value) {
-  const refs = []; const unresolvedRefs = []
-  referencesFromText(value).forEach((alias) => {
-    const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.name) === alias)
-    if (matches.length === 1) refs.push({ asset_id: matches[0].id, alias })
-    if (matches.length > 1) unresolvedRefs.push({ alias, candidate_asset_ids: matches.map((asset) => asset.id) })
-  })
-  emit('references', { text: value || '', refs, unresolved: unresolvedRefs })
+  const refs = []; const unresolvedRefs = []; const occurrences = new Map()
+  const persisted = Array.isArray(props.referenceDocument?.refs) ? props.referenceDocument.refs : []
+  for (const match of String(value || '').matchAll(/@([^\s@]+)/g)) {
+    const alias = match[1]; const occurrence = occurrences.get(alias) || 0
+    occurrences.set(alias, occurrence + 1)
+    const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.reference_alias || asset.name) === alias)
+    const previous = persisted.find((entry) => String(entry?.alias || '') === alias && Number(entry?.occurrence || 0) === occurrence && matches.some((asset) => Number(asset.id) === Number(entry.asset_id)))
+    const asset = previous ? matches.find((item) => Number(item.id) === Number(previous.asset_id)) : (matches.length === 1 ? matches[0] : null)
+    if (asset) refs.push({ asset_id: asset.id, alias, occurrence, start: match.index, end: match.index + match[0].length })
+    else if (matches.length > 1) unresolvedRefs.push({ alias, occurrence, candidate_asset_ids: matches.map((asset) => asset.id) })
+  }
+  resolvedReferences.value = refs
+  unresolved.value = unresolvedRefs
+  const documentValue = { text: value || '', refs, unresolved: unresolvedRefs }
+  const signature = JSON.stringify(documentValue)
+  if (signature !== emittedReferenceSignature) {
+    emittedReferenceSignature = signature
+    emit('references', documentValue)
+  }
 }
 
 /** 插入素材 @引用；若未选中则通知父组件加入创作 */
@@ -164,24 +171,31 @@ function insertAsset(asset, opts = {}) {
   const token = `@${asset.alias || asset.name}`
   const explicitOffset = Number.isFinite(Number(opts.offset)) ? Number(opts.offset) : null
   const mention = explicitOffset == null ? activeMentionRange() : null
+  const scrollPosition = { top: editorRef.value?.scrollTop || 0, left: editorRef.value?.scrollLeft || 0 }
+  let caret = null
   if (explicitOffset != null) {
     const inserted = insertTokenAtOffset(text.value, token, explicitOffset)
     text.value = inserted.text
     lastCaretOffset = inserted.caret
-    nextTick(() => { renderEditor(text.value, true); focusEditorEnd() })
+    caret = inserted.caret
   } else if (mention) {
     // Replace exactly the @ token around the caret, including one in the
     // middle of a sentence, then leave the cursor immediately after it.
     const suffix = text.value.slice(mention.end)
     const separator = suffix && !/^\s/.test(suffix) ? ' ' : ''
     text.value = `${text.value.slice(0, mention.start)}${token}${separator}${suffix}`
-    nextTick(() => { renderEditor(text.value, true); focusEditorEnd() })
+    caret = mention.start + token.length + separator.length
+    lastCaretOffset = caret
   } else if (opts.append) {
     text.value = `${text.value}${text.value && !/\s$/.test(text.value) ? ' ' : ''}${token} `
+    caret = text.value.length
+    lastCaretOffset = caret
   } else return
   emit('update:modelValue', text.value)
   syncReferences(text.value)
-  nextTick(() => { renderEditor(text.value, true); focusEditorEnd() })
+  // 这里以前同时执行了多次 render + focusEditorEnd；任一次聚焦末尾都会
+  // 让长提示词的内部滚动条跳回顶部。插入后只重绘一次，并恢复原视口。
+  nextTick(() => restoreEditorAfterInsert(caret, scrollPosition))
   showPicker.value = false
 }
 
@@ -204,8 +218,10 @@ function thumbUrl(asset) {
   return '/static/' + String(t).replace(/^\/+/, '')
 }
 
-function matchingAsset(alias) {
-  const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.name) === alias)
+function matchingAsset(alias, occurrence = 0) {
+  const reference = resolvedReferences.value.find((entry) => entry.alias === alias && Number(entry.occurrence || 0) === occurrence)
+  if (reference) return (props.assets || []).find((asset) => Number(asset?.id) === Number(reference.asset_id)) || null
+  const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.reference_alias || asset.name) === alias)
   return matches.length === 1 ? matches[0] : null
 }
 function serializeNode(node) {
@@ -222,10 +238,10 @@ function renderEditor(value, force = false) {
   el.replaceChildren()
   const source = String(value || '')
   const matcher = /@([^\s@]+)/g
-  let last = 0; let found
+  let last = 0; let found; const occurrences = new Map()
   while ((found = matcher.exec(source))) {
     if (found.index > last) el.append(document.createTextNode(source.slice(last, found.index)))
-    const alias = found[1]; const asset = matchingAsset(alias)
+    const alias = found[1]; const occurrence = occurrences.get(alias) || 0; occurrences.set(alias, occurrence + 1); const asset = matchingAsset(alias, occurrence)
     if (!asset) el.append(document.createTextNode(found[0]))
     else {
       const chip = document.createElement('span')
@@ -373,25 +389,73 @@ function visualRectForCollapsedRange(range) {
   return null
 }
 
+function focusEditorAtOffset(offset, scrollPosition) {
+  const el = editorRef.value
+  if (!el) return
+  const target = Math.max(0, Number(offset) || 0)
+  const range = document.createRange()
+  let consumed = 0
+  let placed = false
+  for (let index = 0; index < el.childNodes.length; index += 1) {
+    const node = el.childNodes[index]
+    const length = serializeNode(node).length
+    if (target <= consumed + length) {
+      if (node.nodeType === Node.TEXT_NODE) range.setStart(node, Math.max(0, Math.min(node.nodeValue?.length || 0, target - consumed)))
+      else range.setStart(el, target === consumed ? index : index + 1)
+      placed = true
+      break
+    }
+    consumed += length
+  }
+  if (!placed) { range.selectNodeContents(el); range.collapse(false) }
+  range.collapse(true)
+  el.focus({ preventScroll: true })
+  const selection = window.getSelection()
+  selection?.removeAllRanges(); selection?.addRange(range)
+  // contenteditable 在 replaceChildren 后偶尔自行归零 scrollTop，显式回填
+  // 原位置可避免在提示词底部插入时预览面跳回顶部。
+  el.scrollTop = scrollPosition?.top || 0
+  el.scrollLeft = scrollPosition?.left || 0
+  lastCaretOffset = target
+}
+
+function restoreEditorAfterInsert(caret, scrollPosition) {
+  renderEditor(text.value, true)
+  focusEditorAtOffset(caret, scrollPosition)
+}
+
+function offsetForRange(range) {
+  const el = editorRef.value
+  if (!el || !range?.startContainer || !el.contains(range.startContainer)) return String(text.value || '').length
+  const before = range.cloneRange()
+  before.selectNodeContents(el)
+  before.setEnd(range.startContainer, range.startOffset)
+  const holder = document.createElement('div')
+  holder.append(before.cloneContents())
+  return [...holder.childNodes].map(serializeNode).join('').length
+}
+
 function textareaPointFromEvent(event) {
   if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return { offset: lastCaretOffset, x: 0, y: 0, height: 18, rejected: true }
-  const range = document.caretRangeFromPoint?.(event.clientX, event.clientY)
+  const position = document.caretPositionFromPoint?.(event.clientX, event.clientY)
+  const range = position ? (() => { const next = document.createRange(); next.setStart(position.offsetNode, position.offset); next.collapse(true); return next })() : document.caretRangeFromPoint?.(event.clientX, event.clientY)
   if (range && editorRef.value?.contains(range.startContainer)) {
-    const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range)
-    lastCaretOffset = caretOffset()
+    // 预览拖拽时不要改写原生 Selection。否则 contenteditable 会同时显示
+    // 浏览器光标和自定义光标，并且 Vue 重绘后可能把当前选区复位。
+    const offset = offsetForRange(range)
     const source = String(text.value || '')
-    const lineStart = source.lastIndexOf('\n', Math.max(0, lastCaretOffset - 1)) + 1
-    const nextBreak = source.indexOf('\n', lastCaretOffset)
+    const lineStart = source.lastIndexOf('\n', Math.max(0, offset - 1)) + 1
+    const nextBreak = source.indexOf('\n', offset)
     const lineEnd = nextBreak < 0 ? source.length : nextBreak
     // 空白行没有可辨识的文字前后。拒绝该落点而非把素材塞进空行，避免拖放
     // 看似成功却难以判断实际插入位置。
-    if (!source.slice(lineStart, lineEnd).trim()) return { offset: lastCaretOffset, x: 0, y: 0, height: 18, rejected: true }
+    if (!source.slice(lineStart, lineEnd).trim()) return { offset, x: 0, y: 0, height: 18, rejected: true }
     const rootRect = editorRoot.value?.getBoundingClientRect() || editorRef.value.getBoundingClientRect()
     const caretRect = visualRectForCollapsedRange(range)
     const lineHeight = Number.parseFloat(getComputedStyle(editorRef.value).lineHeight) || 20
-    if (!caretRect) return { offset: lastCaretOffset, x: 0, y: 0, height: lineHeight, rejected: true }
+    if (!caretRect) return { offset, x: 0, y: 0, height: lineHeight, rejected: true }
     return {
-      offset: lastCaretOffset,
+      offset,
       x: Math.max(0, Math.min(rootRect.width - 3, caretRect.left - rootRect.left)),
       y: Math.max(0, caretRect.top - rootRect.top),
       height: Math.max(16, caretRect.height || lineHeight),
@@ -421,7 +485,8 @@ function textareaPointFromEvent(event) {
 }
 
 function pointerInside(detail) {
-  const rect = editorRoot.value?.getBoundingClientRect()
+  // editorRoot 还包含拖放状态栏；只有可编辑文本区域才有可解释的字符边界。
+  const rect = editorRef.value?.getBoundingClientRect()
   return !!rect && detail.clientX >= rect.left && detail.clientX <= rect.right && detail.clientY >= rect.top && detail.clientY <= rect.bottom
 }
 
@@ -438,7 +503,8 @@ function onAssetPointerMove(event) {
 
 function onAssetPointerDrop(event) {
   const detail = event.detail || {}
-  const point = pointerInside(detail) ? (dropCaret.value.visible ? dropCaret.value : textareaPointFromEvent(detail)) : null
+  // 释放位置才是最终意图，不能复用上一帧 pointermove 的陈旧落点。
+  const point = pointerInside(detail) ? textareaPointFromEvent(detail) : null
   dragging.value = false
   dropCaret.value.visible = false
   clearLayoutCache()
@@ -453,7 +519,9 @@ function onAssetPointerCancel() {
 
 function onDrop(e) {
   dragging.value = false
-  const point = dropCaret.value.visible ? dropCaret.value : textareaPointFromEvent(e)
+  // 同样以原生 drop 事件的最终坐标为准，避免拖放最后一小段移动未触发
+  // dragover 时仍使用旧落点。
+  const point = textareaPointFromEvent(e)
   dropCaret.value.visible = false
   dragCounter = 0
   clearLayoutCache()
@@ -478,8 +546,8 @@ function onDrop(e) {
 .prompt-rich-editor:focus-visible { border-color:var(--studio-teal,var(--accent)); box-shadow:0 0 0 2px color-mix(in srgb,var(--studio-teal,var(--accent)) 32%,transparent); }
 /* 拖入时只显示自定义落点光标，避免与 contenteditable 的原生光标重叠。 */
 .editor.dragging .prompt-rich-editor { caret-color:transparent; }
-:deep(.prompt-asset-chip) { display:inline-flex; vertical-align:baseline; align-items:center; gap:3px; max-width:132px; margin:0 1px; padding:1px 4px 1px 2px; border:1px solid #54ead4; border-radius:4px; background:color-mix(in srgb,#54ead4 12%,var(--bg-raised)); color:var(--text-primary); line-height:1; user-select:all; }
-:deep(.prompt-asset-chip img),:deep(.prompt-asset-chip>span) { width:24px; height:24px; flex:none; border-radius:3px; object-fit:cover; background:var(--bg-hover); }
+:deep(.prompt-asset-chip) { display:inline-flex; vertical-align:baseline; align-items:center; gap:4px; max-width:156px; margin:0 1px; padding:2px 5px 2px 2px; border:1px solid #54ead4; border-radius:5px; background:color-mix(in srgb,#54ead4 12%,var(--bg-raised)); color:var(--text-primary); line-height:1; user-select:all; }
+:deep(.prompt-asset-chip img),:deep(.prompt-asset-chip>span) { width:30px; height:30px; flex:none; border-radius:4px; object-fit:cover; background:var(--bg-hover); }
 :deep(.prompt-asset-chip>span) { display:grid; place-items:center; font-size:10px; }
 :deep(.prompt-asset-chip b) { overflow:hidden; font-size:11px; font-weight:650; text-overflow:ellipsis; white-space:nowrap; }
 .drop-status {

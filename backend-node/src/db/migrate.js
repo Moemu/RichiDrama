@@ -235,6 +235,7 @@ function ensureAllColumns(database) {
     { name: 'omni_last_frame_asset_id', type: 'INTEGER' },
     { name: 'omni_asset_usage_json', type: 'TEXT' },
     { name: 'universal_segment_text', type: 'TEXT' },              // 全能模式片段描述（@ 引用等）
+    { name: 'omni_prompt_document_json', type: 'TEXT' },           // {text,refs:[{asset_id,alias,occurrence,start,end}]}
     { name: 'first_frame_image_id', type: 'INTEGER' },
     { name: 'last_frame_image_id',  type: 'INTEGER' },
     { name: 'last_frame_image_url', type: 'TEXT' },
@@ -511,6 +512,8 @@ function ensureAllColumns(database) {
   ensureColumns(database, 'assets', [
     { name: 'drama_id',     type: 'INTEGER' },
     { name: 'name',         type: 'TEXT' },
+    // 原文件名用于素材管理；引用名是稳定且唯一的 @ 标识，避免同名文件错绑。
+    { name: 'reference_alias', type: 'TEXT' },
     { name: 'type',         type: 'TEXT' },
     { name: 'category',     type: 'TEXT' },
     { name: 'url',          type: 'TEXT' },
@@ -535,6 +538,7 @@ function ensureAllColumns(database) {
     { name: 'requires_sd2_identity', type: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'created_at',   type: 'TEXT' },
     { name: 'updated_at',   type: 'TEXT' },
+    { name: 'archived_at',  type: 'TEXT' },
     { name: 'deleted_at',   type: 'TEXT' },
   ]);
 

@@ -83,18 +83,24 @@ function routes(db, log, cfg) {
     delete: (req, res) => {
       try {
         const current = assetService.getByIdForOwner(db, req.params.id, req.auth.id);
-        if (current?.source_type === 'project_resource') {
-          const detached = require('../services/assetMappingService').detachProjectResource(db, current.id, req.auth.id);
-          if (detached) return response.success(res, { message: '已解除项目资源关联，历史分镜引用保持不变', detached: true });
-          // 旧版分镜页曾直接写入 source_type=project_resource 的素材，未同步
-          // asset_resource_links。将它误判为不存在会导致前端 DELETE 收到 404；
-          // 此处回退为普通软删除，且仍会先执行分镜引用保护。
-        }
-        const ok = assetService.deleteById(db, log, req.params.id, req.auth.id);
+        if (!current) return response.notFound(res, '资源不存在');
+        const ok = assetService.archiveById(db, log, req.params.id, req.auth.id);
         if (!ok) return response.notFound(res, '资源不存在');
-        response.success(res, { message: '删除成功' });
+        response.success(res, { message: '已归档：新镜头不可再选，已有镜头引用保持不变' });
       } catch (err) {
-        log.error('assets delete', { error: err.message });
+        log.error('assets archive', { error: err.message });
+        response.badRequest(res, err.message);
+      }
+    },
+    forceDetach: (req, res) => {
+      try {
+        const current = assetService.getByIdForOwner(db, req.params.id, req.auth.id);
+        if (!current) return response.notFound(res, '资源不存在');
+        const impact = assetService.detachEditableShotReferences(db, [current.id], req.auth.id);
+        const archived = assetService.archiveById(db, log, current.id, req.auth.id);
+        response.success(res, { archived, impact, message: `已从 ${impact.storyboards} 个分镜、${impact.freeShots} 个自由创作镜头解除引用并归档` });
+      } catch (err) {
+        log.error('assets force detach', { error: err.message });
         response.badRequest(res, err.message);
       }
     },
@@ -128,7 +134,7 @@ function routes(db, log, cfg) {
         // all_matching is deliberately explicit so an empty selected list can
         // never erase a library by accident.
         if (!ids.length && body.all_matching !== true) return response.badRequest(res, '请至少选择一个素材，或明确指定清空素材库');
-        const count = assetService.deleteMany(db, log, {
+        const count = assetService.archiveMany(db, log, {
           ids,
           owner_user_id: req.auth.id,
           scope,
@@ -139,7 +145,7 @@ function routes(db, log, cfg) {
             favorite: body.favorite,
           } : {}),
         });
-        response.success(res, { count, message: count ? `已删除 ${count} 个素材` : '没有可删除的素材' });
+        response.success(res, { count, message: count ? `已归档 ${count} 个素材，已有镜头引用保持不变` : '没有可归档的素材' });
       } catch (err) {
         log.error('assets batch delete', { error: err.message });
         response.badRequest(res, err.message);

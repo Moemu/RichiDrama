@@ -13,7 +13,7 @@ function dbWithProjectResource() {
     CREATE TABLE scenes (id INTEGER PRIMARY KEY, drama_id INTEGER, image_url TEXT, local_path TEXT, deleted_at TEXT);
     CREATE TABLE props (id INTEGER PRIMARY KEY, drama_id INTEGER, image_url TEXT, local_path TEXT, deleted_at TEXT);
     CREATE TABLE assets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, drama_id INTEGER, owner_user_id INTEGER, name TEXT, type TEXT, category TEXT,
+      id INTEGER PRIMARY KEY AUTOINCREMENT, drama_id INTEGER, owner_user_id INTEGER, name TEXT, reference_alias TEXT, type TEXT, category TEXT,
       url TEXT, local_path TEXT, file_size INTEGER, mime_type TEXT, width INTEGER, height INTEGER, duration REAL,
       image_gen_id INTEGER, video_gen_id INTEGER, source_type TEXT, parent_asset_id INTEGER, thumbnail_local_path TEXT,
       metadata_json TEXT, tags_json TEXT, checksum TEXT, processing_status TEXT, error_msg TEXT, seedance2_asset TEXT,

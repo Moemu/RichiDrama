@@ -365,6 +365,47 @@
           </div>
           <el-button type="primary" plain :loading="resourceMediaUploading" @click="openResourceMediaUpload"><el-icon><Upload /></el-icon>上传媒体素材</el-button>
         </div>
+        <nav class="resource-browser-tabs" aria-label="资源类别">
+          <button v-for="tab in resourceCatalogTabs" :key="tab.key" type="button" :class="{ active: resourceCatalogType === tab.key }" :aria-current="resourceCatalogType === tab.key ? 'page' : undefined" @click="resourceCatalogType = tab.key">
+            {{ tab.label }} <span>{{ tab.count }}</span>
+          </button>
+        </nav>
+        <section class="resource-browser" :aria-label="`${resourceCatalogMeta.label}资源浏览器`">
+          <header class="resource-browser-toolbar">
+            <label class="resource-browser-search">
+              <span class="sr-only">搜索{{ resourceCatalogMeta.label }}</span>
+              <el-input v-model="resourceCatalogKeyword" clearable :placeholder="`搜索${resourceCatalogMeta.label}名称或描述`" />
+            </label>
+            <div class="resource-browser-filters" role="group" aria-label="资源状态筛选">
+              <button v-for="filter in resourceCatalogFilters" :key="filter.key" type="button" :class="{ active: resourceCatalogFilter === filter.key }" :aria-pressed="resourceCatalogFilter === filter.key" @click="resourceCatalogFilter = filter.key">{{ filter.label }}</button>
+            </div>
+            <div class="resource-browser-actions">
+              <el-button v-if="resourceCatalogType === 'character'" size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button>
+              <el-button v-if="resourceCatalogType === 'scene'" size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button>
+              <el-button v-if="resourceCatalogType === 'prop'" size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button>
+              <el-button v-if="resourceCatalogType === 'character'" size="small" @click="openAddCharacter">添加角色</el-button>
+              <el-button v-else-if="resourceCatalogType === 'scene'" size="small" @click="openAddScene">添加场景</el-button>
+              <el-button v-else-if="resourceCatalogType === 'prop'" size="small" @click="showAddProp = true">添加道具</el-button>
+              <el-button v-if="resourceCatalogType !== 'media' && resourceCatalogItems.length" size="small" type="primary" plain :loading="resourceBatchGenerating === resourceCatalogType" @click="onGenerateMissingResourceImages(resourceCatalogType)">生成缺图</el-button>
+              <el-button v-if="resourceCatalogType === 'media'" size="small" @click="router.push({ path: '/media-library', query: { drama_id: dramaId } })">管理项目素材</el-button>
+              <el-button v-if="resourceCatalogSelectedCount" size="small" type="danger" plain @click="batchDeleteUnifiedResources(resourceCatalogType)">批量删除（{{ resourceCatalogSelectedCount }}）</el-button>
+            </div>
+          </header>
+          <p class="resource-browser-summary" role="status">显示 {{ filteredResourceCatalogItems.length }} / {{ resourceCatalogItems.length }} 个{{ resourceCatalogMeta.label }}{{ resourceCatalogSelectedCount ? `，已选择 ${resourceCatalogSelectedCount} 个` : '' }}</p>
+          <div v-if="filteredResourceCatalogItems.length" class="resource-browser-grid">
+            <article v-for="item in filteredResourceCatalogItems" :key="item.id" class="resource-browser-card" :class="{ selected: isUnifiedResourceSelected(resourceCatalogType, item.id) }">
+              <el-checkbox class="resource-browser-select" :model-value="isUnifiedResourceSelected(resourceCatalogType, item.id)" :aria-label="`选择${resourceCatalogMeta.label} ${resourceCatalogItemName(item)}`" @click.stop @change="toggleUnifiedResourceSelection(resourceCatalogType, item.id)" />
+              <img v-if="resourceCatalogHasImage(item)" :src="resourceCatalogImageUrl(item)" :alt="resourceCatalogItemName(item)" width="160" height="112" loading="lazy" />
+              <span v-else class="resource-browser-placeholder" aria-hidden="true">{{ resourceCatalogMeta.label }}</span>
+              <div class="resource-browser-card-copy"><b>{{ resourceCatalogItemName(item) }}</b><small>{{ resourceCatalogItemDescription(item) }}</small></div>
+              <div class="resource-browser-card-actions">
+                <template v-if="resourceCatalogType === 'media'"><el-button size="small" text @click="renameResourceMedia(item)">重命名</el-button><el-button size="small" type="warning" text @click="deleteResourceMedia(item)">归档</el-button></template>
+                <template v-else><el-button size="small" text @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker(resourceCatalogType, item)">素材库</el-button><template v-if="resourceCatalogType === 'character'"><el-button size="small" type="primary" text :loading="sd2VoiceUploadingId === item.id" @click="onSd2VoicePrimaryAction(item)">{{ item.seedance2_voice_asset?.status === 'active' ? '音色已绑定' : '绑定音色' }}</el-button><el-button v-if="item.seedance2_voice_asset?.status === 'active'" size="small" text @click="onSd2VoiceReplace(item)">更换音色</el-button><el-button v-if="item.seedance2_voice_asset?.url" size="small" text @click="playSd2Voice(item)">试听</el-button></template><el-button size="small" type="primary" text :loading="resourceCatalogGenerating(item)" @click="generateResourceCatalogItem(item)">生成图</el-button><el-button size="small" type="danger" text @click="deleteResourceCatalogItem(item)">删除</el-button></template>
+              </div>
+            </article>
+          </div>
+          <div v-else class="resource-browser-empty"><b>暂无匹配的{{ resourceCatalogMeta.label }}</b><p>{{ resourceCatalogKeyword ? '请清空搜索词或调整筛选条件。' : resourceCatalogMeta.empty }}</p></div>
+        </section>
         <div class="resource-center-grid">
           <article class="resource-center-group">
             <header><b>角色</b><span>{{ characters.length }}</span></header>
@@ -2589,6 +2630,14 @@ const projectTargetFps = ref(null)
 const universalLibraryAssets = ref([])
 const detachedResourceLinks = ref([])
 const unifiedResourceSelection = reactive({ character: new Set(), scene: new Set(), prop: new Set(), media: new Set() })
+const resourceCatalogType = ref('character')
+const resourceCatalogKeyword = ref('')
+const resourceCatalogFilter = ref('all')
+const resourceCatalogFilters = [
+  { key: 'all', label: '全部' },
+  { key: 'with-image', label: '有图片' },
+  { key: 'missing-image', label: '待补图' },
+]
 /** 全能素材库：上传 / 拖拽 / 首尾帧上传 共享状态 */
 const sbOmniFileInput = ref(null)
 const sbOmniFrameFileInput = ref(null)
@@ -2684,6 +2733,51 @@ const characters = computed(() => validRows(store.characters))
 const scenes = computed(() => validRows(store.scenes))
 const props = computed(() => validRows(store.props))
 const storyboards = computed(() => validRows(store.storyboards))
+const resourceCatalogTabs = computed(() => [
+  { key: 'character', label: '角色', count: characters.value.length },
+  { key: 'scene', label: '场景', count: scenes.value.length },
+  { key: 'prop', label: '道具', count: props.value.length },
+  { key: 'media', label: '项目素材', count: universalLibraryAssets.value.length },
+])
+const resourceCatalogMeta = computed(() => ({
+  character: { label: '角色', empty: '可从剧本提取，或手动添加角色。' },
+  scene: { label: '场景', empty: '可从当前剧本提取，或手动添加场景。' },
+  prop: { label: '道具', empty: '可从当前剧本提取，或手动添加道具。' },
+  media: { label: '项目素材', empty: '上传图片、视频或音频后，可在分镜中按需加入。' },
+}[resourceCatalogType.value] || { label: '资源', empty: '' }))
+const resourceCatalogItems = computed(() => ({
+  character: characters.value,
+  scene: scenes.value,
+  prop: props.value,
+  media: universalLibraryAssets.value,
+}[resourceCatalogType.value] || []))
+const resourceCatalogSelectedCount = computed(() => unifiedResourceSelection[resourceCatalogType.value]?.size || 0)
+function resourceCatalogItemName(item) {
+  if (resourceCatalogType.value === 'scene') return item?.location || item?.name || '未命名场景'
+  return item?.name || `素材 ${item?.id || ''}`
+}
+function resourceCatalogItemDescription(item) {
+  if (resourceCatalogType.value === 'character') return item?.appearance || item?.description || '待补充描述'
+  if (resourceCatalogType.value === 'scene') return item?.description || item?.prompt || item?.time || '待补充描述'
+  if (resourceCatalogType.value === 'prop') return item?.description || item?.prompt || item?.type || '待补充描述'
+  return item?.library_scope === 'global' ? '我的全局素材' : '当前项目素材'
+}
+function resourceCatalogHasImage(item) {
+  return resourceCatalogType.value === 'media' ? item?.type === 'image' : hasAssetImage(item)
+}
+function resourceCatalogImageUrl(item) {
+  return resourceCatalogType.value === 'media' ? sbOmniAssetUrl(item) : assetImageUrl(item)
+}
+const filteredResourceCatalogItems = computed(() => {
+  const keyword = resourceCatalogKeyword.value.trim().toLocaleLowerCase()
+  return resourceCatalogItems.value.filter((item) => {
+    const hasImage = resourceCatalogHasImage(item)
+    if (resourceCatalogFilter.value === 'with-image' && !hasImage) return false
+    if (resourceCatalogFilter.value === 'missing-image' && hasImage) return false
+    if (!keyword) return true
+    return `${resourceCatalogItemName(item)} ${resourceCatalogItemDescription(item)}`.toLocaleLowerCase().includes(keyword)
+  })
+})
 
 // FilmCreate 与自由创作页可能同时编辑同一分镜。所有从本页发起的更新都携带
 // 当前快照版本，成功后回写服务端的新 updated_at，避免旧页面的整行保存覆盖新编辑。
@@ -5305,6 +5399,34 @@ async function onGenerateMissingResourceImages(type) {
   }
 }
 
+function openResourceEditor(type, item) {
+  if (type === 'character') editCharacter(item)
+  else if (type === 'scene') editScene(item)
+  else if (type === 'prop') editProp(item)
+}
+
+function resourceCatalogGenerating(item) {
+  const ids = resourceCatalogType.value === 'character'
+    ? generatingCharIds
+    : resourceCatalogType.value === 'scene'
+      ? generatingSceneIds
+      : generatingPropIds
+  const set = ids?.value || ids
+  return Boolean(set?.has?.(item.id))
+}
+
+async function generateResourceCatalogItem(item) {
+  if (resourceCatalogType.value === 'character') return onGenerateCharacterImage(item)
+  if (resourceCatalogType.value === 'scene') return onGenerateSceneImage(item, sceneUseQuadGrid.value)
+  return onGeneratePropImage(item, propUseQuadGrid.value)
+}
+
+async function deleteResourceCatalogItem(item) {
+  if (resourceCatalogType.value === 'character') return onDeleteCharacter(item)
+  if (resourceCatalogType.value === 'scene') return onDeleteScene(item)
+  return onDeleteProp(item)
+}
+
 // 解析 extra_images JSON，返回 local_path 数组
 function parseExtraImages(item) {
   if (!item?.extra_images) return []
@@ -6119,7 +6241,7 @@ async function batchDeleteUnifiedResources(type) {
     : 0
   try {
     await ElMessageBox.confirm(
-      `确定删除选中的 ${ids.length} 个${label}？${globalMediaCount ? `其中 ${globalMediaCount} 个为全局素材，删除后其他项目也将不可见。` : ''}历史分镜与已生成作品保持可追溯。`,
+      `确定删除选中的 ${ids.length} 个${label}？系统会自动从可编辑镜头及对应 @ 引用中移除它们。${globalMediaCount ? `其中 ${globalMediaCount} 个为全局素材，删除后其他项目也将不可见。` : ''}历史分镜与已生成作品保持可追溯。`,
       `批量删除${label}`,
       { type: 'warning', confirmButtonText: '删除选中项', cancelButtonText: '取消' }
     )
@@ -6149,17 +6271,11 @@ async function batchDeleteUnifiedResources(type) {
 
 async function deleteResourceMedia(asset) {
   try {
-    const linked = asset.source_type === 'project_resource'
     const globalAsset = asset.library_scope === 'global'
-    await ElMessageBox.confirm(linked
-      ? `确定解除“${asset.name || `素材 ${asset.id}`}”的媒体库关联？历史分镜不会被删除。`
-      : globalAsset
-        ? `确定从全局素材库删除“${asset.name || `素材 ${asset.id}`}”？其他项目将不再看到该素材。`
-        : `确定删除“${asset.name || `素材 ${asset.id}`}”？`, linked ? '解除素材关联' : globalAsset ? '删除全局素材' : '删除项目素材', { type: 'warning' })
+    await ElMessageBox.confirm(`确定归档“${asset.name || `素材 ${asset.id}`}”？它将不再供新镜头选择；已有镜头引用和生成记录保持不变。`, globalAsset ? '归档全局素材' : '归档项目素材', { type: 'warning' })
     await omniVideoAPI.deleteAsset(asset.id)
     universalLibraryAssets.value = universalLibraryAssets.value.filter((item) => Number(item.id) !== Number(asset.id))
-    if (linked) await loadDetachedResourceLinks()
-    ElMessage.success(linked ? '已解除素材关联，历史引用保持不变' : '素材已删除')
+    ElMessage.success('已归档；已有镜头引用保持不变')
   } catch (err) {
     if (err !== 'cancel' && err?.action !== 'cancel') ElMessage.error(err?.message || '删除素材失败')
   }
@@ -11789,6 +11905,7 @@ html.light .frame-layout-anchor {
 .resource-center-item-actions{display:flex;align-items:center;gap:2px;white-space:nowrap}.resource-center-item-actions .el-button{margin:0}.prop-asset-picker-grid{max-height:440px;overflow:auto;padding:2px}.prop-asset-picker-card{padding:0;cursor:pointer;text-align:left;font:inherit}.prop-asset-picker-card:hover{border-color:var(--el-color-primary)}
 .resource-media-card{position:relative}.resource-media-delete{position:absolute!important;top:5px;right:5px;z-index:2;margin:0!important;min-width:24px!important;width:24px;height:24px;padding:0!important;background:#b84242!important;color:#fff!important;border-color:#f29a9a!important;font-weight:800}.resources-stage-active .resource-media-delete{display:grid!important;place-items:center}
 .resource-center-item{position:relative}.resource-select{position:absolute;top:8px;left:8px;z-index:3;padding:2px;border-radius:4px;background:color-mix(in srgb,var(--bg-surface) 82%,transparent)}.resource-center-item.selected{box-shadow:inset 0 0 0 2px var(--accent),0 0 0 1px color-mix(in srgb,var(--accent) 36%,transparent)}.resource-media-card.selected{border:2px solid var(--accent)!important;box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 48%,transparent)}.resource-media-select{position:absolute;top:6px;left:6px;z-index:3;padding:2px;border-radius:4px;background:color-mix(in srgb,var(--bg-surface) 82%,transparent)}
+.resource-center-grid,.resource-media-library{display:none}.resource-browser-tabs{display:flex;gap:8px;overflow:auto;padding-bottom:2px}.resource-browser-tabs button{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:0 13px;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-surface);color:var(--text-regular);font:inherit;cursor:pointer;white-space:nowrap}.resource-browser-tabs button:hover,.resource-browser-tabs button:focus-visible{border-color:var(--accent);outline:2px solid color-mix(in srgb,var(--accent) 32%,transparent);outline-offset:2px}.resource-browser-tabs button.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--bg-surface));color:var(--accent)}.resource-browser-tabs span{display:grid;place-items:center;min-width:22px;height:22px;border-radius:99px;background:var(--bg-hover);color:var(--text-muted);font-size:12px}.resource-browser{display:flex;flex-direction:column;min-height:0;margin-top:14px;padding:14px;border:1px solid var(--border-subtle);border-radius:10px;background:var(--bg-raised)}.resource-browser-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.resource-browser-search{flex:1 1 230px;max-width:340px}.resource-browser-filters{display:flex;gap:4px;padding:3px;border-radius:8px;background:var(--bg-hover)}.resource-browser-filters button{min-height:30px;padding:0 9px;border:0;border-radius:6px;background:transparent;color:var(--text-muted);font:inherit;font-size:13px;cursor:pointer}.resource-browser-filters button:hover,.resource-browser-filters button:focus-visible{color:var(--text-primary);outline:2px solid color-mix(in srgb,var(--accent) 34%,transparent);outline-offset:1px}.resource-browser-filters button.active{background:var(--bg-raised);color:var(--text-primary);box-shadow:var(--shadow-sm)}.resource-browser-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:auto}.resource-browser-summary{margin:12px 0 10px;color:var(--text-muted);font-size:13px}.resource-browser-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:10px;min-height:0;overflow:auto;padding:2px}.resource-browser-card{position:relative;display:grid;grid-template-rows:112px auto auto;align-content:start;min-width:0;overflow:hidden;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-surface)}.resource-browser-card.selected{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 50%,transparent)}.resource-browser-card>img,.resource-browser-placeholder{width:100%;height:112px;object-fit:cover;background:var(--bg-hover)}.resource-browser-placeholder{display:grid;place-items:center;color:var(--text-muted);font-size:13px}.resource-browser-select{position:absolute;top:7px;left:7px;z-index:1;padding:2px;border-radius:4px;background:color-mix(in srgb,var(--bg-surface) 82%,transparent)}.resource-browser-card-copy{min-width:0;padding:9px 10px 6px}.resource-browser-card-copy b,.resource-browser-card-copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-browser-card-copy b{color:var(--text-primary);font-size:14px}.resource-browser-card-copy small{margin-top:4px;color:var(--text-muted);font-size:12px}.resource-browser-card-actions{display:flex;flex-wrap:wrap;align-content:flex-start;gap:4px;min-width:0;padding:0 6px 8px}.resource-browser-card-actions .el-button{min-height:26px;margin:0;padding-inline:5px}.resource-browser-empty{display:grid;place-items:center;min-height:220px;text-align:center;color:var(--text-muted)}.resource-browser-empty b{color:var(--text-primary)}.resource-browser-empty p{margin:7px 0 0;font-size:14px}@media(max-width:900px){.resource-browser-toolbar{align-items:stretch}.resource-browser-search{max-width:none}.resource-browser-actions{margin-left:0}.resource-browser-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
 .workflow-next-action{border-color:var(--border-color);background:var(--bg-raised);color:var(--text-regular)}
 .merge-readiness,.merge-readiness.ready{border-color:var(--border-color);background:var(--bg-hover);color:var(--text-regular)}
 .sb-ctrl-bar--dragover{box-shadow:inset 0 3px 0 var(--accent)!important;background:var(--bg-hover)!important}
@@ -11827,11 +11944,13 @@ html.light .frame-layout-anchor {
   .script-stage-active #anchor-script>.story-textarea{flex:1;min-height:0}
   .script-stage-active #anchor-script>.story-textarea:deep(.el-textarea__inner){height:100%!important;min-height:10rem!important;resize:none}
   .script-stage-active .workflow-next-action{margin:0}
-  .resources-stage-active>.main{display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:14px;overflow:hidden;padding-top:18px;padding-bottom:18px}
+  .resources-stage-active>.main{display:block;overflow-y:auto;padding-top:18px;padding-bottom:18px}
   .resources-stage-active .workflow-shell{margin:0;padding:15px 22px;border-radius:16px}
   .resources-stage-active .workflow-head{align-items:center}.resources-stage-active .workflow-head h2{margin-block:2px;font-size:22px}.resources-stage-active .workflow-head p{font-size:12px}
   .resources-stage-active .workflow-steps{margin-top:12px}.resources-stage-active .workflow-step{min-height:38px}
-  .resources-stage-active .resource-center{display:grid;grid-template-rows:auto minmax(0,1fr) 14rem;gap:12px;min-height:0;padding:18px 22px;overflow:hidden}
+  .resources-stage-active .resource-center{display:block;min-height:0;padding:18px 22px;overflow:visible}
+  .resources-stage-active .resource-browser{margin-top:14px;overflow:visible}
+  .resources-stage-active .resource-browser-grid{min-height:15rem;max-height:min(52dvh,34rem);overflow:auto}
   .resources-stage-active .resource-center-heading{margin:0}.resources-stage-active .resource-center-heading .section-title{margin-top:0}.resources-stage-active .resource-center-heading .section-desc{margin-bottom:0}
   .resources-stage-active .resource-center-grid{min-height:0}.resources-stage-active .resource-center-group{display:flex;flex-direction:column;min-height:0;overflow:hidden}
   .resources-stage-active .resource-center-list{flex:1;min-height:0;max-height:none;overflow:auto;scrollbar-width:thin}

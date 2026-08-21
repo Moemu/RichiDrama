@@ -145,7 +145,7 @@ function activeOmniAssetIds(db, storyboardId, rawIds, ownerUserId, log) {
 function updateStoryboard(db, log, id, req, ownerUserId = null) {
   const row = db.prepare('SELECT id, updated_at FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!row) return null;
-  const allowed = ['title', 'description', 'location', 'time', 'duration', 'dialogue', 'narration', 'action', 'result', 'atmosphere', 'image_prompt', 'polished_prompt', 'video_prompt', 'text_model', 'video_model', 'video_resolution', 'video_aspect_ratio', 'video_upscale_resolution', 'video_target_fps', 'scene_id', 'characters', 'composed_image', 'image_url', 'local_path', 'main_panel_idx', 'video_url', 'audio_local_path', 'narration_audio_local_path', 'status', 'shot_type', 'angle', 'angle_h', 'angle_v', 'angle_s', 'movement', 'segment_index', 'segment_title', 'creation_mode', 'universal_segment_text', 'layout_description', 'first_frame_image_id', 'last_frame_image_id', 'last_frame_image_url', 'last_frame_local_path', 'omni_asset_ids', 'audio_strategy', 'keep_original_audio', 'audio_volume', 'audio_fade_seconds', 'omni_creation_mode', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'omni_asset_usage_json', 'omni_asset_send_policy'];
+  const allowed = ['title', 'description', 'location', 'time', 'duration', 'dialogue', 'narration', 'action', 'result', 'atmosphere', 'image_prompt', 'polished_prompt', 'video_prompt', 'text_model', 'video_model', 'video_resolution', 'video_aspect_ratio', 'video_upscale_resolution', 'video_target_fps', 'scene_id', 'characters', 'composed_image', 'image_url', 'local_path', 'main_panel_idx', 'video_url', 'audio_local_path', 'narration_audio_local_path', 'status', 'shot_type', 'angle', 'angle_h', 'angle_v', 'angle_s', 'movement', 'segment_index', 'segment_title', 'creation_mode', 'universal_segment_text', 'layout_description', 'first_frame_image_id', 'last_frame_image_id', 'last_frame_image_url', 'last_frame_local_path', 'omni_asset_ids', 'audio_strategy', 'keep_original_audio', 'audio_volume', 'audio_fade_seconds', 'omni_creation_mode', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'omni_asset_usage_json', 'omni_asset_send_policy', 'omni_prompt_document'];
   const updates = [];
   const params = [];
   // 前端可能传 character_ids，与 characters 统一：存为 JSON 字符串
@@ -160,10 +160,11 @@ function updateStoryboard(db, log, id, req, ownerUserId = null) {
   for (const key of allowed) {
     if (key === 'characters') continue;
     if (req[key] !== undefined) {
-      updates.push(key + ' = ?');
+      updates.push(key === 'omni_prompt_document' ? 'omni_prompt_document_json = ?' : key + ' = ?');
       const val = req[key];
       if (key === 'omni_asset_ids') params.push(JSON.stringify(activeOmniAssetIds(db, id, val, ownerUserId, log)));
       else if (key === 'omni_asset_usage_json') params.push(JSON.stringify(parseJsonObject(val)));
+      else if (key === 'omni_prompt_document') params.push(JSON.stringify(val && typeof val === 'object' ? val : { text: '', refs: [] }));
       else if (key === 'keep_original_audio') params.push(val ? 1 : 0);
       else params.push(val);
     }
@@ -262,6 +263,7 @@ function getStoryboardById(db, id) {
     segment_title: r.segment_title ?? null,
     creation_mode: r.creation_mode === 'universal' ? 'universal' : 'classic',
     universal_segment_text: r.universal_segment_text ?? null,
+    omni_prompt_document: parseJsonObject(r.omni_prompt_document_json),
     omni_asset_ids: parseJsonArray(r.omni_asset_ids),
     audio_strategy: r.audio_strategy || 'reference_only',
     keep_original_audio: !!r.keep_original_audio,
