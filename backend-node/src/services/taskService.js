@@ -1,4 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
+const billingRequestContext = require('./billingRequestContext');
 
 function createTask(db, log, taskType, resourceId, ownerUserId = null, tenantId = null) {
   const id = uuidv4();
@@ -10,6 +11,18 @@ function createTask(db, log, taskType, resourceId, ownerUserId = null, tenantId 
   log.info('Task created', { task_id: id, type: taskType, resource_id: resourceId });
   const task = getTask(db, id);
   return task || { id, type: taskType, status: 'pending', progress: 0, message: '', resource_id: resourceId || '', created_at: now, updated_at: now, completed_at: null };
+}
+
+// 在 HTTP 请求作用域内创建任务:自动继承计费上下文中的归属用户与租户。
+// ownershipGuard 会拒绝 owner_user_id 为 NULL 的任务(GET /tasks/:id 直接 404),
+// 因此请求内创建的异步任务必须带归属人;后台链路(无请求上下文)可用 fallback 显式传入。
+function createTaskFromContext(db, log, taskType, resourceId, fallbackOwnerUserId = null, fallbackTenantId = null) {
+  const ctx = billingRequestContext.current();
+  return createTask(
+    db, log, taskType, resourceId,
+    fallbackOwnerUserId != null ? fallbackOwnerUserId : (ctx?.actor?.id ?? null),
+    fallbackTenantId != null ? fallbackTenantId : (ctx?.tenant_id ?? null)
+  );
 }
 
 function getTask(db, taskId) {
@@ -160,6 +173,7 @@ function failOrphanedAsyncTasksOnStartup(db, log) {
 
 module.exports = {
   createTask,
+  createTaskFromContext,
   getTask,
   getTasksByResource,
   updateTaskStatus,

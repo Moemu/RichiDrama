@@ -1300,7 +1300,7 @@ The user enabled narrator voice-over for the whole episode. Every shot object MU
     systemPrompt += promptI18n.getStoryboardUniversalOmniModeSuffix(cfg);
   }
 
-  const task = taskService.createTask(db, log, 'storyboard_generation', String(episodeId));
+  const task = taskService.createTaskFromContext(db, log, 'storyboard_generation', String(episodeId));
   log.info('Generating storyboard asynchronously', {
     task_id: task.id,
     episode_id: episodeId,

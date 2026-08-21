@@ -73,7 +73,7 @@ function routes(db, cfg, log) {
     },
     scene: (req, res) => {
       try {
-        const task = taskService.createTask(db, log, 'image_generation', req.params.scene_id);
+        const task = taskService.createTaskFromContext(db, log, 'image_generation', req.params.scene_id);
         setTimeout(() => taskService.updateTaskResult(db, task.id, []), 100);
         response.success(res, { task_id: task.id });
       } catch (err) {

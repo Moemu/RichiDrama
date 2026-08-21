@@ -15,7 +15,7 @@ module.exports = function stubRoutes(db, cfg, log) {
     // POST /generation/characters
     generationCharacters: (req, res) => {
       const body = req.body || {};
-      const task = taskService.createTask(db, log, 'character_generation', body.drama_id || '');
+      const task = taskService.createTaskFromContext(db, log, 'character_generation', body.drama_id || '');
       setTimeout(() => taskService.updateTaskResult(db, task.id, { characters: [], count: 0 }), 100);
       response.success(res, { task_id: task.id, status: 'pending' });
     },
@@ -30,12 +30,12 @@ module.exports = function stubRoutes(db, cfg, log) {
     characterUpdate: (req, res) => response.success(res, { message: '保存成功' }),
     characterDelete: (req, res) => response.success(res, { message: '删除成功' }),
     characterBatchGenerateImages: (req, res) => {
-      const task = taskService.createTask(db, log, 'batch_character_image', '');
+      const task = taskService.createTaskFromContext(db, log, 'batch_character_image', '');
       setTimeout(() => taskService.updateTaskResult(db, task.id, {}), 100);
       response.success(res, { task_id: task.id });
     },
     characterGenerateImage: (req, res) => {
-      const task = taskService.createTask(db, log, 'character_image', req.params.id);
+      const task = taskService.createTaskFromContext(db, log, 'character_image', req.params.id);
       setTimeout(() => taskService.updateTaskResult(db, task.id, {}), 100);
       response.success(res, { task_id: task.id });
     },
@@ -63,7 +63,7 @@ module.exports = function stubRoutes(db, cfg, log) {
       response.success(res, list);
     },
     episodeCharactersExtract: (req, res) => {
-      const task = taskService.createTask(db, log, 'character_extraction', req.params.episode_id);
+      const task = taskService.createTaskFromContext(db, log, 'character_extraction', req.params.episode_id);
       setTimeout(() => taskService.updateTaskResult(db, task.id, { characters: [], count: 0 }), 100);
       response.success(res, { task_id: task.id });
     },
@@ -78,7 +78,7 @@ module.exports = function stubRoutes(db, cfg, log) {
     // images
     imageList: (req, res) => response.success(res, []),
     imageCreate: (req, res) => {
-      const task = taskService.createTask(db, log, 'image_generation', '');
+      const task = taskService.createTaskFromContext(db, log, 'image_generation', '');
       setTimeout(() => taskService.updateTaskResult(db, task.id, { id: 0, status: 'pending' }), 100);
       response.created(res, { id: 0, task_id: task.id, status: 'pending' });
     },
@@ -89,7 +89,7 @@ module.exports = function stubRoutes(db, cfg, log) {
     imageEpisodeBackgrounds: (req, res) => response.success(res, []),
     imageEpisodeBackgroundsExtract: (req, res) => {
       try {
-        const task = taskService.createTask(db, log, 'background_extraction', req.params.episode_id);
+        const task = taskService.createTaskFromContext(db, log, 'background_extraction', req.params.episode_id);
         const taskId = task && task.id ? task.id : '';
         setTimeout(() => {
           try { taskService.updateTaskResult(db, taskId, { backgrounds: [] }); } catch (_) {}
@@ -107,14 +107,14 @@ module.exports = function stubRoutes(db, cfg, log) {
     // videos
     videoList: (req, res) => response.success(res, []),
     videoCreate: (req, res) => {
-      const task = taskService.createTask(db, log, 'video_generation', '');
+      const task = taskService.createTaskFromContext(db, log, 'video_generation', '');
       setTimeout(() => taskService.updateTaskResult(db, task.id, { id: 0, status: 'pending' }), 100);
       response.created(res, { id: 0, task_id: task.id, status: 'pending' });
     },
     videoGet: (req, res) => response.notFound(res, '记录不存在'),
     videoDelete: (req, res) => response.success(res, { message: '删除成功' }),
     videoFromImage: (req, res) => {
-      const task = taskService.createTask(db, log, 'video_generation', '');
+      const task = taskService.createTaskFromContext(db, log, 'video_generation', '');
       response.success(res, { task_id: task.id });
     },
     videoEpisodeBatch: (req, res) => response.success(res, []),
@@ -122,7 +122,7 @@ module.exports = function stubRoutes(db, cfg, log) {
     // video-merges
     videoMergeList: (req, res) => response.success(res, []),
     videoMergeCreate: (req, res) => {
-      const task = taskService.createTask(db, log, 'video_merge', req.body?.episode_id || '');
+      const task = taskService.createTaskFromContext(db, log, 'video_merge', req.body?.episode_id || '');
       response.success(res, { merge_id: 0, task_id: task.id });
     },
     videoMergeGet: (req, res) => response.notFound(res, '记录不存在'),
@@ -142,7 +142,7 @@ module.exports = function stubRoutes(db, cfg, log) {
     storyboardUpdate: (req, res) => response.success(res, { message: '保存成功' }),
     storyboardDelete: (req, res) => response.success(res, { message: '删除成功' }),
     storyboardFramePrompt: (req, res) => {
-      const task = taskService.createTask(db, log, 'frame_prompt_generation', req.params.id);
+      const task = taskService.createTaskFromContext(db, log, 'frame_prompt_generation', req.params.id);
       response.success(res, task.id);
     },
     storyboardFramePromptsGet: (req, res) => response.success(res, []),

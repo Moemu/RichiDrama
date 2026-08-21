@@ -43,7 +43,7 @@ function getById(db, id) {
 function create(db, log, req) {
   const now = new Date().toISOString();
   const taskService = require('./taskService');
-  const task = taskService.createTask(db, log, 'video_merge', String(req.episode_id || ''));
+  const task = taskService.createTaskFromContext(db, log, 'video_merge', String(req.episode_id || ''));
   const mergeOptionsJson = (() => {
     const o = req.merge_options;
     if (o && typeof o === 'object') return JSON.stringify(o);
