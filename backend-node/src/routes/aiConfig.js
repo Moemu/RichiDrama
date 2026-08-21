@@ -36,7 +36,8 @@ function get(db) {
     const config = aiConfigService.getConfig(db, id);
     if (!config) return response.notFound(res, '配置不存在');
     const tenantId = Number(req.query?.tenant_id);
-    if (tenantId && Number(config.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
+    // legacy 组视图包含全局配置(owner 为空),单条查询同样放行
+    if (tenantId && Number(config.owner_tenant_id) > 0 && Number(config.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
     response.success(res, maskConfig(config));
   };
 }
@@ -90,7 +91,11 @@ function update(db, log, cfg) {
     let body = req.body || {};
     const tenantId = Number(body.tenant_id || req.query?.tenant_id);
     const owned = aiConfigService.getConfig(db, id);
-    if (tenantId && Number(owned?.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
+    if (!owned) return response.notFound(res, '配置不存在');
+    // legacy 组视图会列出全局配置(owner 为空);从该视图编辑/删除全局配置
+    // 不应按分组归属 404——全局配置本就由平台管理员维护。
+    const editingGlobalFromTenantView = tenantId && !Number(owned.owner_tenant_id);
+    if (tenantId && !editingGlobalFromTenantView && Number(owned.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
 
     // 普通成员只拿到不含凭据的共享配置列表。限制其更新字段，避免前端的
     // 空端点/空设置覆盖管理员已经保存的供应商接入和计费参数。
@@ -122,7 +127,9 @@ function update(db, log, cfg) {
     if (tenantId) body = { ...body, is_default: false };
     const config = aiConfigService.updateConfig(db, log, id, body);
     if (!config) return response.notFound(res, '配置不存在');
-    if (tenantId) require('../services/tenantService').bindOwnedConfig(db, tenantId, config, { is_default: req.body?.is_default !== false, priority: req.body?.priority });
+    // 仅当配置真正归属该组时才更新分组绑定;bindOwnedConfig 会拒绝
+    // 绑定全局配置(legacy 视图编辑全局配置的场景)。
+    if (tenantId && !editingGlobalFromTenantView) require('../services/tenantService').bindOwnedConfig(db, tenantId, config, { is_default: req.body?.is_default !== false, priority: req.body?.priority });
     response.success(res, maskConfig(config));
   };
 }
@@ -136,7 +143,9 @@ function remove(db, log, cfg) {
     if (isNaN(id)) return response.badRequest(res, '无效的配置ID');
     const tenantId = Number(req.query?.tenant_id);
     const owned = aiConfigService.getConfig(db, id);
-    if (tenantId && Number(owned?.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
+    if (!owned) return response.notFound(res, '配置不存在');
+    // 与 update 一致:legacy 组视图删除全局配置不按分组归属 404
+    if (tenantId && Number(owned.owner_tenant_id) > 0 && Number(owned.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
     const ok = aiConfigService.deleteConfig(db, log, id);
     if (!ok) return response.notFound(res, '配置不存在');
     response.success(res, { message: '删除成功' });

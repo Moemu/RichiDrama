@@ -45,12 +45,12 @@ function ensureSingleDefaultPerType(db) {
   const types = ['text', 'image', 'storyboard_image', 'video', 'video_postprocess', 'tts', 'jimeng2_character_auth', 'model_ark_asset'];
   for (const st of types) {
     const rows = db.prepare(
-      'SELECT id, priority FROM ai_service_configs WHERE deleted_at IS NULL AND owner_tenant_id IS NULL AND service_type = ? AND is_default = 1 ORDER BY priority DESC, id ASC'
+      'SELECT id, priority FROM ai_service_configs WHERE deleted_at IS NULL AND COALESCE(owner_tenant_id, 0) = 0 AND service_type = ? AND is_default = 1 ORDER BY priority DESC, id ASC'
     ).all(st);
     if (rows.length <= 1) continue;
     const keepId = rows[0].id;
     db.prepare(
-      'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND owner_tenant_id IS NULL AND service_type = ? AND id != ?'
+      'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND COALESCE(owner_tenant_id, 0) = 0 AND service_type = ? AND id != ?'
     ).run(st, keepId);
   }
 }
@@ -121,7 +121,7 @@ function resolveBillingTarget(db, serviceType, model, configId, options = {}) {
 
 function clearOtherDefault(db, serviceType, exceptId, ownerTenantId = null) {
   const stmt = db.prepare(
-    'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND service_type = ? AND id != ? AND ((? IS NULL AND owner_tenant_id IS NULL) OR owner_tenant_id = ?)'
+    'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND service_type = ? AND id != ? AND ((COALESCE(?, 0) = 0 AND COALESCE(owner_tenant_id, 0) = 0) OR owner_tenant_id = ?)'
   );
   stmt.run(serviceType, exceptId, ownerTenantId, ownerTenantId);
 }
@@ -134,10 +134,12 @@ function getConfig(db, id) {
 function listOwnedTenantConfigs(db, tenantId, serviceType) {
   const params = [Number(tenantId)];
   const legacy = require('./tenantService').usesLegacyGlobalConfigs(db, tenantId);
+  // legacy 组视图同时展示全局配置与本组自有配置;只看 IS NULL 会把
+  // 运营工作台向该组添加的配置(owner_tenant_id=组)从列表里排除。
   let sql = `SELECT c.*, b.is_default AS tenant_is_default, b.priority AS tenant_priority
     FROM ai_service_configs c LEFT JOIN tenant_ai_config_bindings b ON b.ai_config_id=c.id AND b.tenant_id=? AND b.is_active=1
-    WHERE c.deleted_at IS NULL AND ${legacy ? 'c.owner_tenant_id IS NULL' : 'c.owner_tenant_id = ?'}`;
-  if (!legacy) params.push(Number(tenantId));
+    WHERE c.deleted_at IS NULL AND ${legacy ? '(COALESCE(c.owner_tenant_id, 0) = 0 OR c.owner_tenant_id = ?)' : 'c.owner_tenant_id = ?'}`;
+  params.push(Number(tenantId));
   if (serviceType) { sql += ' AND c.service_type = ?'; params.push(serviceType); }
   sql += ' ORDER BY b.is_default DESC, b.priority DESC, c.created_at DESC';
   return db.prepare(sql).all(...params).map(rowToConfig);
@@ -208,7 +210,7 @@ function createConfig(db, log, req) {
     req.priority ?? 0,
     req.is_default ? 1 : 0,
     req.settings || null,
-    Number.isSafeInteger(Number(req.owner_tenant_id)) ? Number(req.owner_tenant_id) : null,
+    (Number(req.owner_tenant_id) > 0) ? Number(req.owner_tenant_id) : null,
     now,
     now
   );
