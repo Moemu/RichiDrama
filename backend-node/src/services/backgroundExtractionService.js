@@ -195,7 +195,7 @@ function extractBackgroundsForEpisode(db, cfg, log, episodeId, model, style, lan
     return existing.id;
   }
 
-  const task = taskService.createTask(db, log, 'background_extraction', String(episodeId));
+  const task = taskService.createTaskFromContext(db, log, 'background_extraction', String(episodeId));
   setImmediate(() => {
     processBackgroundExtraction(db, runCfg, log, task.id, episodeId, model, style, language).catch((err) => {
       log.error('processBackgroundExtraction fatal', { error: err.message, task_id: task.id });

@@ -2804,7 +2804,10 @@ function normalizeWorkflowStage(value) {
   return WORKFLOW_STAGE_KEYS.includes(stage) ? stage : 'script'
 }
 const workflowStage = ref(normalizeWorkflowStage(route.query.stage))
-const showLegacyPipeline = ref(false)
+// 一键全流程入口：在「剧本管理」阶段展示 10 步流水线面板
+// (提取角色/场景/道具 → 分镜 → 三类资源图 → 分镜图 → 视频 → 合成)，
+// 每步自动跳过已有产物，支持暂停/恢复。
+const showLegacyPipeline = ref(true)
 const resourceMediaFileInput = ref(null)
 const resourceMediaUploading = ref(false)
 const workflowStages = computed(() => [

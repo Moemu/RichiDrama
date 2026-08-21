@@ -1638,7 +1638,7 @@ function createAndGenerateImage(db, log, opts) {
   if (charIdNum != null) resourceId = `character_${charIdNum}`;
   else if (sceneIdNum != null) resourceId = `scene_${sceneIdNum}`;
   else resourceId = String(dramaIdNum);
-  const task = taskService.createTask(db, log, 'image_generation', resourceId);
+  const task = taskService.createTaskFromContext(db, log, 'image_generation', resourceId);
   const taskId = task.id;
 
   let imageGenId;

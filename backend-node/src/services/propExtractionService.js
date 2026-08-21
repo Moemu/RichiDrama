@@ -140,7 +140,7 @@ function extractPropsForEpisode(db, log, episodeId, cfg) {
     throw new Error('剧集剧本内容为空，无法提取道具');
   }
 
-  const task = taskService.createTask(db, log, 'prop_extraction', String(episodeId));
+  const task = taskService.createTaskFromContext(db, log, 'prop_extraction', String(episodeId));
   setImmediate(() => {
     processPropExtraction(db, log, task.id, episodeId).catch((err) => {
       log.error('processPropExtraction fatal', { error: err.message, task_id: task.id });
