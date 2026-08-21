@@ -11,7 +11,7 @@ test('自由创作只渲染一个提示词编辑器', async () => {
   assert.equal(editorTags.length, 1)
   assert.match(source, /<div class="shot-script"><OmniAssetPromptEditor\s+ref="promptEditorRef"\s+v-model="prompt"/)
   assert.match(source, /class="insert-at-caret"/)
-  assert.match(source, /promptEditorRef\?\.insertAtCaret\(asset\)/)
+  assert.match(source, /promptEditorRef\?\.insertAtCaret\(promptAssetFor\(asset\)\)/)
   assert.match(source, /@keydown\.up\.prevent="selectRelative\(-1\)"/)
   assert.match(source, /@keydown\.down\.prevent="selectRelative\(1\)"/)
 })
@@ -108,16 +108,19 @@ test('提示词引用使用稳定素材别名并展示更清晰的缩略图', as
     readSource('../src/components/OmniAssetPromptEditor.vue'),
   ])
 
-  assert.match(workbench, /reference_alias \|\| asset\?\.alias \|\| asset\?\.name/)
+  assert.match(workbench, /function assetDisplayName\(asset\)/)
+  assert.match(workbench, /legacy_aliases: assetLegacyAliases\(asset\)/)
+  assert.match(workbench, /:assets="promptAssets"/)
   assert.match(workbench, /:reference-document="promptDocument"/)
   assert.match(editor, /referenceDocument/)
+  assert.match(editor, /function assetMatchesAlias\(asset, alias\)/)
   assert.match(editor, /width:30px; height:30px/)
 })
 
 test('提示词引用只解析当前镜头工作集，不能借用其他镜头素材', async () => {
   const source = await readSource('../src/views/FreeCreate.vue')
 
-  assert.match(source, /<OmniAssetPromptEditor[\s\S]*:assets="chosenAssets"/)
+  assert.match(source, /<OmniAssetPromptEditor[\s\S]*:assets="promptAssets"/)
   assert.match(source, /项目库素材必须先“加入本镜”/)
 })
 

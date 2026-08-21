@@ -142,13 +142,19 @@ function positionPickerAndMention() {
 function referencesFromText(value) {
   return [...new Set([...String(value || '').matchAll(/@([^\s@]+)/g)].map((match) => match[1]))]
 }
+function assetMatchesAlias(asset, alias) {
+  return [asset?.alias, asset?.reference_alias, asset?.name, ...(asset?.legacy_aliases || [])]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .includes(alias)
+}
 function syncReferences(value) {
   const refs = []; const unresolvedRefs = []; const occurrences = new Map()
   const persisted = Array.isArray(props.referenceDocument?.refs) ? props.referenceDocument.refs : []
   for (const match of String(value || '').matchAll(/@([^\s@]+)/g)) {
     const alias = match[1]; const occurrence = occurrences.get(alias) || 0
     occurrences.set(alias, occurrence + 1)
-    const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.reference_alias || asset.name) === alias)
+    const matches = (props.assets || []).filter((asset) => asset && assetMatchesAlias(asset, alias))
     const previous = persisted.find((entry) => String(entry?.alias || '') === alias && Number(entry?.occurrence || 0) === occurrence && matches.some((asset) => Number(asset.id) === Number(entry.asset_id)))
     const asset = previous ? matches.find((item) => Number(item.id) === Number(previous.asset_id)) : (matches.length === 1 ? matches[0] : null)
     if (asset) refs.push({ asset_id: asset.id, alias, occurrence, start: match.index, end: match.index + match[0].length })
@@ -221,7 +227,7 @@ function thumbUrl(asset) {
 function matchingAsset(alias, occurrence = 0) {
   const reference = resolvedReferences.value.find((entry) => entry.alias === alias && Number(entry.occurrence || 0) === occurrence)
   if (reference) return (props.assets || []).find((asset) => Number(asset?.id) === Number(reference.asset_id)) || null
-  const matches = (props.assets || []).filter((asset) => asset && (asset.alias || asset.reference_alias || asset.name) === alias)
+  const matches = (props.assets || []).filter((asset) => asset && assetMatchesAlias(asset, alias))
   return matches.length === 1 ? matches[0] : null
 }
 function serializeNode(node) {
