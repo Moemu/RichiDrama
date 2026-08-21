@@ -1413,7 +1413,11 @@
         <div class="sb-stage-gen-group">
           <span class="sb-stage-gen-label" title="留空由 AI 按剧本估算；填 1 会被当作明确只生成 1 镜">分镜数量</span>
           <el-input-number v-model="storyboardCount" :min="1" :max="200" :step="5" placeholder="自动" size="small" controls-position="right" style="width: 96px" />
-          <span class="sb-stage-gen-label" title="留空由 AI 按剧本估算">总时长(秒)</span>
+          <span class="sb-stage-gen-label" title="每镜时长以此为准(保存到项目设置,视频生成默认时长同源)；总时长与镜数仅作整体规划参考">每段(秒)</span>
+          <el-select v-model="videoClipDuration" size="small" style="width: 82px" @change="() => saveProjectSettings(false)">
+            <el-option v-for="sec in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]" :key="sec" :label="`${sec} 秒`" :value="sec" />
+          </el-select>
+          <span class="sb-stage-gen-label" :title="`当前每段 ${videoClipDuration} 秒优先生效；总时长留空由 AI 估算，填了也只作整体参考，不会把每镜压短`">总时长(秒)</span>
           <el-input-number v-model="videoDuration" :min="10" :max="600" :step="5" placeholder="自动" size="small" controls-position="right" style="width: 96px" />
           <el-button
             type="success"
