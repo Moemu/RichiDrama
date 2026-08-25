@@ -32,10 +32,11 @@ If you discover a security vulnerability, please contact us privately:
 
 ### 注意事项 / Notes
 
-本项目是**本地离线桌面应用**，不涉及服务端数据传输。用户的 AI API Key 和项目数据均存储在本地，不经过任何第三方服务器。主要安全风险集中在：
+本项目是自行托管的 Web 服务。用户数据和 AI API Key 存储在部署方控制的服务器上。主要安全风险集中在：
 
-- 本地文件读写权限
+- 服务端身份认证和访问控制
+- 数据库、媒体目录和配置文件权限
 - 对接第三方 AI API 时的网络请求
 - 依赖包的已知漏洞
 
-This is a **local desktop application**. No user data or API keys are transmitted through any third-party server. Security risks are mainly related to local file access, outbound AI API requests, and known dependency vulnerabilities.
+This is a self-hosted web service. The operator controls user data, API keys, storage, and network access.

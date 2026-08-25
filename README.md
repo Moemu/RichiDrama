@@ -2,14 +2,14 @@
 
 # 🎬 本地短剧助手
 
-**本地 AI 短剧 & 漫剧生成工具 —— 下载即用，完全开源，数据不出本机**
+**可自行部署的 AI 短剧与漫剧生成平台**
 
 *LocalMiniDrama · AI-powered short drama creator*
 
 [![version](https://img.shields.io/badge/version-1.2.8-blue?style=flat-square)](https://github.com/xuanyustudio/LocalMiniDrama/releases)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=flat-square)](#-快速开始)
-[![stack](https://img.shields.io/badge/Vue3%20%2B%20Node.js%20%2B%20Electron-informational?style=flat-square)](#-项目架构)
+[![platform](https://img.shields.io/badge/platform-Docker%20%2B%20Linux-lightgrey?style=flat-square)](#-快速开始)
+[![stack](https://img.shields.io/badge/Vue3%20%2B%20Node.js-informational?style=flat-square)](#-项目架构)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](https://github.com/xuanyustudio/LocalMiniDrama/pulls)
 
 **[English](docs/en.md) · 简体中文 · [文档索引](docs/README.md) · [作者故事](docs/story.md)**
@@ -17,7 +17,7 @@
 [![GitHub](https://img.shields.io/badge/GitHub-xuanyustudio%2FLocalMiniDrama-181717?logo=github&style=flat-square)](https://github.com/xuanyustudio/LocalMiniDrama)
 [![Gitee](https://img.shields.io/badge/Gitee-bi__shang__a%2Flocalminidrama-C71D23?logo=gitee&style=flat-square)](https://gitee.com/bi_shang_a/localminidrama)
 
-[**⬇️ 下载 Release**](https://github.com/xuanyustudio/LocalMiniDrama/releases) · [**🚀 快速开始**](#-快速开始) · [**📖 配置 AI**](docs/guides/configuration.md) · [**🗺 画布文档**](docs/plans/2026-06-15-drama-canvas-workflow-plan.md)
+[**🚀 快速开始**](#-快速开始) · [**📦 部署指南**](docs/deployment/README.md) · [**📖 配置 AI**](docs/guides/configuration.md) · [**🗺 画布文档**](docs/plans/2026-06-15-drama-canvas-workflow-plan.md)
 
 </div>
 
@@ -25,17 +25,16 @@
 
 <table>
 <tr>
-<td width="25%" align="center"><b>🔒 本地优先</b><br/>SQLite + 本地文件，素材不上云</td>
+<td width="25%" align="center"><b>🔒 自行托管</b><br/>SQLite + 持久化存储，数据由部署方管理</td>
 <td width="25%" align="center"><b>🎬 全流程</b><br/>剧本 → 角色/场景 → 分镜 → 视频合成</td>
 <td width="25%" align="center"><b>🤖 多模型</b><br/>通义 / 火山 / 可灵 / Gemini 等</td>
 <td width="25%" align="center"><b>🗺 双视图</b><br/>列表精细编辑 + 画布批量编排</td>
 </tr>
 </table>
 
-市面上 AI 短剧工具不少，但真正能**本地离线运行、开箱即用、素材不上云**的几乎没有。  
-本项目用纯 JavaScript 从零搭建，接入你自己的 AI API，打开即可生成完整 AI 短剧。
+本项目使用纯 JavaScript 构建。部署方可以管理账号、项目、媒体、模型配置和计费数据。
 
-> ✅ 无订阅费 · ✅ 数据本地存储 · ✅ 支持多家 AI 服务商 · ✅ 完全开源可二次开发
+> ✅ 自行托管 · ✅ 数据持久化 · ✅ 支持多家 AI 服务商 · ✅ 完全开源可二次开发
 
 ---
 
@@ -148,20 +147,7 @@
 
 ## 🚀 快速开始
 
-### 方式一：下载 exe（推荐）
-
-前往 **[Releases 下载页](https://github.com/xuanyustudio/LocalMiniDrama/releases)**：
-
-| 版本 | 说明 | 适合 |
-|------|------|------|
-| `本地短剧助手 x.x.x.exe` | 标准版，**含示例项目** | 新手入门 |
-| `本地短剧助手-Lite-x.x.x.exe` | Lite 版，体积更小 | 熟悉流程后 |
-
-双击运行 → 「AI 配置」填入 API Key → 开始创作。
-
-> 首次运行配置：`%APPDATA%\LocalMiniDrama\backend\configs\config.yaml`
-
-### 方式二：源码开发
+### 本地开发
 
 > Node.js ≥ 18
 
@@ -171,7 +157,6 @@ cd LocalMiniDrama
 
 # 后端（端口 5679）
 cd backend-node && npm install
-cp configs/config.example.yaml configs/config.yaml   # 填入 API Key
 npm run migrate && npm start
 
 # 前端（端口 3013，新终端）
@@ -180,7 +165,13 @@ cd frontweb && npm install && npm run dev
 
 浏览器打开 `http://localhost:3013`，或双击根目录 **`run_dev.bat`** 一键启动。
 
-📖 [详细开发/打包/Docker 指南](docs/guides/quickstart.md) · [AI 配置指南](docs/guides/configuration.md)
+### 服务器部署
+
+```bash
+docker compose up -d --build
+```
+
+📖 [开发与部署指南](docs/guides/quickstart.md) · [部署文档](docs/deployment/README.md) · [AI 配置指南](docs/guides/configuration.md)
 
 ---
 
@@ -207,7 +198,6 @@ LocalMiniDrama/
 ├── backend-node/     # Express + SQLite，生成/合成/导入导出
 ├── frontweb/         # Vue 3 + Element Plus + @vue-flow/core
 │   └── views/        # FilmList · DramaDetail · FilmCreate · DramaCanvas
-├── desktop/          # Electron 打包 exe
 └── docs/             # 文档与计划
 ```
 
@@ -215,7 +205,6 @@ LocalMiniDrama/
 |----|------|
 | 前端 | Vue 3 · Vite · Element Plus · Pinia · @vue-flow/core |
 | 后端 | Node.js · Express · SQLite (better-sqlite3) |
-| 桌面 | Electron 28 · electron-builder |
 
 ---
 
@@ -251,7 +240,7 @@ LocalMiniDrama/
 | 用户 | 场景 |
 |------|------|
 | 📹 内容创作者 | 批量生产 AI 短剧 / 漫剧 |
-| 🔒 隐私敏感 | 素材与剧本完全留在本机 |
+| 🔒 私有部署 | 素材、剧本和模型配置由自有服务器管理 |
 | 🛠 开发者 | 二次开发、接入新 AI 服务商 |
 | 🌱 入门探索 | 低成本体验 AI 视频全流程 |
 
@@ -265,7 +254,7 @@ LocalMiniDrama/
 - ⭐ **Star** 帮助更多人发现本项目
 
 **GitHub 仓库建议 Topics**（在仓库 Settings → Topics 添加，便于搜索）：  
-`ai-video` `short-drama` `storyboard` `vue3` `electron` `local-first` `seedance` `comic-drama`
+`ai-video` `short-drama` `storyboard` `vue3` `self-hosted` `seedance` `comic-drama`
 
 ---
 
@@ -303,6 +292,6 @@ LocalMiniDrama/
 
 **如果这个项目对你有帮助，请点 ⭐ Star —— 这是对作者最大的鼓励！**
 
-[⬇️ 立即下载](https://github.com/xuanyustudio/LocalMiniDrama/releases) · [📖 快速开始文档](docs/guides/quickstart.md) · [🗺 画布文档](docs/plans/2026-06-15-drama-canvas-workflow-plan.md)
+[📦 部署文档](docs/deployment/README.md) · [📖 快速开始文档](docs/guides/quickstart.md) · [🗺 画布文档](docs/plans/2026-06-15-drama-canvas-workflow-plan.md)
 
 </div>

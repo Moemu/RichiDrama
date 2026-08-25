@@ -32,8 +32,8 @@ assignees: ''
 | 项目 | 内容 |
 |------|------|
 | 软件版本 / Version | v |
-| 操作系统 / OS | Windows 10 / 11 |
-| 运行方式 / Mode | exe 直接运行 / 开发模式 |
+| 操作系统 / OS | Linux 服务器或本地开发系统 |
+| 运行方式 / Mode | Docker Compose / 开发模式 |
 
 ## 日志 / Logs
 <!-- 如有报错日志，请粘贴在此（可在软件界面的错误提示中复制）/ Paste any error logs if available -->
@@ -43,4 +43,3 @@ assignees: ''
 
 ## 补充信息 / Additional Context
 <!-- 其他任何有助于定位问题的信息 / Any other context about the problem -->
-

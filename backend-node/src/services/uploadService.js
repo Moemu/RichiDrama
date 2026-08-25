@@ -7,7 +7,7 @@ const { randomUUID } = require('crypto');
 
 /**
  * 用 Node.js 原生 http/https 模块下载 URL 到 Buffer。
- * 比 native fetch 在 Electron 打包环境中更可靠，支持自动跟随 301/302 重定向（最多 5 次）。
+ * 比 native fetch 更易控制，支持自动跟随 301/302 重定向（最多 5 次）。
  */
 function downloadBufferViaNodeHttp(url, timeoutMs = 30000, redirectCount = 0) {
   return new Promise((resolve, reject) => {

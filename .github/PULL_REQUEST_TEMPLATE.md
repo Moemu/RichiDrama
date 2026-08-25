@@ -26,7 +26,7 @@ Closes #
 <!-- 描述你如何测试这些改动 / Describe how you tested these changes -->
 
 - [ ] 本地开发模式测试通过 / Tested in dev mode
-- [ ] 打包 exe 测试通过 / Tested with packaged exe
+- [ ] Production build 或相关后端测试通过 / Production build or relevant backend tests passed
 - [ ] 相关功能无明显回归 / No obvious regression
 
 ## 截图 / Screenshots
@@ -39,4 +39,3 @@ Closes #
 - [ ] 代码符合项目现有风格（纯 JavaScript，无 TypeScript）/ Code follows project style (vanilla JS)
 - [ ] 没有引入不必要的依赖 / No unnecessary new dependencies
 - [ ] 如有必要，已更新相关文档 / Documentation updated if needed
-

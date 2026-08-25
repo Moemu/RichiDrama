@@ -17,8 +17,6 @@ volumes
 .gitattributes
 
 # 桌面打包 / 文档 / 截图（与服务器部署无关）
-desktop/dist
-desktop/backend-app-secure
 backend-node/deploy-pack
 build
 build_edu

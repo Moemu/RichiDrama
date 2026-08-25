@@ -6,39 +6,19 @@
 
 ## 目录
 
-- [运行方式一：下载 exe（推荐普通用户）](#运行方式一下载-exe推荐普通用户)
-- [运行方式二：开发模式（推荐开发者）](#运行方式二开发模式推荐开发者)
+- [本地开发](#本地开发)
   - [环境要求](#环境要求)
   - [启动后端](#1-启动后端)
   - [启动前端](#2-启动前端)
   - [一键启动脚本](#3-一键启动脚本)
-- [打包为 Windows exe](#打包为-windows-exe)
+- [部署到服务器](#部署到服务器)
 - [配置文件说明](#配置文件说明)
 - [数据库与数据目录](#数据库与数据目录)
 - [常见问题 FAQ](#常见问题-faq)
 
 ---
 
-## 运行方式一：下载 exe（推荐普通用户）
-
-1. 前往 **[Releases](../../releases)** 页面下载最新版本：
-   - `本地短剧助手 Setup x.x.x.exe` — NSIS 安装包（推荐，可选安装路径）
-   - `本地短剧助手 x.x.x.exe` — 免安装便携版，解压即用
-
-2. 双击运行，软件会自动启动内置后端服务。
-
-3. 首次运行会在以下路径生成配置文件：
-   ```
-   %APPDATA%\LocalMiniDrama\backend\configs\config.yaml
-   ```
-
-4. 点击软件右上角「AI 配置」，填入你的 AI API Key，即可开始使用。
-
-> 💡 不知道去哪里申请 API Key？请看 → [AI 配置指南](configuration.md)
-
----
-
-## 运行方式二：开发模式（推荐开发者）
+## 本地开发
 
 ### 环境要求
 
@@ -118,37 +98,21 @@ run_dev.bat
 
 ---
 
-## 打包为 Windows exe
+## 部署到服务器
 
-> 打包前请先确保已完成后端和前端的 `npm install`。
+生产环境使用 Docker Compose 部署。前端由 Vite 构建。后端提供 API 和静态文件。
 
 ```bash
-cd desktop
-
-# 安装 Electron 相关依赖
-npm install
-
-# 打包（生成 NSIS 安装包 + 便携版 exe）
-npm run dist
-
-# 国内网络 Electron 下载慢时，使用镜像加速：
-npm run dist:cn
+docker compose up -d --build
 ```
 
-打包产物位于 `desktop/release/` 目录：
-- `本地短剧助手 Setup x.x.x.exe` — NSIS 安装包
-- `本地短剧助手 x.x.x.exe` — 便携版
-
-**打包原理：**
-1. 构建前端静态文件
-2. 复制后端代码与前端产物到 `desktop/` 
-3. electron-builder 打包为 Windows exe
+部署前请阅读 [部署文档](../deployment/README.md)。
 
 ---
 
 ## 配置文件说明
 
-配置文件位于 `backend-node/configs/config.yaml`（开发模式）或 `%APPDATA%\LocalMiniDrama\backend\configs\config.yaml`（exe 模式）。
+配置文件位于 `backend-node/configs/config.yaml`。生产密钥使用部署环境变量或受控环境文件。
 
 主要配置项：
 
@@ -181,7 +145,6 @@ AI 服务配置通过软件内「AI 配置」页面管理，无需手动编辑 Y
 |------|------|
 | `backend-node/data/drama_generator.db` | SQLite 数据库（开发模式） |
 | `backend-node/data/storage/` | 生成的图片和视频文件 |
-| `%APPDATA%\LocalMiniDrama\` | exe 模式下的所有数据 |
 
 > ⚠️ 升级版本前建议备份 `data/` 目录；数据库会在启动时自动执行迁移脚本，一般无需手动操作。
 
@@ -207,26 +170,10 @@ npm install
 
 ---
 
-### Q: 打包 exe 时 Electron 下载失败
-
-使用国内镜像：
-```bash
-cd desktop
-npm run dist:cn
-```
-
-或手动设置环境变量后再运行：
-```bash
-set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
-npm run dist
-```
-
----
-
 ### Q: 生成的图片/视频保存在哪里？
 
 开发模式：`backend-node/data/storage/`  
-exe 模式：`%APPDATA%\LocalMiniDrama\backend\data\storage\`
+生产环境：Docker Compose 配置的持久化数据目录。
 
 目录结构：
 ```
@@ -248,10 +195,9 @@ storage/
 
 ---
 
-### Q: 支持 Mac / Linux 吗？
+### Q: 支持哪些生产环境？
 
-目前仅测试了 Windows。后端（Node.js）理论上跨平台，前端（Vue 3）完全跨平台，但桌面版（Electron）打包仅配置了 Windows 目标。  
-欢迎提 PR 添加 Mac / Linux 打包支持。
+当前生产部署目标是 Linux 服务器和 Docker Compose。Windows 可用于本地开发。
 
 ---
 

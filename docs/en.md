@@ -2,12 +2,12 @@
 
 # 🎬 LocalMiniDrama
 
-**A locally-running AI short drama & comic generator — download and run, no cloud required, fully open source**
+**A self-hosted AI short drama and comic production platform**
 
 [![version](https://img.shields.io/badge/version-1.2.8-blue?style=flat-square)](../../releases)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](../LICENSE)
-[![platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=flat-square)](#)
-[![stack](https://img.shields.io/badge/Vue3%20%2B%20Node.js%20%2B%20Electron-informational?style=flat-square)](#)
+[![platform](https://img.shields.io/badge/platform-Docker%20%2B%20Linux-lightgrey?style=flat-square)](#)
+[![stack](https://img.shields.io/badge/Vue3%20%2B%20Node.js-informational?style=flat-square)](#)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](../../pulls)
 
 **[中文](../README.md) | English | [Author's Story](story.md)**
@@ -16,8 +16,7 @@
 
 ---
 
-There are plenty of AI short-drama tools out there, but almost none that truly run **offline locally, work out of the box, and keep your assets private**.  
-This project is built entirely in JavaScript from scratch. Connect your own AI API and start generating your own AI short drama immediately.
+LocalMiniDrama is a self-hosted production platform. The operator controls its database, media storage, accounts, and AI provider configuration.
 
 > ✅ No subscription · ✅ Data stays local · ✅ Multiple AI providers · ✅ Fully open source
 
@@ -89,18 +88,7 @@ This project is built entirely in JavaScript from scratch. Connect your own AI A
 
 ## 🚀 Quick Start
 
-### Option A — Download exe (recommended)
-
-Go to **[Releases](../../releases)** and download the latest:
-- `LocalMiniDrama Setup x.x.x.exe` — NSIS installer
-- `LocalMiniDrama x.x.x.exe` — portable, no install needed
-
-Double-click → open **AI Config** → enter your API key → start creating.
-
-> On first launch a config file is created at:  
-> `%APPDATA%\LocalMiniDrama\backend\configs\config.yaml`
-
-### Option B — Development Mode
+### Development Mode
 
 > Requires Node.js >= 18
 
@@ -112,8 +100,6 @@ cd LocalMiniDrama
 # 2. Backend (port 5679)
 cd backend-node
 npm install
-cp configs/config.example.yaml configs/config.yaml
-# Edit config.yaml — set your AI API endpoint and key
 npm run migrate   # first run: initialise DB
 npm start
 
@@ -127,7 +113,13 @@ Open `http://localhost:3013` in your browser.
 
 You can also double-click `run_dev.bat` at the project root to **start both servers at once**.
 
-📖 Full developer guide, packaging, and FAQ → **[Quickstart Guide](guides/quickstart.md)**
+For production, deploy the service with Docker Compose.
+
+```bash
+docker compose up -d --build
+```
+
+📖 Development and deployment guide → **[Quickstart Guide](guides/quickstart.md)**
 
 ---
 
@@ -165,7 +157,6 @@ LocalMiniDrama/
 │       ├── api/                  # Backend API wrappers
 │       ├── stores/               # Pinia state management
 │       └── styles/               # Global styles & theme variables
-├── desktop/               # Electron shell (builds the exe)
 ├── docs/                  # Documentation
 └── README.md
 ```
@@ -176,7 +167,6 @@ LocalMiniDrama/
 |-------|-----------|
 | Frontend | Vue 3 + Vite + Element Plus + Pinia + Axios |
 | Backend | Node.js + Express + SQLite (better-sqlite3) |
-| Desktop | Electron 28 + electron-builder |
 | Language | Plain JavaScript (no TypeScript) |
 
 ---

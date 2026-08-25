@@ -13,7 +13,7 @@ function sanitize(value, key = '', depth = 0) {
   return out;
 }
 
-// 简单 logger，和 Go 端行为接近；若设置 LOG_FILE 则同时追加到该文件（便于打包 exe 双击时查日志）
+// 简单 logger，和 Go 端行为接近；若设置 LOG_FILE，则同时追加到该文件。
 function log(level, msg, ...args) {
   const time = new Date().toISOString();
   let rest = '';
