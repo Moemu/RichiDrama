@@ -33,11 +33,17 @@ RichiDrama 是可自行部署的 AI 短剧生产平台。
 | 运营管理 | 管理账号、权限、模型价格和计费记录 |
 | 私有部署 | 使用 SQLite、持久化媒体目录和 Docker Compose |
 
-## 界面预览
+## 界面与 UI 审计
 
-![项目列表](docs/assets/project-screenshots/project-home.png)
+以下截图来自 2026-08-20 UI 审计。
 
-![画布工作流](docs/assets/project-screenshots/canvas-workflow.png)
+![项目工作台](docs/assets/ui-audit-20260820/02-project-list-1440x900.png)
+
+![分镜工作台](docs/assets/ui-audit-20260820/09-storyboard-workbench-1440x900.png)
+
+![画布工作流](docs/assets/ui-audit-20260820/25-canvas-loaded-1440x900.png)
+
+完整页面和三档桌面视口证据见 [UI 审计报告](docs/audits/2026-08-20-product-ui-asset-isolation.md#9-截图证据索引)。
 
 ## 快速开始
 

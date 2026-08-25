@@ -21,7 +21,7 @@
 - [产品与界面设计](design/README.md)
 - [审计报告](audits/)
 - [实施计划](plans/)
-- [文档资源](assets/README.md)
+- [UI 审计与截图](audits/2026-08-20-product-ui-asset-isolation.md#9-截图证据索引)
 
 ## 历史资料
 
