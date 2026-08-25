@@ -1,4 +1,4 @@
-# LocalMiniDrama Design System
+# RichiDrama Design System
 
 ## Design philosophy
 

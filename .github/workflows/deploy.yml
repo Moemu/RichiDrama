@@ -1,4 +1,4 @@
-# LocalMiniDrama 自动部署
+# RichiDrama 自动部署
 # 合并/推送到 main 后，自动 SSH 登录服务器执行 deploy.sh
 #
 # 需要配置的 Repository Secrets（Settings → Secrets and variables → Actions）:
@@ -38,7 +38,7 @@ jobs:
             set -e
             cd /data/apps/LocalMiniDrama
             # origin 对应当前 GitHub 仓库。服务器使用 SSH 拉取。
-            git remote set-url origin git@github.com:Moemu/LocalMiniDrama.git
+            git remote set-url origin git@github.com:Moemu/RichiDrama.git
             # 先拉取最新代码（deploy.sh 本身可能就是新加的），再执行部署脚本
             git fetch --all --prune
             git reset --hard origin/main

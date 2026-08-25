@@ -1,8 +1,8 @@
 # 贡献指南 / Contributing Guide
 
-感谢你对 LocalMiniDrama 的关注！无论是报告 Bug、提功能建议，还是贡献代码，都非常欢迎。
+感谢你对 RichiDrama 的关注！无论是报告 Bug、提功能建议，还是贡献代码，都非常欢迎。
 
-> Thank you for your interest in LocalMiniDrama! All forms of contribution are welcome — bug reports, feature suggestions, or code.
+> Thank you for your interest in RichiDrama! All forms of contribution are welcome — bug reports, feature suggestions, or code.
 
 ---
 
@@ -27,15 +27,15 @@ By participating, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md
 
 ## 报告 Bug / Reporting Bugs
 
-1. 先在 [Issues](../../issues) 搜索确认是否已有相同问题
-2. 如果没有，点击 [新建 Issue](../../issues/new/choose) 并选择 **Bug 报告** 模板
+1. 先在 [Issues](https://github.com/Moemu/RichiDrama/issues) 搜索确认是否已有相同问题
+2. 如果没有，点击 [新建 Issue](https://github.com/Moemu/RichiDrama/issues/new/choose) 并选择 **Bug 报告** 模板
 3. 尽量填写完整的复现步骤、环境信息和截图
 
 ---
 
 ## 功能建议 / Feature Requests
 
-1. 在 [Issues](../../issues) 中搜索是否已有相似建议
+1. 在 [Issues](https://github.com/Moemu/RichiDrama/issues) 中搜索是否已有相似建议
 2. 选择 **功能建议** 模板新建 Issue
 3. 描述清楚使用场景，有助于我们评估优先级
 
@@ -47,8 +47,8 @@ By participating, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md
 
 ```bash
 # 1. Fork 本仓库，然后克隆你的 Fork
-git clone https://github.com/你的用户名/LocalMiniDrama.git
-cd LocalMiniDrama
+git clone https://github.com/你的用户名/RichiDrama.git
+cd RichiDrama
 
 # 2. 创建功能分支（从 main 分支切出）
 git checkout -b feature/your-feature-name
@@ -82,10 +82,8 @@ git push origin feature/your-feature-name
 ```bash
 cd backend-node
 npm install
-cp configs/config.example.yaml configs/config.yaml
-# 编辑 config.yaml，填入你的 AI API 配置
-npm run migrate   # 首次运行，初始化数据库
-npm start         # 默认端口 5679
+# config.yaml 已包含在仓库中。
+npm run dev       # 默认端口 5679
 ```
 
 ### 启动前端
@@ -143,5 +141,5 @@ docs: 更新 AI 配置指南中的火山引擎配置说明
 
 ---
 
-再次感谢你的贡献！有任何疑问欢迎在 Issue 中提问或加入微信群交流。  
-Thanks again for contributing! Feel free to open an issue or join the WeChat group if you have any questions.
+再次感谢你的贡献！有问题时，请创建 Issue。
+Thanks again for contributing! Open an issue if you have a question.

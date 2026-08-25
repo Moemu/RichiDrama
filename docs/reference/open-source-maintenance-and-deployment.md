@@ -1,6 +1,6 @@
 # 开源项目二次开发与服务器部署完整流程
 
-> 本文是通用参考资料。LocalMiniDrama 的实际部署要求以 [`../deployment/`](../deployment/) 和仓库 `deploy/` 目录为准。
+> 本文是通用参考资料。RichiDrama 的实际部署要求以 [`../deployment/`](../deployment/) 和仓库 `deploy/` 目录为准。
 
 ## 1. 文档目标
 

@@ -1,6 +1,6 @@
 # 项目文档
 
-此目录是 LocalMiniDrama 的统一资料入口。
+此目录是 RichiDrama 的统一资料入口。
 
 ## 使用与配置
 

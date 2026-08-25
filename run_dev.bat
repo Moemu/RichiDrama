@@ -16,7 +16,7 @@ set BACKEND_PORT=5679
 set FRONTEND_PORT=3013
 
 echo ===========================================
-echo  LocalMiniDrama 本地开发环境一键启动
+echo  RichiDrama 本地开发环境一键启动
 echo ===========================================
 
 rem [1/3] 清理残留旧进程（避免端口冲突把 Vite 挤到别的端口）
@@ -28,12 +28,12 @@ call :kill_port %FRONTEND_PORT%
 rem [2/3] 启动后端（从 backend-node 目录启动 + 本地调试环境变量）
 echo.
 echo [2/3] 启动后端 (:%BACKEND_PORT%)...
-start "LMD-Backend" cmd /k "cd /d %ROOT%backend-node && set CFG_IMAGE_PROXY__USE_FOR_VIDEO=false && echo 后端运行中，按 Ctrl+C 停止 && npm run dev"
+start "RichiDrama-Backend" cmd /k "cd /d %ROOT%backend-node && set CFG_IMAGE_PROXY__USE_FOR_VIDEO=false && echo 后端运行中，按 Ctrl+C 停止 && npm run dev"
 
 rem [3/3] 启动前端
 echo.
 echo [3/3] 启动前端 (:%FRONTEND_PORT%)...
-start "LMD-Frontend" cmd /k "cd /d %ROOT%frontweb && echo 前端运行中，按 Ctrl+C 停止 && npm run dev"
+start "RichiDrama-Frontend" cmd /k "cd /d %ROOT%frontweb && echo 前端运行中，按 Ctrl+C 停止 && npm run dev"
 
 echo.
 echo ===========================================

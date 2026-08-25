@@ -38,12 +38,8 @@ cd backend-node
 # 安装依赖
 npm install
 
-# 复制配置文件模板
-cp configs/config.example.yaml configs/config.yaml
-# Windows PowerShell:
-# copy configs\config.example.yaml configs\config.yaml
-
-# 编辑 config.yaml，填入你的 AI API 地址与密钥（见配置指南）
+# config.yaml 已包含在仓库中。不要从不存在的模板复制。
+# AI 模型和密钥通过前端的“AI 配置”页面管理。
 
 # 首次运行：初始化数据库
 npm run migrate

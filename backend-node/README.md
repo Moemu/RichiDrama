@@ -1,14 +1,13 @@
-# LocalMiniDrama 后端服务
+# RichiDrama 后端服务
 
 **Node.js + Express + SQLite · 纯 JavaScript · 无 TypeScript**
 
 → [项目主页](../README.md) | [快速开始](../docs/guides/quickstart.md) | [AI 配置](../docs/guides/configuration.md) | [版本历史](../docs/changelog.md) | [作者故事](../docs/story.md) | [English](../docs/en.md)
 
 **官方仓库：**
-[![GitHub](https://img.shields.io/badge/GitHub-xuanyustudio%2FLocalMiniDrama-181717?logo=github)](https://github.com/xuanyustudio/LocalMiniDrama)
-[![Gitee](https://img.shields.io/badge/Gitee-bi__shang__a%2Flocalminidrama-C71D23?logo=gitee)](https://gitee.com/bi_shang_a/localminidrama)
+[![GitHub](https://img.shields.io/badge/GitHub-Moemu%2FRichiDrama-181717?logo=github)](https://github.com/Moemu/RichiDrama)
 
-> 遇到问题或有功能建议，欢迎在 [GitHub Issues](https://github.com/xuanyustudio/LocalMiniDrama/issues) 或 [Gitee Issues](https://gitee.com/bi_shang_a/localminidrama/issues) 提交反馈。
+> 遇到问题或有功能建议，请在 [GitHub Issues](https://github.com/Moemu/RichiDrama/issues) 提交反馈。
 
 > **本包版本：** `1.2.8`（与仓库根目录 [CHANGELOG](../CHANGELOG.md)、前端与桌面 `package.json` 对齐）
 
@@ -172,7 +171,7 @@ style:
 - [官方即梦 2.0 配置](../docs/integrations/model-proxies/images/seedream-2-official.png)
 - [本地反向代理即梦 Free API 配置](../docs/integrations/model-proxies/images/seedream-freeapi-local-proxy.png)
 
-若中转商控制台中的商品名（如「即梦 2.0」）与示例里的 **模型 ID**（如 `doubao-seedream-4-0-250828`）表述不一致，以对方实际开放的模型 ID 为准，并在本系统中与 JSON 保持一致。更多面向最终用户的说明见仓库根目录 [项目主页 `index.html`](../index.html) 中的「AI 与各大平台中转站」区块（发布页展示用）。
+若中转商控制台中的商品名与示例中的模型 ID 不同，请使用服务商实际开放的模型 ID。配置示例见 [`docs/integrations/model-proxies`](../docs/integrations/model-proxies/README.md)。
 
 ---
 

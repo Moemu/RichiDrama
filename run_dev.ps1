@@ -1,4 +1,4 @@
-# LocalMiniDrama local dev launcher: backend (5679) + frontend (3013)
+# RichiDrama local dev launcher: backend (5679) + frontend (3013)
 # Usage: powershell -ExecutionPolicy Bypass -File ./run_dev.ps1
 # Why env var: backend MUST start with CFG_IMAGE_PROXY__USE_FOR_VIDEO=false in local debug,
 # otherwise video gen uploads local ref images to a slow proxy and blocks async tasks for minutes.
@@ -24,7 +24,7 @@ function Stop-Port($port) {
 }
 
 Write-Host "===========================================" -ForegroundColor Cyan
-Write-Host " LocalMiniDrama dev launcher" -ForegroundColor Cyan
+Write-Host " RichiDrama dev launcher" -ForegroundColor Cyan
 Write-Host "===========================================" -ForegroundColor Cyan
 
 Write-Host ""
