@@ -68,9 +68,9 @@
 
 有任何建议、交流、合作欢迎加微信：
 
-<img src="../项目截图/wx.jpg" alt="微信二维码" width="220" />
+<img src="assets/community/wechat-contact.jpg" alt="微信二维码" width="220" />
 <br/>
-<img src="../项目截图/微信群.jpg" alt="微信交流群" width="220"/><br/>
+<img src="assets/community/wechat-group.jpg" alt="微信交流群" width="220"/><br/>
 
 
 ---

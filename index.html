@@ -421,7 +421,7 @@ var _hmt = _hmt || [];
                     </div>
                     <h3 class="text-xl font-bold text-primary-900 mb-3">灵活 AI 配置</h3>
                     <p class="text-primary-600">
-                        支持多种 AI 模型接入，灵活配置 API Key。仓库内提供「各大平台中转站配置」示例 JSON，可一键对照导入后再替换为自己的 Key。
+                        支持多种 AI 模型接入，灵活配置 API Key。仓库内提供“模型中转平台配置示例”JSON，可导入后再替换为自己的 Key。
                     </p>
                 </div>
                 
@@ -503,9 +503,9 @@ var _hmt = _hmt || [];
     <section id="ai-relay" class="py-24 bg-gradient-to-b from-primary-50 to-white border-t border-primary-100">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center mb-14">
-                <h2 class="text-4xl font-bold text-primary-900 mb-4">AI 与各大平台中转站</h2>
+                <h2 class="text-4xl font-bold text-primary-900 mb-4">AI 与模型中转平台</h2>
                 <p class="text-xl text-primary-600 max-w-3xl mx-auto">
-                    在 GitHub 仓库的 <code class="text-sm bg-primary-100 px-2 py-0.5 rounded text-primary-800">各大平台中转站配置/</code> 目录中，整理了常见中转服务商的示例配置，便于快速找到对应站点并对照修改。
+                    在 GitHub 仓库的 <code class="text-sm bg-primary-100 px-2 py-0.5 rounded text-primary-800">docs/integrations/model-proxies/</code> 目录中，整理了常见中转服务商的示例配置。
                 </p>
             </div>
 
@@ -515,7 +515,7 @@ var _hmt = _hmt || [];
                     怎么用
                 </h3>
                 <ol class="list-decimal list-inside space-y-2 text-primary-700 text-sm sm:text-base">
-                    <li>打开仓库目录：<a href="https://github.com/xuanyustudio/LocalMiniDrama/tree/main/%E5%90%84%E5%A4%A7%E5%B9%B3%E5%8F%B0%E4%B8%AD%E8%BD%AC%E7%AB%99%E9%85%8D%E7%BD%AE" target="_blank" rel="noopener noreferrer" class="text-primary-600 font-medium underline hover:text-primary-500">各大平台中转站配置（GitHub）</a>，先阅读其中的 <code class="text-xs bg-primary-50 px-1.5 py-0.5 rounded">使用说明.txt</code>。</li>
+                    <li>打开仓库目录：<a href="https://github.com/xuanyustudio/LocalMiniDrama/tree/main/docs/integrations/model-proxies" target="_blank" rel="noopener noreferrer" class="text-primary-600 font-medium underline hover:text-primary-500">模型中转平台配置示例（GitHub）</a>，先阅读其中的 <code class="text-xs bg-primary-50 px-1.5 py-0.5 rounded">README.md</code>。</li>
                     <li>选择与你购买服务一致的中转商 JSON（文件名即站点标识），在应用 AI 设置中导入或手动对照字段填写。</li>
                     <li>将配置里<strong class="text-primary-900">每一条服务</strong>的 <code class="text-xs bg-primary-50 px-1.5 py-0.5 rounded">api_key</code> 全部替换为你自己的 Key；<code class="text-xs bg-primary-50 px-1.5 py-0.5 rounded">base_url</code> 若中转商提供了专属域名，请按对方文档修改。</li>
                     <li>若某中转站模型列表与示例不一致，以服务商后台为准，在应用内选择或填写对方开放的模型 ID 即可。</li>
@@ -525,24 +525,24 @@ var _hmt = _hmt || [];
             <div class="mb-14">
                 <h3 class="text-lg font-bold text-primary-900 mb-4 text-center">示例配置文件（直链）</h3>
                 <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl mx-auto">
-                    <a href="https://raw.githubusercontent.com/xuanyustudio/LocalMiniDrama/main/%E5%90%84%E5%A4%A7%E5%B9%B3%E5%8F%B0%E4%B8%AD%E8%BD%AC%E7%AB%99%E9%85%8D%E7%BD%AE/302ai-302.json" target="_blank" rel="noopener noreferrer" class="github-card rounded-xl p-5 card-hover flex flex-col gap-2">
-                        <span class="font-semibold text-primary-900">302.AI（302ai-302.json）</span>
+                    <a href="https://raw.githubusercontent.com/xuanyustudio/LocalMiniDrama/main/docs/integrations/model-proxies/examples/302ai.json" target="_blank" rel="noopener noreferrer" class="github-card rounded-xl p-5 card-hover flex flex-col gap-2">
+                        <span class="font-semibold text-primary-900">302.AI（302ai.json）</span>
                         <span class="text-sm text-primary-600">点击在浏览器中打开原始 JSON，另存后导入或复制字段。</span>
                     </a>
-                    <a href="https://raw.githubusercontent.com/xuanyustudio/LocalMiniDrama/main/%E5%90%84%E5%A4%A7%E5%B9%B3%E5%8F%B0%E4%B8%AD%E8%BD%AC%E7%AB%99%E9%85%8D%E7%BD%AE/%E4%BA%91%E9%9B%BEai.json" target="_blank" rel="noopener noreferrer" class="github-card rounded-xl p-5 card-hover flex flex-col gap-2">
-                        <span class="font-semibold text-primary-900">云雾 AI（云雾ai.json）</span>
+                    <a href="https://raw.githubusercontent.com/xuanyustudio/LocalMiniDrama/main/docs/integrations/model-proxies/examples/yunwu-ai.json" target="_blank" rel="noopener noreferrer" class="github-card rounded-xl p-5 card-hover flex flex-col gap-2">
+                        <span class="font-semibold text-primary-900">云雾 AI（yunwu-ai.json）</span>
                         <span class="text-sm text-primary-600">同上，按需替换 Key 与地址。</span>
                     </a>
-                    <a href="https://raw.githubusercontent.com/xuanyustudio/LocalMiniDrama/main/%E5%90%84%E5%A4%A7%E5%B9%B3%E5%8F%B0%E4%B8%AD%E8%BD%AC%E7%AB%99%E9%85%8D%E7%BD%AE/%E5%90%91%E9%87%8F.json" target="_blank" rel="noopener noreferrer" class="github-card rounded-xl p-5 card-hover flex flex-col gap-2">
-                        <span class="font-semibold text-primary-900">向量（向量.json）</span>
+                    <a href="https://raw.githubusercontent.com/xuanyustudio/LocalMiniDrama/main/docs/integrations/model-proxies/examples/vector.json" target="_blank" rel="noopener noreferrer" class="github-card rounded-xl p-5 card-hover flex flex-col gap-2">
+                        <span class="font-semibold text-primary-900">向量（vector.json）</span>
                         <span class="text-sm text-primary-600">同上。</span>
                     </a>
-                    <a href="https://raw.githubusercontent.com/xuanyustudio/LocalMiniDrama/main/%E5%90%84%E5%A4%A7%E5%B9%B3%E5%8F%B0%E4%B8%AD%E8%BD%AC%E7%AB%99%E9%85%8D%E7%BD%AE/%E9%A3%9E%E5%84%BFapi-ffir.cn.json" target="_blank" rel="noopener noreferrer" class="github-card rounded-xl p-5 card-hover flex flex-col gap-2 sm:col-span-2 lg:col-span-1">
-                        <span class="font-semibold text-primary-900">飞儿 API（飞儿api-ffir.cn.json）</span>
+                    <a href="https://raw.githubusercontent.com/xuanyustudio/LocalMiniDrama/main/docs/integrations/model-proxies/examples/ffir-api.json" target="_blank" rel="noopener noreferrer" class="github-card rounded-xl p-5 card-hover flex flex-col gap-2 sm:col-span-2 lg:col-span-1">
+                        <span class="font-semibold text-primary-900">飞儿 API（ffir-api.json）</span>
                         <span class="text-sm text-primary-600">同上。</span>
                     </a>
-                    <a href="https://raw.githubusercontent.com/xuanyustudio/LocalMiniDrama/main/%E5%90%84%E5%A4%A7%E5%B9%B3%E5%8F%B0%E4%B8%AD%E8%BD%AC%E7%AB%99%E9%85%8D%E7%BD%AE/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.txt" target="_blank" rel="noopener noreferrer" class="github-card rounded-xl p-5 card-hover flex flex-col gap-2 sm:col-span-2">
-                        <span class="font-semibold text-primary-900">使用说明.txt</span>
+                    <a href="https://raw.githubusercontent.com/xuanyustudio/LocalMiniDrama/main/docs/integrations/model-proxies/README.md" target="_blank" rel="noopener noreferrer" class="github-card rounded-xl p-5 card-hover flex flex-col gap-2 sm:col-span-2">
+                        <span class="font-semibold text-primary-900">README.md</span>
                         <span class="text-sm text-primary-600">导入后务必将各条目的 Key 改为自己的；与示例不一致时以中转商文档为准。</span>
                     </a>
                 </div>
@@ -666,7 +666,7 @@ var _hmt = _hmt || [];
                     <h4 class="font-semibold text-white mb-4">相关链接</h4>
                     <ul class="space-y-2 text-sm">
                         <li><a href="https://github.com/xuanyustudio/LocalMiniDrama" class="hover:text-white transition-colors">GitHub 仓库</a></li>
-                        <li><a href="https://github.com/xuanyustudio/LocalMiniDrama/tree/main/%E5%90%84%E5%A4%A7%E5%B9%B3%E5%8F%B0%E4%B8%AD%E8%BD%AC%E7%AB%99%E9%85%8D%E7%BD%AE" class="hover:text-white transition-colors">各大平台中转站配置</a></li>
+                        <li><a href="https://github.com/xuanyustudio/LocalMiniDrama/tree/main/docs/integrations/model-proxies" class="hover:text-white transition-colors">模型中转平台配置示例</a></li>
                         <li><a href="https://github.com/xuanyustudio/LocalMiniDrama/releases" class="hover:text-white transition-colors">版本发布</a></li>
                         <li><a href="https://github.com/xuanyustudio/LocalMiniDrama/issues" class="hover:text-white transition-colors">问题反馈</a></li>
                         <li><a href="https://github.com/xuanyustudio/LocalMiniDrama/discussions" class="hover:text-white transition-colors">社区讨论</a></li>

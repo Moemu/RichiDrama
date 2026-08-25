@@ -111,7 +111,7 @@ npm start
 ```
 
 > Electron 开发需要安装 Python 3 和 Visual Studio C++ 生成工具（用于编译 better-sqlite3）。  
-> 详见 [快速开始文档](docs/quickstart.md)。
+> 详见 [快速开始文档](docs/guides/quickstart.md)。
 
 ---
 

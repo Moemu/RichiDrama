@@ -27,8 +27,8 @@ This project is built entirely in JavaScript from scratch. Connect your own AI A
 
 <table>
   <tr>
-    <td align="center"><img src="../项目截图/武侠.png" alt="Project list" width="480"/><br/><sub>Project list · Export/Import projects</sub></td>
-    <td align="center"><img src="../项目截图/武侠分镜.png" alt="Storyboard editor" width="480"/><br/><sub>Storyboard editor · One-click image + video generation</sub></td>
+    <td align="center"><img src="assets/project-screenshots/wuxia-project.png" alt="Project list" width="480"/><br/><sub>Project list · Export/Import projects</sub></td>
+    <td align="center"><img src="assets/project-screenshots/wuxia-storyboard.png" alt="Storyboard editor" width="480"/><br/><sub>Storyboard editor · One-click image + video generation</sub></td>
   </tr>
 </table>
 
@@ -127,7 +127,7 @@ Open `http://localhost:3013` in your browser.
 
 You can also double-click `run_dev.bat` at the project root to **start both servers at once**.
 
-📖 Full developer guide, packaging, and FAQ → **[Quickstart Guide](quickstart.md)**
+📖 Full developer guide, packaging, and FAQ → **[Quickstart Guide](guides/quickstart.md)**
 
 ---
 
@@ -141,7 +141,7 @@ You can also double-click `run_dev.bat` at the project root to **start both serv
 | Local (Ollama, OpenAI-compat.) | ✅ | — | — |
 | Other OpenAI-compatible APIs | ✅ | ✅ | — |
 
-📖 API key registration and configuration → **[Configuration Guide](configuration.md)**
+📖 API key registration and configuration → **[Configuration Guide](guides/configuration.md)**
 
 ---
 
@@ -257,11 +257,11 @@ LocalMiniDrama is **free, open source, and runs locally** — maintained in spar
 <table>
   <tr>
     <td align="center">
-      <img src="../项目截图/weixinpay.jpg" alt="WeChat Pay tip QR" width="200"/><br/>
+      <img src="assets/payments/wechat-pay.jpg" alt="WeChat Pay tip QR" width="200"/><br/>
       <sub><b>WeChat Pay</b></sub>
     </td>
     <td align="center">
-      <img src="../项目截图/ali.jpg" alt="Alipay tip QR" width="200"/><br/>
+      <img src="assets/payments/alipay.jpg" alt="Alipay tip QR" width="200"/><br/>
       <sub><b>Alipay</b></sub>
     </td>
   </tr>

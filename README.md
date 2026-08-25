@@ -12,12 +12,12 @@
 [![stack](https://img.shields.io/badge/Vue3%20%2B%20Node.js%20%2B%20Electron-informational?style=flat-square)](#-项目架构)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](https://github.com/xuanyustudio/LocalMiniDrama/pulls)
 
-**[English](docs/en.md) · 简体中文 · [作者故事](docs/story.md)**
+**[English](docs/en.md) · 简体中文 · [文档索引](docs/README.md) · [作者故事](docs/story.md)**
 
 [![GitHub](https://img.shields.io/badge/GitHub-xuanyustudio%2FLocalMiniDrama-181717?logo=github&style=flat-square)](https://github.com/xuanyustudio/LocalMiniDrama)
 [![Gitee](https://img.shields.io/badge/Gitee-bi__shang__a%2Flocalminidrama-C71D23?logo=gitee&style=flat-square)](https://gitee.com/bi_shang_a/localminidrama)
 
-[**⬇️ 下载 Release**](https://github.com/xuanyustudio/LocalMiniDrama/releases) · [**🚀 快速开始**](#-快速开始) · [**📖 配置 AI**](docs/configuration.md) · [**🗺 画布文档**](docs/plans/2026-06-15-drama-canvas-workflow-plan.md)
+[**⬇️ 下载 Release**](https://github.com/xuanyustudio/LocalMiniDrama/releases) · [**🚀 快速开始**](#-快速开始) · [**📖 配置 AI**](docs/guides/configuration.md) · [**🗺 画布文档**](docs/plans/2026-06-15-drama-canvas-workflow-plan.md)
 
 </div>
 
@@ -67,14 +67,14 @@
 ## 📸 界面预览
 
 <div align="center">
-  <img src="项目截图/首页截图.png" alt="首页 · 项目列表" width="960"/><br/>
+  <img src="docs/assets/project-screenshots/project-home.png" alt="首页 · 项目列表" width="960"/><br/>
   <sub>首页 · 项目卡片一览，亮色模式</sub>
 </div>
 
 <br/>
 
 <div align="center">
-  <img src="项目截图/画布模式.png" alt="画布工作流 · 分镜流水线" width="960"/><br/>
+  <img src="docs/assets/project-screenshots/canvas-workflow.png" alt="画布工作流 · 分镜流水线" width="960"/><br/>
   <sub>🆕 画布模式 · 分镜流水线可视化 · 节点内编辑/生成 · 工作流整组重跑</sub>
 </div>
 
@@ -82,42 +82,17 @@
 
 <table>
   <tr>
-    <td align="center"><img src="项目截图/武侠.png" alt="剧集管理页" width="480"/><br/><sub>剧集管理 · 分集 + 资源库</sub></td>
-    <td align="center"><img src="项目截图/武侠分镜.png" alt="分镜编辑页" width="480"/><br/><sub>分镜制作 · 图片 + 视频一键生成</sub></td>
+    <td align="center"><img src="docs/assets/project-screenshots/wuxia-project.png" alt="剧集管理页" width="480"/><br/><sub>剧集管理 · 分集 + 资源库</sub></td>
+    <td align="center"><img src="docs/assets/project-screenshots/wuxia-storyboard.png" alt="分镜编辑页" width="480"/><br/><sub>分镜制作 · 图片 + 视频一键生成</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="项目截图/新版本4宫格分镜.png" alt="角色管理页" width="480"/><br/><sub>角色生成 · AI 自动提取并生成角色形象图</sub></td>
-    <td align="center"><img src="项目截图/专业分镜.png" alt="专业分镜参数" width="480"/><br/><sub>分镜制作 · 专业视频参数（景别 / 运镜 / 灯光 / 景深）</sub></td>
+    <td align="center"><img src="docs/assets/project-screenshots/storyboard-four-grid.png" alt="角色管理页" width="480"/><br/><sub>角色生成 · AI 自动提取并生成角色形象图</sub></td>
+    <td align="center"><img src="docs/assets/project-screenshots/storyboard-advanced.png" alt="专业分镜参数" width="480"/><br/><sub>分镜制作 · 专业视频参数（景别 / 运镜 / 灯光 / 景深）</sub></td>
   </tr>
   <tr>
-    <td align="center" colspan="2"><img src="项目截图/本剧场景库.png" alt="本剧场景库" width="720"/><br/><sub>场景库 · 一键「加入本集」，复用已有场景素材</sub></td>
+    <td align="center" colspan="2"><img src="docs/assets/project-screenshots/scene-library.png" alt="本剧场景库" width="720"/><br/><sub>场景库 · 一键「加入本集」，复用已有场景素材</sub></td>
   </tr>
 </table>
-
----
-
-## 🎬 AI 生成实拍效果
-
-> 以下 3 段视频由**本软件自动工作流选择即梦 1.0**生成，展示连续分镜下角色外貌一致性。
-
-<table>
-  <tr>
-    <td align="center">
-      <video src="项目截图/1.mp4" controls width="300"></video><br/>
-      <sub>分镜 1 · 即梦 1.0</sub>
-    </td>
-    <td align="center">
-      <video src="项目截图/2.mp4" controls width="300"></video><br/>
-      <sub>分镜 2 · 服装一致</sub>
-    </td>
-    <td align="center">
-      <video src="项目截图/3.mp4" controls width="300"></video><br/>
-      <sub>分镜 3 · 人物统一</sub>
-    </td>
-  </tr>
-</table>
-
-> 💡 同时支持火山 **Seedance 2.0**、通义万相、Vidu、可灵 Kling（含 Omni）等，模型越新效果通常越好。
 
 ---
 
@@ -205,7 +180,7 @@ cd frontweb && npm install && npm run dev
 
 浏览器打开 `http://localhost:3013`，或双击根目录 **`run_dev.bat`** 一键启动。
 
-📖 [详细开发/打包/Docker 指南](docs/quickstart.md) · [AI 配置指南](docs/configuration.md)
+📖 [详细开发/打包/Docker 指南](docs/guides/quickstart.md) · [AI 配置指南](docs/guides/configuration.md)
 
 ---
 
@@ -301,8 +276,8 @@ LocalMiniDrama/
 
 <table>
   <tr>
-    <td align="center"><img src="项目截图/weixinpay.jpg" alt="微信赞赏码" width="200"/><br/><sub>微信支付</sub></td>
-    <td align="center"><img src="项目截图/ali.jpg" alt="支付宝收款码" width="200"/><br/><sub>支付宝</sub></td>
+    <td align="center"><img src="docs/assets/payments/wechat-pay.jpg" alt="微信赞赏码" width="200"/><br/><sub>微信支付</sub></td>
+    <td align="center"><img src="docs/assets/payments/alipay.jpg" alt="支付宝收款码" width="200"/><br/><sub>支付宝</sub></td>
   </tr>
 </table>
 
@@ -312,7 +287,7 @@ LocalMiniDrama/
 
 ## 💬 联系 & 社区
 
-[作者故事 & 碎碎念](docs/story.md) · 微信交流 / 用户群（二维码见仓库 `项目截图/` 目录）
+[作者故事 & 碎碎念](docs/story.md) · 微信交流 / 用户群（二维码见 `docs/assets/community/`）
 
 > 群二维码约 7 天有效，过期请加作者微信拉群。
 
@@ -328,6 +303,6 @@ LocalMiniDrama/
 
 **如果这个项目对你有帮助，请点 ⭐ Star —— 这是对作者最大的鼓励！**
 
-[⬇️ 立即下载](https://github.com/xuanyustudio/LocalMiniDrama/releases) · [📖 快速开始文档](docs/quickstart.md) · [🗺 画布文档](docs/plans/2026-06-15-drama-canvas-workflow-plan.md)
+[⬇️ 立即下载](https://github.com/xuanyustudio/LocalMiniDrama/releases) · [📖 快速开始文档](docs/guides/quickstart.md) · [🗺 画布文档](docs/plans/2026-06-15-drama-canvas-workflow-plan.md)
 
 </div>
