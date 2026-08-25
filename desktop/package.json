@@ -59,11 +59,6 @@
         "filter": ["**/*"]
       },
       {
-        "from": "../example_drama",
-        "to": "example_drama",
-        "filter": ["**/*"]
-      },
-      {
         "from": "../backend-node/tools/ffmpeg",
         "to": "ffmpeg",
         "filter": ["**/*"]

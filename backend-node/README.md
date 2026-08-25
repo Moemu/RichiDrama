@@ -269,13 +269,13 @@ style:
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/dramas/:id/characters` | 获取剧集角色 |
-| POST | `/dramas/:id/characters/extract` | 从剧本提取角色（触发任务） |
+| POST | `/generation/characters` | 从剧本提取角色（请求体传 `drama_id`，触发任务） |
 | POST | `/characters/:id/generate-image` | 生成角色图片 |
-| GET | `/dramas/:id/scenes` | 获取剧集场景 |
-| POST | `/episodes/:id/extract-backgrounds` | 提取场景背景（触发任务） |
+| GET | `/scenes/:id` | 获取场景 |
+| POST | `/images/episode/:id/backgrounds/extract` | 提取场景背景（触发任务） |
 | GET | `/dramas/:id/props` | 获取剧集道具 |
-| POST | `/episodes/:id/extract-props` | 从剧本提取道具（触发任务） |
-| POST | `/props/:id/generate-image` | 生成道具图片 |
+| POST | `/episodes/:id/props/extract` | 从剧本提取道具（触发任务） |
+| POST | `/props/:id/generate` | 生成道具图片 |
 
 ### 静态文件
 

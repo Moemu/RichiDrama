@@ -21,11 +21,6 @@
       "filter": ["**/*"]
     },
     {
-      "from": "../example_drama",
-      "to": "example_drama",
-      "filter": ["**/*"]
-    },
-    {
       "from": "ffmpeg-mac",
       "to": "ffmpeg",
       "filter": ["**/*"]

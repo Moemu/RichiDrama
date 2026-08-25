@@ -55,9 +55,6 @@ export const dramaAPI = {
   extractBackgrounds(episodeId, body) {
     return request.post(`/images/episode/${episodeId}/backgrounds/extract`, body || {})
   },
-  extractEpisodeCharacters(episodeId) {
-    return request.post(`/episodes/${episodeId}/characters/extract`)
-  },
   exportDrama(id) {
     return request.get(`/dramas/${id}/export`, { responseType: 'blob' })
   },

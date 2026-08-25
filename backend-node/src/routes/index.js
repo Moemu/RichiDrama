@@ -5,7 +5,6 @@ const taskRoutes = require('./task');
 const settingsRoutes = require('./settings');
 const aiConfigRoutes = require('./aiConfig');
 const propRoutes = require('./prop');
-const stubRoutes = require('./stub');
 const characterLibraryRoutes = require('./characterLibrary');
 const sceneLibraryRoutes = require('./sceneLibrary');
 const propLibraryRoutes = require('./propLibrary');
@@ -74,7 +73,6 @@ function setupRouter(cfg, db, log) {
   const settings = settingsRoutes(db, cfg, log);
   const aiConfig = aiConfigRoutes(db, log, cfg);
   const prop = propRoutes(db, log, cfg);
-  const stub = stubRoutes(db, cfg, log);
   const sceneModelMap = sceneModelMapRoutes(db, log);
   const omniVideo = require('./omniVideo')(db, log, cfg);
   
@@ -388,7 +386,6 @@ function setupRouter(cfg, db, log) {
   // 之前可能有部分路由指向了 storyboards.episodeStoryboardsGenerate，这可能导致参数解析不一致
   r.post('/episodes/:episode_id/storyboards', drama.generateStoryboard);
   r.post('/episodes/:episode_id/props/extract', prop.extractProps);
-  r.post('/episodes/:episode_id/characters/extract', stub.episodeCharactersExtract);
   r.get('/episodes/:episode_id/storyboards', storyboards.episodeStoryboardsGet);
   r.get('/episodes/:episode_id/generation-settings', storyboards.episodeGenerationSettingsGet);
   r.patch('/episodes/:episode_id/generation-settings', storyboards.episodeGenerationSettingsUpdate);
