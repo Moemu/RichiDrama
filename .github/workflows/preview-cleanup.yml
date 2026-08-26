@@ -27,7 +27,7 @@ jobs:
           username: root
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          script: preview-remove '${{ github.event.pull_request.number }}'
+          script: bash /data/apps/LocalMiniDrama/deploy/preview-remove '${{ github.event.pull_request.number }}'
       - name: Remove expired previews
         if: github.event_name != 'pull_request_target'
         uses: appleboy/ssh-action@v1.2.0
@@ -36,4 +36,4 @@ jobs:
           username: root
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          script: preview-cleanup
+          script: bash /data/apps/LocalMiniDrama/deploy/preview-cleanup

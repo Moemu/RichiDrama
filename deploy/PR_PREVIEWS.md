@@ -4,7 +4,7 @@
 
 每个 PR 自动运行 `Validation`。此流程运行后端测试、前端测试、前端构建、空数据库迁移和容器构建。
 
-管理员审查内部 PR 后，手动运行 `PR Preview`。输入 PR 编号。GitHub `preview` environment 需要批准。
+内部 PR 打开或更新时自动触发 `PR Preview`（`pull_request_target`）。该流程运行在受保护的 `preview` environment 中，需要管理员批准后才会部署；也可以通过 `workflow_dispatch` 手动输入 PR 编号重跑。只有仓库成员的同一仓库分支会被部署，其他来源一律拒绝。
 
 预览成功后，提交获得 `preview / smoke` 状态。`main` 分支要求此状态。
 
@@ -16,43 +16,42 @@
 - 不可变源码：`/data/minidrama-releases/<sha>/source`
 - 发布前数据库：`/data/minidrama-releases/<sha>/production-before.db`
 - PR 数据：`/data/minidrama-previews/pr-<number>`
+- 预览 Basic Auth 凭据：`/data/minidrama-previews/auth`
 - 生产数据：`/data/minidrama-data`
 
-PR 应用共享独立 network anchor 的 namespace。部署脚本在应用启动前删除 default route。PR 应用不能挂载生产数据目录。
+## 预览架构
+
+预览是纯 HTTP，不签发任何证书：
+
+- 所有预览共享一个 Docker 内部网络 `minidrama-previews`（`--internal`，无法访问公网）。
+- 每个 PR 只有一个容器 `minidrama-pr-<number>`，以别名 `pr-<number>` 加入该网络。
+- 端口 80 入口容器加载一份静态配置 `deploy/nginx-preview-http.conf`：按 `pr-<number>.preview.drama.richbest.cn` 匹配主机名，经 Basic Auth 后用 Docker DNS 反代到对应容器。这份文件不随预览增删变化。
+- 预览数据来自生产库在线快照；迁移会在快照副本上先完整验证两次，然后才启动预览应用。生产数据目录永不挂载进预览。
 
 Runner 只发送 PR 编号和 commit SHA。服务器通过 GitHub SSH Deploy Key 获取 PR ref，并在本机创建源码包。
 
 ## 首次服务器准备
 
-安装 Docker、Certbot、OpenSSL 和 `flock`。
+安装 Docker 和 `flock`。
 
-当前服务器使用两个入口容器：
+当前服务器使用一个入口容器：
 
-- `lens-rhyme-nginx-1` 处理端口 80 和 HTTP-01。
-- `avatar-proxy-api-gateway-1` 处理端口 443 和预览 TLS。
-- TLS 容器挂载宿主机 `/etc/letsencrypt` 为只读目录。
-- 预览代理连接 `avatar-proxy_default` 和当前 PR 的独立网络。
-- PR 应用没有 default route，也没有 `NET_ADMIN` capability。
+- `lens-rhyme-nginx-1` 处理端口 80（生产站点与全部预览子域名）。
+
+首次预览部署会自动创建 `minidrama-previews` 网络，并把入口容器接入该网络（`--gw-priority -1` 保证其默认路由不变）。
 
 如服务器名称不同，可以设置：
 
 ```text
 MINIDRAMA_HTTP_NGINX_CONTAINER
-MINIDRAMA_TLS_NGINX_CONTAINER
-MINIDRAMA_TLS_PROXY_NETWORK
 MINIDRAMA_PROXY_NETWORK
+MINIDRAMA_PREVIEW_NETWORK
 ```
 
-在火山引擎 DNS 中添加记录：
+在火山引擎 DNS 中添加记录（外部访问预览的前提）：
 
 ```text
 *.preview.drama.richbest.cn  A  <生产服务器公网 IP>
-```
-
-GitHub `preview` environment 需要变量：
-
-```text
-MINIDRAMA_ACME_EMAIL=i@snowy.moe
 ```
 
 第一次成功生产发布会安装以下命令：

@@ -8,10 +8,9 @@ PROD_DATA_DIR="${MINIDRAMA_DATA_DIR:-/data/minidrama-data}"
 DEPLOY_LOCK="${MINIDRAMA_DEPLOY_LOCK:-/var/lock/minidrama-deploy.lock}"
 PROD_CONTAINER="${MINIDRAMA_PROD_CONTAINER:-local-minidrama}"
 HTTP_NGINX_CONTAINER="${MINIDRAMA_HTTP_NGINX_CONTAINER:-${MINIDRAMA_NGINX_CONTAINER:-lens-rhyme-nginx-1}}"
-TLS_NGINX_CONTAINER="${MINIDRAMA_TLS_NGINX_CONTAINER:-avatar-proxy-api-gateway-1}"
 PROD_PROXY_NETWORK="${MINIDRAMA_PROXY_NETWORK:-lens-rhyme_default}"
 # shellcheck disable=SC2034 # Used by scripts that source this library.
-TLS_PROXY_NETWORK="${MINIDRAMA_TLS_PROXY_NETWORK:-avatar-proxy_default}"
+PREVIEW_NETWORK="${MINIDRAMA_PREVIEW_NETWORK:-minidrama-previews}"
 
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*" >&2; }
 fail() { log "ERROR: $*" >&2; exit 1; }
@@ -208,30 +207,42 @@ safe_remove_preview_dir() {
 }
 
 remove_preview_resources() {
-  local pr="$1" delete_cert="${2:-1}" pr_dir="$PREVIEW_ROOT/pr-$1" host='' network=''
+  local pr="$1" pr_dir="$PREVIEW_ROOT/pr-$1"
   validate_pr "$pr"
-  if [[ -f "$pr_dir/metadata.env" ]]; then
-    host="$(awk -F= '$1=="HOST"{print $2}' "$pr_dir/metadata.env")"
-    network="$(awk -F= '$1=="NETWORK"{print $2}' "$pr_dir/metadata.env")"
-  fi
-  # Remove routes before containers so Nginx never keeps an unavailable DNS upstream.
+  # Drop any stale per-PR ingress reference (legacy layout) before removing the
+  # containers, so Nginx never proxies to an unavailable upstream.
   if docker ps --format '{{.Names}}' | grep -Fqx "$HTTP_NGINX_CONTAINER"; then
     docker exec "$HTTP_NGINX_CONTAINER" rm -f "/etc/nginx/conf.d/preview-pr-$pr.conf"
-    docker exec "$HTTP_NGINX_CONTAINER" nginx -t
-    docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload
-  fi
-  if docker ps --format '{{.Names}}' | grep -Fqx "$TLS_NGINX_CONTAINER"; then
-    docker exec "$TLS_NGINX_CONTAINER" rm -f "/etc/nginx/conf.d/preview-pr-$pr.conf"
-    docker exec "$TLS_NGINX_CONTAINER" nginx -t
-    docker exec "$TLS_NGINX_CONTAINER" nginx -s reload
   fi
   mapfile -t preview_containers < <(docker ps -aq --filter "label=com.richidrama.preview-pr=$pr")
   ((${#preview_containers[@]} == 0)) || docker rm -f "${preview_containers[@]}" >/dev/null
-  [[ -z "$network" ]] || docker network rm "$network" >/dev/null 2>&1 || true
-  if [[ -n "$host" && "$delete_cert" == 1 ]] && command -v certbot >/dev/null 2>&1; then
-    certbot delete --non-interactive --cert-name "$host" >/dev/null 2>&1 || true
-  fi
   safe_remove_preview_dir "$pr"
+}
+
+ensure_preview_network() {
+  docker network inspect "$PREVIEW_NETWORK" >/dev/null 2>&1 && return 0
+  docker network create --internal "$PREVIEW_NETWORK" >/dev/null || \
+    fail 'Cannot create the preview Docker network.'
+}
+
+attach_ingress_to_preview_network() {
+  require_running_container "$HTTP_NGINX_CONTAINER"
+  local networks
+  networks="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$HTTP_NGINX_CONTAINER")"
+  grep -Fqx "$PREVIEW_NETWORK" <<<"$networks" && return 0
+  # gw-priority -1 keeps the ingress default route on its primary network.
+  docker network connect --gw-priority -1 "$PREVIEW_NETWORK" "$HTTP_NGINX_CONTAINER" >/dev/null || \
+    fail 'Cannot attach the HTTP ingress to the preview network.'
+}
+
+install_preview_http_ingress() {
+  local conf_source="$1" auth_dir="$PREVIEW_ROOT/auth"
+  [[ -r "$auth_dir/htpasswd" ]] || fail 'Preview basic-auth file is missing.'
+  require_running_container "$HTTP_NGINX_CONTAINER"
+  docker cp "$conf_source" "$HTTP_NGINX_CONTAINER:/etc/nginx/conf.d/minidrama-previews.conf"
+  docker cp "$auth_dir/htpasswd" "$HTTP_NGINX_CONTAINER:/etc/nginx/minidrama-preview.htpasswd"
+  docker exec "$HTTP_NGINX_CONTAINER" nginx -t
+  docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload
 }
 
 prune_release_images() {
