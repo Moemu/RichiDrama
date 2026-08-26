@@ -21,6 +21,8 @@ test('preview deployment isolates data, network and resources', () => {
   assert.doesNotMatch(source, /-v "\$PROD_DATA_DIR:\/app\/backend-node\/data"/);
   assert.match(gateway, /auth_basic_user_file/);
   assert.match(source, /preview\.drama\.richbest\.cn/);
+  assert.match(source, /docker cp -L .*fullchain\.pem/);
+  assert.match(source, /docker cp -L .*privkey\.pem/);
   assert.match(acmeHook, /chmod 644 "\$tmp"/);
   assert.match(acmeHook, /chmod 644 .*CERTBOT_TOKEN/);
 });

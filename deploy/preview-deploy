@@ -126,8 +126,8 @@ if ! MINIDRAMA_NGINX_CONTAINER="$NGINX_CONTAINER" certbot certonly --manual --no
 fi
 
 docker exec "$NGINX_CONTAINER" mkdir -p "/etc/nginx/preview-certs/$HOST"
-docker cp "/etc/letsencrypt/live/$HOST/fullchain.pem" "$NGINX_CONTAINER:/etc/nginx/preview-certs/$HOST/fullchain.pem"
-docker cp "/etc/letsencrypt/live/$HOST/privkey.pem" "$NGINX_CONTAINER:/etc/nginx/preview-certs/$HOST/privkey.pem"
+docker cp -L "/etc/letsencrypt/live/$HOST/fullchain.pem" "$NGINX_CONTAINER:/etc/nginx/preview-certs/$HOST/fullchain.pem"
+docker cp -L "/etc/letsencrypt/live/$HOST/privkey.pem" "$NGINX_CONTAINER:/etc/nginx/preview-certs/$HOST/privkey.pem"
 
 cat > "$PR_DIR/outer-nginx.conf" <<EOF
 server {
