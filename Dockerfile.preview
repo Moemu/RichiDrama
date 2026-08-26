@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1
+
+ARG RUNTIME_BASE_IMAGE=local-minidrama:preview-runtime-base
+
+FROM node:18-bookworm-slim AS builder
+
+# Match the established production builder so the host can reuse its package
+# and dependency layers. The preview build does not pull a new base image.
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 make g++ git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY frontweb/package.json frontweb/package-lock.json* ./frontweb/
+RUN npm config set registry https://registry.npmmirror.com
+RUN cd frontweb && npm install --no-audit --no-fund
+COPY frontweb ./frontweb
+RUN cd frontweb && npm run build
+
+COPY backend-node/package.json backend-node/package-lock.json* ./backend-node/
+COPY backend-node/.npmrc ./backend-node/.npmrc
+RUN cd backend-node && npm ci --omit=dev --no-audit --no-fund
+COPY backend-node ./backend-node
+
+FROM ${RUNTIME_BASE_IMAGE} AS runtime
+
+WORKDIR /app/backend-node
+COPY --from=builder /build/backend-node ./
+COPY --from=builder /build/frontweb/dist /app/frontweb/dist
+
+ARG APP_REVISION=unknown
+ENV NODE_ENV=production
+ENV PORT=5679
+ENV APP_REVISION=${APP_REVISION}
+LABEL org.opencontainers.image.revision=${APP_REVISION}
+
+EXPOSE 5679
+VOLUME ["/app/backend-node/data"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "src/server.js"]

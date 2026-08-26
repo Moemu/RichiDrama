@@ -34,7 +34,7 @@ ACTIVE_COUNT="$(find "$PREVIEW_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'pr-*
 (( ACTIVE_COUNT < 2 )) || fail 'Two preview environments already exist.'
 
 SOURCE_DIR="$(prepare_source "$SHA")"
-IMAGE="$(build_image "$SHA" "$SOURCE_DIR")"
+IMAGE="$(build_preview_image "$SHA" "$SOURCE_DIR")"
 
 # Remove only the previous environment for this PR.
 if [[ -d "$PREVIEW_ROOT/pr-$PR_NUMBER" ]]; then

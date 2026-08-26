@@ -97,8 +97,27 @@ build_image() {
   local sha="$1" source_dir="$2" image="local-minidrama:${1}"
   if ! docker image inspect "$image" >/dev/null 2>&1; then
     log "Building immutable image $image"
-    docker build --build-arg "APP_REVISION=$sha" -t "$image" "$source_dir" || \
+    docker build --pull --build-arg "APP_REVISION=$sha" -t "$image" "$source_dir" || \
       fail "Immutable image build failed: $image"
+  else
+    log "Using existing image $image"
+  fi
+  printf '%s\n' "$image"
+}
+
+build_preview_image() {
+  local sha="$1" source_dir="$2" image="local-minidrama:${1}"
+  local base_image base_tag="local-minidrama:preview-runtime-base"
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    require_running_container "$PROD_CONTAINER"
+    base_image="$(docker inspect --format '{{.Image}}' "$PROD_CONTAINER")"
+    [[ "$base_image" =~ ^sha256:[0-9a-f]{64}$ ]] || fail 'Cannot resolve the production image ID.'
+    docker image tag "$base_image" "$base_tag"
+    log "Building preview image $image from the active production runtime"
+    docker build --file "$source_dir/Dockerfile.preview" \
+      --build-arg "RUNTIME_BASE_IMAGE=$base_tag" \
+      --build-arg "APP_REVISION=$sha" \
+      -t "$image" "$source_dir" || fail "Preview image build failed: $image"
   else
     log "Using existing image $image"
   fi
