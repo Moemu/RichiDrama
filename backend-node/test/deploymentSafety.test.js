@@ -13,6 +13,7 @@ test('preview deployment isolates data, network and resources', () => {
   assert.match(source, /--network "\$NETWORK" --network-alias preview-app/);
   assert.match(source, /--memory 2g --cpus 1/);
   assert.match(source, /--pids-limit 256/);
+  assert.match(source, /apt-get install -y --no-install-recommends certbot/);
   assert.match(source, /-v "\$DATA_DIR:\/app\/backend-node\/data"/);
   assert.doesNotMatch(source, /-v "\$PROD_DATA_DIR:\/app\/backend-node\/data"/);
   assert.match(gateway, /auth_basic_user_file/);

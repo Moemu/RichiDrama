@@ -11,7 +11,13 @@ PR_NUMBER="$1"
 SHA="$2"
 acquire_lock
 
-command -v certbot >/dev/null 2>&1 || fail 'certbot is required for preview HTTPS.'
+if ! command -v certbot >/dev/null 2>&1; then
+  command -v apt-get >/dev/null 2>&1 || fail 'certbot is required and apt-get is unavailable.'
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y --no-install-recommends certbot
+fi
+command -v certbot >/dev/null 2>&1 || fail 'certbot installation failed.'
 command -v openssl >/dev/null 2>&1 || fail 'openssl is required.'
 : "${MINIDRAMA_ACME_EMAIL:?Set MINIDRAMA_ACME_EMAIL for certificate issuance.}"
 
