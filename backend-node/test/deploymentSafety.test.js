@@ -6,11 +6,12 @@ const path = require('path');
 const root = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('preview deployment isolates data, network and resources', () => {
+test('preview deployment isolates data, network, secrets and resources', () => {
   const source = read('deploy/preview-deploy');
   const library = read('deploy/lib.sh');
   const previewDockerfile = read('Dockerfile.preview');
-  const vhost = read('deploy/nginx-preview-http.conf');
+  const passthrough = read('deploy/nginx-previews-passthrough.conf');
+  const edge = read('deploy/nginx-preview-edge.conf');
   assert.match(source, /build_preview_image "\$SHA" "\$SOURCE_DIR"/);
   assert.match(library, /docker inspect --format '\{\{\.Image\}\}' "\$PROD_CONTAINER"/);
   assert.match(library, /RUNTIME_BASE_IMAGE=\$base_tag/);
@@ -26,9 +27,10 @@ test('preview deployment isolates data, network and resources', () => {
     /ANCHOR_CONTAINER|ip route del default|NET_ADMIN|"container:\$|GATEWAY_CONTAINER/
   );
   // Previews are HTTP-only: no certificate machinery may return.
-  assert.doesNotMatch(source + library + vhost, /certbot|letsencrypt|TLS_PROXY_NETWORK|TLS_NGINX_CONTAINER|listen 443/);
-  assert.match(source, /Preview app can access the public network/);
-  assert.match(source, /acquire_lock\nvalidate_production_ingress/);
+  assert.doesNotMatch(source + library + edge + passthrough, /certbot|letsencrypt|TLS_PROXY_NETWORK|TLS_NGINX_CONTAINER|listen 443/);
+  // Production secrets never reach preview code.
+  assert.doesNotMatch(source, /--env-file/);
+  assert.match(source, /MINIDRAMA_STORAGE_TYPE=local/);
   // Migration safety against the current production snapshot is mandatory.
   assert.match(source, /create_online_snapshot "\$DATA_DIR\/drama_generator\.db"/);
   assert.match(source, /verify_migrations "\$IMAGE" "\$DATA_DIR"/);
@@ -37,16 +39,40 @@ test('preview deployment isolates data, network and resources', () => {
   assert.match(source, /--pids-limit 256/);
   assert.match(source, /-v "\$DATA_DIR:\/app\/backend-node\/data"/);
   assert.doesNotMatch(source, /-v "\$PROD_DATA_DIR:\/app\/backend-node\/data"/);
-  assert.match(vhost, /resolver 127\.0\.0\.11/);
+  // Preview deploys only inspect production ingress; they never migrate it.
+  assert.match(source, /acquire_lock\nvalidate_production_ingress_readonly/);
+  assert.match(library, /validate_production_ingress\(\)/);
+  assert.match(library, /mv "\$stale" "\$disabled"/);
+  // Candidate images must be pruned on every successful preview.
+  assert.match(source, /prune_release_images/);
+});
+
+test('preview edge is the only dual-homed component and cannot pivot', () => {
+  const source = read('deploy/preview-deploy');
+  const library = read('deploy/lib.sh');
+  const passthrough = read('deploy/nginx-previews-passthrough.conf');
+  const edge = read('deploy/nginx-preview-edge.conf');
+  assert.match(source, /install_preview_http_ingress "\$SOURCE_DIR\/deploy\/nginx-previews-passthrough\.conf" "\$SOURCE_DIR\/deploy\/nginx-preview-edge\.conf"/);
+  assert.match(library, /PREVIEW_EDGE_CONTAINER=/);
+  assert.match(library, /ensure_preview_edge/);
+  // The edge enforces authentication; the outer passthrough carries none, so
+  // it can never leak credentials nor be talked into proxying elsewhere.
+  assert.match(edge, /auth_basic "RichiDrama PR Preview"/);
+  assert.match(edge, /auth_basic_user_file \/etc\/nginx\/minidrama-preview\.htpasswd/);
+  assert.doesNotMatch(passthrough, /auth_basic/);
+  assert.match(edge, /listen 8080 default_server/);
+  assert.match(edge, /return 404/);
+  assert.match(edge, /resolver 127\.0\.0\.11/);
   // The routed hostname carries the literal pr- prefix; a digits-only match
   // silently falls through to the rejection block (regression 2026-08-26).
-  assert.match(vhost, /server_name "~\^pr-\(\?<preview_pr>\[0-9]\+\)\\\.preview\\\.drama/);
-  // The legacy ACME-only vhost uses a suffix wildcard that outranks regex
-  // server names; every deploy must remove it from the ingress container.
-  assert.match(library, /rm -f \/etc\/nginx\/conf\.d\/minidrama-preview-http\.conf/);
-  assert.match(vhost, /auth_basic_user_file \/etc\/nginx\/minidrama-preview\.htpasswd/);
-  assert.match(vhost, /proxy_pass http:\/\/pr-\$preview_pr:5679/);
+  assert.match(edge, /server_name "~\^pr-\(\?<preview_pr>\[0-9]\+\)\\\.preview\\\.drama/);
+  assert.match(edge, /proxy_pass http:\/\/pr-\$preview_pr:5679/);
+  assert.match(passthrough, /set \$preview_edge_upstream http:\/\/minidrama-preview-edge:8080/);
+  assert.match(source, /PREVIEW_EDGE_CONTAINER.*wget/);
   assert.match(source, /pr-\$\{PR_NUMBER\}\.preview\.drama\.richbest\.cn/);
+  // Legacy layouts that hijacked or bypassed the edge must be purged.
+  assert.match(library, /rm -f \/etc\/nginx\/conf\.d\/minidrama-preview-http\.conf/);
+  assert.match(library, /rm -f \/etc\/nginx\/conf\.d\/minidrama-previews\.conf/);
 });
 
 test('preview removal validates the exact PR path', () => {
@@ -54,7 +80,6 @@ test('preview removal validates the exact PR path', () => {
   assert.match(source, /resolved_target.*resolved_root\/pr-\$pr/);
   assert.match(source, /label=com\.richidrama\.preview-pr/);
   assert.match(source, /rm -rf -- "\$resolved_target"/);
-  assert.match(source, /docker exec "\$HTTP_NGINX_CONTAINER" rm -f "\/etc\/nginx\/conf\.d\/preview-pr-\$pr\.conf"/);
   assert.ok(source.indexOf('preview-pr-$pr.conf') < source.indexOf('docker rm -f "${preview_containers[@]}"'));
   assert.doesNotMatch(read('deploy/preview-remove') + source, /certbot delete/);
 });
@@ -70,7 +95,6 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(source, /--network "\$PROD_PROXY_NETWORK" --network-alias minidrama-app/);
   assert.match(source, /validate_production_ingress/);
   assert.doesNotMatch(source, /sync_production_nginx/);
-  assert.match(library, /mv "\$stale" "\$disabled"/);
   assert.match(library, /count=.*server_name/);
   assert.match(library, /getent hosts minidrama-app/);
   assert.match(source, /rollback_now/);
@@ -92,7 +116,9 @@ test('GitHub workflows gate preview and production', () => {
   assert.match(validation, /docker build --build-arg/);
   assert.match(validation, /shellcheck -e SC1091/);
   assert.match(validation, /Verify preview Nginx configuration/);
-  assert.match(validation, /nginx:1\.27-alpine nginx -t/);
+  assert.match(validation, /nginx-preview-edge\.conf/);
+  assert.match(validation, /nginx-previews-passthrough\.conf/);
+  assert.match(validation, /1\.27-alpine nginx -t/);
   assert.match(preview, /pull_request_target/);
   assert.match(preview, /types: \[opened, synchronize, reopened\]/);
   assert.match(preview, /environment: preview/);

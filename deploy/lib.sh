@@ -11,6 +11,7 @@ HTTP_NGINX_CONTAINER="${MINIDRAMA_HTTP_NGINX_CONTAINER:-${MINIDRAMA_NGINX_CONTAI
 PROD_PROXY_NETWORK="${MINIDRAMA_PROXY_NETWORK:-lens-rhyme_default}"
 # shellcheck disable=SC2034 # Used by scripts that source this library.
 PREVIEW_NETWORK="${MINIDRAMA_PREVIEW_NETWORK:-minidrama-previews}"
+PREVIEW_EDGE_CONTAINER="${MINIDRAMA_PREVIEW_EDGE_CONTAINER:-minidrama-preview-edge}"
 
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*" >&2; }
 fail() { log "ERROR: $*" >&2; exit 1; }
@@ -67,6 +68,20 @@ validate_production_ingress() {
         exit 1
       fi
     fi
+    count="$(nginx -T 2>&1 | grep -Ec "server_name[[:space:]]+drama\\.richbest\\.cn;")"
+    [ "$count" -eq 1 ]
+    getent hosts minidrama-app >/dev/null
+    nginx -t
+  ' || fail 'Production Nginx ingress validation failed.'
+}
+
+# Read-only variant for preview deploys: same guarantees, but it never moves
+# production configuration — migrating legacy files is release-deploy work.
+validate_production_ingress_readonly() {
+  require_container_network "$HTTP_NGINX_CONTAINER" "$PROD_PROXY_NETWORK"
+  docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
+    grep -Eq "server_name[[:space:]]+drama\\.richbest\\.cn;" /etc/nginx/conf.d/default.conf
+    grep -Eq "proxy_pass[[:space:]]+http://minidrama-app:5679" /etc/nginx/conf.d/default.conf
     count="$(nginx -T 2>&1 | grep -Ec "server_name[[:space:]]+drama\\.richbest\\.cn;")"
     [ "$count" -eq 1 ]
     getent hosts minidrama-app >/dev/null
@@ -235,13 +250,12 @@ attach_ingress_to_preview_network() {
     fail 'Cannot attach the HTTP ingress to the preview network.'
 }
 
-install_preview_http_ingress_at() {
-  # $1 = absolute conf path inside the ingress container.
-  # Returns success only when the dropped vhost is part of the effective
+install_ingress_conf_at() {
+  # $1 = conf file on disk, $2 = absolute path inside the ingress container.
+  # Succeeds only when the dropped file is part of the effective
   # configuration (nginx -T lists every file it actually includes).
-  local conf_source="$1" conf_target="$2" auth_dir="$PREVIEW_ROOT/auth"
+  local conf_source="$1" conf_target="$2"
   docker cp "$conf_source" "$HTTP_NGINX_CONTAINER:$conf_target"
-  docker cp "$auth_dir/htpasswd" "$HTTP_NGINX_CONTAINER:/etc/nginx/minidrama-preview.htpasswd"
   docker exec "$HTTP_NGINX_CONTAINER" nginx -t
   docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload
   docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
@@ -249,19 +263,56 @@ install_preview_http_ingress_at() {
   ' sh "$conf_target"
 }
 
+ensure_preview_edge() {
+  # The preview edge is the only dual-homed component. It is recreated on
+  # every deploy so auth/config updates always land; its configuration
+  # refuses to proxy anything except pr-<N> applications, which is what
+  # keeps preview code from pivoting into the production network.
+  local edge_conf="$1" auth_dir="$PREVIEW_ROOT/auth"
+  [[ -r "$auth_dir/htpasswd" ]] || fail 'Preview basic-auth file is missing.'
+  docker rm -f "$PREVIEW_EDGE_CONTAINER" >/dev/null 2>&1 || true
+  docker create --name "$PREVIEW_EDGE_CONTAINER" \
+    --network "$PROD_PROXY_NETWORK" --network-alias minidrama-preview-edge \
+    --label "com.richidrama.preview-edge=true" \
+    --security-opt no-new-privileges --cap-drop ALL --pids-limit 64 \
+    --memory 128m --cpus 0.25 --read-only \
+    --tmpfs /tmp:rw,noexec,nosuid,size=8m --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=8m \
+    --tmpfs /var/run:rw,noexec,nosuid,size=4m \
+    nginxinc/nginx-unprivileged:1.27-alpine >/dev/null || \
+    fail 'Cannot create the preview edge container.'
+  docker network connect --gw-priority -1 "$PREVIEW_NETWORK" "$PREVIEW_EDGE_CONTAINER" >/dev/null || \
+    fail 'Cannot attach the preview edge to the preview network.'
+  docker cp "$edge_conf" "$PREVIEW_EDGE_CONTAINER:/etc/nginx/conf.d/default.conf"
+  docker cp "$auth_dir/htpasswd" "$PREVIEW_EDGE_CONTAINER:/etc/nginx/minidrama-preview.htpasswd"
+  docker start "$PREVIEW_EDGE_CONTAINER" >/dev/null || fail 'Cannot start the preview edge container.'
+  for _ in {1..10}; do
+    docker ps --format '{{.Names}}' | grep -Fqx "$PREVIEW_EDGE_CONTAINER" && break
+    sleep 0.5
+  done
+  docker ps --format '{{.Names}}' | grep -Fqx "$PREVIEW_EDGE_CONTAINER" || {
+    docker logs --tail 30 "$PREVIEW_EDGE_CONTAINER" >&2 || true
+    fail 'Preview edge container did not stay running.'
+  }
+  docker exec "$PREVIEW_EDGE_CONTAINER" nginx -t
+}
+
 install_preview_http_ingress() {
-  local conf_source="$1" auth_dir="$PREVIEW_ROOT/auth"
+  local passthrough_conf="$1" edge_conf="$2" auth_dir="$PREVIEW_ROOT/auth"
   [[ -r "$auth_dir/htpasswd" ]] || fail 'Preview basic-auth file is missing.'
   require_running_container "$HTTP_NGINX_CONTAINER"
-  # The pre-simplification layout dropped an ACME-only vhost under this name.
-  # Its suffix wildcard (.preview...) outranks every regex server_name and
-  # hijacks all preview hosts, so it must never survive a deploy.
-  docker exec "$HTTP_NGINX_CONTAINER" rm -f /etc/nginx/conf.d/minidrama-preview-http.conf
-  if ! install_preview_http_ingress_at "$conf_source" '/etc/nginx/conf.d/minidrama-previews.conf'; then
+  # Files dropped by earlier layouts must never survive: the ACME-era suffix
+  # wildcard and the previous direct vhost would outrank or duplicate the
+  # current routing (the direct vhost also bypasses the edge isolation).
+  docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
+    rm -f /etc/nginx/conf.d/minidrama-preview-http.conf
+    rm -f /etc/nginx/conf.d/minidrama-previews.conf
+  '
+  ensure_preview_edge "$edge_conf"
+  if ! install_ingress_conf_at "$passthrough_conf" '/etc/nginx/conf.d/minidrama-previews-ingress.conf'; then
     log 'conf.d is not part of the ingress include layout; trying sites-enabled.'
-    docker exec "$HTTP_NGINX_CONTAINER" rm -f /etc/nginx/conf.d/minidrama-previews.conf
-    install_preview_http_ingress_at "$conf_source" '/etc/nginx/sites-enabled/minidrama-previews.conf' || \
-      fail 'Ingress did not load the preview vhost; neither conf.d nor sites-enabled is included.'
+    docker exec "$HTTP_NGINX_CONTAINER" rm -f /etc/nginx/conf.d/minidrama-previews-ingress.conf
+    install_ingress_conf_at "$passthrough_conf" '/etc/nginx/sites-enabled/minidrama-previews-ingress.conf' || \
+      fail 'Ingress did not load the preview passthrough; neither conf.d nor sites-enabled is included.'
   fi
 }
 
