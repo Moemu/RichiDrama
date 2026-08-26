@@ -1,0 +1,67 @@
+name: Validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests and migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: backend-node/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend-node
+        run: npm ci --no-audit --no-fund
+      - name: Run backend tests
+        working-directory: backend-node
+        run: node --test test/*.test.js
+      - name: Verify empty database migrations twice
+        working-directory: backend-node
+        run: node tools/verify-migrations.js "${RUNNER_TEMP}/empty/drama_generator.db"
+
+  frontend:
+    name: Frontend tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: frontweb/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontweb
+        run: npm ci --no-audit --no-fund
+      - name: Run frontend tests
+        working-directory: frontweb
+        run: node --test test/*.test.js
+      - name: Build frontend
+        working-directory: frontweb
+        run: npm run build
+
+  container:
+    name: Container build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build immutable candidate image
+        run: docker build --build-arg "APP_REVISION=${GITHUB_SHA}" -t "local-minidrama:${GITHUB_SHA}" .
+      - name: Verify image revision
+        run: test "$(docker image inspect --format '{{ index .Config.Labels \"org.opencontainers.image.revision\" }}' "local-minidrama:${GITHUB_SHA}")" = "${GITHUB_SHA}"

@@ -27,6 +27,8 @@ Closes #
 
 - [ ] 本地开发模式测试通过 / Tested in dev mode
 - [ ] Production build 或相关后端测试通过 / Production build or relevant backend tests passed
+- [ ] 数据库迁移验证通过 / Database migration verification passed
+- [ ] 管理员批准的 PR 预览通过 / Approved PR preview passed
 - [ ] 相关功能无明显回归 / No obvious regression
 
 ## 截图 / Screenshots
@@ -39,3 +41,4 @@ Closes #
 - [ ] 代码符合项目现有风格（纯 JavaScript，无 TypeScript）/ Code follows project style (vanilla JS)
 - [ ] 没有引入不必要的依赖 / No unnecessary new dependencies
 - [ ] 如有必要，已更新相关文档 / Documentation updated if needed
+- [ ] 未添加破坏性或不可回退的数据库迁移 / No destructive or non-compatible migration

@@ -114,16 +114,14 @@ curl -H "Host: drama.richbest.cn" http://127.0.0.1/health
 
 ---
 
-## 二、更新到最新版本
+## 二、安全发布
 
 ```bash
-cd /data/apps/LocalMiniDrama
-git pull
-docker compose build app
-docker compose up -d
+# GitHub Actions 上传源码包后执行：
+release-deploy <40-character-commit-sha>
 ```
 
-数据保留在 `./volumes/data`，不受镜像重建影响。
+发布脚本不修改服务器 Git 仓库。脚本先测试生产数据库副本，再切换生产容器。详细规则见 `deploy/PR_PREVIEWS.md`。
 
 ---
 

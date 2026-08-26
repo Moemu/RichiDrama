@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+REPOSITORY="${1:-Moemu/RichiDrama}"
+command -v gh >/dev/null 2>&1 || { echo 'gh CLI is required.' >&2; exit 1; }
+gh auth status >/dev/null
+
+# Do not create an impossible bootstrap rule. The required workflows must be
+# present on the default branch before their check names become mandatory.
+gh api "repos/$REPOSITORY/contents/.github/workflows/validation.yml?ref=main" >/dev/null
+gh api "repos/$REPOSITORY/contents/.github/workflows/preview.yml?ref=main" >/dev/null
+
+gh api --method PUT "repos/$REPOSITORY/branches/main/protection" --input - <<'JSON'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "Backend tests and migrations",
+      "Frontend tests and build",
+      "Container build",
+      "preview / smoke"
+    ]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": {
+    "dismiss_stale_reviews": true,
+    "require_code_owner_reviews": false,
+    "required_approving_review_count": 1,
+    "require_last_push_approval": true
+  },
+  "restrictions": null,
+  "required_linear_history": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "block_creations": false,
+  "required_conversation_resolution": true,
+  "lock_branch": false,
+  "allow_fork_syncing": true
+}
+JSON
+
+echo "Protected $REPOSITORY main branch."

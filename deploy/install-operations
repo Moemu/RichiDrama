@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$(id -u)" == 0 ]] || { echo 'Run as root.' >&2; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MODE="${1:-release}"
+[[ "$MODE" == preview || "$MODE" == release ]] || { echo 'Usage: install-operations [preview|release]' >&2; exit 2; }
+if [[ "$MODE" == preview ]]; then
+  TARGET="/usr/local/lib/richidrama-preview"
+  FILES=(lib.sh preview-deploy preview-remove preview-show preview-cleanup acme-auth-hook.sh acme-cleanup-hook.sh nginx-preview-http.conf preview-gateway.conf.template)
+  COMMANDS=(preview-deploy preview-remove preview-show preview-cleanup)
+else
+  TARGET="/usr/local/lib/richidrama-deploy"
+  FILES=(lib.sh preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback acme-auth-hook.sh acme-cleanup-hook.sh nginx-drama-richbest.conf nginx-preview-http.conf preview-gateway.conf.template)
+  COMMANDS=(preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback)
+fi
+mkdir -p "$TARGET"
+for file in "${FILES[@]}"; do
+  install -m 0755 "$SCRIPT_DIR/$file" "$TARGET/$file"
+done
+for command in "${COMMANDS[@]}"; do
+  ln -sfn "$TARGET/$command" "/usr/local/bin/$command"
+done
