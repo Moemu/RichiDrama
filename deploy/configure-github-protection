@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 REPOSITORY="${1:-Moemu/RichiDrama}"
+REQUIRED_APPROVALS="${2:-0}"
 command -v gh >/dev/null 2>&1 || { echo 'gh CLI is required.' >&2; exit 1; }
 gh auth status >/dev/null
+
+case "$REQUIRED_APPROVALS" in
+  0) REQUIRE_LAST_PUSH_APPROVAL=false ;;
+  1) REQUIRE_LAST_PUSH_APPROVAL=true ;;
+  *) echo 'Approval count must be 0 or 1.' >&2; exit 2 ;;
+esac
 
 # Do not create an impossible bootstrap rule. The required workflows must be
 # present on the default branch before their check names become mandatory.
 gh api "repos/$REPOSITORY/contents/.github/workflows/validation.yml?ref=main" >/dev/null
 gh api "repos/$REPOSITORY/contents/.github/workflows/preview.yml?ref=main" >/dev/null
 
-gh api --method PUT "repos/$REPOSITORY/branches/main/protection" --input - <<'JSON'
+gh api --method PUT "repos/$REPOSITORY/branches/main/protection" --input - <<JSON
 {
   "required_status_checks": {
     "strict": true,
@@ -24,8 +31,8 @@ gh api --method PUT "repos/$REPOSITORY/branches/main/protection" --input - <<'JS
   "required_pull_request_reviews": {
     "dismiss_stale_reviews": true,
     "require_code_owner_reviews": false,
-    "required_approving_review_count": 1,
-    "require_last_push_approval": true
+    "required_approving_review_count": $REQUIRED_APPROVALS,
+    "require_last_push_approval": $REQUIRE_LAST_PUSH_APPROVAL
   },
   "restrictions": null,
   "required_linear_history": true,
@@ -38,4 +45,4 @@ gh api --method PUT "repos/$REPOSITORY/branches/main/protection" --input - <<'JS
 }
 JSON
 
-echo "Protected $REPOSITORY main branch."
+echo "Protected $REPOSITORY main branch with $REQUIRED_APPROVALS required approval(s)."

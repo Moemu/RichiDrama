@@ -51,5 +51,7 @@ test('GitHub workflows gate preview and production', () => {
   const protection = read('deploy/configure-github-protection');
   assert.match(protection, /preview \/ smoke/);
   assert.match(protection, /"enforce_admins": true/);
-  assert.match(protection, /required_approving_review_count.*1/);
+  assert.match(protection, /REQUIRED_APPROVALS="\$\{2:-0\}"/);
+  assert.match(protection, /1\) REQUIRE_LAST_PUSH_APPROVAL=true/);
+  assert.match(protection, /required_approving_review_count.*REQUIRED_APPROVALS/);
 });
