@@ -41,6 +41,9 @@ test('preview deployment isolates data, network and resources', () => {
   // The routed hostname carries the literal pr- prefix; a digits-only match
   // silently falls through to the rejection block (regression 2026-08-26).
   assert.match(vhost, /server_name "~\^pr-\(\?<preview_pr>\[0-9]\+\)\\\.preview\\\.drama/);
+  // The legacy ACME-only vhost uses a suffix wildcard that outranks regex
+  // server names; every deploy must remove it from the ingress container.
+  assert.match(library, /rm -f \/etc\/nginx\/conf\.d\/minidrama-preview-http\.conf/);
   assert.match(vhost, /auth_basic_user_file \/etc\/nginx\/minidrama-preview\.htpasswd/);
   assert.match(vhost, /proxy_pass http:\/\/pr-\$preview_pr:5679/);
   assert.match(source, /pr-\$\{PR_NUMBER\}\.preview\.drama\.richbest\.cn/);

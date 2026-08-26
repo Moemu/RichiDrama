@@ -235,14 +235,34 @@ attach_ingress_to_preview_network() {
     fail 'Cannot attach the HTTP ingress to the preview network.'
 }
 
+install_preview_http_ingress_at() {
+  # $1 = absolute conf path inside the ingress container.
+  # Returns success only when the dropped vhost is part of the effective
+  # configuration (nginx -T lists every file it actually includes).
+  local conf_source="$1" conf_target="$2" auth_dir="$PREVIEW_ROOT/auth"
+  docker cp "$conf_source" "$HTTP_NGINX_CONTAINER:$conf_target"
+  docker cp "$auth_dir/htpasswd" "$HTTP_NGINX_CONTAINER:/etc/nginx/minidrama-preview.htpasswd"
+  docker exec "$HTTP_NGINX_CONTAINER" nginx -t
+  docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload
+  docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
+    nginx -T 2>/dev/null | grep -Fq "configuration file $1"
+  ' sh "$conf_target"
+}
+
 install_preview_http_ingress() {
   local conf_source="$1" auth_dir="$PREVIEW_ROOT/auth"
   [[ -r "$auth_dir/htpasswd" ]] || fail 'Preview basic-auth file is missing.'
   require_running_container "$HTTP_NGINX_CONTAINER"
-  docker cp "$conf_source" "$HTTP_NGINX_CONTAINER:/etc/nginx/conf.d/minidrama-previews.conf"
-  docker cp "$auth_dir/htpasswd" "$HTTP_NGINX_CONTAINER:/etc/nginx/minidrama-preview.htpasswd"
-  docker exec "$HTTP_NGINX_CONTAINER" nginx -t
-  docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload
+  # The pre-simplification layout dropped an ACME-only vhost under this name.
+  # Its suffix wildcard (.preview...) outranks every regex server_name and
+  # hijacks all preview hosts, so it must never survive a deploy.
+  docker exec "$HTTP_NGINX_CONTAINER" rm -f /etc/nginx/conf.d/minidrama-preview-http.conf
+  if ! install_preview_http_ingress_at "$conf_source" '/etc/nginx/conf.d/minidrama-previews.conf'; then
+    log 'conf.d is not part of the ingress include layout; trying sites-enabled.'
+    docker exec "$HTTP_NGINX_CONTAINER" rm -f /etc/nginx/conf.d/minidrama-previews.conf
+    install_preview_http_ingress_at "$conf_source" '/etc/nginx/sites-enabled/minidrama-previews.conf' || \
+      fail 'Ingress did not load the preview vhost; neither conf.d nor sites-enabled is included.'
+  fi
 }
 
 prune_release_images() {
