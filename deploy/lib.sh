@@ -53,20 +53,6 @@ require_container_network() {
   grep -Fqx "$network" <<<"$networks" || fail "Container $container is not connected to network $network"
 }
 
-container_network_ip() {
-  local container="$1" network="$2" ip
-  # Docker Engine 29 omits EndpointSettings.IPAddress from container inspect.
-  # Network inspect keeps the address in the portable IPv4Address field.
-  ip="$(docker network inspect --format '{{range $_, $item := .Containers}}{{println $item.Name $item.IPv4Address}}{{end}}' \
-    "$network" | awk -v target="$container" '$1 == target { sub(/\/.*/, "", $2); print $2; exit }')"
-  if [[ -z "$ip" ]]; then
-    ip="$(docker inspect --format '{{range $name, $item := .NetworkSettings.Networks}}{{println $name $item.IPAddress}}{{end}}' \
-      "$container" | awk -v target="$network" '$1 == target { print $2; exit }')"
-  fi
-  [[ "$ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || fail "Cannot resolve the container IP on network $network"
-  printf '%s\n' "$ip"
-}
-
 validate_production_ingress() {
   require_container_network "$HTTP_NGINX_CONTAINER" "$PROD_PROXY_NETWORK"
   docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
@@ -208,10 +194,7 @@ remove_preview_resources() {
     host="$(awk -F= '$1=="HOST"{print $2}' "$pr_dir/metadata.env")"
     network="$(awk -F= '$1=="NETWORK"{print $2}' "$pr_dir/metadata.env")"
   fi
-  mapfile -t preview_containers < <(docker ps -aq --filter "label=com.richidrama.preview-pr=$pr")
-  ((${#preview_containers[@]} == 0)) || docker rm -f "${preview_containers[@]}" >/dev/null
-  [[ -z "$network" ]] || docker network rm "$network" >/dev/null 2>&1 || true
-
+  # Remove routes before containers so Nginx never keeps an unavailable DNS upstream.
   if docker ps --format '{{.Names}}' | grep -Fqx "$HTTP_NGINX_CONTAINER"; then
     docker exec "$HTTP_NGINX_CONTAINER" rm -f "/etc/nginx/conf.d/preview-pr-$pr.conf"
     docker exec "$HTTP_NGINX_CONTAINER" nginx -t
@@ -222,6 +205,9 @@ remove_preview_resources() {
     docker exec "$TLS_NGINX_CONTAINER" nginx -t
     docker exec "$TLS_NGINX_CONTAINER" nginx -s reload
   fi
+  mapfile -t preview_containers < <(docker ps -aq --filter "label=com.richidrama.preview-pr=$pr")
+  ((${#preview_containers[@]} == 0)) || docker rm -f "${preview_containers[@]}" >/dev/null
+  [[ -z "$network" ]] || docker network rm "$network" >/dev/null 2>&1 || true
   if [[ -n "$host" && "$delete_cert" == 1 ]] && command -v certbot >/dev/null 2>&1; then
     certbot delete --non-interactive --cert-name "$host" >/dev/null 2>&1 || true
   fi

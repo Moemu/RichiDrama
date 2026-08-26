@@ -112,12 +112,11 @@ docker run -d --name "$GATEWAY_CONTAINER" --network "$NETWORK" \
   nginxinc/nginx-unprivileged:1.27-alpine >/dev/null
 require_container_network "$TLS_NGINX_CONTAINER" "$TLS_PROXY_NETWORK"
 docker network connect --alias "$GATEWAY_CONTAINER" "$TLS_PROXY_NETWORK" "$GATEWAY_CONTAINER"
-GATEWAY_PROXY_IP="$(container_network_ip "$GATEWAY_CONTAINER" "$TLS_PROXY_NETWORK")"
 
 AUTH_HEADER="$(printf 'preview:%s' "$PASSWORD" | openssl base64 -A)"
 GATEWAY_READY="$(docker exec "$TLS_NGINX_CONTAINER" wget -qO- \
   --header="Host: $HOST" --header="Authorization: Basic $AUTH_HEADER" \
-  "http://$GATEWAY_PROXY_IP:8080/ready")" || fail 'TLS ingress cannot reach the preview gateway.'
+  "http://$GATEWAY_CONTAINER:8080/ready")" || fail 'TLS ingress cannot reach the preview gateway through Docker DNS.'
 grep -q "\"revision\":\"$SHA\"" <<<"$GATEWAY_READY" || fail 'Preview gateway returned the wrong revision.'
 unset AUTH_HEADER GATEWAY_READY
 
@@ -153,7 +152,7 @@ docker exec "$TLS_NGINX_CONTAINER" test -r "/etc/letsencrypt/live/$HOST/fullchai
 docker exec "$TLS_NGINX_CONTAINER" test -r "/etc/letsencrypt/live/$HOST/privkey.pem"
 
 sed "s/__PREVIEW_HOST__/$HOST/g" "$SOURCE_DIR/deploy/nginx-preview-redirect.conf.template" > "$PR_DIR/http-nginx.conf"
-sed -e "s/__PREVIEW_HOST__/$HOST/g" -e "s/__GATEWAY_IP__/$GATEWAY_PROXY_IP/g" \
+sed -e "s/__PREVIEW_HOST__/$HOST/g" -e "s/__GATEWAY_HOST__/$GATEWAY_CONTAINER/g" \
   "$SOURCE_DIR/deploy/nginx-preview-tls.conf.template" > "$PR_DIR/tls-nginx.conf"
 
 docker cp "$PR_DIR/http-nginx.conf" "$HTTP_NGINX_CONTAINER:/etc/nginx/conf.d/preview-pr-$PR_NUMBER.conf"

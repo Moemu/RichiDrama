@@ -17,9 +17,8 @@ test('preview deployment isolates data, network and resources', () => {
   assert.match(source, /docker network create --internal/);
   assert.match(source, /require_container_network "\$TLS_NGINX_CONTAINER" "\$TLS_PROXY_NETWORK"/);
   assert.match(source, /docker network connect .*"\$TLS_PROXY_NETWORK"/);
-  assert.match(source, /GATEWAY_PROXY_IP="\$\(container_network_ip/);
-  assert.match(library, /docker network inspect --format/);
-  assert.match(library, /IPv4Address/);
+  assert.match(source, /http:\/\/\$GATEWAY_CONTAINER:8080\/ready/);
+  assert.doesNotMatch(source + library, /container_network_ip|GATEWAY_PROXY_IP/);
   assert.match(source, /acquire_lock\s+validate_production_ingress/);
   assert.match(source, /docker exec "\$TLS_NGINX_CONTAINER" wget/);
   assert.match(source, /--network "\$NETWORK" --network-alias preview-app/);
@@ -34,7 +33,7 @@ test('preview deployment isolates data, network and resources', () => {
   assert.match(source, /preview\.drama\.richbest\.cn/);
   assert.doesNotMatch(source, /docker cp -L .*chain\.pem/);
   assert.match(tls, /\/etc\/letsencrypt\/live\/__PREVIEW_HOST__\/fullchain\.pem/);
-  assert.match(tls, /proxy_pass http:\/\/__GATEWAY_IP__:8080/);
+  assert.match(tls, /proxy_pass http:\/\/__GATEWAY_HOST__:8080/);
   assert.match(redirect, /return 301 https:\/\/\$host\$request_uri/);
   assert.match(reject, /listen 443 ssl default_server/);
   assert.match(reject, /server_names_hash_bucket_size 128/);
@@ -54,10 +53,10 @@ test('preview TLS template renders one exact isolated upstream', () => {
   const host = 'pr-3-0123456789abcdef.preview.drama.richbest.cn';
   const rendered = template
     .replaceAll('__PREVIEW_HOST__', host)
-    .replaceAll('__GATEWAY_IP__', '172.22.0.6');
+    .replaceAll('__GATEWAY_HOST__', 'minidrama-pr-3-token-gateway');
   assert.doesNotMatch(rendered, /__[A-Z_]+__/);
   assert.match(rendered, new RegExp(`server_name ${host.replaceAll('.', '\\.')}`));
-  assert.match(rendered, /proxy_pass http:\/\/172\.22\.0\.6:8080/);
+  assert.match(rendered, /proxy_pass http:\/\/minidrama-pr-3-token-gateway:8080/);
   assert.doesNotMatch(rendered, /minidrama-app|preview-app/);
 });
 
@@ -68,6 +67,7 @@ test('preview removal validates the exact PR path', () => {
   assert.match(source, /rm -rf -- "\$resolved_target"/);
   assert.match(source, /docker exec "\$HTTP_NGINX_CONTAINER" rm -f "\/etc\/nginx\/conf\.d\/preview-pr-\$pr\.conf"/);
   assert.match(source, /docker exec "\$TLS_NGINX_CONTAINER" rm -f "\/etc\/nginx\/conf\.d\/preview-pr-\$pr\.conf"/);
+  assert.ok(source.indexOf('preview-pr-$pr.conf') < source.indexOf('docker rm -f "${preview_containers[@]}"'));
 });
 
 test('production release uses an immutable archive and rollback container', () => {

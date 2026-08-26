@@ -84,7 +84,7 @@ jobs:
             -subj "/CN=${host}" \
             -keyout "${test_root}/live/${host}/privkey.pem" \
             -out "${test_root}/live/${host}/fullchain.pem" >/dev/null 2>&1
-          sed -e "s/__PREVIEW_HOST__/${host}/g" -e 's/__GATEWAY_IP__/127.0.0.1/g' \
+          sed -e "s/__PREVIEW_HOST__/${host}/g" -e 's/__GATEWAY_HOST__/127.0.0.1/g' \
             deploy/nginx-preview-tls.conf.template > "${test_root}/preview.conf"
           docker run --rm \
             -v "${test_root}/preview.conf:/etc/nginx/conf.d/preview.conf:ro" \
