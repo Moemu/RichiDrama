@@ -91,7 +91,10 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(library, /local image="\$1" sha="\$2" data_dir="\$3"\s+local name="minidrama-preflight-/);
   assert.match(library, /docker build[^\n]*\|\| \\/);
   assert.match(library, /fail "Immutable image build failed/);
-  assert.doesNotMatch(dockerfile, /mirrors\.aliyun\.com/);
+  assert.match(library, /docker build --build-arg/);
+  assert.doesNotMatch(library, /docker build --pull/);
+  assert.equal((dockerfile.match(/mirrors\.aliyun\.com/g) || []).length, 4);
+  assert.ok(dockerfile.indexOf('apt-get install') < dockerfile.indexOf('ARG APP_REVISION'));
   assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-300/);
   assert.doesNotMatch(source + compatibility, /git reset|git remote set-url/);
 });
@@ -108,7 +111,11 @@ test('GitHub workflows gate preview and production', () => {
   assert.match(preview, /environment: preview/);
   assert.match(preview, /preview \/ smoke/);
   assert.match(preview, /head\.repo\.full_name/);
-  assert.match(preview, /Remove transferred source/);
+  assert.doesNotMatch(preview, /actions\/checkout|scp-action|Upload source archive/);
+  assert.match(preview, /git -C "\$repo" fetch --no-tags origin "refs\/pull\/\$\{pr\}\/head"/);
+  assert.match(preview, /rev-parse FETCH_HEAD/);
+  assert.match(preview, /git -C "\$repo" archive/);
+  assert.match(preview, /Remove server-side source/);
   assert.match(preview, /rm -f -- "\$incoming"/);
   assert.match(preview, /rm -rf -- "\$bootstrap"/);
   assert.match(production, /environment: production/);
