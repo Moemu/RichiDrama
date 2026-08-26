@@ -39,7 +39,7 @@ if [[ ! "$PASSWORD" =~ ^[0-9a-f]{32}$ ]]; then
 fi
 printf 'preview:%s\n' "$(openssl passwd -apr1 "$PASSWORD")" > "$AUTH_DIR/htpasswd"
 chown 101:101 "$AUTH_DIR/htpasswd"
-chmod 600 "$AUTH_DIR/htpasswd"
+chmod 644 "$AUTH_DIR/htpasswd"
 
 cat > "$PR_DIR/metadata.env" <<EOF
 PR_NUMBER=$PR_NUMBER

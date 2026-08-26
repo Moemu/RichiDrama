@@ -38,6 +38,9 @@ test('preview deployment isolates data, network and resources', () => {
   assert.match(source, /-v "\$DATA_DIR:\/app\/backend-node\/data"/);
   assert.doesNotMatch(source, /-v "\$PROD_DATA_DIR:\/app\/backend-node\/data"/);
   assert.match(vhost, /resolver 127\.0\.0\.11/);
+  // The routed hostname carries the literal pr- prefix; a digits-only match
+  // silently falls through to the rejection block (regression 2026-08-26).
+  assert.match(vhost, /server_name "~\^pr-\(\?<preview_pr>\[0-9]\+\)\\\.preview\\\.drama/);
   assert.match(vhost, /auth_basic_user_file \/etc\/nginx\/minidrama-preview\.htpasswd/);
   assert.match(vhost, /proxy_pass http:\/\/pr-\$preview_pr:5679/);
   assert.match(source, /pr-\$\{PR_NUMBER\}\.preview\.drama\.richbest\.cn/);
