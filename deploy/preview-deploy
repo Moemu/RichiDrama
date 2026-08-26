@@ -102,7 +102,6 @@ docker exec "$HTTP_NGINX_CONTAINER" wget -qO- \
   "http://pr-${PR_NUMBER}:5679/ready" | grep -q "\"revision\":\"$SHA\"" || \
   fail 'HTTP ingress cannot reach the isolated preview application.'
 
-AUTH_HEADER="$(printf 'preview:%s' "$PASSWORD" | openssl base64 -A)"
 [[ "$(curl -sS --max-time 15 --resolve "$HOST:80:127.0.0.1" -o /dev/null -w '%{http_code}' "http://$HOST/ready")" == 401 ]] || \
   fail 'Preview Basic Auth accepted a request without credentials.'
 [[ "$(curl -sS --max-time 15 --resolve "$HOST:80:127.0.0.1" -u 'preview:incorrect' -o /dev/null -w '%{http_code}' "http://$HOST/ready")" == 401 ]] || \
@@ -113,7 +112,7 @@ curl -fsS --max-time 15 --resolve "$HOST:80:127.0.0.1" -u "preview:$PASSWORD" "h
 PROD_DOMAIN="${MINIDRAMA_PROD_DOMAIN:-drama.richbest.cn}"
 curl -fsS --max-time 10 -H "Host: $PROD_DOMAIN" http://127.0.0.1/ready >/dev/null || \
   fail 'The existing production route failed after the ingress reload.'
-unset AUTH_HEADER PASSWORD
+unset PASSWORD
 
 PREVIEW_SUCCESS=1
 trap - EXIT

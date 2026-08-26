@@ -207,7 +207,7 @@ safe_remove_preview_dir() {
 }
 
 remove_preview_resources() {
-  local pr="$1" pr_dir="$PREVIEW_ROOT/pr-$1"
+  local pr="$1"
   validate_pr "$pr"
   # Drop any stale per-PR ingress reference (legacy layout) before removing the
   # containers, so Nginx never proxies to an unavailable upstream.
