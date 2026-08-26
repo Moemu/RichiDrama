@@ -5,9 +5,6 @@
 
 FROM node:18-bookworm-slim AS builder
 
-# 使用 HTTPS 国内 Debian 镜像源，避免代理污染仓库签名。
-RUN sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g; s|http://security.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
-
 # 编译原生模块所需工具链
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -38,9 +35,6 @@ COPY backend-node ./backend-node
 FROM node:18-bookworm-slim AS runtime
 
 ARG APP_REVISION=unknown
-
-# 使用 HTTPS 国内 Debian 镜像源，避免代理污染仓库签名。
-RUN sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g; s|http://security.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
 
 # sharp 运行时基础库 + ffmpeg（视频合并/后期处理依赖）+ tini（信号转发）
 RUN apt-get update \

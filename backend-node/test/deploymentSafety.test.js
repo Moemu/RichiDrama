@@ -91,8 +91,7 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(library, /local image="\$1" sha="\$2" data_dir="\$3"\s+local name="minidrama-preflight-/);
   assert.match(library, /docker build[^\n]*\|\| \\/);
   assert.match(library, /fail "Immutable image build failed/);
-  assert.match(dockerfile, /https:\/\/mirrors\.aliyun\.com/);
-  assert.doesNotMatch(dockerfile, /s\|deb\.debian\.org\|mirrors\.aliyun\.com/);
+  assert.doesNotMatch(dockerfile, /mirrors\.aliyun\.com/);
   assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-300/);
   assert.doesNotMatch(source + compatibility, /git reset|git remote set-url/);
 });
