@@ -12,10 +12,17 @@ SHA="$2"
 acquire_lock
 
 if ! command -v certbot >/dev/null 2>&1; then
-  command -v apt-get >/dev/null 2>&1 || fail 'certbot is required and apt-get is unavailable.'
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  apt-get install -y --no-install-recommends certbot
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends certbot
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y certbot
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y certbot
+  else
+    fail 'certbot is required and no supported package manager is available.'
+  fi
 fi
 command -v certbot >/dev/null 2>&1 || fail 'certbot installation failed.'
 command -v openssl >/dev/null 2>&1 || fail 'openssl is required.'
