@@ -72,8 +72,9 @@ DATABASE_BACKUP=$RELEASE_DIR/production-before.db
 EOF
 chmod 600 "$RELEASE_ROOT/rollback.env"
 
+PROXY_NETWORK="$(resolve_proxy_network)"
 docker run -d --name "$PROD_CONTAINER" --restart unless-stopped \
-  --network "$LENS_NETWORK" --network-alias minidrama-app \
+  --network "$PROXY_NETWORK" --network-alias minidrama-app \
   --label "com.richidrama.production=true" --label "com.richidrama.revision=$SHA" \
   --health-cmd "node -e \"require('http').get('http://127.0.0.1:5679/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\"" \
   --health-interval 30s --health-timeout 10s --health-retries 3 --health-start-period 40s \

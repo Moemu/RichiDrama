@@ -109,7 +109,8 @@ docker run -d --name "$GATEWAY_CONTAINER" --network "$NETWORK" \
   -v "$PR_DIR/gateway/default.conf:/etc/nginx/conf.d/default.conf:ro" \
   -v "$PR_DIR/gateway/htpasswd:/etc/nginx/htpasswd:ro" \
   nginxinc/nginx-unprivileged:1.27-alpine >/dev/null
-docker network connect --alias "$GATEWAY_CONTAINER" "$LENS_NETWORK" "$GATEWAY_CONTAINER"
+PROXY_NETWORK="$(resolve_proxy_network)"
+docker network connect --alias "$GATEWAY_CONTAINER" "$PROXY_NETWORK" "$GATEWAY_CONTAINER"
 
 # Install the permanent HTTP-01 entry before requesting the exact certificate.
 docker exec "$NGINX_CONTAINER" mkdir -p /var/www/minidrama-acme/.well-known/acme-challenge /etc/nginx/preview-certs

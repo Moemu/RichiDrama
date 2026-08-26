@@ -37,6 +37,18 @@ resolve_env_file() {
   printf '%s\n' ''
 }
 
+resolve_proxy_network() {
+  local networks selected
+  networks="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$NGINX_CONTAINER")"
+  if grep -Fxq "$LENS_NETWORK" <<<"$networks"; then
+    printf '%s\n' "$LENS_NETWORK"
+    return
+  fi
+  selected="$(sed '/^[[:space:]]*$/d' <<<"$networks" | head -n 1)"
+  [[ -n "$selected" ]] || fail "Nginx container has no Docker network: $NGINX_CONTAINER"
+  printf '%s\n' "$selected"
+}
+
 prepare_source() {
   local sha="$1" archive="${INCOMING_ROOT}/${1}.tar.gz" target="${RELEASE_ROOT}/${1}/source" resolved_root resolved_target
   validate_sha "$sha"

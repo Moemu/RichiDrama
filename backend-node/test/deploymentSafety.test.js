@@ -11,6 +11,7 @@ test('preview deployment isolates data, network and resources', () => {
   const gateway = read('deploy/preview-gateway.conf.template');
   const acmeHook = read('deploy/acme-auth-hook.sh');
   assert.match(source, /docker network create --internal/);
+  assert.match(source, /PROXY_NETWORK="\$\(resolve_proxy_network\)"/);
   assert.match(source, /--network "\$NETWORK" --network-alias preview-app/);
   assert.match(source, /--memory 2g --cpus 1/);
   assert.match(source, /--pids-limit 256/);
@@ -43,6 +44,8 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(source, /prepare_source "\$SHA"/);
   assert.match(source, /verify_migrations/);
   assert.match(source, /wait_container_ready.*90/);
+  assert.match(source, /--network "\$PROXY_NETWORK" --network-alias minidrama-app/);
+  assert.match(library, /resolve_proxy_network/);
   assert.match(source, /rollback_now/);
   assert.match(library, /local image="\$1" sha="\$2" data_dir="\$3"\s+local name="minidrama-preflight-/);
   assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-300/);
