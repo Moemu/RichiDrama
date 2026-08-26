@@ -102,7 +102,7 @@ docker run -d --name "$ANCHOR_CONTAINER" --network "$NETWORK" --network-alias pr
   --entrypoint sh nginxinc/nginx-unprivileged:1.27-alpine -c 'exec sleep 2147483647' >/dev/null
 
 docker run --rm --network "container:$ANCHOR_CONTAINER" \
-  --cap-drop ALL --cap-add NET_ADMIN --entrypoint sh \
+  --user 0 --cap-drop ALL --cap-add NET_ADMIN --entrypoint sh \
   nginxinc/nginx-unprivileged:1.27-alpine -eu -c \
   'busybox ip route del default; ! busybox ip route show default | grep -q .'
 

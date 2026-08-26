@@ -26,7 +26,7 @@ test('preview deployment isolates data, network and resources', () => {
   assert.doesNotMatch(source, /--publish/);
   assert.match(source, /--name "\$ANCHOR_CONTAINER" --network "\$NETWORK" --network-alias preview-app/);
   assert.match(source, /--network "container:\$ANCHOR_CONTAINER"/);
-  assert.match(source, /--cap-drop ALL --cap-add NET_ADMIN/);
+  assert.match(source, /--user 0 --cap-drop ALL --cap-add NET_ADMIN/);
   assert.match(source, /busybox ip route del default/);
   assert.match(source, /APP_NETWORK_MODE=.*HostConfig\.NetworkMode/);
   assert.match(source, /--network "name=\$TLS_PROXY_NETWORK,alias=\$GATEWAY_CONTAINER,gw-priority=1"/);
