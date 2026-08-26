@@ -111,6 +111,8 @@ docker run -d --name "$GATEWAY_CONTAINER" --network "$NETWORK" \
   nginxinc/nginx-unprivileged:1.27-alpine >/dev/null
 PROXY_NETWORK="$(resolve_proxy_network)"
 docker network connect --alias "$GATEWAY_CONTAINER" "$PROXY_NETWORK" "$GATEWAY_CONTAINER"
+GATEWAY_PROXY_IP="$(docker inspect --format "{{(index .NetworkSettings.Networks \"$PROXY_NETWORK\").IPAddress}}" "$GATEWAY_CONTAINER")"
+[[ "$GATEWAY_PROXY_IP" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || fail 'Cannot resolve the preview gateway IP.'
 
 # Install the permanent HTTP-01 entry before requesting the exact certificate.
 docker exec "$NGINX_CONTAINER" mkdir -p /var/www/minidrama-acme/.well-known/acme-challenge /etc/nginx/preview-certs
@@ -154,7 +156,7 @@ server {
     ssl_certificate /etc/nginx/preview-certs/$HOST/fullchain.pem;
     ssl_certificate_key /etc/nginx/preview-certs/$HOST/privkey.pem;
     location / {
-        proxy_pass http://$GATEWAY_CONTAINER:8080;
+        proxy_pass http://$GATEWAY_PROXY_IP:8080;
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$remote_addr;

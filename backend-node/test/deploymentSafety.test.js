@@ -12,6 +12,8 @@ test('preview deployment isolates data, network and resources', () => {
   const acmeHook = read('deploy/acme-auth-hook.sh');
   assert.match(source, /docker network create --internal/);
   assert.match(source, /PROXY_NETWORK="\$\(resolve_proxy_network\)"/);
+  assert.match(source, /GATEWAY_PROXY_IP=.*docker inspect/);
+  assert.match(source, /proxy_pass http:\/\/\$GATEWAY_PROXY_IP:8080/);
   assert.match(source, /--network "\$NETWORK" --network-alias preview-app/);
   assert.match(source, /--memory 2g --cpus 1/);
   assert.match(source, /--pids-limit 256/);
