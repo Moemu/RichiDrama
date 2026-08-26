@@ -18,6 +18,9 @@ test('preview deployment isolates data, network and resources', () => {
   assert.match(source, /require_container_network "\$TLS_NGINX_CONTAINER" "\$TLS_PROXY_NETWORK"/);
   assert.match(source, /docker network connect .*"\$TLS_PROXY_NETWORK"/);
   assert.match(source, /GATEWAY_PROXY_IP="\$\(container_network_ip/);
+  assert.match(library, /docker network inspect --format/);
+  assert.match(library, /IPv4Address/);
+  assert.match(source, /acquire_lock\s+validate_production_ingress/);
   assert.match(source, /docker exec "\$TLS_NGINX_CONTAINER" wget/);
   assert.match(source, /--network "\$NETWORK" --network-alias preview-app/);
   assert.match(source, /--memory 2g --cpus 1/);

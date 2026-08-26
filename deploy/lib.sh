@@ -55,8 +55,14 @@ require_container_network() {
 
 container_network_ip() {
   local container="$1" network="$2" ip
-  ip="$(docker inspect --format '{{range $name, $item := .NetworkSettings.Networks}}{{println $name $item.IPAddress}}{{end}}' \
-    "$container" | awk -v target="$network" '$1 == target { print $2; exit }')"
+  # Docker Engine 29 omits EndpointSettings.IPAddress from container inspect.
+  # Network inspect keeps the address in the portable IPv4Address field.
+  ip="$(docker network inspect --format '{{range $_, $item := .Containers}}{{println $item.Name $item.IPv4Address}}{{end}}' \
+    "$network" | awk -v target="$container" '$1 == target { sub(/\/.*/, "", $2); print $2; exit }')"
+  if [[ -z "$ip" ]]; then
+    ip="$(docker inspect --format '{{range $name, $item := .NetworkSettings.Networks}}{{println $name $item.IPAddress}}{{end}}' \
+      "$container" | awk -v target="$network" '$1 == target { print $2; exit }')"
+  fi
   [[ "$ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || fail "Cannot resolve the container IP on network $network"
   printf '%s\n' "$ip"
 }

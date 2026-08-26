@@ -10,6 +10,7 @@ validate_sha "${2:-}"
 PR_NUMBER="$1"
 SHA="$2"
 acquire_lock
+validate_production_ingress
 
 if ! command -v certbot >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
