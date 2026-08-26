@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
+require_root
+validate_sha "${1:-}"
+SHA="$1"
+acquire_lock
+
+SOURCE_DIR="$(prepare_source "$SHA")"
+IMAGE="$(build_image "$SHA" "$SOURCE_DIR")"
+RELEASE_DIR="$RELEASE_ROOT/$SHA"
+rm -rf "$RELEASE_DIR/preflight-data"
+mkdir -p "$RELEASE_DIR/preflight-data"
+
+create_online_snapshot "$RELEASE_DIR/production-before.db"
+if [[ -f "$RELEASE_DIR/production-before.db" ]]; then
+  cp "$RELEASE_DIR/production-before.db" "$RELEASE_DIR/preflight-data/drama_generator.db"
+fi
+verify_migrations "$IMAGE" "$RELEASE_DIR/preflight-data"
+run_preflight_app "$IMAGE" "$SHA" "$RELEASE_DIR/preflight-data"
+sync_production_nginx "$SOURCE_DIR"
+
+ENV_FILE="$(resolve_env_file)"
+ENV_ARGS=()
+[[ -n "$ENV_FILE" ]] && ENV_ARGS+=(--env-file "$ENV_FILE")
+
+PREVIOUS_IMAGE=''
+PREVIOUS_REVISION=''
+PREVIOUS_CONTAINER=''
+if docker inspect "$PROD_CONTAINER" >/dev/null 2>&1; then
+  PREVIOUS_IMAGE="$(docker inspect --format '{{.Config.Image}}' "$PROD_CONTAINER")"
+  PREVIOUS_REVISION="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$PROD_CONTAINER" | awk -F= '$1=="APP_REVISION"{print $2;exit}')"
+  PREVIOUS_CONTAINER="minidrama-rollback-$(date +%s)"
+fi
+
+# Remove only the stopped rollback container recorded by the last release.
+OLD_ROLLBACK="$(awk -F= '$1=="PREVIOUS_CONTAINER"{print $2}' "$RELEASE_ROOT/rollback.env" 2>/dev/null || true)"
+if [[ -n "$OLD_ROLLBACK" && "$OLD_ROLLBACK" =~ ^minidrama-rollback-[0-9]+$ ]]; then
+  docker rm -f "$OLD_ROLLBACK" >/dev/null 2>&1 || true
+fi
+
+rollback_now() {
+  trap - ERR
+  log 'Candidate failed. Restoring the previous application container.'
+  docker rm -f "$PROD_CONTAINER" >/dev/null 2>&1 || true
+  if [[ -n "$PREVIOUS_CONTAINER" ]] && docker inspect "$PREVIOUS_CONTAINER" >/dev/null 2>&1; then
+    docker rename "$PREVIOUS_CONTAINER" "$PROD_CONTAINER"
+    docker start "$PROD_CONTAINER" >/dev/null
+    docker exec "$NGINX_CONTAINER" nginx -s reload >/dev/null 2>&1 || true
+    for _ in {1..30}; do
+      docker exec "$PROD_CONTAINER" node -e 'require("http").get("http://127.0.0.1:5679/health",r=>process.exit(r.statusCode===200?0:1)).on("error",()=>process.exit(1))' >/dev/null 2>&1 && break
+      sleep 2
+    done
+  fi
+  exit 1
+}
+trap rollback_now ERR
+
+if [[ -n "$PREVIOUS_CONTAINER" ]]; then
+  docker stop --time 20 "$PROD_CONTAINER" >/dev/null
+  docker rename "$PROD_CONTAINER" "$PREVIOUS_CONTAINER"
+fi
+
+cat > "$RELEASE_ROOT/rollback.env" <<EOF
+PREVIOUS_CONTAINER=$PREVIOUS_CONTAINER
+PREVIOUS_IMAGE=$PREVIOUS_IMAGE
+PREVIOUS_REVISION=$PREVIOUS_REVISION
+CANDIDATE_IMAGE=$IMAGE
+CANDIDATE_REVISION=$SHA
+DATABASE_BACKUP=$RELEASE_DIR/production-before.db
+EOF
+chmod 600 "$RELEASE_ROOT/rollback.env"
+
+docker run -d --name "$PROD_CONTAINER" --restart unless-stopped \
+  --network "$LENS_NETWORK" --network-alias minidrama-app \
+  --label "com.richidrama.production=true" --label "com.richidrama.revision=$SHA" \
+  --health-cmd "node -e \"require('http').get('http://127.0.0.1:5679/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\"" \
+  --health-interval 30s --health-timeout 10s --health-retries 3 --health-start-period 40s \
+  -p 10588:5679 "${ENV_ARGS[@]}" \
+  -e NODE_ENV=production -e PORT=5679 -e "APP_REVISION=$SHA" \
+  -v "$PROD_DATA_DIR:/app/backend-node/data" "$IMAGE" >/dev/null
+
+wait_container_ready "$PROD_CONTAINER" "$SHA" 90
+docker exec "$NGINX_CONTAINER" nginx -s reload
+
+DOMAIN="${MINIDRAMA_PROD_DOMAIN:-drama.richbest.cn}"
+check_external() {
+  local body code
+  body="$(curl -fsS --max-time 10 -H "Host: $DOMAIN" http://127.0.0.1/ready)" || return 1
+  grep -q "\"revision\":\"$SHA\"" <<<"$body" || return 1
+  curl -fsS --max-time 10 -H "Host: $DOMAIN" http://127.0.0.1/ >/dev/null || return 1
+  code="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" http://127.0.0.1/api/v1/__release_probe__)"
+  [[ "$code" == 404 ]]
+}
+
+check_external
+OBSERVATION_SECONDS="${MINIDRAMA_OBSERVATION_SECONDS:-300}"
+elapsed=0
+while (( elapsed < OBSERVATION_SECONDS )); do
+  sleep 15
+  elapsed=$((elapsed + 15))
+  check_external
+done
+
+trap - ERR
+printf '%s\n' "$SHA" > "$RELEASE_ROOT/active-revision"
+touch "$RELEASE_DIR/succeeded"
+bash "$SOURCE_DIR/deploy/install-operations"
+prune_release_images
+log "Production release succeeded: $SHA"

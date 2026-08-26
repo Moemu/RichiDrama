@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
+require_root
+validate_pr "${1:-}"
+PR_NUMBER="$1"
+acquire_lock
+remove_preview_resources "$PR_NUMBER" 1
+log "Removed preview for PR $PR_NUMBER."

@@ -1,45 +1,66 @@
-# RichiDrama 自动部署
-# 合并/推送到 main 后，自动 SSH 登录服务器执行 deploy.sh
-#
-# 需要配置的 Repository Secrets（Settings → Secrets and variables → Actions）:
-#   SERVER_HOST  - 服务器 IP，例如 101.96.224.33
-#   SERVER_KEY   - SSH 私钥（用于登录 root），与服务器 ~/.ssh/authorized_keys 中的公钥配对
-#   SERVER_PORT  - SSH 端口（可选，默认 22）
-name: Deploy
+name: Production Deploy
 
 on:
-  push:
-    branches: [ main ]
-  # 允许手动触发，便于调试
+  workflow_run:
+    workflows: [Validation]
+    types: [completed]
   workflow_dispatch:
 
-# 同一时间只允许一个部署任务，避免并发构建冲突
+permissions:
+  contents: read
+
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 
 jobs:
   deploy:
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
+    environment: production
     steps:
-      - name: Deploy to server via SSH
+      - name: Resolve release revision
+        id: revision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ "$EVENT_NAME" == workflow_run ]]; then sha="$WORKFLOW_SHA"; else sha="${GITHUB_SHA}"; fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.revision.outputs.sha }}
+          fetch-depth: 1
+      - name: Package exact revision
+        env:
+          SHA: ${{ steps.revision.outputs.sha }}
+        run: git archive --format=tar.gz --output="${SHA}.tar.gz" HEAD
+      - name: Upload source archive
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          source: ${{ steps.revision.outputs.sha }}.tar.gz
+          target: /data/minidrama-incoming
+      - name: Deploy approved release
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: root
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          # 远程命令执行超时（构建含原生模块编译，给足时间）
-          command_timeout: 25m
-          # 建立连接超时
-          proxy_timeout: 60s
+          command_timeout: 45m
           script: |
-            set -e
-            cd /data/apps/LocalMiniDrama
-            # origin 对应当前 GitHub 仓库。服务器使用 SSH 拉取。
-            git remote set-url origin git@github.com:Moemu/RichiDrama.git
-            # 先拉取最新代码（deploy.sh 本身可能就是新加的），再执行部署脚本
-            git fetch --all --prune
-            git reset --hard origin/main
-            bash deploy.sh
+            set -euo pipefail
+            sha='${{ steps.revision.outputs.sha }}'
+            bootstrap="/data/minidrama-bootstrap/${sha}"
+            rm -rf "$bootstrap"
+            mkdir -p "$bootstrap"
+            tar -xzf "/data/minidrama-incoming/${sha}.tar.gz" -C "$bootstrap"
+            bash "$bootstrap/deploy/release-deploy" "$sha"

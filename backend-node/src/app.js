@@ -14,6 +14,24 @@ function resolveHttpErrorStatus(err) {
   return Number.isInteger(status) && status >= 400 && status < 500 ? status : 500;
 }
 
+function revisionInfo() {
+  const revision = String(process.env.APP_REVISION || '').trim();
+  return revision ? { revision } : {};
+}
+
+function readinessStatus(db, webDist) {
+  const checks = { database: false, frontend: false };
+  try {
+    checks.database = db.prepare('SELECT 1 AS ok').get()?.ok === 1;
+  } catch (_) {}
+  checks.frontend = fs.existsSync(path.join(webDist, 'index.html'));
+  return {
+    status: checks.database && checks.frontend ? 'ready' : 'not_ready',
+    checks,
+    ...revisionInfo(),
+  };
+}
+
 function createApp() {
   const config = loadConfig();
   const db = getDb(config.database);
@@ -78,6 +96,7 @@ function createApp() {
   taskService.failOrphanedAsyncTasksOnStartup(db, log);
 
   const app = express();
+  const webDist = process.env.WEB_DIST_PATH || path.join(process.cwd(), '..', 'frontweb', 'dist');
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
 
@@ -136,13 +155,18 @@ function createApp() {
       status: 'ok',
       app: config.app.name,
       version: config.app.version,
+      ...revisionInfo(),
     });
+  });
+
+  app.get('/ready', (req, res) => {
+    const result = readinessStatus(db, webDist);
+    res.status(result.status === 'ready' ? 200 : 503).json(result);
   });
 
   app.use('/api/v1', setupRouter(config, db, log));
 
   // 前端静态资源；测试或自定义部署可用 WEB_DIST_PATH 覆盖默认目录。
-  const webDist = process.env.WEB_DIST_PATH || path.join(process.cwd(), '..', 'frontweb', 'dist');
   console.log('webDist', webDist);
   if (fs.existsSync(webDist)) {
     app.use('/assets', express.static(path.join(webDist, 'assets')));
@@ -193,4 +217,4 @@ function createApp() {
   return { app, config, db };
 }
 
-module.exports = { createApp, resolveHttpErrorStatus };
+module.exports = { createApp, resolveHttpErrorStatus, readinessStatus, revisionInfo };

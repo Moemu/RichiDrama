@@ -37,6 +37,8 @@ COPY backend-node ./backend-node
 # ============================================================
 FROM node:18-bookworm-slim AS runtime
 
+ARG APP_REVISION=unknown
+
 # 使用国内 Debian 镜像源加速 apt
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
 
@@ -56,6 +58,8 @@ COPY --from=builder /build/frontweb/dist /app/frontweb/dist
 
 ENV NODE_ENV=production
 ENV PORT=5679
+ENV APP_REVISION=${APP_REVISION}
+LABEL org.opencontainers.image.revision=${APP_REVISION}
 EXPOSE 5679
 
 # 数据持久化目录由 docker-compose 挂载到 ./volumes/data
