@@ -41,12 +41,12 @@ flowchart LR
 
 代码依据（本次仅产出方案，未改动业务代码）：
 
-- [自由创作页面](/C:/Users/EDY/Desktop/项目工作流文档/LocalMiniDrama/frontweb/src/views/FreeCreate.vue) 已调用 `/videos`，但只有一张 `first_frame_url`。
-- [视频路由](/C:/Users/EDY/Desktop/项目工作流文档/LocalMiniDrama/backend-node/src/routes/videos.js) 已保存首尾帧及 `reference_image_urls`。
-- [视频服务](/C:/Users/EDY/Desktop/项目工作流文档/LocalMiniDrama/backend-node/src/services/videoService.js) 已会读取多图并发给 `videoClient`。
-- [视频客户端](/C:/Users/EDY/Desktop/项目工作流文档/LocalMiniDrama/backend-node/src/services/videoClient.js) 已具备 Seedance 全能多图和 `reference_audio` 请求结构。
-- [上传路由](/C:/Users/EDY/Desktop/项目工作流文档/LocalMiniDrama/backend-node/src/routes/upload.js) 当前仅实现图片上传，以及仅供角色音色使用的音频上传。
-- [媒体素材库](/C:/Users/EDY/Desktop/项目工作流文档/LocalMiniDrama/frontweb/src/views/MediaLibrary.vue) 与 [资产服务](/C:/Users/EDY/Desktop/项目工作流文档/LocalMiniDrama/backend-node/src/services/assetService.js) 尚未将直接上传文件创建为 `assets` 记录。
+- [自由创作页面](../../frontweb/src/views/FreeCreate.vue) 已调用 `/videos`，但只有一张 `first_frame_url`。
+- [视频路由](../../backend-node/src/routes/videos.js) 已保存首尾帧及 `reference_image_urls`。
+- [视频服务](../../backend-node/src/services/videoService.js) 已会读取多图并发给 `videoClient`。
+- [视频客户端](../../backend-node/src/services/videoClient.js) 已具备 Seedance 全能多图和 `reference_audio` 请求结构。
+- [上传路由](../../backend-node/src/routes/upload.js) 当前仅实现图片上传，以及仅供角色音色使用的音频上传。
+- [媒体素材库](../../frontweb/src/views/MediaLibrary.vue) 与 [资产服务](../../backend-node/src/services/assetService.js) 尚未将直接上传文件创建为 `assets` 记录。
 
 ## 3. 产品定位与边界
 

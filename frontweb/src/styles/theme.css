@@ -1,5 +1,5 @@
 /*
- * LocalMiniDrama design contract
+ * RichiDrama design contract
  *
  * This is intentionally the only global visual authority.  Page components
  * may describe layout, but must use these tokens for colour, borders and

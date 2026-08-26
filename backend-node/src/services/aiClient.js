@@ -22,7 +22,7 @@ function outboundProxyUrl() {
 /**
  * Node does not inherit the Windows system proxy automatically.  Provider
  * traffic must therefore explicitly tunnel through the configured HTTP proxy
- * when a desktop/local environment requires one.  The same agent is used by
+ * when a local development environment requires one. The same agent is used by
  * text streaming, image creation and video creation, so their billing paths
  * cannot diverge because of a transport difference.
  */

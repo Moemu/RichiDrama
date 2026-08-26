@@ -1,5 +1,5 @@
 [Unit]
-Description=LocalMiniDrama full local media disaster-recovery backup
+Description=RichiDrama full local media disaster-recovery backup
 After=docker.service
 Requires=docker.service
 

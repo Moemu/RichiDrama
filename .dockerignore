@@ -17,15 +17,11 @@ volumes
 .gitattributes
 
 # 桌面打包 / 文档 / 截图（与服务器部署无关）
-desktop/dist
-desktop/backend-app-secure
 backend-node/deploy-pack
 build
 build_edu
 frontweb-edu
-项目截图
 example_drama
-各大平台中转站配置
 docs
 
 # 本地编辑器 / 临时
@@ -45,4 +41,3 @@ backend-node/configs/ai-configs-*.json
 # 部署文档本身无需进镜像
 deploy
 *.md
-部署规范.txt

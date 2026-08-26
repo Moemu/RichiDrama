@@ -1,4 +1,4 @@
-# LocalMiniDrama 服务器部署文档
+# RichiDrama 服务器部署文档
 
 按《部署规范》采用 **Git + Docker Compose + 数据持久化** 的最小可维护方案。
 
@@ -73,7 +73,7 @@ chmod 600 ~/.ssh/config ~/.ssh/github_deploy_key
 
 ```bash
 ssh -T git@github.com
-# 期望: Hi Yangheyu123/LocalMiniDrama! You've successfully authenticated...
+# 期望: Hi Moemu/RichiDrama! You've successfully authenticated...
 ```
 
 ### 3. 拉取代码
@@ -81,12 +81,12 @@ ssh -T git@github.com
 ```bash
 mkdir -p /data/apps
 cd /data/apps
-git clone git@github.com:Yangheyu123/LocalMiniDrama.git
+git clone git@github.com:Moemu/RichiDrama.git LocalMiniDrama
 cd LocalMiniDrama
 ```
 
 > 如已有 HTTPS 克隆，改为 SSH：
-> `git remote set-url origin git@github.com:Yangheyu123/LocalMiniDrama.git`
+> `git remote set-url origin git@github.com:Moemu/RichiDrama.git`
 
 ### 3. 准备数据目录
 

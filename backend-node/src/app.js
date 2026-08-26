@@ -110,7 +110,7 @@ function createApp() {
     next();
   });
 
-  // 静态资源目录：统一转为绝对路径（打包 exe 下相对路径可能解析异常）
+  // 静态资源目录统一转为绝对路径，避免工作目录变化导致路径解析异常。
   const storageRoot = config.storage?.local_path
     ? (path.isAbsolute(config.storage.local_path)
         ? config.storage.local_path
@@ -141,7 +141,7 @@ function createApp() {
 
   app.use('/api/v1', setupRouter(config, db, log));
 
-  // 前端静态资源（sxy：web/dist）；Electron 打包时可设 WEB_DIST_PATH
+  // 前端静态资源；测试或自定义部署可用 WEB_DIST_PATH 覆盖默认目录。
   const webDist = process.env.WEB_DIST_PATH || path.join(process.cwd(), '..', 'frontweb', 'dist');
   console.log('webDist', webDist);
   if (fs.existsSync(webDist)) {

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# LocalMiniDrama 单容器镜像：前端构建 + 后端运行
+# RichiDrama 单容器镜像：前端构建 + 后端运行
 #
 # 后端依赖 better-sqlite3 / sharp 两个原生模块，需要编译工具链。
 

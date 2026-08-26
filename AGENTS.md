@@ -4,7 +4,7 @@
 
 ### Project Overview
 
-LocalMiniDrama (本地短剧助手) — an AI-powered local short drama creation tool. Single product, three sub-projects sharing one repo (no monorepo tooling).
+RichiDrama (瑞池传媒短剧平台) is a self-hosted AI short-drama production tool. The frontend and backend share one repository without monorepo tooling.
 
 ### Services
 
@@ -130,4 +130,3 @@ CFG_IMAGE_PROXY__USE_FOR_VIDEO=false SD2_DISABLE_ASSET_INJECT=1 node --watch src
 #### 本地测试 HTTP 请求注意
 
 用 `curl` 发含中文的 JSON 请求时，Windows Git Bash 的 curl 会损坏 UTF-8（中文变 `U+FFFD`），导致后端收到的中文路径匹配不到本地文件。**本地测试含中文的请求请用 Node 发送**（`http.request` + `Buffer.byteLength(body)`），或直接用浏览器前端操作。
-

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LocalMiniDrama 服务器部署脚本
+# RichiDrama 服务器部署脚本
 # 由 GitHub Actions 通过 SSH 调用，也可手动执行。
 #
 # 用法:
@@ -27,7 +27,7 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 log()  { echo "[$(date '+%F %T')] $*"; }
 fail() { log "ERROR: $*"; exit 1; }
 
-log "===== LocalMiniDrama 部署开始 ====="
+log "===== RichiDrama 部署开始 ====="
 log "工作目录: ${PROJECT_DIR}"
 cd "${PROJECT_DIR}" || fail "项目目录不存在: ${PROJECT_DIR}"
 [[ "${DATA_DIR}" = /* ]] || fail "MINIDRAMA_DATA_DIR 必须是绝对路径: ${DATA_DIR}"
