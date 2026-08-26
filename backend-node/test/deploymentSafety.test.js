@@ -23,9 +23,14 @@ test('preview deployment isolates data, network and resources', () => {
   const previewRuntime = previewDockerfile.split('FROM ${RUNTIME_BASE_IMAGE} AS runtime')[1];
   assert.doesNotMatch(previewRuntime, /apt-get|dnf|yum/);
   assert.match(source, /require_container_network "\$TLS_NGINX_CONTAINER" "\$TLS_PROXY_NETWORK"/);
-  assert.match(source, /name=\$TLS_PROXY_NETWORK,alias=\$GATEWAY_CONTAINER,gw-priority=1/);
-  assert.match(source, /docker network connect --gw-priority -1 "\$NETWORK" "\$GATEWAY_CONTAINER"/);
-  assert.ok(source.indexOf('docker network connect "$NETWORK"') < source.indexOf('docker start "$GATEWAY_CONTAINER"'));
+  assert.match(source, /docker network inspect --format .*\.IPAM\.Config/);
+  assert.match(source, /--publish "\$TLS_HOST_IP::5679"/);
+  assert.match(source, /APP_BINDING="\$\(docker port "\$APP_CONTAINER" 5679\/tcp\)"/);
+  assert.match(source, /--network "\$TLS_PROXY_NETWORK" --network-alias "\$GATEWAY_CONTAINER"/);
+  assert.doesNotMatch(source, /docker network connect/);
+  assert.match(source, /Preview app can access the public network/);
+  assert.match(source, /Preview app can resolve the production application network/);
+  assert.match(source, /http:\/\/127\.0\.0\.1:8080\/ready/);
   assert.match(source, /http:\/\/\$GATEWAY_CONTAINER:8080\/ready/);
   assert.doesNotMatch(source + library, /container_network_ip|GATEWAY_PROXY_IP/);
   assert.match(source, /acquire_lock\s+validate_production_ingress/);
@@ -40,6 +45,7 @@ test('preview deployment isolates data, network and resources', () => {
   assert.match(source, /chown 101:101 "\$PR_DIR\/gateway\/htpasswd"/);
   assert.doesNotMatch(source, /-v "\$PROD_DATA_DIR:\/app\/backend-node\/data"/);
   assert.match(gateway, /auth_basic_user_file/);
+  assert.match(gateway, /proxy_pass http:\/\/__APP_HOST__:__APP_PORT__/);
   assert.match(source, /preview\.drama\.richbest\.cn/);
   assert.doesNotMatch(source, /docker cp -L .*chain\.pem/);
   assert.match(tls, /\/etc\/letsencrypt\/live\/__PREVIEW_HOST__\/fullchain\.pem/);

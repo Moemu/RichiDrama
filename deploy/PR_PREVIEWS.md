@@ -12,13 +12,15 @@
 
 ## 服务器目录
 
-- 上传包：`/data/minidrama-incoming/<sha>.tar.gz`
+- 服务器本地包：`/data/minidrama-incoming/<sha>.tar.gz`
 - 不可变源码：`/data/minidrama-releases/<sha>/source`
 - 发布前数据库：`/data/minidrama-releases/<sha>/production-before.db`
 - PR 数据：`/data/minidrama-previews/pr-<number>`
 - 生产数据：`/data/minidrama-data`
 
 PR 应用只连接内部 Docker 网络。该网络没有外部出口。PR 应用不能挂载生产数据目录。
+
+Runner 只发送 PR 编号和 commit SHA。服务器通过 GitHub SSH Deploy Key 获取 PR ref，并在本机创建源码包。
 
 ## 首次服务器准备
 
@@ -29,7 +31,9 @@ PR 应用只连接内部 Docker 网络。该网络没有外部出口。PR 应用
 - `lens-rhyme-nginx-1` 处理端口 80 和 HTTP-01。
 - `avatar-proxy-api-gateway-1` 处理端口 443 和预览 TLS。
 - TLS 容器挂载宿主机 `/etc/letsencrypt` 为只读目录。
-- 预览代理连接 `avatar-proxy_default`。预览应用仍只连接内部网络。
+- 预览代理只连接 `avatar-proxy_default`。
+- 预览应用仍只连接内部网络。
+- 应用端口只绑定到 TLS Docker bridge 的宿主机 gateway IP。它不绑定公网 IP。
 
 如服务器名称不同，可以设置：
 
