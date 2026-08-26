@@ -9,6 +9,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 test('preview deployment isolates data, network and resources', () => {
   const source = read('deploy/preview-deploy');
   const gateway = read('deploy/preview-gateway.conf.template');
+  const acmeHook = read('deploy/acme-auth-hook.sh');
   assert.match(source, /docker network create --internal/);
   assert.match(source, /--network "\$NETWORK" --network-alias preview-app/);
   assert.match(source, /--memory 2g --cpus 1/);
@@ -20,6 +21,8 @@ test('preview deployment isolates data, network and resources', () => {
   assert.doesNotMatch(source, /-v "\$PROD_DATA_DIR:\/app\/backend-node\/data"/);
   assert.match(gateway, /auth_basic_user_file/);
   assert.match(source, /preview\.drama\.richbest\.cn/);
+  assert.match(acmeHook, /chmod 644 "\$tmp"/);
+  assert.match(acmeHook, /chmod 644 .*CERTBOT_TOKEN/);
 });
 
 test('preview removal validates the exact PR path', () => {
