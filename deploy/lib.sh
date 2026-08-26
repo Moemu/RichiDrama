@@ -97,7 +97,8 @@ build_image() {
   local sha="$1" source_dir="$2" image="local-minidrama:${1}"
   if ! docker image inspect "$image" >/dev/null 2>&1; then
     log "Building immutable image $image"
-    docker build --pull --build-arg "APP_REVISION=$sha" -t "$image" "$source_dir"
+    docker build --pull --build-arg "APP_REVISION=$sha" -t "$image" "$source_dir" || \
+      fail "Immutable image build failed: $image"
   else
     log "Using existing image $image"
   fi

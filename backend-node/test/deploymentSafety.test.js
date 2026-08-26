@@ -77,6 +77,7 @@ test('production release uses an immutable archive and rollback container', () =
   const source = read('deploy/release-deploy');
   const compatibility = read('deploy.sh');
   const library = read('deploy/lib.sh');
+  const dockerfile = read('Dockerfile');
   assert.match(source, /prepare_source "\$SHA"/);
   assert.match(source, /verify_migrations/);
   assert.match(source, /wait_container_ready.*90/);
@@ -88,6 +89,10 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(library, /getent hosts minidrama-app/);
   assert.match(source, /rollback_now/);
   assert.match(library, /local image="\$1" sha="\$2" data_dir="\$3"\s+local name="minidrama-preflight-/);
+  assert.match(library, /docker build[^\n]*\|\| \\/);
+  assert.match(library, /fail "Immutable image build failed/);
+  assert.match(dockerfile, /https:\/\/mirrors\.aliyun\.com/);
+  assert.doesNotMatch(dockerfile, /s\|deb\.debian\.org\|mirrors\.aliyun\.com/);
   assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-300/);
   assert.doesNotMatch(source + compatibility, /git reset|git remote set-url/);
 });
