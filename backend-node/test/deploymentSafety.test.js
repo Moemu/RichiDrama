@@ -23,8 +23,8 @@ test('preview deployment isolates data, network and resources', () => {
   const previewRuntime = previewDockerfile.split('FROM ${RUNTIME_BASE_IMAGE} AS runtime')[1];
   assert.doesNotMatch(previewRuntime, /apt-get|dnf|yum/);
   assert.match(source, /require_container_network "\$TLS_NGINX_CONTAINER" "\$TLS_PROXY_NETWORK"/);
-  assert.match(source, /docker create .*--network "\$TLS_PROXY_NETWORK"/);
-  assert.match(source, /docker network connect "\$NETWORK" "\$GATEWAY_CONTAINER"/);
+  assert.match(source, /name=\$TLS_PROXY_NETWORK,alias=\$GATEWAY_CONTAINER,gw-priority=1/);
+  assert.match(source, /docker network connect --gw-priority -1 "\$NETWORK" "\$GATEWAY_CONTAINER"/);
   assert.ok(source.indexOf('docker network connect "$NETWORK"') < source.indexOf('docker start "$GATEWAY_CONTAINER"'));
   assert.match(source, /http:\/\/\$GATEWAY_CONTAINER:8080\/ready/);
   assert.doesNotMatch(source + library, /container_network_ip|GATEWAY_PROXY_IP/);

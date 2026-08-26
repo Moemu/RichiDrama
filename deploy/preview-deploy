@@ -103,7 +103,8 @@ docker run -d --name "$APP_CONTAINER" --network "$NETWORK" --network-alias previ
 wait_container_ready "$APP_CONTAINER" "$SHA" 90 || fail 'Preview application did not become ready.'
 
 require_container_network "$TLS_NGINX_CONTAINER" "$TLS_PROXY_NETWORK"
-docker create --name "$GATEWAY_CONTAINER" --network "$TLS_PROXY_NETWORK" --network-alias "$GATEWAY_CONTAINER" \
+docker create --name "$GATEWAY_CONTAINER" \
+  --network "name=$TLS_PROXY_NETWORK,alias=$GATEWAY_CONTAINER,gw-priority=1" \
   --label "com.richidrama.preview-pr=$PR_NUMBER" \
   --security-opt no-new-privileges --cap-drop ALL --pids-limit 64 \
   --memory 128m --cpus 0.25 --read-only \
@@ -112,7 +113,7 @@ docker create --name "$GATEWAY_CONTAINER" --network "$TLS_PROXY_NETWORK" --netwo
   -v "$PR_DIR/gateway/default.conf:/etc/nginx/conf.d/default.conf:ro" \
   -v "$PR_DIR/gateway/htpasswd:/etc/nginx/htpasswd:ro" \
   nginxinc/nginx-unprivileged:1.27-alpine >/dev/null
-docker network connect "$NETWORK" "$GATEWAY_CONTAINER"
+docker network connect --gw-priority -1 "$NETWORK" "$GATEWAY_CONTAINER"
 docker start "$GATEWAY_CONTAINER" >/dev/null
 if ! docker ps --format '{{.Names}}' | grep -Fqx "$GATEWAY_CONTAINER"; then
   docker logs --tail 50 "$GATEWAY_CONTAINER" >&2 || true
