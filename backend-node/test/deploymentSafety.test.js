@@ -32,10 +32,12 @@ test('preview removal validates the exact PR path', () => {
 test('production release uses an immutable archive and rollback container', () => {
   const source = read('deploy/release-deploy');
   const compatibility = read('deploy.sh');
+  const library = read('deploy/lib.sh');
   assert.match(source, /prepare_source "\$SHA"/);
   assert.match(source, /verify_migrations/);
   assert.match(source, /wait_container_ready.*90/);
   assert.match(source, /rollback_now/);
+  assert.match(library, /local image="\$1" sha="\$2" data_dir="\$3"\s+local name="minidrama-preflight-/);
   assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-300/);
   assert.doesNotMatch(source + compatibility, /git reset|git remote set-url/);
 });

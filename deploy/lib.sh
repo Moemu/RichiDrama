@@ -116,7 +116,8 @@ wait_container_ready() {
 }
 
 run_preflight_app() {
-  local image="$1" sha="$2" data_dir="$3" name="minidrama-preflight-${sha:0:12}"
+  local image="$1" sha="$2" data_dir="$3"
+  local name="minidrama-preflight-${sha:0:12}"
   local env_file env_args=()
   env_file="$(resolve_env_file)"
   [[ -n "$env_file" ]] && env_args+=(--env-file "$env_file")
