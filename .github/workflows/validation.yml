@@ -27,7 +27,13 @@ jobs:
       - name: Install video test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo apt-get install -y --no-install-recommends ffmpeg shellcheck
+      - name: Check deployment shell scripts
+        run: |
+          shellcheck -e SC1091 \
+            deploy/lib.sh deploy/preview-deploy deploy/preview-remove deploy/preview-show deploy/preview-cleanup \
+            deploy/release-deploy deploy/release-rollback deploy/install-operations \
+            deploy/acme-auth-hook.sh deploy/acme-cleanup-hook.sh
       - name: Install backend dependencies
         working-directory: backend-node
         run: npm ci --no-audit --no-fund
@@ -69,3 +75,19 @@ jobs:
         run: docker build --build-arg "APP_REVISION=${GITHUB_SHA}" -t "local-minidrama:${GITHUB_SHA}" .
       - name: Verify image revision
         run: test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "local-minidrama:${GITHUB_SHA}")" = "${GITHUB_SHA}"
+      - name: Verify preview TLS Nginx configuration
+        run: |
+          host='pr-3-0123456789abcdef.preview.drama.richbest.cn'
+          test_root="${RUNNER_TEMP}/preview-nginx"
+          mkdir -p "${test_root}/live/${host}"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj "/CN=${host}" \
+            -keyout "${test_root}/live/${host}/privkey.pem" \
+            -out "${test_root}/live/${host}/fullchain.pem" >/dev/null 2>&1
+          sed -e "s/__PREVIEW_HOST__/${host}/g" -e 's/__GATEWAY_IP__/127.0.0.1/g' \
+            deploy/nginx-preview-tls.conf.template > "${test_root}/preview.conf"
+          docker run --rm \
+            -v "${test_root}/preview.conf:/etc/nginx/conf.d/preview.conf:ro" \
+            -v "${GITHUB_WORKSPACE}/deploy/nginx-tls-default-reject.conf:/etc/nginx/conf.d/00-minidrama-default-reject.conf:ro" \
+            -v "${test_root}:/etc/letsencrypt:ro" \
+            nginx:1.27-alpine nginx -t

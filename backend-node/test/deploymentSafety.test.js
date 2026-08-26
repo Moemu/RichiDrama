@@ -8,12 +8,17 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('preview deployment isolates data, network and resources', () => {
   const source = read('deploy/preview-deploy');
+  const library = read('deploy/lib.sh');
   const gateway = read('deploy/preview-gateway.conf.template');
+  const redirect = read('deploy/nginx-preview-redirect.conf.template');
+  const tls = read('deploy/nginx-preview-tls.conf.template');
+  const reject = read('deploy/nginx-tls-default-reject.conf');
   const acmeHook = read('deploy/acme-auth-hook.sh');
   assert.match(source, /docker network create --internal/);
-  assert.match(source, /PROXY_NETWORK="\$\(resolve_proxy_network\)"/);
-  assert.match(source, /GATEWAY_PROXY_IP=.*docker inspect/);
-  assert.match(source, /proxy_pass http:\/\/\$GATEWAY_PROXY_IP:8080/);
+  assert.match(source, /require_container_network "\$TLS_NGINX_CONTAINER" "\$TLS_PROXY_NETWORK"/);
+  assert.match(source, /docker network connect .*"\$TLS_PROXY_NETWORK"/);
+  assert.match(source, /GATEWAY_PROXY_IP="\$\(container_network_ip/);
+  assert.match(source, /docker exec "\$TLS_NGINX_CONTAINER" wget/);
   assert.match(source, /--network "\$NETWORK" --network-alias preview-app/);
   assert.match(source, /--memory 2g --cpus 1/);
   assert.match(source, /--pids-limit 256/);
@@ -24,12 +29,32 @@ test('preview deployment isolates data, network and resources', () => {
   assert.doesNotMatch(source, /-v "\$PROD_DATA_DIR:\/app\/backend-node\/data"/);
   assert.match(gateway, /auth_basic_user_file/);
   assert.match(source, /preview\.drama\.richbest\.cn/);
-  assert.match(source, /docker cp -L .*fullchain\.pem/);
-  assert.match(source, /docker cp -L .*privkey\.pem/);
+  assert.doesNotMatch(source, /docker cp -L .*chain\.pem/);
+  assert.match(tls, /\/etc\/letsencrypt\/live\/__PREVIEW_HOST__\/fullchain\.pem/);
+  assert.match(tls, /proxy_pass http:\/\/__GATEWAY_IP__:8080/);
+  assert.match(redirect, /return 301 https:\/\/\$host\$request_uri/);
+  assert.match(reject, /listen 443 ssl default_server/);
+  assert.match(reject, /ssl_reject_handshake on/);
+  assert.match(library, /HTTP_NGINX_CONTAINER=.*lens-rhyme-nginx-1/);
+  assert.match(library, /TLS_NGINX_CONTAINER=.*avatar-proxy-api-gateway-1/);
+  assert.match(library, /TLS_PROXY_NETWORK=.*avatar-proxy_default/);
   assert.match(source, /for attempt in 1 2/);
   assert.match(source, /\[preview-host\]/);
+  assert.match(source, /MINIDRAMA_HTTP_NGINX_CONTAINER="\$HTTP_NGINX_CONTAINER"/);
   assert.match(acmeHook, /chmod 644 "\$tmp"/);
   assert.match(acmeHook, /chmod 644 .*CERTBOT_TOKEN/);
+});
+
+test('preview TLS template renders one exact isolated upstream', () => {
+  const template = read('deploy/nginx-preview-tls.conf.template');
+  const host = 'pr-3-0123456789abcdef.preview.drama.richbest.cn';
+  const rendered = template
+    .replaceAll('__PREVIEW_HOST__', host)
+    .replaceAll('__GATEWAY_IP__', '172.22.0.6');
+  assert.doesNotMatch(rendered, /__[A-Z_]+__/);
+  assert.match(rendered, new RegExp(`server_name ${host.replaceAll('.', '\\.')}`));
+  assert.match(rendered, /proxy_pass http:\/\/172\.22\.0\.6:8080/);
+  assert.doesNotMatch(rendered, /minidrama-app|preview-app/);
 });
 
 test('preview removal validates the exact PR path', () => {
@@ -37,6 +62,8 @@ test('preview removal validates the exact PR path', () => {
   assert.match(source, /resolved_target.*resolved_root\/pr-\$pr/);
   assert.match(source, /label=com\.richidrama\.preview-pr/);
   assert.match(source, /rm -rf -- "\$resolved_target"/);
+  assert.match(source, /docker exec "\$HTTP_NGINX_CONTAINER" rm -f "\/etc\/nginx\/conf\.d\/preview-pr-\$pr\.conf"/);
+  assert.match(source, /docker exec "\$TLS_NGINX_CONTAINER" rm -f "\/etc\/nginx\/conf\.d\/preview-pr-\$pr\.conf"/);
 });
 
 test('production release uses an immutable archive and rollback container', () => {
@@ -46,8 +73,12 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(source, /prepare_source "\$SHA"/);
   assert.match(source, /verify_migrations/);
   assert.match(source, /wait_container_ready.*90/);
-  assert.match(source, /--network "\$PROXY_NETWORK" --network-alias minidrama-app/);
-  assert.match(library, /resolve_proxy_network/);
+  assert.match(source, /--network "\$PROD_PROXY_NETWORK" --network-alias minidrama-app/);
+  assert.match(source, /validate_production_ingress/);
+  assert.doesNotMatch(source, /sync_production_nginx/);
+  assert.match(library, /mv "\$stale" "\$disabled"/);
+  assert.match(library, /count=.*server_name/);
+  assert.match(library, /getent hosts minidrama-app/);
   assert.match(source, /rollback_now/);
   assert.match(library, /local image="\$1" sha="\$2" data_dir="\$3"\s+local name="minidrama-preflight-/);
   assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-300/);
@@ -60,11 +91,18 @@ test('GitHub workflows gate preview and production', () => {
   const production = read('.github/workflows/deploy.yml');
   assert.match(validation, /node --test test\/\*\.test\.js/);
   assert.match(validation, /docker build --build-arg/);
+  assert.match(validation, /shellcheck -e SC1091/);
+  assert.match(validation, /Verify preview TLS Nginx configuration/);
+  assert.match(validation, /nginx:1\.27-alpine nginx -t/);
   assert.match(preview, /environment: preview/);
   assert.match(preview, /preview \/ smoke/);
   assert.match(preview, /head\.repo\.full_name/);
+  assert.match(preview, /Remove transferred source/);
+  assert.match(preview, /rm -f -- "\$incoming"/);
+  assert.match(preview, /rm -rf -- "\$bootstrap"/);
   assert.match(production, /environment: production/);
   assert.match(production, /workflow_run\.conclusion == 'success'/);
+  assert.match(production, /Remove transferred source/);
   const protection = read('deploy/configure-github-protection');
   assert.match(protection, /preview \/ smoke/);
   assert.match(protection, /"enforce_admins": true/);

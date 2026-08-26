@@ -15,7 +15,7 @@
 本应用容器加入 `lens-rhyme_default` 网络（alias `minidrama-app`），
 由 `lens-rhyme-nginx` 按域名 `drama.richbest.cn` 反代。
 - 容器内监听 5679；宿主机 10588 仅作内网调试备用。
-- `deploy/nginx-drama-richbest.conf` 为 nginx 反代配置，每次部署自动同步（见下）。
+- 生产 Nginx 配置由现有 `default.conf` 管理。发布脚本只验证该配置，不写入重复域名。
 
 后端（Express）在容器内托管：
 - `/api/v1/*`  后端接口

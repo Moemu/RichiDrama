@@ -64,3 +64,21 @@ jobs:
             mkdir -p "$bootstrap"
             tar -xzf "/data/minidrama-incoming/${sha}.tar.gz" -C "$bootstrap"
             bash "$bootstrap/deploy/release-deploy" "$sha"
+      - name: Remove transferred source
+        if: always() && steps.revision.outputs.sha != ''
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            sha='${{ steps.revision.outputs.sha }}'
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+            incoming="/data/minidrama-incoming/${sha}.tar.gz"
+            bootstrap="/data/minidrama-bootstrap/${sha}"
+            [[ "$(realpath -m "$incoming")" == "/data/minidrama-incoming/${sha}.tar.gz" ]]
+            [[ "$(realpath -m "$bootstrap")" == "/data/minidrama-bootstrap/${sha}" ]]
+            rm -f -- "$incoming"
+            rm -rf -- "$bootstrap"

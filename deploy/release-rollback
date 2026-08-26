@@ -15,7 +15,7 @@ docker stop --time 20 "$PROD_CONTAINER" >/dev/null 2>&1 || true
 docker rm "$PROD_CONTAINER" >/dev/null 2>&1 || true
 docker rename "$PREVIOUS_CONTAINER" "$PROD_CONTAINER"
 docker start "$PROD_CONTAINER" >/dev/null
-docker exec "$NGINX_CONTAINER" nginx -s reload >/dev/null 2>&1 || true
+docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload >/dev/null 2>&1 || true
 
 for _ in {1..45}; do
   if docker exec "$PROD_CONTAINER" node -e 'require("http").get("http://127.0.0.1:5679/health",r=>process.exit(r.statusCode===200?0:1)).on("error",()=>process.exit(1))' >/dev/null 2>&1; then

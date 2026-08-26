@@ -22,7 +22,23 @@ PR 应用只连接内部 Docker 网络。该网络没有外部出口。PR 应用
 
 ## 首次服务器准备
 
-安装 Docker、Certbot、OpenSSL、`flock` 和 Nginx 容器。Nginx 容器必须发布端口 80 和 443。
+安装 Docker、Certbot、OpenSSL 和 `flock`。
+
+当前服务器使用两个入口容器：
+
+- `lens-rhyme-nginx-1` 处理端口 80 和 HTTP-01。
+- `avatar-proxy-api-gateway-1` 处理端口 443 和预览 TLS。
+- TLS 容器挂载宿主机 `/etc/letsencrypt` 为只读目录。
+- 预览代理连接 `avatar-proxy_default`。预览应用仍只连接内部网络。
+
+如服务器名称不同，可以设置：
+
+```text
+MINIDRAMA_HTTP_NGINX_CONTAINER
+MINIDRAMA_TLS_NGINX_CONTAINER
+MINIDRAMA_TLS_PROXY_NETWORK
+MINIDRAMA_PROXY_NETWORK
+```
 
 在火山引擎 DNS 中添加记录：
 

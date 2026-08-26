@@ -7,8 +7,10 @@ INCOMING_ROOT="${MINIDRAMA_INCOMING_ROOT:-/data/minidrama-incoming}"
 PROD_DATA_DIR="${MINIDRAMA_DATA_DIR:-/data/minidrama-data}"
 DEPLOY_LOCK="${MINIDRAMA_DEPLOY_LOCK:-/var/lock/minidrama-deploy.lock}"
 PROD_CONTAINER="${MINIDRAMA_PROD_CONTAINER:-local-minidrama}"
-NGINX_CONTAINER="${MINIDRAMA_NGINX_CONTAINER:-lens-rhyme-nginx-1}"
-LENS_NETWORK="${MINIDRAMA_PROXY_NETWORK:-lens-rhyme_default}"
+HTTP_NGINX_CONTAINER="${MINIDRAMA_HTTP_NGINX_CONTAINER:-${MINIDRAMA_NGINX_CONTAINER:-lens-rhyme-nginx-1}}"
+TLS_NGINX_CONTAINER="${MINIDRAMA_TLS_NGINX_CONTAINER:-avatar-proxy-api-gateway-1}"
+PROD_PROXY_NETWORK="${MINIDRAMA_PROXY_NETWORK:-lens-rhyme_default}"
+TLS_PROXY_NETWORK="${MINIDRAMA_TLS_PROXY_NETWORK:-avatar-proxy_default}"
 
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*" >&2; }
 fail() { log "ERROR: $*" >&2; exit 1; }
@@ -37,16 +39,47 @@ resolve_env_file() {
   printf '%s\n' ''
 }
 
-resolve_proxy_network() {
-  local networks selected
-  networks="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$NGINX_CONTAINER")"
-  if grep -Fxq "$LENS_NETWORK" <<<"$networks"; then
-    printf '%s\n' "$LENS_NETWORK"
-    return
-  fi
-  selected="$(sed '/^[[:space:]]*$/d' <<<"$networks" | head -n 1)"
-  [[ -n "$selected" ]] || fail "Nginx container has no Docker network: $NGINX_CONTAINER"
-  printf '%s\n' "$selected"
+require_running_container() {
+  local container="$1"
+  docker ps --format '{{.Names}}' | grep -Fqx "$container" || fail "Required container is not running: $container"
+}
+
+require_container_network() {
+  local container="$1" network="$2" networks
+  require_running_container "$container"
+  docker network inspect "$network" >/dev/null 2>&1 || fail "Docker network does not exist: $network"
+  networks="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container")"
+  grep -Fqx "$network" <<<"$networks" || fail "Container $container is not connected to network $network"
+}
+
+container_network_ip() {
+  local container="$1" network="$2" ip
+  ip="$(docker inspect --format '{{range $name, $item := .NetworkSettings.Networks}}{{println $name $item.IPAddress}}{{end}}' \
+    "$container" | awk -v target="$network" '$1 == target { print $2; exit }')"
+  [[ "$ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || fail "Cannot resolve the container IP on network $network"
+  printf '%s\n' "$ip"
+}
+
+validate_production_ingress() {
+  require_container_network "$HTTP_NGINX_CONTAINER" "$PROD_PROXY_NETWORK"
+  docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
+    default=/etc/nginx/conf.d/default.conf
+    stale=/etc/nginx/conf.d/minidrama.conf
+    disabled=/etc/nginx/minidrama.conf.disabled
+    grep -Eq "server_name[[:space:]]+drama\\.richbest\\.cn;" "$default"
+    grep -Eq "proxy_pass[[:space:]]+http://minidrama-app:5679" "$default"
+    if [ -f "$stale" ]; then
+      mv "$stale" "$disabled"
+      if ! nginx -t; then
+        mv "$disabled" "$stale"
+        exit 1
+      fi
+    fi
+    count="$(nginx -T 2>&1 | grep -Ec "server_name[[:space:]]+drama\\.richbest\\.cn;")"
+    [ "$count" -eq 1 ]
+    getent hosts minidrama-app >/dev/null
+    nginx -t
+  ' || fail 'Production Nginx ingress validation failed.'
 }
 
 prepare_source() {
@@ -151,19 +184,6 @@ run_preflight_app() {
   docker rm -f "$name" >/dev/null
 }
 
-sync_production_nginx() {
-  local source_dir="$1"
-  docker ps --format '{{.Names}}' | grep -qx "$NGINX_CONTAINER" || fail "Nginx container is not running: $NGINX_CONTAINER"
-  docker exec "$NGINX_CONTAINER" sh -c 'if [ -f /etc/nginx/conf.d/minidrama.conf ]; then cp /etc/nginx/conf.d/minidrama.conf /etc/nginx/minidrama.conf.backup; fi'
-  docker cp "$source_dir/deploy/nginx-drama-richbest.conf" "$NGINX_CONTAINER:/etc/nginx/conf.d/minidrama.conf"
-  if ! docker exec "$NGINX_CONTAINER" nginx -t; then
-    docker exec "$NGINX_CONTAINER" sh -c 'if [ -f /etc/nginx/minidrama.conf.backup ]; then mv /etc/nginx/minidrama.conf.backup /etc/nginx/conf.d/minidrama.conf; else rm -f /etc/nginx/conf.d/minidrama.conf; fi'
-    fail 'Candidate production Nginx configuration is invalid.'
-  fi
-  docker exec "$NGINX_CONTAINER" rm -f /etc/nginx/minidrama.conf.backup
-  docker exec "$NGINX_CONTAINER" nginx -s reload
-}
-
 safe_remove_preview_dir() {
   local pr="$1" target="${PREVIEW_ROOT}/pr-${1}" resolved_root resolved_target
   validate_pr "$pr"
@@ -185,13 +205,15 @@ remove_preview_resources() {
   ((${#preview_containers[@]} == 0)) || docker rm -f "${preview_containers[@]}" >/dev/null
   [[ -z "$network" ]] || docker network rm "$network" >/dev/null 2>&1 || true
 
-  if docker ps --format '{{.Names}}' | grep -qx "$NGINX_CONTAINER"; then
-    docker exec "$NGINX_CONTAINER" rm -f "/etc/nginx/conf.d/preview-pr-$pr.conf"
-    if [[ -n "$host" && "$host" =~ ^pr-${pr}-[0-9a-f]{16}\.preview\.drama\.richbest\.cn$ ]]; then
-      docker exec "$NGINX_CONTAINER" rm -rf "/etc/nginx/preview-certs/$host"
-    fi
-    docker exec "$NGINX_CONTAINER" nginx -t
-    docker exec "$NGINX_CONTAINER" nginx -s reload
+  if docker ps --format '{{.Names}}' | grep -Fqx "$HTTP_NGINX_CONTAINER"; then
+    docker exec "$HTTP_NGINX_CONTAINER" rm -f "/etc/nginx/conf.d/preview-pr-$pr.conf"
+    docker exec "$HTTP_NGINX_CONTAINER" nginx -t
+    docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload
+  fi
+  if docker ps --format '{{.Names}}' | grep -Fqx "$TLS_NGINX_CONTAINER"; then
+    docker exec "$TLS_NGINX_CONTAINER" rm -f "/etc/nginx/conf.d/preview-pr-$pr.conf"
+    docker exec "$TLS_NGINX_CONTAINER" nginx -t
+    docker exec "$TLS_NGINX_CONTAINER" nginx -s reload
   fi
   if [[ -n "$host" && "$delete_cert" == 1 ]] && command -v certbot >/dev/null 2>&1; then
     certbot delete --non-interactive --cert-name "$host" >/dev/null 2>&1 || true

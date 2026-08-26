@@ -2,7 +2,7 @@
 set -euo pipefail
 : "${CERTBOT_TOKEN:?CERTBOT_TOKEN is required}"
 : "${CERTBOT_VALIDATION:?CERTBOT_VALIDATION is required}"
-NGINX_CONTAINER="${MINIDRAMA_NGINX_CONTAINER:-lens-rhyme-nginx-1}"
+NGINX_CONTAINER="${MINIDRAMA_HTTP_NGINX_CONTAINER:-${MINIDRAMA_NGINX_CONTAINER:-lens-rhyme-nginx-1}}"
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 printf '%s' "$CERTBOT_VALIDATION" > "$tmp"

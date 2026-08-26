@@ -109,20 +109,27 @@ docker run -d --name "$GATEWAY_CONTAINER" --network "$NETWORK" \
   -v "$PR_DIR/gateway/default.conf:/etc/nginx/conf.d/default.conf:ro" \
   -v "$PR_DIR/gateway/htpasswd:/etc/nginx/htpasswd:ro" \
   nginxinc/nginx-unprivileged:1.27-alpine >/dev/null
-PROXY_NETWORK="$(resolve_proxy_network)"
-docker network connect --alias "$GATEWAY_CONTAINER" "$PROXY_NETWORK" "$GATEWAY_CONTAINER"
-GATEWAY_PROXY_IP="$(docker inspect --format "{{(index .NetworkSettings.Networks \"$PROXY_NETWORK\").IPAddress}}" "$GATEWAY_CONTAINER")"
-[[ "$GATEWAY_PROXY_IP" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || fail 'Cannot resolve the preview gateway IP.'
+require_container_network "$TLS_NGINX_CONTAINER" "$TLS_PROXY_NETWORK"
+docker network connect --alias "$GATEWAY_CONTAINER" "$TLS_PROXY_NETWORK" "$GATEWAY_CONTAINER"
+GATEWAY_PROXY_IP="$(container_network_ip "$GATEWAY_CONTAINER" "$TLS_PROXY_NETWORK")"
+
+AUTH_HEADER="$(printf 'preview:%s' "$PASSWORD" | openssl base64 -A)"
+GATEWAY_READY="$(docker exec "$TLS_NGINX_CONTAINER" wget -qO- \
+  --header="Host: $HOST" --header="Authorization: Basic $AUTH_HEADER" \
+  "http://$GATEWAY_PROXY_IP:8080/ready")" || fail 'TLS ingress cannot reach the preview gateway.'
+grep -q "\"revision\":\"$SHA\"" <<<"$GATEWAY_READY" || fail 'Preview gateway returned the wrong revision.'
+unset AUTH_HEADER GATEWAY_READY
 
 # Install the permanent HTTP-01 entry before requesting the exact certificate.
-docker exec "$NGINX_CONTAINER" mkdir -p /var/www/minidrama-acme/.well-known/acme-challenge /etc/nginx/preview-certs
-docker cp "$SOURCE_DIR/deploy/nginx-preview-http.conf" "$NGINX_CONTAINER:/etc/nginx/conf.d/minidrama-preview-http.conf"
-docker exec "$NGINX_CONTAINER" nginx -t
-docker exec "$NGINX_CONTAINER" nginx -s reload
+require_running_container "$HTTP_NGINX_CONTAINER"
+docker exec "$HTTP_NGINX_CONTAINER" mkdir -p /var/www/minidrama-acme/.well-known/acme-challenge
+docker cp "$SOURCE_DIR/deploy/nginx-preview-http.conf" "$HTTP_NGINX_CONTAINER:/etc/nginx/conf.d/minidrama-preview-http.conf"
+docker exec "$HTTP_NGINX_CONTAINER" nginx -t
+docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload
 
 CERT_ISSUED=0
 for attempt in 1 2; do
-  if MINIDRAMA_NGINX_CONTAINER="$NGINX_CONTAINER" certbot certonly --manual --non-interactive --agree-tos \
+  if MINIDRAMA_HTTP_NGINX_CONTAINER="$HTTP_NGINX_CONTAINER" certbot certonly --manual --non-interactive --agree-tos \
     --email "$MINIDRAMA_ACME_EMAIL" --preferred-challenges http \
     --manual-auth-hook "bash $SOURCE_DIR/deploy/acme-auth-hook.sh" \
     --manual-cleanup-hook "bash $SOURCE_DIR/deploy/acme-cleanup-hook.sh" \
@@ -139,36 +146,36 @@ if [[ "$CERT_ISSUED" != 1 ]]; then
   fail 'Preview certificate issuance failed. Read the private server log for full details.'
 fi
 
-docker exec "$NGINX_CONTAINER" mkdir -p "/etc/nginx/preview-certs/$HOST"
-docker cp -L "/etc/letsencrypt/live/$HOST/fullchain.pem" "$NGINX_CONTAINER:/etc/nginx/preview-certs/$HOST/fullchain.pem"
-docker cp -L "/etc/letsencrypt/live/$HOST/privkey.pem" "$NGINX_CONTAINER:/etc/nginx/preview-certs/$HOST/privkey.pem"
+[[ -r "/etc/letsencrypt/live/$HOST/fullchain.pem" && -r "/etc/letsencrypt/live/$HOST/privkey.pem" ]] || \
+  fail 'Issued certificate files are not readable on the host.'
+docker exec "$TLS_NGINX_CONTAINER" test -r "/etc/letsencrypt/live/$HOST/fullchain.pem"
+docker exec "$TLS_NGINX_CONTAINER" test -r "/etc/letsencrypt/live/$HOST/privkey.pem"
 
-cat > "$PR_DIR/outer-nginx.conf" <<EOF
-server {
-    listen 80;
-    server_name $HOST;
-    location ^~ /.well-known/acme-challenge/ { root /var/www/minidrama-acme; }
-    location / { return 301 https://\$host\$request_uri; }
-}
-server {
-    listen 443 ssl;
-    server_name $HOST;
-    ssl_certificate /etc/nginx/preview-certs/$HOST/fullchain.pem;
-    ssl_certificate_key /etc/nginx/preview-certs/$HOST/privkey.pem;
-    location / {
-        proxy_pass http://$GATEWAY_PROXY_IP:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-    }
-}
-EOF
-docker cp "$PR_DIR/outer-nginx.conf" "$NGINX_CONTAINER:/etc/nginx/conf.d/preview-pr-$PR_NUMBER.conf"
-docker exec "$NGINX_CONTAINER" nginx -t
-docker exec "$NGINX_CONTAINER" nginx -s reload
+sed "s/__PREVIEW_HOST__/$HOST/g" "$SOURCE_DIR/deploy/nginx-preview-redirect.conf.template" > "$PR_DIR/http-nginx.conf"
+sed -e "s/__PREVIEW_HOST__/$HOST/g" -e "s/__GATEWAY_IP__/$GATEWAY_PROXY_IP/g" \
+  "$SOURCE_DIR/deploy/nginx-preview-tls.conf.template" > "$PR_DIR/tls-nginx.conf"
 
+docker cp "$PR_DIR/http-nginx.conf" "$HTTP_NGINX_CONTAINER:/etc/nginx/conf.d/preview-pr-$PR_NUMBER.conf"
+docker exec "$HTTP_NGINX_CONTAINER" nginx -t
+docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload
+
+docker cp "$SOURCE_DIR/deploy/nginx-tls-default-reject.conf" \
+  "$TLS_NGINX_CONTAINER:/etc/nginx/conf.d/00-minidrama-default-reject.conf"
+docker cp "$PR_DIR/tls-nginx.conf" "$TLS_NGINX_CONTAINER:/etc/nginx/conf.d/preview-pr-$PR_NUMBER.conf"
+docker exec "$TLS_NGINX_CONTAINER" nginx -t
+docker exec "$TLS_NGINX_CONTAINER" nginx -s reload
+
+curl -fsS --max-time 15 "https://api.richbest.cn/health" >/dev/null || \
+  fail 'The existing TLS API route failed after reload.'
+REJECT_HOST="rejected-${TOKEN}.preview.drama.richbest.cn"
+if curl -ksS --max-time 10 --resolve "$REJECT_HOST:443:127.0.0.1" "https://$REJECT_HOST/" >/dev/null 2>&1; then
+  fail 'Unknown TLS hosts are not rejected.'
+fi
+
+[[ "$(curl -sS --max-time 15 --resolve "$HOST:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://$HOST/ready")" == 401 ]] || \
+  fail 'Preview Basic Auth accepted a request without credentials.'
+[[ "$(curl -sS --max-time 15 --resolve "$HOST:443:127.0.0.1" -u 'preview:incorrect' -o /dev/null -w '%{http_code}' "https://$HOST/ready")" == 401 ]] || \
+  fail 'Preview Basic Auth accepted incorrect credentials.'
 curl -fsS --max-time 15 --resolve "$HOST:443:127.0.0.1" -u "preview:$PASSWORD" "https://$HOST/ready" | \
   grep -q "\"revision\":\"$SHA\"" || fail 'External preview readiness check failed.'
 

@@ -19,7 +19,7 @@ if [[ -f "$RELEASE_DIR/production-before.db" ]]; then
 fi
 verify_migrations "$IMAGE" "$RELEASE_DIR/preflight-data"
 run_preflight_app "$IMAGE" "$SHA" "$RELEASE_DIR/preflight-data"
-sync_production_nginx "$SOURCE_DIR"
+validate_production_ingress
 
 ENV_FILE="$(resolve_env_file)"
 ENV_ARGS=()
@@ -47,7 +47,7 @@ rollback_now() {
   if [[ -n "$PREVIOUS_CONTAINER" ]] && docker inspect "$PREVIOUS_CONTAINER" >/dev/null 2>&1; then
     docker rename "$PREVIOUS_CONTAINER" "$PROD_CONTAINER"
     docker start "$PROD_CONTAINER" >/dev/null
-    docker exec "$NGINX_CONTAINER" nginx -s reload >/dev/null 2>&1 || true
+    docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload >/dev/null 2>&1 || true
     for _ in {1..30}; do
       docker exec "$PROD_CONTAINER" node -e 'require("http").get("http://127.0.0.1:5679/health",r=>process.exit(r.statusCode===200?0:1)).on("error",()=>process.exit(1))' >/dev/null 2>&1 && break
       sleep 2
@@ -72,9 +72,8 @@ DATABASE_BACKUP=$RELEASE_DIR/production-before.db
 EOF
 chmod 600 "$RELEASE_ROOT/rollback.env"
 
-PROXY_NETWORK="$(resolve_proxy_network)"
 docker run -d --name "$PROD_CONTAINER" --restart unless-stopped \
-  --network "$PROXY_NETWORK" --network-alias minidrama-app \
+  --network "$PROD_PROXY_NETWORK" --network-alias minidrama-app \
   --label "com.richidrama.production=true" --label "com.richidrama.revision=$SHA" \
   --health-cmd "node -e \"require('http').get('http://127.0.0.1:5679/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\"" \
   --health-interval 30s --health-timeout 10s --health-retries 3 --health-start-period 40s \
@@ -83,7 +82,8 @@ docker run -d --name "$PROD_CONTAINER" --restart unless-stopped \
   -v "$PROD_DATA_DIR:/app/backend-node/data" "$IMAGE" >/dev/null
 
 wait_container_ready "$PROD_CONTAINER" "$SHA" 90
-docker exec "$NGINX_CONTAINER" nginx -s reload
+docker exec "$HTTP_NGINX_CONTAINER" nginx -t
+docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload
 
 DOMAIN="${MINIDRAMA_PROD_DOMAIN:-drama.richbest.cn}"
 check_external() {
