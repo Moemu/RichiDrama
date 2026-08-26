@@ -34,6 +34,7 @@ test('preview deployment isolates data, network and resources', () => {
   assert.match(tls, /proxy_pass http:\/\/__GATEWAY_IP__:8080/);
   assert.match(redirect, /return 301 https:\/\/\$host\$request_uri/);
   assert.match(reject, /listen 443 ssl default_server/);
+  assert.match(reject, /server_names_hash_bucket_size 128/);
   assert.match(reject, /ssl_reject_handshake on/);
   assert.match(library, /HTTP_NGINX_CONTAINER=.*lens-rhyme-nginx-1/);
   assert.match(library, /TLS_NGINX_CONTAINER=.*avatar-proxy-api-gateway-1/);

@@ -10,6 +10,7 @@ PROD_CONTAINER="${MINIDRAMA_PROD_CONTAINER:-local-minidrama}"
 HTTP_NGINX_CONTAINER="${MINIDRAMA_HTTP_NGINX_CONTAINER:-${MINIDRAMA_NGINX_CONTAINER:-lens-rhyme-nginx-1}}"
 TLS_NGINX_CONTAINER="${MINIDRAMA_TLS_NGINX_CONTAINER:-avatar-proxy-api-gateway-1}"
 PROD_PROXY_NETWORK="${MINIDRAMA_PROXY_NETWORK:-lens-rhyme_default}"
+# shellcheck disable=SC2034 # Used by scripts that source this library.
 TLS_PROXY_NETWORK="${MINIDRAMA_TLS_PROXY_NETWORK:-avatar-proxy_default}"
 
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*" >&2; }
