@@ -24,11 +24,18 @@ jobs:
           node-version: 18
           cache: npm
           cache-dependency-path: backend-node/package-lock.json
-      - name: Verify runner test tools
+      - name: Install bounded test tools
         run: |
-          command -v ffmpeg
-          command -v ffprobe
-          command -v shellcheck
+          sudo timeout 180s apt-get \
+            -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            update
+          sudo timeout 180s apt-get \
+            -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            install -y --no-install-recommends ffmpeg shellcheck
       - name: Check deployment shell scripts
         run: |
           shellcheck -e SC1091 \
