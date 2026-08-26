@@ -55,4 +55,5 @@ test('GitHub workflows gate preview and production', () => {
   assert.match(protection, /REQUIRED_APPROVALS="\$\{2:-0\}"/);
   assert.match(protection, /1\) REQUIRE_LAST_PUSH_APPROVAL=true/);
   assert.match(protection, /required_approving_review_count.*REQUIRED_APPROVALS/);
+  assert.match(read('.gitattributes'), /backend-node\/tools\/ffmpeg\/ffmpeg\.exe export-ignore/);
 });
