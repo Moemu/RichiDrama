@@ -268,8 +268,14 @@ ensure_preview_edge() {
   # every deploy so auth/config updates always land; its configuration
   # refuses to proxy anything except pr-<N> applications, which is what
   # keeps preview code from pivoting into the production network.
+  # Configuration is bind-mounted rather than copied: the rootfs is read-only,
+  # so docker cp would be rejected outright.
   local edge_conf="$1" auth_dir="$PREVIEW_ROOT/auth"
+  local system_dir="$PREVIEW_ROOT/system"
   [[ -r "$auth_dir/htpasswd" ]] || fail 'Preview basic-auth file is missing.'
+  mkdir -p "$system_dir"
+  cp "$edge_conf" "$system_dir/preview-edge-default.conf"
+  chmod 644 "$system_dir/preview-edge-default.conf"
   docker rm -f "$PREVIEW_EDGE_CONTAINER" >/dev/null 2>&1 || true
   docker create --name "$PREVIEW_EDGE_CONTAINER" \
     --network "$PROD_PROXY_NETWORK" --network-alias minidrama-preview-edge \
@@ -278,12 +284,12 @@ ensure_preview_edge() {
     --memory 128m --cpus 0.25 --read-only \
     --tmpfs /tmp:rw,noexec,nosuid,size=8m --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=8m \
     --tmpfs /var/run:rw,noexec,nosuid,size=4m \
+    -v "$system_dir/preview-edge-default.conf:/etc/nginx/conf.d/default.conf:ro" \
+    -v "$auth_dir/htpasswd:/etc/nginx/minidrama-preview.htpasswd:ro" \
     nginxinc/nginx-unprivileged:1.27-alpine >/dev/null || \
     fail 'Cannot create the preview edge container.'
   docker network connect --gw-priority -1 "$PREVIEW_NETWORK" "$PREVIEW_EDGE_CONTAINER" >/dev/null || \
     fail 'Cannot attach the preview edge to the preview network.'
-  docker cp "$edge_conf" "$PREVIEW_EDGE_CONTAINER:/etc/nginx/conf.d/default.conf"
-  docker cp "$auth_dir/htpasswd" "$PREVIEW_EDGE_CONTAINER:/etc/nginx/minidrama-preview.htpasswd"
   docker start "$PREVIEW_EDGE_CONTAINER" >/dev/null || fail 'Cannot start the preview edge container.'
   for _ in {1..10}; do
     docker ps --format '{{.Names}}' | grep -Fqx "$PREVIEW_EDGE_CONTAINER" && break
