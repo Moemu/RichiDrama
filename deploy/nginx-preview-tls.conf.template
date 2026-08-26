@@ -6,7 +6,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/__PREVIEW_HOST__/privkey.pem;
 
     location / {
-        proxy_pass http://__GATEWAY_HOST__:__GATEWAY_PORT__;
+        proxy_pass http://__GATEWAY_HOST__:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
