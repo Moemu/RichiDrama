@@ -24,10 +24,11 @@ jobs:
           node-version: 18
           cache: npm
           cache-dependency-path: backend-node/package-lock.json
-      - name: Install video test tools
+      - name: Verify runner test tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg shellcheck
+          command -v ffmpeg
+          command -v ffprobe
+          command -v shellcheck
       - name: Check deployment shell scripts
         run: |
           shellcheck -e SC1091 \
