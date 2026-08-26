@@ -85,6 +85,7 @@ run_preflight_app "$IMAGE" "$SHA" "$DATA_DIR"
 
 sed "s/__PREVIEW_HOST__/$HOST/g" "$SOURCE_DIR/deploy/preview-gateway.conf.template" > "$PR_DIR/gateway/default.conf"
 printf 'preview:%s\n' "$(openssl passwd -apr1 "$PASSWORD")" > "$PR_DIR/gateway/htpasswd"
+chown 101:101 "$PR_DIR/gateway/htpasswd"
 chmod 600 "$PR_DIR/gateway/htpasswd"
 
 docker network create --internal "$NETWORK" >/dev/null
@@ -101,7 +102,8 @@ docker run -d --name "$APP_CONTAINER" --network "$NETWORK" --network-alias previ
 
 wait_container_ready "$APP_CONTAINER" "$SHA" 90 || fail 'Preview application did not become ready.'
 
-docker run -d --name "$GATEWAY_CONTAINER" --network "$NETWORK" \
+require_container_network "$TLS_NGINX_CONTAINER" "$TLS_PROXY_NETWORK"
+docker create --name "$GATEWAY_CONTAINER" --network "$TLS_PROXY_NETWORK" --network-alias "$GATEWAY_CONTAINER" \
   --label "com.richidrama.preview-pr=$PR_NUMBER" \
   --security-opt no-new-privileges --cap-drop ALL --pids-limit 64 \
   --memory 128m --cpus 0.25 --read-only \
@@ -110,8 +112,12 @@ docker run -d --name "$GATEWAY_CONTAINER" --network "$NETWORK" \
   -v "$PR_DIR/gateway/default.conf:/etc/nginx/conf.d/default.conf:ro" \
   -v "$PR_DIR/gateway/htpasswd:/etc/nginx/htpasswd:ro" \
   nginxinc/nginx-unprivileged:1.27-alpine >/dev/null
-require_container_network "$TLS_NGINX_CONTAINER" "$TLS_PROXY_NETWORK"
-docker network connect --alias "$GATEWAY_CONTAINER" "$TLS_PROXY_NETWORK" "$GATEWAY_CONTAINER"
+docker network connect "$NETWORK" "$GATEWAY_CONTAINER"
+docker start "$GATEWAY_CONTAINER" >/dev/null
+if ! docker ps --format '{{.Names}}' | grep -Fqx "$GATEWAY_CONTAINER"; then
+  docker logs --tail 50 "$GATEWAY_CONTAINER" >&2 || true
+  fail 'Preview gateway stopped during startup.'
+fi
 
 AUTH_HEADER="$(printf 'preview:%s' "$PASSWORD" | openssl base64 -A)"
 GATEWAY_READY="$(docker exec "$TLS_NGINX_CONTAINER" wget -qO- \

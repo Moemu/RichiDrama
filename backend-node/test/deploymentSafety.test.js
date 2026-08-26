@@ -16,7 +16,9 @@ test('preview deployment isolates data, network and resources', () => {
   const acmeHook = read('deploy/acme-auth-hook.sh');
   assert.match(source, /docker network create --internal/);
   assert.match(source, /require_container_network "\$TLS_NGINX_CONTAINER" "\$TLS_PROXY_NETWORK"/);
-  assert.match(source, /docker network connect .*"\$TLS_PROXY_NETWORK"/);
+  assert.match(source, /docker create .*--network "\$TLS_PROXY_NETWORK"/);
+  assert.match(source, /docker network connect "\$NETWORK" "\$GATEWAY_CONTAINER"/);
+  assert.ok(source.indexOf('docker network connect "$NETWORK"') < source.indexOf('docker start "$GATEWAY_CONTAINER"'));
   assert.match(source, /http:\/\/\$GATEWAY_CONTAINER:8080\/ready/);
   assert.doesNotMatch(source + library, /container_network_ip|GATEWAY_PROXY_IP/);
   assert.match(source, /acquire_lock\s+validate_production_ingress/);
@@ -28,6 +30,7 @@ test('preview deployment isolates data, network and resources', () => {
   assert.match(source, /dnf install -y certbot/);
   assert.match(source, /yum install -y certbot/);
   assert.match(source, /-v "\$DATA_DIR:\/app\/backend-node\/data"/);
+  assert.match(source, /chown 101:101 "\$PR_DIR\/gateway\/htpasswd"/);
   assert.doesNotMatch(source, /-v "\$PROD_DATA_DIR:\/app\/backend-node\/data"/);
   assert.match(gateway, /auth_basic_user_file/);
   assert.match(source, /preview\.drama\.richbest\.cn/);
