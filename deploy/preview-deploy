@@ -117,12 +117,23 @@ docker cp "$SOURCE_DIR/deploy/nginx-preview-http.conf" "$NGINX_CONTAINER:/etc/ng
 docker exec "$NGINX_CONTAINER" nginx -t
 docker exec "$NGINX_CONTAINER" nginx -s reload
 
-if ! MINIDRAMA_NGINX_CONTAINER="$NGINX_CONTAINER" certbot certonly --manual --non-interactive --agree-tos \
-  --email "$MINIDRAMA_ACME_EMAIL" --preferred-challenges http \
-  --manual-auth-hook "bash $SOURCE_DIR/deploy/acme-auth-hook.sh" \
-  --manual-cleanup-hook "bash $SOURCE_DIR/deploy/acme-cleanup-hook.sh" \
-  --cert-name "$HOST" -d "$HOST" >"$PR_DIR/certbot.log" 2>&1; then
-  fail 'Preview certificate issuance failed. Read the private server log for details.'
+CERT_ISSUED=0
+for attempt in 1 2; do
+  if MINIDRAMA_NGINX_CONTAINER="$NGINX_CONTAINER" certbot certonly --manual --non-interactive --agree-tos \
+    --email "$MINIDRAMA_ACME_EMAIL" --preferred-challenges http \
+    --manual-auth-hook "bash $SOURCE_DIR/deploy/acme-auth-hook.sh" \
+    --manual-cleanup-hook "bash $SOURCE_DIR/deploy/acme-cleanup-hook.sh" \
+    --cert-name "$HOST" -d "$HOST" >"$PR_DIR/certbot.log" 2>&1; then
+    CERT_ISSUED=1
+    break
+  fi
+  [[ "$attempt" == 2 ]] || sleep 5
+done
+if [[ "$CERT_ISSUED" != 1 ]]; then
+  grep -Ei 'detail:|error:|unauthorized|ratelimited|too many|timeout|connection refused|invalid response' \
+    "$PR_DIR/certbot.log" | tail -n 8 | \
+    sed -E "s/$HOST/[preview-host]/g; s/[0-9]{1,3}(\.[0-9]{1,3}){3}/[ip]/g" >&2 || true
+  fail 'Preview certificate issuance failed. Read the private server log for full details.'
 fi
 
 docker exec "$NGINX_CONTAINER" mkdir -p "/etc/nginx/preview-certs/$HOST"
