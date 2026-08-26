@@ -96,7 +96,6 @@ ENV_ARGS=()
 [[ -n "$ENV_FILE" ]] && ENV_ARGS+=(--env-file "$ENV_FILE")
 
 docker run -d --name "$APP_CONTAINER" --network "$NETWORK" --network-alias preview-app \
-  --publish "$TLS_HOST_IP::5679" \
   --label "com.richidrama.preview-pr=$PR_NUMBER" --label "com.richidrama.revision=$SHA" \
   --security-opt no-new-privileges --cap-drop ALL --pids-limit 256 \
   --memory 2g --cpus 1 --read-only --tmpfs /tmp:rw,noexec,nosuid,size=128m \
@@ -104,11 +103,6 @@ docker run -d --name "$APP_CONTAINER" --network "$NETWORK" --network-alias previ
   -v "$DATA_DIR:/app/backend-node/data" "$IMAGE" >/dev/null
 
 wait_container_ready "$APP_CONTAINER" "$SHA" 90 || fail 'Preview application did not become ready.'
-
-APP_BINDING="$(docker port "$APP_CONTAINER" 5679/tcp)"
-[[ "${APP_BINDING%:*}" == "$TLS_HOST_IP" ]] || fail 'Preview port is not bound to the TLS bridge gateway.'
-APP_PORT="${APP_BINDING##*:}"
-[[ "$APP_PORT" =~ ^[1-9][0-9]{3,4}$ ]] || fail 'Docker did not allocate a valid preview port.'
 
 APP_NETWORKS="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$APP_CONTAINER")"
 [[ "$(sed '/^$/d' <<<"$APP_NETWORKS")" == "$NETWORK" ]] || fail 'Preview app joined an unexpected Docker network.'
@@ -118,10 +112,16 @@ if docker exec "$APP_CONTAINER" node -e 'const request=require("http").get({host
   fail 'Preview app can access the public network.'
 fi
 
-sed -e "s/__PREVIEW_HOST__/$HOST/g" -e "s/__APP_HOST__/$TLS_HOST_IP/g" -e "s/__APP_PORT__/$APP_PORT/g" \
+APP_ADDRESS="$(docker network inspect --format "{{range .Containers}}{{if eq .Name \"$APP_CONTAINER\"}}{{.IPv4Address}}{{end}}{{end}}" "$NETWORK")"
+APP_IP="${APP_ADDRESS%/*}"
+[[ "$APP_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || fail 'Cannot resolve the preview app internal address.'
+GATEWAY_PORT=$((20000 + (16#${TOKEN:0:4} % 10000)))
+
+sed -e "s/__PREVIEW_HOST__/$HOST/g" -e "s/__LISTEN_HOST__/$TLS_HOST_IP/g" \
+  -e "s/__LISTEN_PORT__/$GATEWAY_PORT/g" -e "s/__APP_HOST__/$APP_IP/g" \
   "$SOURCE_DIR/deploy/preview-gateway.conf.template" > "$PR_DIR/gateway/default.conf"
 docker create --name "$GATEWAY_CONTAINER" \
-  --network "$TLS_PROXY_NETWORK" --network-alias "$GATEWAY_CONTAINER" \
+  --network host \
   --label "com.richidrama.preview-pr=$PR_NUMBER" \
   --security-opt no-new-privileges --cap-drop ALL --pids-limit 64 \
   --memory 128m --cpus 0.25 --read-only \
@@ -139,11 +139,11 @@ fi
 AUTH_HEADER="$(printf 'preview:%s' "$PASSWORD" | openssl base64 -A)"
 docker exec "$GATEWAY_CONTAINER" wget -qO- \
   --header="Host: $HOST" --header="Authorization: Basic $AUTH_HEADER" \
-  'http://127.0.0.1:8080/ready' | grep -q "\"revision\":\"$SHA\"" || \
+  "http://$TLS_HOST_IP:$GATEWAY_PORT/ready" | grep -q "\"revision\":\"$SHA\"" || \
   fail 'Preview gateway cannot reach the host-restricted application port.'
 GATEWAY_READY="$(docker exec "$TLS_NGINX_CONTAINER" wget -qO- \
   --header="Host: $HOST" --header="Authorization: Basic $AUTH_HEADER" \
-  "http://$GATEWAY_CONTAINER:8080/ready")" || fail 'TLS ingress cannot reach the preview gateway through Docker DNS.'
+  "http://$TLS_HOST_IP:$GATEWAY_PORT/ready")" || fail 'TLS ingress cannot reach the host-restricted preview gateway.'
 grep -q "\"revision\":\"$SHA\"" <<<"$GATEWAY_READY" || fail 'Preview gateway returned the wrong revision.'
 unset AUTH_HEADER GATEWAY_READY
 
@@ -179,7 +179,8 @@ docker exec "$TLS_NGINX_CONTAINER" test -r "/etc/letsencrypt/live/$HOST/fullchai
 docker exec "$TLS_NGINX_CONTAINER" test -r "/etc/letsencrypt/live/$HOST/privkey.pem"
 
 sed "s/__PREVIEW_HOST__/$HOST/g" "$SOURCE_DIR/deploy/nginx-preview-redirect.conf.template" > "$PR_DIR/http-nginx.conf"
-sed -e "s/__PREVIEW_HOST__/$HOST/g" -e "s/__GATEWAY_HOST__/$GATEWAY_CONTAINER/g" \
+sed -e "s/__PREVIEW_HOST__/$HOST/g" -e "s/__GATEWAY_HOST__/$TLS_HOST_IP/g" \
+  -e "s/__GATEWAY_PORT__/$GATEWAY_PORT/g" \
   "$SOURCE_DIR/deploy/nginx-preview-tls.conf.template" > "$PR_DIR/tls-nginx.conf"
 
 docker cp "$PR_DIR/http-nginx.conf" "$HTTP_NGINX_CONTAINER:/etc/nginx/conf.d/preview-pr-$PR_NUMBER.conf"

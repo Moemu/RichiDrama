@@ -31,7 +31,7 @@ Runner 只发送 PR 编号和 commit SHA。服务器通过 GitHub SSH Deploy Key
 - `lens-rhyme-nginx-1` 处理端口 80 和 HTTP-01。
 - `avatar-proxy-api-gateway-1` 处理端口 443 和预览 TLS。
 - TLS 容器挂载宿主机 `/etc/letsencrypt` 为只读目录。
-- 预览代理只连接 `avatar-proxy_default`。
+- 预览代理使用 host network，但只监听 `avatar-proxy_default` 的 bridge gateway IP。
 - 预览应用仍只连接内部网络。
 - 应用端口只绑定到 TLS Docker bridge 的宿主机 gateway IP。它不绑定公网 IP。
 
