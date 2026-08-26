@@ -97,17 +97,19 @@ ENV_ARGS=()
 
 docker run -d --name "$ANCHOR_CONTAINER" --network "$NETWORK" --network-alias preview-app \
   --label "com.richidrama.preview-pr=$PR_NUMBER" \
-  --security-opt no-new-privileges --cap-drop ALL --pids-limit 16 --memory 32m --cpus 0.1 \
+  --user 0 --security-opt no-new-privileges --cap-drop ALL --cap-add NET_ADMIN \
+  --pids-limit 16 --memory 32m --cpus 0.1 \
   --read-only --tmpfs /tmp:rw,noexec,nosuid,size=4m \
-  --entrypoint sh nginxinc/nginx-unprivileged:1.27-alpine -c 'exec sleep 2147483647' >/dev/null || \
+  --entrypoint sh nginxinc/nginx-unprivileged:1.27-alpine -eu -c \
+  'busybox ip route del default; exec sleep 2147483647' >/dev/null || \
   fail 'Cannot create the preview network namespace.'
 
-docker run --rm --network "container:$ANCHOR_CONTAINER" \
-  --user 0 --cap-drop ALL --cap-add NET_ADMIN --entrypoint sh \
-  nginxinc/nginx-unprivileged:1.27-alpine -eu -c 'busybox ip route del default' || \
-  fail 'Cannot remove the preview default route.'
-docker exec "$ANCHOR_CONTAINER" sh -eu -c \
-  'test -z "$(busybox ip route show default)"' || \
+for _ in {1..25}; do
+  docker exec "$ANCHOR_CONTAINER" sh -eu -c \
+    'test -z "$(busybox ip route show default)"' && break
+  sleep 0.2
+done
+docker exec "$ANCHOR_CONTAINER" sh -eu -c 'test -z "$(busybox ip route show default)"' || \
   fail 'The preview network namespace still has a default route.'
 
 docker create --name "$APP_CONTAINER" --network "container:$ANCHOR_CONTAINER" \
