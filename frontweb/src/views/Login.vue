@@ -493,6 +493,7 @@ async function submit() {
 .field-shell.invalid { border-color: #ff7665; box-shadow: 0 0 0 3px rgba(255, 75, 55, .08); }
 .field-shell > svg { flex: 0 0 auto; width: 17px; }
 .field-shell input { flex: 1; min-width: 0; min-height: 50px; padding: 0 12px; border: 0; outline: 0; background: transparent; color: #fff; font-size: 14px; }
+.field-shell input:focus-visible { outline: 0 !important; }
 .field-shell input::placeholder { color: rgba(255, 255, 255, .32); }
 .password-toggle { display: grid; place-items: center; width: 44px; height: 44px; margin-inline-end: -10px; border: 0; background: transparent; color: var(--faint); cursor: pointer; transition: color .2s ease; }
 .password-toggle:hover { color: #fff; }

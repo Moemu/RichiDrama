@@ -23,6 +23,8 @@ test('login form keeps accessible labels, feedback and motion preferences', () =
   assert.match(loginSource, /aria-live="polite"/)
   assert.match(loginSource, /aria-busy="loading"/)
   assert.match(loginSource, /role="tablist"/)
+  assert.match(loginSource, /\.field-shell input:focus-visible\s*\{\s*outline:\s*0\s*!important/)
+  assert.match(loginSource, /\.field-shell:focus-within/)
   assert.match(loginSource, /prefers-reduced-motion: reduce/)
   assert.match(loginSource, /prefers-contrast: more/)
   assert.match(loginSource, /forced-colors: active/)
