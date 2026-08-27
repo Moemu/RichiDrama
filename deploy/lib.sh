@@ -265,12 +265,14 @@ attach_ingress_to_preview_network() {
 }
 
 # Media realism: build an OverlayFS union view so a preview serves the real
-# production media bytes without ever mutating them — lowerdir is the hot-copy
-# tree (read-only by construction), writes land in the preview-private upper
-# layer, deletions become whiteouts in it. Failure degrades gracefully to the
+# production media bytes without ever mutating them. Lower layers: the cold
+# directory filled server-side from OSS first, then the production hot-copy
+# tree — both read-only by construction; writes land in the preview-private
+# upper layer as whiteouts/creations. Failure degrades gracefully to the
 # previous no-media behaviour.
 ensure_preview_media_view() {
-  local pr_dir="$1" lower="${MINIDRAMA_MEDIA_SOURCE_DIR:-${PROD_DATA_DIR}/storage}"
+  local pr_dir="$1" cold="${2:-}"
+  local lower="${MINIDRAMA_MEDIA_SOURCE_DIR:-${PROD_DATA_DIR}/storage}"
   local upper="$pr_dir/media-upper" work="$pr_dir/media-work" view="$pr_dir/media-view"
   [[ -d "$lower" ]] || {
     log "No production media directory at $lower; preview will serve no media."
@@ -279,7 +281,11 @@ ensure_preview_media_view() {
   }
   mkdir -p "$upper" "$work" "$view"
   if ! mountpoint -q "$view"; then
-    if ! mount -t overlay overlay -o "lowerdir=$lower,upperdir=$upper,workdir=$work" "$view"; then
+    local LOWER_SPEC="$lower"
+    if [[ -n "$cold" && -d "$cold" ]]; then
+      LOWER_SPEC="$cold:$lower"
+    fi
+    if ! mount -t overlay overlay -o "lowerdir=$LOWER_SPEC,upperdir=$upper,workdir=$work" "$view"; then
       log 'OverlayFS media view unavailable; preview will serve no media.'
       return 0
     fi

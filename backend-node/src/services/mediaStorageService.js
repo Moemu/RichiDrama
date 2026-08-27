@@ -81,7 +81,18 @@ async function readMediaBuffer(cfg, storageRoot, localPath) {
   const absolute = path.join(storageRoot, relative);
   if (fs.existsSync(absolute)) return fs.readFileSync(absolute);
   if (!isOss(cfg)) return null;
-  const oss = ossConfig(cfg); const key = objectKey(cfg, relative); const date = new Date().toUTCString();
+  const buf = await readObjectByKey(cfg, objectKey(cfg, relative));
+  if (!buf) return null;
+  return buf;
+}
+
+// Full-object read by explicit OSS key. Server-side one-off tooling only
+// (preview cold-media fill): the caller must already hold the production
+// configuration; this never hands credentials to a sandboxed process.
+async function readObjectByKey(cfg, key) {
+  if (!isOss(cfg)) return null;
+  const oss = ossConfig(cfg);
+  const date = new Date().toUTCString();
   const result = await requestBuffer(endpointUrl(oss, key), { method: 'GET', headers: {
     Date: date, Authorization: ossAuthorization(oss, 'GET', '', date, key),
   } });
@@ -320,4 +331,4 @@ function startArchiveScheduler(cfg, storageRoot, log, options = {}) {
   return { runNow, stop: () => clearInterval(timer) };
 }
 
-module.exports = { normalizeKey, isOss, objectKey, objectUrl, publicBaseUrl, putBuffer, readMediaBuffer, verifyOssObject, archiveLocalFile, mirrorAndTrack, retryPendingMirrors, pruneVerifiedLocalCopies, staticHandler, migrateLocalTree, startArchiveScheduler, assertOssDeliveryReady };
+module.exports = { normalizeKey, isOss, objectKey, objectUrl, publicBaseUrl, putBuffer, readMediaBuffer, readObjectByKey, verifyOssObject, archiveLocalFile, mirrorAndTrack, retryPendingMirrors, pruneVerifiedLocalCopies, staticHandler, migrateLocalTree, startArchiveScheduler, assertOssDeliveryReady };

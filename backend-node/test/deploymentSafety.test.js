@@ -48,12 +48,18 @@ test('preview deployment isolates data, network, secrets and resources', () => {
   // Candidate images must be pruned on every successful preview.
   assert.match(source, /prune_release_images/);
   // Media realism: an OverlayFS union view mounts real production bytes under
-  // the container storage path, with writes isolated in the preview upper dir.
+  // the container storage path — the server-side cold fill provides archived
+  // objects first, the production hot-copy tree sits beneath it.
   assert.match(library, /ensure_preview_media_view/);
-  assert.match(library, /lowerdir=\$lower,upperdir=\$upper,workdir=\$work/);
+  assert.match(library, /LOWER_SPEC="\$cold:\$lower"/);
   assert.match(library, /umount -l "\$view"/);
-  assert.match(source, /MEDIA_VIEW="\$\(ensure_preview_media_view "\$PR_DIR"\)"/);
+  assert.match(source, /MEDIA_VIEW="\$\(ensure_preview_media_view "\$PR_DIR" "\$COLD_DIR"\)"/);
   assert.match(source, /-v "\$MEDIA_VIEW:\/app\/backend-node\/data\/storage"/);
+  // Cold-fill runs on the host with production credentials via --env-file and
+  // never touches the preview container's environment.
+  assert.match(source, /tools\/fill-preview-media\.js/);
+  assert.match(source, /--env-file "\$ENV_FILE_FOR_FILL"/);
+  assert.doesNotMatch(source.split('docker run -d --name')[1], /MINIDRAMA_OSS_/);
 });
 
 test('preview edge is the only dual-homed component and cannot pivot', () => {
