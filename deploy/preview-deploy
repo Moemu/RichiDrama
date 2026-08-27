@@ -78,17 +78,25 @@ verify_migrations "$IMAGE" "$DATA_DIR"
 COLD_DIR="$PR_DIR/media-cold"
 ENV_FILE_FOR_FILL="$(resolve_env_file)"
 if [[ -n "$ENV_FILE_FOR_FILL" && -d "${PROD_DATA_DIR}/storage" ]]; then
-  timeout 900s docker run --rm \
+  # Host-side copy first: SQLite refuses read-only OPEN when it cannot place
+  # sidecar files beside the database, so a :ro bind of the snapshot breaks
+  # even plain SELECTs ('unable to open database file').
+  mkdir -p "$COLD_DIR"
+  cp "$DATA_DIR/drama_generator.db" "$COLD_DIR/.snapshot.db"
+  if timeout 900s docker run --rm \
     -v "${PROD_DATA_DIR}:/prod-data:ro" \
-    -v "${DATA_DIR}:/preview-db:ro" \
     -v "${COLD_DIR}:/cold" \
     --env-file "$ENV_FILE_FOR_FILL" \
     --entrypoint node "$IMAGE" \
-    tools/fill-preview-media.js /preview-db/drama_generator.db /prod-data/storage /cold \
+    tools/fill-preview-media.js /cold/.snapshot.db /prod-data/storage /cold \
     --max-bytes "${MINIDRAMA_PREVIEW_MEDIA_MAX_BYTES:-2147483648}" \
     --limit-count "${MINIDRAMA_PREVIEW_MEDIA_LIMIT_COUNT:-400}" \
-    --prefer-prefix "${MINIDRAMA_PREVIEW_MEDIA_PREFIXES:-library}" \
-    || log 'Cold-media fill failed or hit its timeout; affected URLs will 404.'
+    --prefer-prefix "${MINIDRAMA_PREVIEW_MEDIA_PREFIXES:-library}"; then
+    rm -f "$COLD_DIR/.snapshot.db"
+  else
+    rm -f "$COLD_DIR/.snapshot.db"
+    log 'Cold-media fill failed or hit its timeout; affected URLs will 404.'
+  fi
 else
   log 'Skipping cold-media fill: no production env file or media directory available.'
 fi

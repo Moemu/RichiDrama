@@ -54,6 +54,10 @@ async function main() {
     return;
   }
 
+  if (!fs.existsSync(opts.dbPath)) {
+    console.log(JSON.stringify({ skipped: 'snapshot_missing', dbPath: opts.dbPath, filled: 0, bytes: 0 }));
+    return;
+  }
   const db = new Database(opts.dbPath, { readonly: true });
   let rows;
   try {

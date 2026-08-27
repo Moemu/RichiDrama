@@ -63,7 +63,11 @@ test('preview deployment isolates data, network, secrets and resources', () => {
   // Cold-fill runs on the host with production credentials via --env-file and
   // never touches the preview container's environment.
   assert.match(source, /tools\/fill-preview-media\.js/);
+  // SQLite cannot open a read-only bind when sidecars are unplaceable: the
+  // snapshot is host-copied into the writable cold dir first.
+  assert.match(source, /cp "\$DATA_DIR\/drama_generator\.db" "\$COLD_DIR\/\.snapshot\.db"/);
   assert.match(source, /--env-file "\$ENV_FILE_FOR_FILL"/);
+  assert.doesNotMatch(source.split('docker run --rm')[1], /\/preview-db:ro/);
   assert.doesNotMatch(source.split('docker run -d --name')[1], /MINIDRAMA_OSS_/);
 });
 
