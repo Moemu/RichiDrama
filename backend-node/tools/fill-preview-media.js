@@ -59,29 +59,16 @@ async function main() {
     return;
   }
   const db = new Database(opts.dbPath, { readonly: true });
-  let rows;
+  let candidates;
   try {
-    const hasLedger = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='media_archive_records'").get();
-    if (!hasLedger) { console.log(JSON.stringify({ skipped: 'no_archive_ledger', filled: 0, bytes: 0 })); return; }
-    rows = db.prepare(`
-      SELECT local_path, oss_key FROM media_archive_records
-      WHERE archive_status IN ('oss_synced', 'local_pruned') AND oss_key IS NOT NULL
-      ORDER BY updated_at DESC`).all();
+    candidates = enumerateMediaReferences(db);
   } finally { db.close(); }
-
-  // Recency first, preferred prefixes first within equal recency.
-  const rank = (row) => {
-    const rel = mediaStorage.normalizeKey(row.local_path);
-    const preferred = opts.preferPrefixes.some((prefix) => rel.startsWith(`${prefix}/`));
-    return preferred ? 0 : 1;
-  };
-  rows.sort((a, b) => rank(a) - rank(b));
 
   fs.mkdirSync(opts.coldDir, { recursive: true });
   const summary = { filled: 0, skipped_existing: 0, skipped_on_host: 0, missing_in_oss: 0, errors: 0, bytes: 0, stop_reason: null };
-  for (const row of rows) {
+  for (const candidate of candidates) {
     if (summary.filled >= opts.limitCount) { summary.stop_reason = 'count_budget'; break; }
-    const rel = mediaStorage.normalizeKey(row.local_path);
+    const rel = mediaStorage.normalizeKey(candidate.rel);
     const dest = path.join(opts.coldDir, rel);
     if (!dest.startsWith(path.join(opts.coldDir) + path.sep)) { summary.errors += 1; continue; }
     if (fs.existsSync(dest)) { summary.skipped_existing += 1; continue; }
@@ -89,7 +76,9 @@ async function main() {
     if (fs.existsSync(path.join(opts.prodRoot, rel))) { summary.skipped_on_host += 1; continue; }
 
     try {
-      const body = await mediaStorage.readObjectByKey(cfg, row.oss_key);
+      // Derive the object key exactly as the serving layer does — legacy
+      // uploads may exist in the bucket without any ledger record.
+      const body = await mediaStorage.readObjectByKey(cfg, mediaStorage.objectKey(cfg, rel));
       if (!body) { summary.missing_in_oss += 1; continue; }
       if (summary.bytes + body.length > opts.maxBytes) { summary.stop_reason = 'byte_budget'; break; }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -104,4 +93,58 @@ async function main() {
   console.log(JSON.stringify(summary));
 }
 
-main().catch((err) => { console.error(err.stack || err.message); process.exit(1); });
+/**
+ * Two-source candidate enumeration.
+ * 1. The archive ledger (authoritative for migrated uploads).
+ * 2. A full scan of every text column for "/static/..." references — pre-
+ *    archive-era assets live only in the bucket and must be derived from the
+ *    references themselves, matching how the serving layer computes keys.
+ */
+function enumerateMediaReferences(db) {
+  const seen = new Set();
+  const STATIC_RE = /\/static\/[A-Za-z0-9_\-./]+/g;
+
+  let hasLedger = false;
+  try {
+    hasLedger = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='media_archive_records'").get();
+  } catch (_) {}
+
+  if (hasLedger) {
+    try {
+      const rows = db.prepare(`
+        SELECT local_path FROM media_archive_records
+        WHERE archive_status IN ('oss_synced', 'local_pruned') AND local_path IS NOT NULL`).all();
+      for (const r of rows) seen.add(mediaStorage.normalizeKey(r.local_path));
+    } catch (_) {}
+  }
+
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+  for (const { name } of tables) {
+    let columns;
+    try {
+      columns = db.prepare(`PRAGMA table_info(${JSON.stringify(name)})`).all()
+        .filter((c) => !c.type || /text|varchar|clob|json/i.test(c.type))
+        .map((c) => `"${c.name.replaceAll('"', '""')}"`);
+    } catch (_) { continue; }
+    for (const col of columns) {
+      let values;
+      try {
+        values = db.prepare(`SELECT DISTINCT ${col} AS v FROM ${JSON.stringify(name)} WHERE ${col} LIKE '%/static/%' LIMIT 5000`).all();
+      } catch (_) { continue; }
+      for (const { v } of values) {
+        if (typeof v !== 'string') continue;
+        for (const match of v.matchAll(STATIC_RE)) {
+          const rel = match[0].slice('/static'.length).replace(/^\/+/, '');
+          if (/\.[a-z0-9]{2,6}$/i.test(rel)) seen.add(mediaStorage.normalizeKey(rel));
+        }
+      }
+    }
+  }
+  return Array.from(seen).map((rel) => ({ rel }));
+}
+
+module.exports = { enumerateMediaReferences };
+
+if (require.main === module) {
+  main().catch((err) => { console.error(err.stack || err.message); process.exit(1); });
+}
