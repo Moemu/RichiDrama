@@ -27,7 +27,12 @@ jobs:
           username: root
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          script: bash /data/apps/LocalMiniDrama/deploy/preview-remove '${{ github.event.pull_request.number }}'
+          script: |
+            if [ -f /data/apps/LocalMiniDrama/deploy/preview-remove ]; then
+              bash /data/apps/LocalMiniDrama/deploy/preview-remove '${{ github.event.pull_request.number }}'
+            else
+              bash /usr/local/lib/richidrama-preview/preview-remove '${{ github.event.pull_request.number }}'
+            fi
       - name: Remove expired previews
         if: github.event_name != 'pull_request_target'
         uses: appleboy/ssh-action@v1.2.0
@@ -36,4 +41,9 @@ jobs:
           username: root
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          script: bash /data/apps/LocalMiniDrama/deploy/preview-cleanup
+          script: |
+            if [ -f /data/apps/LocalMiniDrama/deploy/preview-cleanup ]; then
+              bash /data/apps/LocalMiniDrama/deploy/preview-cleanup
+            else
+              bash /usr/local/lib/richidrama-preview/preview-cleanup
+            fi

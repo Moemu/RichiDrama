@@ -135,6 +135,9 @@ test('GitHub workflows gate preview and production', () => {
   // Cleanup must not depend on commands installed by a successful deploy.
   assert.match(cleanup, /bash \/data\/apps\/LocalMiniDrama\/deploy\/preview-cleanup/);
   assert.match(cleanup, /bash \/data\/apps\/LocalMiniDrama\/deploy\/preview-remove/);
+  // ...and must fall back to the deployed copies when the checkout lags main.
+  assert.match(cleanup, /bash \/usr\/local\/lib\/richidrama-preview\/preview-remove/);
+  assert.match(cleanup, /bash \/usr\/local\/lib\/richidrama-preview\/preview-cleanup/);
   assert.match(production, /environment: production/);
   assert.match(production, /workflow_run\.conclusion == 'success'/);
   assert.match(production, /Remove transferred source/);
