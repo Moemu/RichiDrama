@@ -41,6 +41,74 @@ function parseArgs(argv) {
   return opts;
 }
 
+/**
+ * Two-source candidate enumeration.
+ * 1. The archive ledger (authoritative for migrated uploads).
+ * 2. A scan of every text column for media references. Two shapes exist:
+ *    explicit "/static/..." URLs and BARE relative paths inside JSON payloads
+ *    (global_settings stores carousel arrays without the /static prefix), so
+ *    both are recognised and normalised to storage-root-relative candidates.
+ */
+const STATIC_RE = /\/static\/[A-Za-z0-9_.-/]+/g;
+// Requires a delimiter before the token, one or more "segment/" groups and a
+// known media extension, so prose words never qualify while bare JSON array
+// entries do. CJK segments appear in real project directory names.
+const BARE_MEDIA_RE = /(?:^|["'\s,[\]:])(?:\.\/)?((?:[A-Za-z0-9_一-鿿][A-Za-z0-9_一-鿿-]*\/)+)([A-Za-z0-9_一-鿿][A-Za-z0-9_一-鿿.-]*)\.(mp4|webm|mov|png|jpg|jpeg|webp|gif|avif|mp3|wav|m4a|m3u8)(?=$|["'\s,\]])/gi;
+
+function collectMatches(valueString, seen) {
+  for (const match of valueString.matchAll(STATIC_RE)) {
+    const rel = match[0].slice('/static'.length).replace(/^\/+/, '');
+    if (/\.[a-z0-9]{2,6}$/i.test(rel)) seen.add(mediaStorage.normalizeKey(rel));
+  }
+  for (const match of valueString.matchAll(BARE_MEDIA_RE)) {
+    const dirs = match[1].replace(/\/$/, '');
+    const rel = `${dirs}/${match[2]}.${match[3]}`;
+    seen.add(mediaStorage.normalizeKey(rel));
+  }
+}
+
+function enumerateMediaReferences(db) {
+  const seen = new Set();
+
+  let hasLedger = false;
+  try {
+    hasLedger = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='media_archive_records'").get();
+  } catch (_) {}
+
+  if (hasLedger) {
+    try {
+      const rows = db.prepare(`
+        SELECT local_path FROM media_archive_records
+        WHERE archive_status IN ('oss_synced', 'local_pruned') AND local_path IS NOT NULL`).all();
+      for (const r of rows) seen.add(mediaStorage.normalizeKey(r.local_path));
+    } catch (_) {}
+  }
+
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+  for (const { name } of tables) {
+    let columns;
+    try {
+      columns = db.prepare(`PRAGMA table_info(${JSON.stringify(name)})`).all()
+        .filter((c) => !c.type || /text|varchar|clob|json/i.test(c.type))
+        .map((c) => `"${c.name.replaceAll('"', '""')}"`);
+    } catch (_) { continue; }
+    for (const col of columns) {
+      let values;
+      try {
+        // A row cap bounds the query; byte/count budgets bound the fill. The
+        // /static LIKE filter cannot apply here because bare relative paths
+        // (global_settings carousel arrays) lack the prefix entirely.
+        values = db.prepare(`SELECT DISTINCT ${col} AS v FROM ${JSON.stringify(name)} LIMIT 5000`).all();
+      } catch (_) { continue; }
+      for (const { v } of values) {
+        if (typeof v !== 'string') continue;
+        collectMatches(v, seen);
+      }
+    }
+  }
+  return Array.from(seen).map((rel) => ({ rel }));
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (!opts.dbPath || !opts.prodRoot || !opts.coldDir) {
@@ -63,6 +131,14 @@ async function main() {
   try {
     candidates = enumerateMediaReferences(db);
   } finally { db.close(); }
+
+  // Preferred prefixes first within each candidate group.
+  const rank = (candidate) => {
+    const rel = mediaStorage.normalizeKey(candidate.rel);
+    const preferred = opts.preferPrefixes.some((prefix) => rel.startsWith(`${prefix}/`));
+    return preferred ? 0 : 1;
+  };
+  candidates.sort((a, b) => rank(a) - rank(b));
 
   fs.mkdirSync(opts.coldDir, { recursive: true });
   const summary = { filled: 0, skipped_existing: 0, skipped_on_host: 0, missing_in_oss: 0, errors: 0, bytes: 0, stop_reason: null };
@@ -91,56 +167,6 @@ async function main() {
     }
   }
   console.log(JSON.stringify(summary));
-}
-
-/**
- * Two-source candidate enumeration.
- * 1. The archive ledger (authoritative for migrated uploads).
- * 2. A full scan of every text column for "/static/..." references — pre-
- *    archive-era assets live only in the bucket and must be derived from the
- *    references themselves, matching how the serving layer computes keys.
- */
-function enumerateMediaReferences(db) {
-  const seen = new Set();
-  const STATIC_RE = /\/static\/[A-Za-z0-9_\-./]+/g;
-
-  let hasLedger = false;
-  try {
-    hasLedger = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='media_archive_records'").get();
-  } catch (_) {}
-
-  if (hasLedger) {
-    try {
-      const rows = db.prepare(`
-        SELECT local_path FROM media_archive_records
-        WHERE archive_status IN ('oss_synced', 'local_pruned') AND local_path IS NOT NULL`).all();
-      for (const r of rows) seen.add(mediaStorage.normalizeKey(r.local_path));
-    } catch (_) {}
-  }
-
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
-  for (const { name } of tables) {
-    let columns;
-    try {
-      columns = db.prepare(`PRAGMA table_info(${JSON.stringify(name)})`).all()
-        .filter((c) => !c.type || /text|varchar|clob|json/i.test(c.type))
-        .map((c) => `"${c.name.replaceAll('"', '""')}"`);
-    } catch (_) { continue; }
-    for (const col of columns) {
-      let values;
-      try {
-        values = db.prepare(`SELECT DISTINCT ${col} AS v FROM ${JSON.stringify(name)} WHERE ${col} LIKE '%/static/%' LIMIT 5000`).all();
-      } catch (_) { continue; }
-      for (const { v } of values) {
-        if (typeof v !== 'string') continue;
-        for (const match of v.matchAll(STATIC_RE)) {
-          const rel = match[0].slice('/static'.length).replace(/^\/+/, '');
-          if (/\.[a-z0-9]{2,6}$/i.test(rel)) seen.add(mediaStorage.normalizeKey(rel));
-        }
-      }
-    }
-  }
-  return Array.from(seen).map((rel) => ({ rel }));
 }
 
 module.exports = { enumerateMediaReferences };
