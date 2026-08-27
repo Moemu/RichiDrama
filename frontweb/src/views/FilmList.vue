@@ -581,10 +581,16 @@ function handleHeroVideoError() {
   heroVideoFailed.value = true
   if (heroVideos.value.length > 1) window.setTimeout(advanceHeroVideo, 400)
 }
+let lastSeenHeroSignature = ''
 watch(heroVideos, (videos) => {
-  if (!videos.length) { stopHeroRotation(); heroVideoIndex.value = 0; return }
+  if (!videos.length) { stopHeroRotation(); heroVideoIndex.value = 0; lastSeenHeroSignature = ''; return }
   if (heroVideoIndex.value >= videos.length) heroVideoIndex.value = 0
   heroVideoFailed.value = false
+  // 无关的数据刷新（增删项目等）会整体替换数组；素材集合没变时保持既有
+  // 轮播节奏，避免当前视频层被无谓地重建与重新拉流。
+  const signature = videos.map((item) => item.key).join('|')
+  if (signature === lastSeenHeroSignature) return
+  lastSeenHeroSignature = signature
   scheduleHeroRotation()
 }, { flush: 'post' })
 const allRecords = computed(() => {
