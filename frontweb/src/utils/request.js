@@ -10,7 +10,10 @@ const request = axios.create({
 
 request.interceptors.request.use((config) => {
   const token = localStorage.getItem('lmd_auth_token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  // Must not occupy Authorization: behind Basic-Auth preview proxies nginx
+  // validates that header itself and any Bearer value breaks the challenge.
+  // The backend accepts X-LMD-Session identically.
+  if (token) config.headers['X-LMD-Session'] = token
   return config
 })
 
