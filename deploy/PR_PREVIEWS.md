@@ -28,7 +28,8 @@
 - 专用的 `minidrama-preview-edge` 容器是**唯一**同时连接入口网络与预览网络的组件：它按 `pr-<number>.preview.drama.richbest.cn` 匹配主机名并执行 Basic Auth，其余一切 Host 在查询上游之前直接返回 404——预览代码即使发起请求也无法借它进入生产网络。
 - 端口 80 入口容器只加载一份静态透传配置 `deploy/nginx-previews-passthrough.conf`（不含凭据），把预览域名转发给 edge；另一份 `deploy/nginx-preview-edge.conf` 安装在 edge 上。两份文件都不随预览增删变化。
 - 预览数据来自生产库在线快照；迁移会在快照副本上先完整验证两次，然后才启动预览应用。生产数据目录永不挂载进预览。
-- 预览容器不接收任何生产环境变量（OSS 凭据等绝不进入预览代码），以 `MINIDRAMA_PROFILE=preview` 启动：配置档强制本地存储、关闭中转图床代理，并将静态媒体未命中固定为 404——快照只含元数据不含媒体本体，若放行给 SPA 兜底会让每个 `./static` 请求都返回 index.html；候选镜像按发布裁剪策略在每次预览成功后回收。
+- 预览容器不接收任何生产环境变量（OSS 凭据等绝不进入预览代码），以 `MINIDRAMA_PROFILE=preview` 启动：配置档强制本地存储、关闭中转图床代理，并将静态媒体未命中固定为 404——快照只含元数据，若放行给 SPA 兜底会让每个 `./static` 请求都返回 index.html。
+- 媒体真实度由 OverlayFS 联合视图提供：`/data/minidrama-data/storage` 作为只读下层挂进预览存储路径，读操作呈现真实生产素材，写操作全部落在预览私有的上层目录（白名单化隔离，生产字节不可变）；冷归档对象（已上 OSS 且本地已裁剪）不在视图中，呈 404。候选镜像按发布裁剪策略在每次预览成功后回收。
 - 所有预览共享一组 Basic Auth 凭据（`/data/minidrama-previews/auth`），域名固定可预测——这是免证书方案的既定取舍，由强制鉴权兜底。
 
 Runner 只发送 PR 编号和 commit SHA。服务器通过 GitHub SSH Deploy Key 获取 PR ref，并在本机创建源码包。

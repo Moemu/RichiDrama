@@ -235,6 +235,9 @@ safe_remove_preview_dir() {
 remove_preview_resources() {
   local pr="$1"
   validate_pr "$pr"
+  # Detach the OverlayFS media view while mounts are still cheap; lazy umount
+  # tolerates a container still holding it for milliseconds.
+  teardown_preview_media_view "$pr"
   # Drop any stale per-PR ingress reference (legacy layout) before removing the
   # containers, so Nginx never proxies to an unavailable upstream.
   if docker ps --format '{{.Names}}' | grep -Fqx "$HTTP_NGINX_CONTAINER"; then
@@ -259,6 +262,37 @@ attach_ingress_to_preview_network() {
   # gw-priority -1 keeps the ingress default route on its primary network.
   docker network connect --gw-priority -1 "$PREVIEW_NETWORK" "$HTTP_NGINX_CONTAINER" >/dev/null || \
     fail 'Cannot attach the HTTP ingress to the preview network.'
+}
+
+# Media realism: build an OverlayFS union view so a preview serves the real
+# production media bytes without ever mutating them — lowerdir is the hot-copy
+# tree (read-only by construction), writes land in the preview-private upper
+# layer, deletions become whiteouts in it. Failure degrades gracefully to the
+# previous no-media behaviour.
+ensure_preview_media_view() {
+  local pr_dir="$1" lower="${MINIDRAMA_MEDIA_SOURCE_DIR:-${PROD_DATA_DIR}/storage}"
+  local upper="$pr_dir/media-upper" work="$pr_dir/media-work" view="$pr_dir/media-view"
+  [[ -d "$lower" ]] || {
+    log "No production media directory at $lower; preview will serve no media."
+    printf '%s\n' ''
+    return 0
+  }
+  mkdir -p "$upper" "$work" "$view"
+  if ! mountpoint -q "$view"; then
+    if ! mount -t overlay overlay -o "lowerdir=$lower,upperdir=$upper,workdir=$work" "$view"; then
+      log 'OverlayFS media view unavailable; preview will serve no media.'
+      return 0
+    fi
+  fi
+  printf '%s\n' "$view"
+}
+
+teardown_preview_media_view() {
+  local pr="$1" view="$PREVIEW_ROOT/pr-$pr/media-view"
+  validate_pr "$pr"
+  if mountpoint -q "$view" 2>/dev/null; then
+    umount -l "$view" >/dev/null 2>&1 || true
+  fi
 }
 
 install_ingress_conf_at() {

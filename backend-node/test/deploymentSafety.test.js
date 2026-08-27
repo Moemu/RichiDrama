@@ -47,6 +47,13 @@ test('preview deployment isolates data, network, secrets and resources', () => {
   assert.match(library, /mv "\$stale" "\$disabled"/);
   // Candidate images must be pruned on every successful preview.
   assert.match(source, /prune_release_images/);
+  // Media realism: an OverlayFS union view mounts real production bytes under
+  // the container storage path, with writes isolated in the preview upper dir.
+  assert.match(library, /ensure_preview_media_view/);
+  assert.match(library, /lowerdir=\$lower,upperdir=\$upper,workdir=\$work/);
+  assert.match(library, /umount -l "\$view"/);
+  assert.match(source, /MEDIA_VIEW="\$\(ensure_preview_media_view "\$PR_DIR"\)"/);
+  assert.match(source, /-v "\$MEDIA_VIEW:\/app\/backend-node\/data\/storage"/);
 });
 
 test('preview edge is the only dual-homed component and cannot pivot', () => {
