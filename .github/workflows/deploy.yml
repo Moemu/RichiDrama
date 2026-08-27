@@ -31,24 +31,7 @@ jobs:
           if [[ "$EVENT_NAME" == workflow_run ]]; then sha="$WORKFLOW_SHA"; else sha="${GITHUB_SHA}"; fi
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.revision.outputs.sha }}
-          fetch-depth: 1
-      - name: Package exact revision
-        env:
-          SHA: ${{ steps.revision.outputs.sha }}
-        run: git archive --format=tar.gz --output="${SHA}.tar.gz" HEAD
-      - name: Upload source archive
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: root
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          source: ${{ steps.revision.outputs.sha }}.tar.gz
-          target: /data/minidrama-incoming
-      - name: Deploy approved release
+      - name: Deploy approved release from a server-side fetch
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -59,26 +42,25 @@ jobs:
           script: |
             set -euo pipefail
             sha='${{ steps.revision.outputs.sha }}'
-            bootstrap="/data/minidrama-bootstrap/${sha}"
-            rm -rf "$bootstrap"
-            mkdir -p "$bootstrap"
-            tar -xzf "/data/minidrama-incoming/${sha}.tar.gz" -C "$bootstrap"
-            bash "$bootstrap/deploy/release-deploy" "$sha"
-      - name: Remove transferred source
-        if: always() && steps.revision.outputs.sha != ''
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: root
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          script: |
-            set -euo pipefail
-            sha='${{ steps.revision.outputs.sha }}'
             [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+            repo='/data/apps/LocalMiniDrama'
+            test -d "$repo/.git"
+            # The runner only sends the commit SHA: every byte crosses from
+            # GitHub over this server's own SSH connection, not an SCP push.
+            if ! timeout 300s git -C "$repo" fetch origin main --no-tags; then
+              echo 'fetch failed; switching origin to SSH port 22 and retrying once'
+              git -C "$repo" remote set-url origin git@github.com:Moemu/RichiDrama.git
+              timeout 300s git -C "$repo" fetch origin main --no-tags
+            fi
+            # Only the exact commit that Validation approved may be released;
+            # a newer merge aborts here and its own queued deploy takes over.
+            test "$(git -C "$repo" rev-parse FETCH_HEAD)" = "$sha"
             incoming="/data/minidrama-incoming/${sha}.tar.gz"
             bootstrap="/data/minidrama-bootstrap/${sha}"
-            [[ "$(realpath -m "$incoming")" == "/data/minidrama-incoming/${sha}.tar.gz" ]]
-            [[ "$(realpath -m "$bootstrap")" == "/data/minidrama-bootstrap/${sha}" ]]
+            rm -rf -- "$bootstrap"
+            mkdir -p /data/minidrama-incoming /data/minidrama-bootstrap
+            git -C "$repo" archive --format=tar.gz --output="$incoming" "$sha"
+            tar -xzf "$incoming" -C "$bootstrap"
+            bash "$bootstrap/deploy/release-deploy" "$sha"
             rm -f -- "$incoming"
             rm -rf -- "$bootstrap"

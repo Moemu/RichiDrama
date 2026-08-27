@@ -90,6 +90,10 @@ test('production release uses an immutable archive and rollback container', () =
   const library = read('deploy/lib.sh');
   const dockerfile = read('Dockerfile');
   assert.match(source, /prepare_source "\$SHA"/);
+  // A missing environment file must abort the release instead of silently
+  // booting production with local storage.
+  assert.match(library, /require_env_file\(\)/);
+  assert.match(source, /ENV_FILE="\$\(require_env_file\)"/);
   assert.match(source, /verify_migrations/);
   assert.match(source, /wait_container_ready.*90/);
   assert.match(source, /--network "\$PROD_PROXY_NETWORK" --network-alias minidrama-app/);
@@ -140,7 +144,13 @@ test('GitHub workflows gate preview and production', () => {
   assert.match(cleanup, /bash \/usr\/local\/lib\/richidrama-preview\/preview-cleanup/);
   assert.match(production, /environment: production/);
   assert.match(production, /workflow_run\.conclusion == 'success'/);
-  assert.match(production, /Remove transferred source/);
+  // The runner never ships bytes across the wall: production fetches its own
+  // source over SSH, pins the exact validated commit, archives it locally.
+  assert.doesNotMatch(production, /actions\/checkout|scp-action|Upload source archive/);
+  assert.match(production, /Deploy approved release from a server-side fetch/);
+  assert.match(production, /rev-parse FETCH_HEAD\)" = "\$sha"/);
+  assert.match(production, /git -C "\$repo" archive --format=tar\.gz --output="\$incoming" "\$sha"/);
+  assert.match(production, /bash "\$bootstrap\/deploy\/release-deploy" "\$sha"/);
   const protection = read('deploy/configure-github-protection');
   assert.match(protection, /preview \/ smoke/);
   assert.match(protection, /"enforce_admins": true/);

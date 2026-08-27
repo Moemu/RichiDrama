@@ -18,6 +18,17 @@ fail() { log "ERROR: $*" >&2; exit 1; }
 
 require_root() { [[ "$(id -u)" == "0" ]] || fail 'Run this command as root.'; }
 
+# Production boots must never silently degrade to local storage because an
+# environment file went missing alongside a repository refresh. Previews are
+# exempt by design: resolve_env_file stays tolerant for other callers.
+require_env_file() {
+  local file
+  file="$(resolve_env_file)"
+  [[ -n "$file" ]] || fail \
+    'Production environment file not found. Put minidrama.oss.env in /data/minidrama-config (template: deploy/minidrama.oss.env.example).'
+  printf '%s\n' "$file"
+}
+
 acquire_lock() {
   mkdir -p "$(dirname "$DEPLOY_LOCK")"
   exec 9>"$DEPLOY_LOCK"
