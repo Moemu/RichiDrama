@@ -288,7 +288,8 @@ ensure_preview_media_view() {
 }
 
 teardown_preview_media_view() {
-  local pr="$1" view="$PREVIEW_ROOT/pr-$pr/media-view"
+  local pr="$1"
+  local view="$PREVIEW_ROOT/pr-$pr/media-view"
   validate_pr "$pr"
   if mountpoint -q "$view" 2>/dev/null; then
     umount -l "$view" >/dev/null 2>&1 || true
