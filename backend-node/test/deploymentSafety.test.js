@@ -28,10 +28,15 @@ test('preview deployment isolates data, network, secrets and resources', () => {
   );
   // Previews are HTTP-only: no certificate machinery may return.
   assert.doesNotMatch(source + library + edge + passthrough, /certbot|letsencrypt|TLS_PROXY_NETWORK|TLS_NGINX_CONTAINER|listen 443/);
-  // Production secrets never reach preview code; the app self-declares its
-  // sandboxed behaviour via the profile layer.
-  assert.doesNotMatch(source, /--env-file/);
+  // Production secrets never reach preview CODE; the app self-declares its
+  // sandboxed behaviour via the profile layer. The cold-media fill container
+  // legitimately consumes the production env file, but only on the server.
   assert.match(source, /MINIDRAMA_PROFILE=preview/);
+  const appRunCommand = source.slice(
+    source.indexOf('docker run -d --name'),
+    source.indexOf("fail 'Cannot create the preview application container.'"),
+  );
+  assert.doesNotMatch(appRunCommand, /--env-file|MINIDRAMA_OSS_|CFG_/);
   assert.doesNotMatch(source, /MINIDRAMA_STORAGE_TYPE/);
   // Migration safety against the current production snapshot is mandatory.
   assert.match(source, /create_online_snapshot "\$DATA_DIR\/drama_generator\.db"/);
