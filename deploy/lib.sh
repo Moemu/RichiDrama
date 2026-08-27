@@ -362,7 +362,10 @@ ensure_preview_edge() {
 # review sessions never blink.
 ensure_preview_media_proxy() {
   local script_src="$1"
-  local proxy_image="${MINIDRAMA_PREVIEW_MEDIA_PROXY_IMAGE:-node:18-alpine}"
+  # glibc (Debian) rather than alpine/musl: musl's resolver has no TCP
+  # fallback and fails getaddrinfo for OSS hostnames behind truncating
+  # upstreams. Explicit public DNS servers as a second belt.
+  local proxy_image="${MINIDRAMA_PREVIEW_MEDIA_PROXY_IMAGE:-node:18-bookworm-slim}"
   local meta_file="$PREVIEW_ROOT/system/media-proxy.meta"
   local env_file
   env_file="$(resolve_env_file)"
@@ -395,6 +398,7 @@ ensure_preview_media_proxy() {
 
   docker create --name "$PREVIEW_MEDIA_PROXY_CONTAINER" \
     --network "$PROD_PROXY_NETWORK" \
+    --dns 223.5.5.5 --dns 119.29.29.29 \
     --label "com.richidrama.preview-media-proxy=true" \
     --security-opt no-new-privileges --cap-drop ALL --pids-limit 64 \
     --memory 256m --cpus 0.5 --read-only \
