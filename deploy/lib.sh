@@ -279,16 +279,20 @@ ensure_preview_media_view() {
     printf '%s\n' ''
     return 0
   }
+  # Always remount from scratch. OverlayFS requires lower layers to be
+  # immutable while mounted — the cold fill writes INTO a lower dir moments
+  # before this call, so reusing a stale mount would hide every newly filled
+  # object behind cached negative dentries.
+  umount -l "$view" >/dev/null 2>&1 || true
+  rm -rf -- "$upper" "$work"
   mkdir -p "$upper" "$work" "$view"
-  if ! mountpoint -q "$view"; then
-    local LOWER_SPEC="$lower"
-    if [[ -n "$cold" && -d "$cold" ]]; then
-      LOWER_SPEC="$cold:$lower"
-    fi
-    if ! mount -t overlay overlay -o "lowerdir=$LOWER_SPEC,upperdir=$upper,workdir=$work" "$view"; then
-      log 'OverlayFS media view unavailable; preview will serve no media.'
-      return 0
-    fi
+  local LOWER_SPEC="$lower"
+  if [[ -n "$cold" && -d "$cold" ]]; then
+    LOWER_SPEC="$cold:$lower"
+  fi
+  if ! mount -t overlay overlay -o "lowerdir=$LOWER_SPEC,upperdir=$upper,workdir=$work" "$view"; then
+    log 'OverlayFS media view unavailable; preview will serve no media.'
+    return 0
   fi
   printf '%s\n' "$view"
 }
