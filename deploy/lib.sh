@@ -7,8 +7,11 @@ INCOMING_ROOT="${MINIDRAMA_INCOMING_ROOT:-/data/minidrama-incoming}"
 PROD_DATA_DIR="${MINIDRAMA_DATA_DIR:-/data/minidrama-data}"
 DEPLOY_LOCK="${MINIDRAMA_DEPLOY_LOCK:-/var/lock/minidrama-deploy.lock}"
 PROD_CONTAINER="${MINIDRAMA_PROD_CONTAINER:-local-minidrama}"
-NGINX_CONTAINER="${MINIDRAMA_NGINX_CONTAINER:-lens-rhyme-nginx-1}"
-LENS_NETWORK="${MINIDRAMA_PROXY_NETWORK:-lens-rhyme_default}"
+HTTP_NGINX_CONTAINER="${MINIDRAMA_HTTP_NGINX_CONTAINER:-${MINIDRAMA_NGINX_CONTAINER:-lens-rhyme-nginx-1}}"
+PROD_PROXY_NETWORK="${MINIDRAMA_PROXY_NETWORK:-lens-rhyme_default}"
+# shellcheck disable=SC2034 # Used by scripts that source this library.
+PREVIEW_NETWORK="${MINIDRAMA_PREVIEW_NETWORK:-minidrama-previews}"
+PREVIEW_EDGE_CONTAINER="${MINIDRAMA_PREVIEW_EDGE_CONTAINER:-minidrama-preview-edge}"
 
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*" >&2; }
 fail() { log "ERROR: $*" >&2; exit 1; }
@@ -37,6 +40,55 @@ resolve_env_file() {
   printf '%s\n' ''
 }
 
+require_running_container() {
+  local container="$1"
+  docker ps --format '{{.Names}}' | grep -Fqx "$container" || fail "Required container is not running: $container"
+}
+
+require_container_network() {
+  local container="$1" network="$2" networks
+  require_running_container "$container"
+  docker network inspect "$network" >/dev/null 2>&1 || fail "Docker network does not exist: $network"
+  networks="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container")"
+  grep -Fqx "$network" <<<"$networks" || fail "Container $container is not connected to network $network"
+}
+
+validate_production_ingress() {
+  require_container_network "$HTTP_NGINX_CONTAINER" "$PROD_PROXY_NETWORK"
+  docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
+    default=/etc/nginx/conf.d/default.conf
+    stale=/etc/nginx/conf.d/minidrama.conf
+    disabled=/etc/nginx/minidrama.conf.disabled
+    grep -Eq "server_name[[:space:]]+drama\\.richbest\\.cn;" "$default"
+    grep -Eq "proxy_pass[[:space:]]+http://minidrama-app:5679" "$default"
+    if [ -f "$stale" ]; then
+      mv "$stale" "$disabled"
+      if ! nginx -t; then
+        mv "$disabled" "$stale"
+        exit 1
+      fi
+    fi
+    count="$(nginx -T 2>&1 | grep -Ec "server_name[[:space:]]+drama\\.richbest\\.cn;")"
+    [ "$count" -eq 1 ]
+    getent hosts minidrama-app >/dev/null
+    nginx -t
+  ' || fail 'Production Nginx ingress validation failed.'
+}
+
+# Read-only variant for preview deploys: same guarantees, but it never moves
+# production configuration — migrating legacy files is release-deploy work.
+validate_production_ingress_readonly() {
+  require_container_network "$HTTP_NGINX_CONTAINER" "$PROD_PROXY_NETWORK"
+  docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
+    grep -Eq "server_name[[:space:]]+drama\\.richbest\\.cn;" /etc/nginx/conf.d/default.conf
+    grep -Eq "proxy_pass[[:space:]]+http://minidrama-app:5679" /etc/nginx/conf.d/default.conf
+    count="$(nginx -T 2>&1 | grep -Ec "server_name[[:space:]]+drama\\.richbest\\.cn;")"
+    [ "$count" -eq 1 ]
+    getent hosts minidrama-app >/dev/null
+    nginx -t
+  ' || fail 'Production Nginx ingress validation failed.'
+}
+
 prepare_source() {
   local sha="$1" archive="${INCOMING_ROOT}/${1}.tar.gz" target="${RELEASE_ROOT}/${1}/source" resolved_root resolved_target
   validate_sha "$sha"
@@ -59,7 +111,27 @@ build_image() {
   local sha="$1" source_dir="$2" image="local-minidrama:${1}"
   if ! docker image inspect "$image" >/dev/null 2>&1; then
     log "Building immutable image $image"
-    docker build --pull --build-arg "APP_REVISION=$sha" -t "$image" "$source_dir"
+    docker build --pull --build-arg "APP_REVISION=$sha" -t "$image" "$source_dir" || \
+      fail "Immutable image build failed: $image"
+  else
+    log "Using existing image $image"
+  fi
+  printf '%s\n' "$image"
+}
+
+build_preview_image() {
+  local sha="$1" source_dir="$2" image="local-minidrama:${1}"
+  local base_image base_tag="local-minidrama:preview-runtime-base"
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    require_running_container "$PROD_CONTAINER"
+    base_image="$(docker inspect --format '{{.Image}}' "$PROD_CONTAINER")"
+    [[ "$base_image" =~ ^sha256:[0-9a-f]{64}$ ]] || fail 'Cannot resolve the production image ID.'
+    docker image tag "$base_image" "$base_tag"
+    log "Building preview image $image from the active production runtime"
+    docker build --file "$source_dir/Dockerfile.preview" \
+      --build-arg "RUNTIME_BASE_IMAGE=$base_tag" \
+      --build-arg "APP_REVISION=$sha" \
+      -t "$image" "$source_dir" || fail "Preview image build failed: $image"
   else
     log "Using existing image $image"
   fi
@@ -116,7 +188,8 @@ wait_container_ready() {
 }
 
 run_preflight_app() {
-  local image="$1" sha="$2" data_dir="$3" name="minidrama-preflight-${sha:0:12}"
+  local image="$1" sha="$2" data_dir="$3"
+  local name="minidrama-preflight-${sha:0:12}"
   local env_file env_args=()
   env_file="$(resolve_env_file)"
   [[ -n "$env_file" ]] && env_args+=(--env-file "$env_file")
@@ -138,19 +211,6 @@ run_preflight_app() {
   docker rm -f "$name" >/dev/null
 }
 
-sync_production_nginx() {
-  local source_dir="$1"
-  docker ps --format '{{.Names}}' | grep -qx "$NGINX_CONTAINER" || fail "Nginx container is not running: $NGINX_CONTAINER"
-  docker exec "$NGINX_CONTAINER" sh -c 'if [ -f /etc/nginx/conf.d/minidrama.conf ]; then cp /etc/nginx/conf.d/minidrama.conf /etc/nginx/minidrama.conf.backup; fi'
-  docker cp "$source_dir/deploy/nginx-drama-richbest.conf" "$NGINX_CONTAINER:/etc/nginx/conf.d/minidrama.conf"
-  if ! docker exec "$NGINX_CONTAINER" nginx -t; then
-    docker exec "$NGINX_CONTAINER" sh -c 'if [ -f /etc/nginx/minidrama.conf.backup ]; then mv /etc/nginx/minidrama.conf.backup /etc/nginx/conf.d/minidrama.conf; else rm -f /etc/nginx/conf.d/minidrama.conf; fi'
-    fail 'Candidate production Nginx configuration is invalid.'
-  fi
-  docker exec "$NGINX_CONTAINER" rm -f /etc/nginx/minidrama.conf.backup
-  docker exec "$NGINX_CONTAINER" nginx -s reload
-}
-
 safe_remove_preview_dir() {
   local pr="$1" target="${PREVIEW_ROOT}/pr-${1}" resolved_root resolved_target
   validate_pr "$pr"
@@ -162,28 +222,104 @@ safe_remove_preview_dir() {
 }
 
 remove_preview_resources() {
-  local pr="$1" delete_cert="${2:-1}" pr_dir="$PREVIEW_ROOT/pr-$1" host='' network=''
+  local pr="$1"
   validate_pr "$pr"
-  if [[ -f "$pr_dir/metadata.env" ]]; then
-    host="$(awk -F= '$1=="HOST"{print $2}' "$pr_dir/metadata.env")"
-    network="$(awk -F= '$1=="NETWORK"{print $2}' "$pr_dir/metadata.env")"
+  # Drop any stale per-PR ingress reference (legacy layout) before removing the
+  # containers, so Nginx never proxies to an unavailable upstream.
+  if docker ps --format '{{.Names}}' | grep -Fqx "$HTTP_NGINX_CONTAINER"; then
+    docker exec "$HTTP_NGINX_CONTAINER" rm -f "/etc/nginx/conf.d/preview-pr-$pr.conf"
   fi
   mapfile -t preview_containers < <(docker ps -aq --filter "label=com.richidrama.preview-pr=$pr")
   ((${#preview_containers[@]} == 0)) || docker rm -f "${preview_containers[@]}" >/dev/null
-  [[ -z "$network" ]] || docker network rm "$network" >/dev/null 2>&1 || true
-
-  if docker ps --format '{{.Names}}' | grep -qx "$NGINX_CONTAINER"; then
-    docker exec "$NGINX_CONTAINER" rm -f "/etc/nginx/conf.d/preview-pr-$pr.conf"
-    if [[ -n "$host" && "$host" =~ ^pr-${pr}-[0-9a-f]{16}\.preview\.drama\.richbest\.cn$ ]]; then
-      docker exec "$NGINX_CONTAINER" rm -rf "/etc/nginx/preview-certs/$host"
-    fi
-    docker exec "$NGINX_CONTAINER" nginx -t
-    docker exec "$NGINX_CONTAINER" nginx -s reload
-  fi
-  if [[ -n "$host" && "$delete_cert" == 1 ]] && command -v certbot >/dev/null 2>&1; then
-    certbot delete --non-interactive --cert-name "$host" >/dev/null 2>&1 || true
-  fi
   safe_remove_preview_dir "$pr"
+}
+
+ensure_preview_network() {
+  docker network inspect "$PREVIEW_NETWORK" >/dev/null 2>&1 && return 0
+  docker network create --internal "$PREVIEW_NETWORK" >/dev/null || \
+    fail 'Cannot create the preview Docker network.'
+}
+
+attach_ingress_to_preview_network() {
+  require_running_container "$HTTP_NGINX_CONTAINER"
+  local networks
+  networks="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$HTTP_NGINX_CONTAINER")"
+  grep -Fqx "$PREVIEW_NETWORK" <<<"$networks" && return 0
+  # gw-priority -1 keeps the ingress default route on its primary network.
+  docker network connect --gw-priority -1 "$PREVIEW_NETWORK" "$HTTP_NGINX_CONTAINER" >/dev/null || \
+    fail 'Cannot attach the HTTP ingress to the preview network.'
+}
+
+install_ingress_conf_at() {
+  # $1 = conf file on disk, $2 = absolute path inside the ingress container.
+  # Succeeds only when the dropped file is part of the effective
+  # configuration (nginx -T lists every file it actually includes).
+  local conf_source="$1" conf_target="$2"
+  docker cp "$conf_source" "$HTTP_NGINX_CONTAINER:$conf_target"
+  docker exec "$HTTP_NGINX_CONTAINER" nginx -t
+  docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload
+  docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
+    nginx -T 2>/dev/null | grep -Fq "configuration file $1"
+  ' sh "$conf_target"
+}
+
+ensure_preview_edge() {
+  # The preview edge is the only dual-homed component. It is recreated on
+  # every deploy so auth/config updates always land; its configuration
+  # refuses to proxy anything except pr-<N> applications, which is what
+  # keeps preview code from pivoting into the production network.
+  # Configuration is bind-mounted rather than copied: the rootfs is read-only,
+  # so docker cp would be rejected outright.
+  local edge_conf="$1" auth_dir="$PREVIEW_ROOT/auth"
+  local system_dir="$PREVIEW_ROOT/system"
+  [[ -r "$auth_dir/htpasswd" ]] || fail 'Preview basic-auth file is missing.'
+  mkdir -p "$system_dir"
+  cp "$edge_conf" "$system_dir/preview-edge-default.conf"
+  chmod 644 "$system_dir/preview-edge-default.conf"
+  docker rm -f "$PREVIEW_EDGE_CONTAINER" >/dev/null 2>&1 || true
+  docker create --name "$PREVIEW_EDGE_CONTAINER" \
+    --network "$PROD_PROXY_NETWORK" --network-alias minidrama-preview-edge \
+    --label "com.richidrama.preview-edge=true" \
+    --security-opt no-new-privileges --cap-drop ALL --pids-limit 64 \
+    --memory 128m --cpus 0.25 --read-only \
+    --tmpfs /tmp:rw,noexec,nosuid,size=8m --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=8m \
+    --tmpfs /var/run:rw,noexec,nosuid,size=4m \
+    -v "$system_dir/preview-edge-default.conf:/etc/nginx/conf.d/default.conf:ro" \
+    -v "$auth_dir/htpasswd:/etc/nginx/minidrama-preview.htpasswd:ro" \
+    nginxinc/nginx-unprivileged:1.27-alpine >/dev/null || \
+    fail 'Cannot create the preview edge container.'
+  docker network connect --gw-priority -1 "$PREVIEW_NETWORK" "$PREVIEW_EDGE_CONTAINER" >/dev/null || \
+    fail 'Cannot attach the preview edge to the preview network.'
+  docker start "$PREVIEW_EDGE_CONTAINER" >/dev/null || fail 'Cannot start the preview edge container.'
+  for _ in {1..10}; do
+    docker ps --format '{{.Names}}' | grep -Fqx "$PREVIEW_EDGE_CONTAINER" && break
+    sleep 0.5
+  done
+  docker ps --format '{{.Names}}' | grep -Fqx "$PREVIEW_EDGE_CONTAINER" || {
+    docker logs --tail 30 "$PREVIEW_EDGE_CONTAINER" >&2 || true
+    fail 'Preview edge container did not stay running.'
+  }
+  docker exec "$PREVIEW_EDGE_CONTAINER" nginx -t
+}
+
+install_preview_http_ingress() {
+  local passthrough_conf="$1" edge_conf="$2" auth_dir="$PREVIEW_ROOT/auth"
+  [[ -r "$auth_dir/htpasswd" ]] || fail 'Preview basic-auth file is missing.'
+  require_running_container "$HTTP_NGINX_CONTAINER"
+  # Files dropped by earlier layouts must never survive: the ACME-era suffix
+  # wildcard and the previous direct vhost would outrank or duplicate the
+  # current routing (the direct vhost also bypasses the edge isolation).
+  docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
+    rm -f /etc/nginx/conf.d/minidrama-preview-http.conf
+    rm -f /etc/nginx/conf.d/minidrama-previews.conf
+  '
+  ensure_preview_edge "$edge_conf"
+  if ! install_ingress_conf_at "$passthrough_conf" '/etc/nginx/conf.d/minidrama-previews-ingress.conf'; then
+    log 'conf.d is not part of the ingress include layout; trying sites-enabled.'
+    docker exec "$HTTP_NGINX_CONTAINER" rm -f /etc/nginx/conf.d/minidrama-previews-ingress.conf
+    install_ingress_conf_at "$passthrough_conf" '/etc/nginx/sites-enabled/minidrama-previews-ingress.conf' || \
+      fail 'Ingress did not load the preview passthrough; neither conf.d nor sites-enabled is included.'
+  fi
 }
 
 prune_release_images() {

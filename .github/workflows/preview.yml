@@ -1,6 +1,8 @@
 name: PR Preview
 
 on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -14,7 +16,7 @@ permissions:
   statuses: write
 
 concurrency:
-  group: preview-pr-${{ inputs.pr_number }}
+  group: preview-pr-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
@@ -28,7 +30,7 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
         shell: bash
         run: |
           [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
@@ -40,45 +42,53 @@ jobs:
           [[ "$association" == MEMBER || "$association" == COLLABORATOR || "$association" == OWNER ]]
           sha="$(jq -r .head.sha <<<"$data")"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "pr=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${sha}" -f state=pending -f context='preview / smoke' -f description='Preview deployment is running' >/dev/null
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.pr.outputs.sha }}
-          fetch-depth: 1
-      - name: Package exact revision
-        env:
-          SHA: ${{ steps.pr.outputs.sha }}
-        run: git archive --format=tar.gz --output="${SHA}.tar.gz" HEAD
-      - name: Upload source archive
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: root
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          source: ${{ steps.pr.outputs.sha }}.tar.gz
-          target: /data/minidrama-incoming
       - name: Deploy isolated preview
         uses: appleboy/ssh-action@v1.2.0
-        env:
-          MINIDRAMA_ACME_EMAIL: ${{ vars.MINIDRAMA_ACME_EMAIL }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: root
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           command_timeout: 40m
-          envs: MINIDRAMA_ACME_EMAIL
           script: |
             set -euo pipefail
             sha='${{ steps.pr.outputs.sha }}'
-            pr='${{ inputs.pr_number }}'
+            pr='${{ steps.pr.outputs.pr }}'
+            repo='/data/apps/LocalMiniDrama'
+            incoming="/data/minidrama-incoming/${sha}.tar.gz"
             bootstrap="/data/minidrama-bootstrap/${sha}"
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$pr" =~ ^[1-9][0-9]*$ ]]
+            test -d "$repo/.git"
+            mkdir -p /data/minidrama-incoming /data/minidrama-bootstrap
+            timeout 180s git -C "$repo" fetch --no-tags origin "refs/pull/${pr}/head"
+            test "$(git -C "$repo" rev-parse FETCH_HEAD)" = "$sha"
+            git -C "$repo" archive --format=tar.gz --output="$incoming" "$sha"
             rm -rf "$bootstrap"
             mkdir -p "$bootstrap"
-            tar -xzf "/data/minidrama-incoming/${sha}.tar.gz" -C "$bootstrap"
+            tar -xzf "$incoming" -C "$bootstrap"
             bash "$bootstrap/deploy/preview-deploy" "$pr" "$sha"
+      - name: Remove server-side source
+        if: always() && steps.pr.outputs.sha != ''
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            sha='${{ steps.pr.outputs.sha }}'
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+            incoming="/data/minidrama-incoming/${sha}.tar.gz"
+            bootstrap="/data/minidrama-bootstrap/${sha}"
+            [[ "$(realpath -m "$incoming")" == "/data/minidrama-incoming/${sha}.tar.gz" ]]
+            [[ "$(realpath -m "$bootstrap")" == "/data/minidrama-bootstrap/${sha}" ]]
+            rm -f -- "$incoming"
+            rm -rf -- "$bootstrap"
       - name: Mark preview successful
         if: success()
         env:

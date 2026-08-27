@@ -11,7 +11,10 @@ function requireAuth(db) {
   return (req, res, next) => {
     const raw = req.headers.authorization || '';
     const match = /^Bearer\s+(.+)$/i.exec(raw);
-    const token = match?.[1] || readCookie(req, 'lmd_session');
+    // X-LMD-Session carries the same token for browsers sitting behind a
+    // reverse proxy with HTTP Basic Auth (nginx rejects non-Basic
+    // Authorization headers before the app ever sees them).
+    const token = match?.[1] || req.headers['x-lmd-session'] || readCookie(req, 'lmd_session');
     if (!token) return response.error(res, 401, 'UNAUTHORIZED', '请先登录');
     try {
       req.auth = authService.authenticate(db, token);

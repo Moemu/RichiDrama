@@ -24,10 +24,23 @@ jobs:
           node-version: 18
           cache: npm
           cache-dependency-path: backend-node/package-lock.json
-      - name: Install video test tools
+      - name: Install bounded test tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo timeout 180s apt-get \
+            -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            update
+          sudo timeout 180s apt-get \
+            -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            install -y --no-install-recommends ffmpeg shellcheck
+      - name: Check deployment shell scripts
+        run: |
+          shellcheck -e SC1091 \
+            deploy/lib.sh deploy/preview-deploy deploy/preview-remove deploy/preview-show deploy/preview-cleanup \
+            deploy/release-deploy deploy/release-rollback deploy/install-operations
       - name: Install backend dependencies
         working-directory: backend-node
         run: npm ci --no-audit --no-fund
@@ -69,3 +82,15 @@ jobs:
         run: docker build --build-arg "APP_REVISION=${GITHUB_SHA}" -t "local-minidrama:${GITHUB_SHA}" .
       - name: Verify image revision
         run: test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "local-minidrama:${GITHUB_SHA}")" = "${GITHUB_SHA}"
+      - name: Verify preview Nginx configuration
+        run: |
+          test_root="${RUNNER_TEMP}/preview-nginx"
+          mkdir -p "$test_root"
+          touch "$test_root/minidrama-preview.htpasswd"
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/deploy/nginx-preview-edge.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v "${test_root}/minidrama-preview.htpasswd:/etc/nginx/minidrama-preview.htpasswd:ro" \
+            nginxinc/nginx-unprivileged:1.27-alpine nginx -t
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/deploy/nginx-previews-passthrough.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine nginx -t

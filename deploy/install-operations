@@ -6,11 +6,11 @@ MODE="${1:-release}"
 [[ "$MODE" == preview || "$MODE" == release ]] || { echo 'Usage: install-operations [preview|release]' >&2; exit 2; }
 if [[ "$MODE" == preview ]]; then
   TARGET="/usr/local/lib/richidrama-preview"
-  FILES=(lib.sh preview-deploy preview-remove preview-show preview-cleanup acme-auth-hook.sh acme-cleanup-hook.sh nginx-preview-http.conf preview-gateway.conf.template)
+  FILES=(lib.sh preview-deploy preview-remove preview-show preview-cleanup nginx-previews-passthrough.conf nginx-preview-edge.conf)
   COMMANDS=(preview-deploy preview-remove preview-show preview-cleanup)
 else
   TARGET="/usr/local/lib/richidrama-deploy"
-  FILES=(lib.sh preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback acme-auth-hook.sh acme-cleanup-hook.sh nginx-drama-richbest.conf nginx-preview-http.conf preview-gateway.conf.template)
+  FILES=(lib.sh preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback nginx-previews-passthrough.conf nginx-preview-edge.conf)
   COMMANDS=(preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback)
 fi
 mkdir -p "$TARGET"

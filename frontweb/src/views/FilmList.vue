@@ -380,7 +380,7 @@ import { formatChinaDateTime } from '@/utils/time'
 const router = useRouter()
 const { toggle: toggleTheme } = useTheme()
 async function logout () {
-  try { await fetch('/api/v1/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('lmd_auth_token') || ''}` } }) } catch (_) {}
+  try { await fetch('/api/v1/auth/logout', { method: 'POST', headers: { 'X-LMD-Session': localStorage.getItem('lmd_auth_token') || '' } }) } catch (_) {}
   localStorage.removeItem('lmd_auth_token')
   localStorage.removeItem('lmd_auth_user')
   router.replace('/login')
@@ -1017,7 +1017,7 @@ async function onExport(d) {
   exportingId.value = d.id
   try {
     const token = localStorage.getItem('lmd_auth_token')
-    const res = await fetch(`/api/v1/dramas/${d.id}/export`, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await fetch(`/api/v1/dramas/${d.id}/export`, { headers: { 'X-LMD-Session': token } })
     if (!res.ok) throw new Error('导出失败')
     const blob = await res.blob()
     const a = document.createElement('a')

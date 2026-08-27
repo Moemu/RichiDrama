@@ -6,5 +6,5 @@ require_root
 validate_pr "${1:-}"
 PR_NUMBER="$1"
 acquire_lock
-remove_preview_resources "$PR_NUMBER" 1
+remove_preview_resources "$PR_NUMBER"
 log "Removed preview for PR $PR_NUMBER."
