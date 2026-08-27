@@ -6,6 +6,7 @@ require_root
 validate_sha "${1:-}"
 SHA="$1"
 acquire_lock
+ENV_FILE="$(require_env_file)"
 
 SOURCE_DIR="$(prepare_source "$SHA")"
 IMAGE="$(build_image "$SHA" "$SOURCE_DIR")"
@@ -21,9 +22,7 @@ verify_migrations "$IMAGE" "$RELEASE_DIR/preflight-data"
 run_preflight_app "$IMAGE" "$SHA" "$RELEASE_DIR/preflight-data"
 validate_production_ingress
 
-ENV_FILE="$(resolve_env_file)"
-ENV_ARGS=()
-[[ -n "$ENV_FILE" ]] && ENV_ARGS+=(--env-file "$ENV_FILE")
+ENV_ARGS=(--env-file "$ENV_FILE")
 
 PREVIOUS_IMAGE=''
 PREVIOUS_REVISION=''
