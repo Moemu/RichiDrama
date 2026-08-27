@@ -363,6 +363,7 @@ ensure_preview_edge() {
 ensure_preview_media_proxy() {
   local script_src="$1"
   local proxy_image="${MINIDRAMA_PREVIEW_MEDIA_PROXY_IMAGE:-node:18-alpine}"
+  local meta_file="$PREVIEW_ROOT/system/media-proxy.meta"
   local env_file
   env_file="$(resolve_env_file)"
   [[ -n "$env_file" ]] || fail 'Preview media proxy requires the production environment file. Put minidrama.oss.env in /data/minidrama-config (template: deploy/minidrama.oss.env.example).'
@@ -378,7 +379,6 @@ ensure_preview_media_proxy() {
 
   if docker ps --format '{{.Names}}' | grep -Fqx "$PREVIEW_MEDIA_PROXY_CONTAINER"; then
     local recorded_script='' recorded_env=''
-    local meta_file="$PREVIEW_ROOT/system/media-proxy.meta"
     [[ -f "$meta_file" ]] && {
       recorded_script="$(awk -F= '$1=="SCRIPT_SHA256"{print $2}' "$meta_file")"
       recorded_env="$(awk -F= '$1=="ENV_SHA256"{print $2}' "$meta_file")"
