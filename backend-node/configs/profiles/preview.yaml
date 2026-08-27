@@ -3,5 +3,8 @@
 # （容器网络层面另有 --internal 双保险；此处是应用层的自我声明。）
 storage:
   type: local
+  # 预览数据卷只含 DB 快照、不含媒体本体：未命中时按 404 呈现，
+  # 而不是放行给 SPA 兜底路由返回 index.html。
+  static_missing_mode: '404'
 image_proxy:
   use_for_video: false

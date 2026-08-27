@@ -240,7 +240,16 @@ function staticHandler(cfg, storageRoot) {
     if (fs.existsSync(local)) return res.sendFile(local);
     try {
       const body = await readMediaBuffer(cfg, storageRoot, key);
-      if (!body) return next();
+      if (!body) {
+        // Default keeps the historical passthrough so callers above can decide.
+        // Previews set static_missing_mode=404: their data volume intentionally
+        // carries no media bytes, and the SPA fallback would otherwise answer
+        // every media request with index.html instead of a visible miss.
+        if (cfg?.storage?.static_missing_mode === '404') {
+          return res.status(404).type('text/plain').end('media not found');
+        }
+        return next();
+      }
       const ext = path.extname(key).toLowerCase();
       const type = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' }[ext] || 'application/octet-stream';
       // Local files are served by sendFile, which implements byte ranges.

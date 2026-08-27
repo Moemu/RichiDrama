@@ -110,3 +110,36 @@ test('an explicit CFG_* variable still wins over the profile overlay', () => {
   assert.equal(cfg.image_proxy.use_for_video, true); // escape hatch honoured
   assert.equal(cfg.app.tag, 'preview'); // other leaves unaffected
 });
+
+// static_missing_mode: the preview data volume intentionally carries no media
+// bytes; a miss must answer 404 rather than falling through to the SPA handler,
+// which would return index.html for every ./static URL.
+const { staticHandler } = require('../src/services/mediaStorageService.js');
+
+function runStaticHandler(cfg) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-static-')); // empty storage root
+  const middleware = staticHandler(cfg, root);
+  const res = {
+    statusCode: null,
+    status(code) { this.statusCode = code; return this; },
+    type() { return this; },
+    end(body) { this.body = body ?? ''; },
+  };
+  let nextCalled = false;
+  const next = () => { nextCalled = true; };
+  // Express strips the /static mount prefix before dispatching here.
+  const req = { path: '/some/missing.png', headers: {} };
+  return Promise.resolve(middleware(req, res, next)).then(() => ({ statusCode: res.statusCode, nextCalled }));
+}
+
+test('static handler with passthrough (default) defers missing files', async () => {
+  const outcome = await runStaticHandler({ storage: { type: 'local' } });
+  assert.equal(outcome.nextCalled, true);
+  assert.equal(outcome.statusCode, null);
+});
+
+test('static handler under static_missing_mode=404 answers a clean miss', async () => {
+  const outcome = await runStaticHandler({ storage: { type: 'local', static_missing_mode: '404' } });
+  assert.equal(outcome.statusCode, 404);
+  assert.equal(outcome.nextCalled, false);
+});
