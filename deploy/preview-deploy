@@ -71,45 +71,16 @@ trap cleanup_failed_preview EXIT
 create_online_snapshot "$DATA_DIR/drama_generator.db"
 verify_migrations "$IMAGE" "$DATA_DIR"
 
-# Cold-media fill: archived-to-OSS objects are invisible to the overlay base
-# layer. A one-off container (same image, production credentials from the host
-# env file ONLY, never injected into the preview itself) downloads referenced
-# missing objects into the per-PR cold dir that becomes an extra lower layer.
-COLD_DIR="$PR_DIR/media-cold"
-ENV_FILE_FOR_FILL="$(resolve_env_file)"
-if [[ -n "$ENV_FILE_FOR_FILL" && -d "${PROD_DATA_DIR}/storage" ]]; then
-  # Host-side copy first: SQLite refuses read-only OPEN when it cannot place
-  # sidecar files beside the database, so a :ro bind of the snapshot breaks
-  # even plain SELECTs ('unable to open database file').
-  mkdir -p "$COLD_DIR"
-  cp "$DATA_DIR/drama_generator.db" "$COLD_DIR/.snapshot.db"
-  if timeout 900s docker run --rm \
-    -v "${PROD_DATA_DIR}:/prod-data:ro" \
-    -v "${COLD_DIR}:/cold" \
-    --env-file "$ENV_FILE_FOR_FILL" \
-    --entrypoint node "$IMAGE" \
-    tools/fill-preview-media.js /cold/.snapshot.db /prod-data/storage /cold \
-    --max-bytes "${MINIDRAMA_PREVIEW_MEDIA_MAX_BYTES:-2147483648}" \
-    --limit-count "${MINIDRAMA_PREVIEW_MEDIA_LIMIT_COUNT:-400}" \
-    --prefer-prefix "${MINIDRAMA_PREVIEW_MEDIA_PREFIXES:-library}"; then
-    rm -f "$COLD_DIR/.snapshot.db"
-  else
-    rm -f "$COLD_DIR/.snapshot.db"
-    log 'Cold-media fill failed or hit its timeout; affected URLs will 404.'
-  fi
-else
-  log 'Skipping cold-media fill: no production env file or media directory available.'
-fi
-
 ensure_preview_network
 attach_ingress_to_preview_network
+ensure_preview_media_proxy
 install_preview_http_ingress "$SOURCE_DIR/deploy/nginx-previews-passthrough.conf" "$SOURCE_DIR/deploy/nginx-preview-edge.conf"
 
 # Media realism: bind an OverlayFS union view over the container storage path.
-# Reads show real production bytes (cold fill first, hot copies beneath);
-# writes stay in the preview-private upper layer; absence degrades silently
-# to no-media (profile answers 404).
-MEDIA_VIEW="$(ensure_preview_media_view "$PR_DIR" "$COLD_DIR")"
+# Reads show the production hot-copy tree; cold archived objects recover at
+# request time through the trusted media proxy; writes stay in the
+# preview-private upper layer.
+MEDIA_VIEW="$(ensure_preview_media_view "$PR_DIR")"
 MEDIA_ARGS=()
 [[ -n "$MEDIA_VIEW" ]] && MEDIA_ARGS+=(-v "$MEDIA_VIEW:/app/backend-node/data/storage")
 

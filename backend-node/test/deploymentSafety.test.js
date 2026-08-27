@@ -52,23 +52,37 @@ test('preview deployment isolates data, network, secrets and resources', () => {
   assert.match(library, /mv "\$stale" "\$disabled"/);
   // Candidate images must be pruned on every successful preview.
   assert.match(source, /prune_release_images/);
-  // Media realism: an OverlayFS union view mounts real production bytes under
-  // the container storage path — the server-side cold fill provides archived
-  // objects first, the production hot-copy tree sits beneath it.
+  // Media realism: an OverlayFS union view mounts real production hot-copy
+  // bytes under the container storage path; archived/cold objects recover at
+  // request time through the trusted media proxy instead of bulk pre-fill.
   assert.match(library, /ensure_preview_media_view/);
-  assert.match(library, /LOWER_SPEC="\$cold:\$lower"/);
+  assert.match(library, /"lowerdir=\$lower,upperdir=\$upper,workdir=\$work"/);
   assert.match(library, /umount -l "\$view"/);
-  assert.match(source, /MEDIA_VIEW="\$\(ensure_preview_media_view "\$PR_DIR" "\$COLD_DIR"\)"/);
+  assert.doesNotMatch(source + library, /fill-preview-media|media-cold|\.snapshot\.db/);
+  assert.match(source, /MEDIA_VIEW="\$\(ensure_preview_media_view "\$PR_DIR"\)"/);
   assert.match(source, /-v "\$MEDIA_VIEW:\/app\/backend-node\/data\/storage"/);
-  // Cold-fill runs on the host with production credentials via --env-file and
-  // never touches the preview container's environment.
-  assert.match(source, /tools\/fill-preview-media\.js/);
-  // SQLite cannot open a read-only bind when sidecars are unplaceable: the
-  // snapshot is host-copied into the writable cold dir first.
-  assert.match(source, /cp "\$DATA_DIR\/drama_generator\.db" "\$COLD_DIR\/\.snapshot\.db"/);
-  assert.match(source, /--env-file "\$ENV_FILE_FOR_FILL"/);
-  assert.doesNotMatch(source.split('docker run --rm')[1], /\/preview-db:ro/);
-  assert.doesNotMatch(source.split('docker run -d --name')[1], /MINIDRAMA_OSS_/);
+});
+
+test('preview media proxy is the only credentialed egress for previews', () => {
+  const library = read('deploy/lib.sh');
+  const proxyBody = (() => {
+    const start = library.indexOf('ensure_preview_media_proxy() {');
+    const end = library.indexOf('\n}', library.indexOf('docker start "$PREVIEW_MEDIA_PROXY_CONTAINER"'));
+    return library.slice(start, end + 2);
+  })();
+  const appRunCommand = read('deploy/preview-deploy').slice(
+    read('deploy/preview-deploy').indexOf('docker run -d --name'),
+    read('deploy/preview-deploy').indexOf("fail 'Cannot create the preview application container.'"),
+  );
+  // The APP container carries zero credentials and no env file.
+  assert.doesNotMatch(appRunCommand, /--env-file|MINIDRAMA_OSS_|CFG_/);
+  // The proxy exists, holds creds ONLY via its own env-file bind, never sees
+  // per-PR labels (so cleanup can never remove it), keeps egress on the
+  // primary network and joins previews last with lowest gateway priority.
+  assert.match(proxyBody, /--env-file "\$env_file"/);
+  assert.doesNotMatch(proxyBody, /\$PROD_DATA_DIR|minidrama-data/);
+  assert.doesNotMatch(proxyBody, /com\.richidrama\.preview-pr/);
+  assert.ok(proxyBody.indexOf(`--network "\$PROD_PROXY_NETWORK"`) < proxyBody.indexOf('docker network connect --gw-priority -1 "\$PREVIEW_NETWORK"'));
 });
 
 test('preview edge is the only dual-homed component and cannot pivot', () => {

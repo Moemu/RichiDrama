@@ -12,6 +12,7 @@ PROD_PROXY_NETWORK="${MINIDRAMA_PROXY_NETWORK:-lens-rhyme_default}"
 # shellcheck disable=SC2034 # Used by scripts that source this library.
 PREVIEW_NETWORK="${MINIDRAMA_PREVIEW_NETWORK:-minidrama-previews}"
 PREVIEW_EDGE_CONTAINER="${MINIDRAMA_PREVIEW_EDGE_CONTAINER:-minidrama-preview-edge}"
+PREVIEW_MEDIA_PROXY_CONTAINER="${MINIDRAMA_PREVIEW_MEDIA_PROXY_CONTAINER:-minidrama-preview-media-proxy}"
 
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*" >&2; }
 fail() { log "ERROR: $*" >&2; exit 1; }
@@ -265,13 +266,13 @@ attach_ingress_to_preview_network() {
 }
 
 # Media realism: build an OverlayFS union view so a preview serves the real
-# production media bytes without ever mutating them. Lower layers: the cold
-# directory filled server-side from OSS first, then the production hot-copy
-# tree — both read-only by construction; writes land in the preview-private
-# upper layer as whiteouts/creations. Failure degrades gracefully to the
-# previous no-media behaviour.
+# production hot-copy bytes without ever mutating them (writes land in the
+# preview-private upper layer). Objects missing from the hot tree recover at
+# request time through the trusted media proxy — no bulk pre-fill exists any
+# more. A deleted lower-layer file surfaces as ENOENT, which the handler
+# treats exactly like any other miss.
 ensure_preview_media_view() {
-  local pr_dir="$1" cold="${2:-}"
+  local pr_dir="$1"
   local lower="${MINIDRAMA_MEDIA_SOURCE_DIR:-${PROD_DATA_DIR}/storage}"
   local upper="$pr_dir/media-upper" work="$pr_dir/media-work" view="$pr_dir/media-view"
   [[ -d "$lower" ]] || {
@@ -280,17 +281,12 @@ ensure_preview_media_view() {
     return 0
   }
   # Always remount from scratch. OverlayFS requires lower layers to be
-  # immutable while mounted — the cold fill writes INTO a lower dir moments
-  # before this call, so reusing a stale mount would hide every newly filled
-  # object behind cached negative dentries.
+  # effectively immutable while mounted and fresh per-deploy state keeps
+  # snapshot fidelity obvious.
   umount -l "$view" >/dev/null 2>&1 || true
   rm -rf -- "$upper" "$work"
   mkdir -p "$upper" "$work" "$view"
-  local LOWER_SPEC="$lower"
-  if [[ -n "$cold" && -d "$cold" ]]; then
-    LOWER_SPEC="$cold:$lower"
-  fi
-  if ! mount -t overlay overlay -o "lowerdir=$LOWER_SPEC,upperdir=$upper,workdir=$work" "$view"; then
+  if ! mount -t overlay overlay -o "lowerdir=$lower,upperdir=$upper,workdir=$work" "$view"; then
     log 'OverlayFS media view unavailable; preview will serve no media.'
     return 0
   fi
@@ -356,6 +352,69 @@ ensure_preview_edge() {
     fail 'Preview edge container did not stay running.'
   }
   docker exec "$PREVIEW_EDGE_CONTAINER" nginx -t
+}
+
+# Long-lived trusted component serving cold OSS objects on demand. Runs with
+# production credentials (--env-file at creation) and is reachable ONLY from
+# the preview network; the preview app itself stays credential-free. Recreated
+# exclusively on drift (image or credential file changed) so concurrent other-
+# PR review sessions never blink.
+ensure_preview_media_proxy() {
+  local env_file
+  env_file="$(resolve_env_file)"
+  [[ -n "$env_file" ]] || fail 'Preview media proxy requires the production environment file. Put minidrama.oss.env in /data/minidrama-config (template: deploy/minidrama.oss.env.example).'
+  require_running_container "$PROD_CONTAINER"
+  local desired_image
+  desired_image="$(docker inspect --format '{{.Image}}' "$PROD_CONTAINER")"
+  local env_hash
+  env_hash="$(sha256sum "$env_file" | awk '{print $1}')"
+  mkdir -p "$PREVIEW_ROOT/system"
+  local meta_file="$PREVIEW_ROOT/system/media-proxy.meta"
+  local stored_hash=''
+  [[ -f "$meta_file" ]] && stored_hash="$(awk -F= '$1=="ENV_SHA256"{print $2}' "$meta_file")"
+
+  if docker ps --format '{{.Names}}' | grep -Fqx "$PREVIEW_MEDIA_PROXY_CONTAINER"; then
+    local running_image
+    running_image="$(docker inspect --format '{{.Image}}' "$PREVIEW_MEDIA_PROXY_CONTAINER")"
+    if [[ "$running_image" == "$desired_image" && "$stored_hash" == "$env_hash" ]]; then
+      return 0
+    fi
+    log 'Recreating the preview media proxy (image or credentials changed).'
+    docker rm -f "$PREVIEW_MEDIA_PROXY_CONTAINER" >/dev/null 2>&1 || true
+  else
+    docker rm -f "$PREVIEW_MEDIA_PROXY_CONTAINER" >/dev/null 2>&1 || true
+  fi
+
+  docker create --name "$PREVIEW_MEDIA_PROXY_CONTAINER" \
+    --network "$PROD_PROXY_NETWORK" \
+    --label "com.richidrama.preview-media-proxy=true" \
+    --security-opt no-new-privileges --cap-drop ALL --pids-limit 64 \
+    --memory 256m --cpus 0.5 --read-only \
+    --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+    --env-file "$env_file" \
+    -e PORT=8090 \
+    --entrypoint /usr/bin/tini \
+    "$desired_image" node tools/media-proxy.js >/dev/null || \
+    fail 'Cannot create the preview media proxy.'
+  # gw-priority -1 belongs on the INTERNAL connect: the proxy keeps its egress
+  # default route on the primary network and never hijacks it for previews.
+  docker network connect --gw-priority -1 "$PREVIEW_NETWORK" "$PREVIEW_MEDIA_PROXY_CONTAINER" >/dev/null || {
+    docker rm -f "$PREVIEW_MEDIA_PROXY_CONTAINER" >/dev/null 2>&1 || true
+    fail 'Cannot attach the preview media proxy to the preview network.'
+  }
+  docker start "$PREVIEW_MEDIA_PROXY_CONTAINER" >/dev/null || {
+    docker logs --tail 30 "$PREVIEW_MEDIA_PROXY_CONTAINER" >&2 || true
+    fail 'Cannot start the preview media proxy.'
+  }
+  for _ in {1..20}; do
+    docker exec "$PREVIEW_MEDIA_PROXY_CONTAINER" node -e "require('http').get('http://127.0.0.1:8090/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))" && break
+    sleep 0.5
+  done
+  docker exec "$PREVIEW_MEDIA_PROXY_CONTAINER" node -e "require('http').get('http://127.0.0.1:8090/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>{console.error('media proxy healthz failed');process.exit(1)})" || {
+    docker logs --tail 30 "$PREVIEW_MEDIA_PROXY_CONTAINER" >&2 || true
+    fail 'Preview media proxy did not become healthy.'
+  }
+  printf 'IMAGE=%s\nENV_SHA256=%s\n' "$desired_image" "$env_hash" > "$meta_file"
 }
 
 install_preview_http_ingress() {
