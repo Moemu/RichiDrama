@@ -55,12 +55,16 @@ test('preview deployment isolates data, network, secrets and resources', () => {
   // Media realism: an OverlayFS union view mounts real production hot-copy
   // bytes under the container storage path; archived/cold objects recover at
   // request time through the trusted media proxy instead of bulk pre-fill.
+  // The proxy script is host-mounted (self-contained) so an old base image
+  // can never strand new tooling.
   assert.match(library, /ensure_preview_media_view/);
   assert.match(library, /"lowerdir=\$lower,upperdir=\$upper,workdir=\$work"/);
   assert.match(library, /umount -l "\$view"/);
-  assert.doesNotMatch(source + library, /fill-preview-media|media-cold|\.snapshot\.db/);
+  assert.match(library, /-v "\$bound_script:\/srv\/media-proxy\.js:ro"/);
+  assert.doesNotMatch(source + library, /fill-preview-media|media-cold|\.snapshot\.db|tools\/media-proxy-server/);
   assert.match(source, /MEDIA_VIEW="\$\(ensure_preview_media_view "\$PR_DIR"\)"/);
   assert.match(source, /-v "\$MEDIA_VIEW:\/app\/backend-node\/data\/storage"/);
+  assert.match(source, /ensure_preview_media_proxy "\$SOURCE_DIR"/);
 });
 
 test('preview media proxy is the only credentialed egress for previews', () => {

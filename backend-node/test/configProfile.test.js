@@ -104,11 +104,33 @@ test('unknown profile aborts loudly instead of guessing', () => {
 test('an explicit CFG_* variable still wins over the profile overlay', () => {
   process.env.MINIDRAMA_PROFILE = 'preview';
   process.env.CFG_IMAGE_PROXY__USE_FOR_VIDEO = 'true';
-  const dir = writeFixture({ preview: PREVIEW_OVERLAY });
+  try {
+    const dir = writeFixture({ preview: PREVIEW_OVERLAY });
+    delete require.cache[MOD_PATH];
+    const { cfg } = loadFrom(dir);
+    assert.equal(cfg.image_proxy.use_for_video, true); // escape hatch honoured
+    assert.equal(cfg.app.tag, 'preview'); // other leaves unaffected
+  } finally {
+    delete process.env.CFG_IMAGE_PROXY__USE_FOR_VIDEO;
+  }
+});
+
+test('preview profile wires the on-demand remote read fallback', () => {
+  process.env.MINIDRAMA_PROFILE = 'preview';
+  const overlay = [
+    'storage:',
+    '  type: local',
+    "  remote_read_base_url: http://minidrama-preview-media-proxy:8090",
+    "  static_missing_mode: '404'",
+    'image_proxy:',
+    '  use_for_video: false',
+  ].join('\n');
+  const dir = writeFixture({ preview: overlay });
   delete require.cache[MOD_PATH];
   const { cfg } = loadFrom(dir);
-  assert.equal(cfg.image_proxy.use_for_video, true); // escape hatch honoured
-  assert.equal(cfg.app.tag, 'preview'); // other leaves unaffected
+  assert.equal(cfg.storage.remote_read_base_url, 'http://minidrama-preview-media-proxy:8090');
+  assert.equal(cfg.storage.static_missing_mode, '404');
+  assert.equal(cfg.image_proxy.use_for_video, false);
 });
 
 // static_missing_mode: the preview data volume intentionally carries no media

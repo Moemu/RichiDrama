@@ -354,32 +354,40 @@ ensure_preview_edge() {
   docker exec "$PREVIEW_EDGE_CONTAINER" nginx -t
 }
 
-# Long-lived trusted component serving cold OSS objects on demand. Runs with
-# production credentials (--env-file at creation) and is reachable ONLY from
-# the preview network; the preview app itself stays credential-free. Recreated
-# exclusively on drift (image or credential file changed) so concurrent other-
-# PR review sessions never blink.
+# Long-lived trusted component serving cold OSS objects on demand. Fully
+# self-contained script mounted from the host (never depends on which app
+# release an image carries). Runs with production credentials (--env-file at
+# creation), reachable ONLY from the preview network; the preview app itself
+# stays credential-free. Recreated exclusively on drift so concurrent other-PR
+# review sessions never blink.
 ensure_preview_media_proxy() {
+  local script_src="$1"
+  local proxy_image="${MINIDRAMA_PREVIEW_MEDIA_PROXY_IMAGE:-node:18-alpine}"
   local env_file
   env_file="$(resolve_env_file)"
   [[ -n "$env_file" ]] || fail 'Preview media proxy requires the production environment file. Put minidrama.oss.env in /data/minidrama-config (template: deploy/minidrama.oss.env.example).'
-  require_running_container "$PROD_CONTAINER"
-  local desired_image
-  desired_image="$(docker inspect --format '{{.Image}}' "$PROD_CONTAINER")"
-  local env_hash
-  env_hash="$(sha256sum "$env_file" | awk '{print $1}')"
+  grep -q '^MINIDRAMA_OSS_ENDPOINT=' "$env_file" || fail "The environment file at $env_file carries no MINIDRAMA_OSS_ENDPOINT; the media proxy cannot serve without bucket access."
+
   mkdir -p "$PREVIEW_ROOT/system"
-  local meta_file="$PREVIEW_ROOT/system/media-proxy.meta"
-  local stored_hash=''
-  [[ -f "$meta_file" ]] && stored_hash="$(awk -F= '$1=="ENV_SHA256"{print $2}' "$meta_file")"
+  local bound_script="$PREVIEW_ROOT/system/media-proxy.js"
+  cp "$script_src/backend-node/tools/media-proxy.js" "$bound_script"
+  chmod 644 "$bound_script"
+  local script_sha env_sha
+  script_sha="$(sha256sum "$bound_script" | awk '{print $1}')"
+  env_sha="$(sha256sum "$env_file" | awk '{print $1}')"
 
   if docker ps --format '{{.Names}}' | grep -Fqx "$PREVIEW_MEDIA_PROXY_CONTAINER"; then
-    local running_image
-    running_image="$(docker inspect --format '{{.Image}}' "$PREVIEW_MEDIA_PROXY_CONTAINER")"
-    if [[ "$running_image" == "$desired_image" && "$stored_hash" == "$env_hash" ]]; then
+    local recorded_script='' recorded_env=''
+    local meta_file="$PREVIEW_ROOT/system/media-proxy.meta"
+    [[ -f "$meta_file" ]] && {
+      recorded_script="$(awk -F= '$1=="SCRIPT_SHA256"{print $2}' "$meta_file")"
+      recorded_env="$(awk -F= '$1=="ENV_SHA256"{print $2}' "$meta_file")"
+    }
+    if [[ "$recorded_script" == "$script_sha" && "$recorded_env" == "$env_sha" ]] \
+      && docker inspect --format '{{.State.Running}}' "$PREVIEW_MEDIA_PROXY_CONTAINER" | grep -q true; then
       return 0
     fi
-    log 'Recreating the preview media proxy (image or credentials changed).'
+    log 'Recreating the preview media proxy (script or credentials changed).'
     docker rm -f "$PREVIEW_MEDIA_PROXY_CONTAINER" >/dev/null 2>&1 || true
   else
     docker rm -f "$PREVIEW_MEDIA_PROXY_CONTAINER" >/dev/null 2>&1 || true
@@ -393,8 +401,9 @@ ensure_preview_media_proxy() {
     --tmpfs /tmp:rw,noexec,nosuid,size=32m \
     --env-file "$env_file" \
     -e PORT=8090 \
-    --entrypoint /usr/bin/tini \
-    "$desired_image" node tools/media-proxy.js >/dev/null || \
+    -v "$bound_script:/srv/media-proxy.js:ro" \
+    --entrypoint node \
+    "$proxy_image" node /srv/media-proxy.js >/dev/null || \
     fail 'Cannot create the preview media proxy.'
   # gw-priority -1 belongs on the INTERNAL connect: the proxy keeps its egress
   # default route on the primary network and never hijacks it for previews.
@@ -407,14 +416,14 @@ ensure_preview_media_proxy() {
     fail 'Cannot start the preview media proxy.'
   }
   for _ in {1..20}; do
-    docker exec "$PREVIEW_MEDIA_PROXY_CONTAINER" node -e "require('http').get('http://127.0.0.1:8090/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))" && break
+    docker exec "$PREVIEW_MEDIA_PROXY_CONTAINER" node -e "fetch('http://127.0.0.1:8090/healthz').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))" && break
     sleep 0.5
   done
-  docker exec "$PREVIEW_MEDIA_PROXY_CONTAINER" node -e "require('http').get('http://127.0.0.1:8090/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>{console.error('media proxy healthz failed');process.exit(1)})" || {
+  docker exec "$PREVIEW_MEDIA_PROXY_CONTAINER" node -e "fetch('http://127.0.0.1:8090/healthz').then(r=>{if(r.status!==200)process.exit(1)}).catch(()=>process.exit(1))" || {
     docker logs --tail 30 "$PREVIEW_MEDIA_PROXY_CONTAINER" >&2 || true
     fail 'Preview media proxy did not become healthy.'
   }
-  printf 'IMAGE=%s\nENV_SHA256=%s\n' "$desired_image" "$env_hash" > "$meta_file"
+  printf 'SCRIPT_SHA256=%s\nENV_SHA256=%s\n' "$script_sha" "$env_sha" > "$meta_file"
 }
 
 install_preview_http_ingress() {

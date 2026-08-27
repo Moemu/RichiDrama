@@ -73,7 +73,7 @@ verify_migrations "$IMAGE" "$DATA_DIR"
 
 ensure_preview_network
 attach_ingress_to_preview_network
-ensure_preview_media_proxy
+ensure_preview_media_proxy "$SOURCE_DIR"
 install_preview_http_ingress "$SOURCE_DIR/deploy/nginx-previews-passthrough.conf" "$SOURCE_DIR/deploy/nginx-preview-edge.conf"
 
 # Media realism: bind an OverlayFS union view over the container storage path.
