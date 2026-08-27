@@ -403,7 +403,7 @@ ensure_preview_media_proxy() {
     -e PORT=8090 \
     -v "$bound_script:/srv/media-proxy.js:ro" \
     --entrypoint node \
-    "$proxy_image" node /srv/media-proxy.js >/dev/null || \
+    "$proxy_image" /srv/media-proxy.js >/dev/null || \
     fail 'Cannot create the preview media proxy.'
   # gw-priority -1 belongs on the INTERNAL connect: the proxy keeps its egress
   # default route on the primary network and never hijacks it for previews.
