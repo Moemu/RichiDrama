@@ -366,6 +366,7 @@ ensure_preview_media_proxy() {
   # fallback and fails getaddrinfo for OSS hostnames behind truncating
   # upstreams. Explicit public DNS servers as a second belt.
   local proxy_image="${MINIDRAMA_PREVIEW_MEDIA_PROXY_IMAGE:-node:18-bookworm-slim}"
+  local PROXY_DNS="223.5.5.5 119.29.29.29"
   local meta_file="$PREVIEW_ROOT/system/media-proxy.meta"
   local env_file
   env_file="$(resolve_env_file)"
@@ -380,21 +381,25 @@ ensure_preview_media_proxy() {
   script_sha="$(sha256sum "$bound_script" | awk '{print $1}')"
   env_sha="$(sha256sum "$env_file" | awk '{print $1}')"
 
+  # Drift = ANY input to the container's construction: script bytes, env
+  # credentials, base image, or DNS flags. Missing meta (first run) counts as
+  # drift. Only an exact match keeps the long-lived container alive.
+  local recorded_image='' recorded_script='' recorded_env='' recorded_dns=''
   if docker ps --format '{{.Names}}' | grep -Fqx "$PREVIEW_MEDIA_PROXY_CONTAINER"; then
-    local recorded_script='' recorded_env=''
     [[ -f "$meta_file" ]] && {
+      recorded_image="$(awk -F= '$1=="IMAGE"{print $2}' "$meta_file")"
       recorded_script="$(awk -F= '$1=="SCRIPT_SHA256"{print $2}' "$meta_file")"
       recorded_env="$(awk -F= '$1=="ENV_SHA256"{print $2}' "$meta_file")"
+      recorded_dns="$(awk -F= '$1=="DNS"{print $2}' "$meta_file")"
     }
-    if [[ "$recorded_script" == "$script_sha" && "$recorded_env" == "$env_sha" ]] \
+    if [[ "$recorded_image" == "$proxy_image" && "$recorded_script" == "$script_sha" \
+      && "$recorded_env" == "$env_sha" && "$recorded_dns" == "$PROXY_DNS" ]] \
       && docker inspect --format '{{.State.Running}}' "$PREVIEW_MEDIA_PROXY_CONTAINER" | grep -q true; then
       return 0
     fi
-    log 'Recreating the preview media proxy (script or credentials changed).'
-    docker rm -f "$PREVIEW_MEDIA_PROXY_CONTAINER" >/dev/null 2>&1 || true
-  else
-    docker rm -f "$PREVIEW_MEDIA_PROXY_CONTAINER" >/dev/null 2>&1 || true
+    log 'Recreating the preview media proxy (image, script, DNS or credentials changed).'
   fi
+  docker rm -f "$PREVIEW_MEDIA_PROXY_CONTAINER" >/dev/null 2>&1 || true
 
   docker create --name "$PREVIEW_MEDIA_PROXY_CONTAINER" \
     --network "$PROD_PROXY_NETWORK" \
@@ -427,7 +432,7 @@ ensure_preview_media_proxy() {
     docker logs --tail 30 "$PREVIEW_MEDIA_PROXY_CONTAINER" >&2 || true
     fail 'Preview media proxy did not become healthy.'
   }
-  printf 'SCRIPT_SHA256=%s\nENV_SHA256=%s\n' "$script_sha" "$env_sha" > "$meta_file"
+  printf 'IMAGE=%s\nSCRIPT_SHA256=%s\nENV_SHA256=%s\nDNS=%s\n' "$proxy_image" "$script_sha" "$env_sha" "$PROXY_DNS" > "$meta_file"
 }
 
 install_preview_http_ingress() {
