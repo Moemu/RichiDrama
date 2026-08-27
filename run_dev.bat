@@ -6,9 +6,10 @@ rem 一键启动本地开发环境：后端 (5679) + 前端 (3013)
 rem 双击运行即可。关闭时直接关掉弹出的两个 cmd 窗口。
 rem ----------------------------------------------------------------------------
 rem 【为什么不能直接 npm run dev】
-rem   后端必须带 CFG_IMAGE_PROXY__USE_FOR_VIDEO=false 启动，否则视频生成会把
-rem   本地参考图传到中转图床，本地图床响应慢会把异步任务阻塞数分钟。
-rem   详见 AGENTS.md「本地调试启动」。线上不设该变量，不受影响。
+rem   后端必须以 MINIDRAMA_PROFILE=dev 启动（等价于旧的显式
+rem   CFG_IMAGE_PROXY__USE_FOR_VIDEO=false），否则视频生成本地参考图会走中转图床，
+rem   响应慢时把异步任务阻塞数分钟。详见 AGENTS.md「本地调试启动」。
+rem   线上由部署注入 prod/preview 档位，互不影响。
 rem ============================================================================
 
 set ROOT=%~dp0
@@ -28,7 +29,7 @@ call :kill_port %FRONTEND_PORT%
 rem [2/3] 启动后端（从 backend-node 目录启动 + 本地调试环境变量）
 echo.
 echo [2/3] 启动后端 (:%BACKEND_PORT%)...
-start "RichiDrama-Backend" cmd /k "cd /d %ROOT%backend-node && set CFG_IMAGE_PROXY__USE_FOR_VIDEO=false && echo 后端运行中，按 Ctrl+C 停止 && npm run dev"
+start "RichiDrama-Backend" cmd /k "cd /d %ROOT%backend-node && set MINIDRAMA_PROFILE=dev && echo 后端运行中 (profile=dev)，按 Ctrl+C 停止 && npm run dev"
 
 rem [3/3] 启动前端
 echo.

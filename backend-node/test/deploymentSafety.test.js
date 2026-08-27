@@ -28,9 +28,11 @@ test('preview deployment isolates data, network, secrets and resources', () => {
   );
   // Previews are HTTP-only: no certificate machinery may return.
   assert.doesNotMatch(source + library + edge + passthrough, /certbot|letsencrypt|TLS_PROXY_NETWORK|TLS_NGINX_CONTAINER|listen 443/);
-  // Production secrets never reach preview code.
+  // Production secrets never reach preview code; the app self-declares its
+  // sandboxed behaviour via the profile layer.
   assert.doesNotMatch(source, /--env-file/);
-  assert.match(source, /MINIDRAMA_STORAGE_TYPE=local/);
+  assert.match(source, /MINIDRAMA_PROFILE=preview/);
+  assert.doesNotMatch(source, /MINIDRAMA_STORAGE_TYPE/);
   // Migration safety against the current production snapshot is mandatory.
   assert.match(source, /create_online_snapshot "\$DATA_DIR\/drama_generator\.db"/);
   assert.match(source, /verify_migrations "\$IMAGE" "\$DATA_DIR"/);
@@ -102,6 +104,7 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(library, /count=.*server_name/);
   assert.match(library, /getent hosts minidrama-app/);
   assert.match(source, /rollback_now/);
+  assert.match(source, /MINIDRAMA_PROFILE=prod/);
   assert.match(library, /local image="\$1" sha="\$2" data_dir="\$3"\s+local name="minidrama-preflight-/);
   assert.match(library, /docker build[^\n]*\|\| \\/);
   assert.match(library, /fail "Immutable image build failed/);

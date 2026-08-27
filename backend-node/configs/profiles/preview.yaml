@@ -1,0 +1,7 @@
+# preview 档：MINIDRAMA_PROFILE=preview 时叠加在 config.yaml 之上。
+# 预览代码不得触碰任何外部资源：强制本地存储、关闭中转图床代理。
+# （容器网络层面另有 --internal 双保险；此处是应用层的自我声明。）
+storage:
+  type: local
+image_proxy:
+  use_for_video: false
