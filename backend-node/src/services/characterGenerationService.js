@@ -192,7 +192,7 @@ async function processCharacterGeneration(db, cfg, log, taskID, req) {
 function generateCharacters(db, cfg, log, req) {
   const dramaId = String(req.drama_id || '');
   if (!dramaId) throw new Error('drama_id 必填');
-  const task = taskService.createTask(db, log, 'character_generation', dramaId);
+  const task = taskService.createTaskFromContext(db, log, 'character_generation', dramaId);
   setImmediate(() => {
     processCharacterGeneration(db, cfg, log, task.id, {
       drama_id: req.drama_id,

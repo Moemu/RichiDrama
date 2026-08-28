@@ -181,7 +181,7 @@ function routes(db, log) {
     },
     fromImage: (req, res) => {
       try {
-        const task = taskService.createTask(db, log, 'video_generation', req.params.image_gen_id);
+        const task = taskService.createTaskFromContext(db, log, 'video_generation', req.params.image_gen_id);
         response.success(res, { task_id: task.id });
       } catch (err) {
         log.error('videos fromImage', { error: err.message });

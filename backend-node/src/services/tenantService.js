@@ -40,7 +40,9 @@ function ensureDefaultTenant(db, actorId) {
   if (!hasTable(db, 'tenants')) return null;
   const at = new Date().toISOString();
   db.transaction(() => {
-    db.prepare(`INSERT OR IGNORE INTO tenants (name,status,created_by,created_at,updated_at) VALUES ('默认项目组','active',?,?,?)`)
+    // 与迁移 68 的语义一致:全新库创建的默认项目组保留全局配置回退,
+    // 否则该组既无绑定又不允许借用全局配置,任何配置都不可见(列表恒为空)。
+    db.prepare(`INSERT OR IGNORE INTO tenants (name,status,uses_legacy_global_configs,created_by,created_at,updated_at) VALUES ('默认项目组','active',1,?,?,?)`)
       .run(actorId || null, at, at);
     const tenant = db.prepare("SELECT id FROM tenants WHERE name='默认项目组'").get();
     if (!tenant) return;
@@ -62,6 +64,31 @@ function ensureDefaultTenant(db, actorId) {
     }
   }
   return defaultTenant;
+}
+
+/**
+ * 新建的全局配置(owner_tenant_id IS NULL)自动补绑到所有 legacy 项目组。
+ * legacy 组一旦存在任何绑定,listConfigs 就只看绑定表(ensureDefaultTenant
+ * 只在领养时同步存量配置),不补绑会导致新配置在 legacy 组不可见、
+ * 也无法被 aiClient/计费解析选中。
+ */
+function bindGlobalConfigToLegacyTenants(db, config) {
+  if (!config || !hasTable(db, 'tenant_ai_config_bindings')) return;
+  const at = new Date().toISOString();
+  const tenants = db.prepare("SELECT id FROM tenants WHERE status='active' AND COALESCE(uses_legacy_global_configs,0)=1").all();
+  const exists = db.prepare('SELECT 1 FROM tenant_ai_config_bindings WHERE tenant_id=? AND ai_config_id=?');
+  const insert = db.prepare(
+    'INSERT INTO tenant_ai_config_bindings (tenant_id,service_type,ai_config_id,is_active,priority,is_default,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)'
+  );
+  for (const tenant of tenants) {
+    if (exists.get(tenant.id, config.id)) continue;
+    // 部分唯一索引 (tenant_id,service_type) WHERE is_default=1:插入新默认前
+    // 先清同组同类型旧默认,与 bindOwnedConfig 语义一致
+    if (config.is_default) {
+      db.prepare('UPDATE tenant_ai_config_bindings SET is_default=0, updated_at=? WHERE tenant_id=? AND service_type=?').run(at, tenant.id, config.service_type);
+    }
+    insert.run(tenant.id, config.service_type, config.id, 1, config.priority ?? 0, config.is_default ? 1 : 0, at, at);
+  }
 }
 
 function listTenants(db) {
@@ -130,8 +157,12 @@ function sanitizeTemplateSettings(raw) {
 // 新分组直接继承平台已验证的服务结构、模型、端点和默认项；所有
 // 凭据与 SD2 私有参数保持为空，运营人员只需补齐本组密钥即可启用。
 function seedOwnedConfigTemplates(db, tenantId, actorId) {
+  // 幂等保护:该组已有任何绑定时不再重播模板。此函数在每次启动的
+  // ensureDefaultTenant 中都会被调用,重播会重复创建配置并可能撞
+  // (tenant_id,service_type) WHERE is_default=1 的部分唯一索引。
+  if (db.prepare('SELECT 1 FROM tenant_ai_config_bindings WHERE tenant_id=? LIMIT 1').get(Number(tenantId))) return;
   const templates = db.prepare(`SELECT * FROM ai_service_configs
-    WHERE deleted_at IS NULL AND owner_tenant_id IS NULL AND is_active=1
+    WHERE deleted_at IS NULL AND COALESCE(owner_tenant_id, 0) = 0 AND is_active=1
     ORDER BY service_type, is_default DESC, priority DESC, id`).all();
   if (!templates.length) return;
   const aiConfigs = require('./aiConfigService');
@@ -273,4 +304,4 @@ function replaceBindings(db, tenantId, input) {
   return tenantDetail(db, target.id);
 }
 
-module.exports = { hasTable, tenantForUser, configIdsForService, configIdsForTenant, usesLegacyGlobalConfigs, priceBookForUser, ensureDefaultTenant, listTenants, tenantDetail, writeTenant, setMember, bindOwnedConfig, replaceBindings, newUserDefaultTenant, ensureNewUserMembership };
+module.exports = { hasTable, tenantForUser, configIdsForService, configIdsForTenant, usesLegacyGlobalConfigs, priceBookForUser, ensureDefaultTenant, bindGlobalConfigToLegacyTenants, listTenants, tenantDetail, writeTenant, setMember, bindOwnedConfig, replaceBindings, newUserDefaultTenant, ensureNewUserMembership };
