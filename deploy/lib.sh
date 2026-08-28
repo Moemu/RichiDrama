@@ -116,9 +116,15 @@ prepare_source() {
 
 build_image() {
   local sha="$1" source_dir="$2" image="local-minidrama:${1}"
+  local pull_args=()
+  if [[ "${MINIDRAMA_PULL_BASE_IMAGES:-0}" == 1 ]]; then
+    pull_args+=(--pull)
+  fi
   if ! docker image inspect "$image" >/dev/null 2>&1; then
     log "Building immutable image $image"
-    docker build --pull --build-arg "APP_REVISION=$sha" -t "$image" "$source_dir" || \
+    # Normal releases reuse the validated local base. Planned maintenance can
+    # set MINIDRAMA_PULL_BASE_IMAGES=1 to refresh it explicitly.
+    docker build "${pull_args[@]}" --build-arg "APP_REVISION=$sha" -t "$image" "$source_dir" || \
       fail "Immutable image build failed: $image"
   else
     log "Using existing image $image"

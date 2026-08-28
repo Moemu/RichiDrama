@@ -173,6 +173,7 @@ import { videosAPI } from '@/api/videos'
 import { dramaAPI } from '@/api/drama'
 import { storyboardsAPI } from '@/api/storyboards'
 import OmniAssetPromptEditor from '@/components/OmniAssetPromptEditor.vue'
+import { findAssetMentions, promptAliasForAsset } from '@/utils/assetMentions'
 import GenerationSettings from '@/components/GenerationSettings.vue'
 import { clearPromptDraft, currentDraftUserId, readPromptDraft, shouldRestorePromptDraft, writePromptDraft } from '@/utils/promptDraft'
 import { formatChinaDateTime } from '@/utils/time'
@@ -314,7 +315,7 @@ const promptAssets = computed(() => {
     const name = assetDisplayName(asset)
     const siblings = groups.get(name) || []
     const index = siblings.findIndex((item) => Number(item.id) === Number(asset.id))
-    const alias = siblings.length > 1 ? `${name}（${assetTypeLabel(asset.type)}${index + 1}）` : name
+    const alias = promptAliasForAsset(asset) || (siblings.length > 1 ? `${name}（${assetTypeLabel(asset.type)}${index + 1}）` : name)
     return { ...asset, alias, legacy_aliases: assetLegacyAliases(asset) }
   })
 })
@@ -486,7 +487,7 @@ const generationStallMinutes = computed(() => {
 const generationProgressMessage = computed(() => generationStallMinutes.value ? `已 ${generationStallMinutes.value} 分钟未收到新状态，仍在持续查询；可继续编辑其他镜头。` : (activeJob.value?.task_message || '任务已提交，正在等待下一次状态更新'))
 const estimatedPoints = ref(null), quotingEstimate = ref(false)
 const requestPreview = computed(() => ({ prompt: prompt.value, asset_selection_policy: 'prompt_references', creation_mode: creationMode.value, model: currentCapability.value?.model || model.value, aspect_ratio: aspectRatio.value, duration_seconds: normalizeDuration(duration.value), resolution: resolution.value, upscale_resolution: upscaleResolution.value, target_fps: targetFps.value, audio_strategy: audioStrategy.value, assets: requestAssets.value.map((asset, index) => ({ ordinal: index + 1, name: promptAssetFor(asset).alias, type: asset.type, usage: asset.usage, routing: assetRouteHint(asset) })) }))
-async function quoteCurrentRequest() { if (!currentCapability.value?.model) return; quotingEstimate.value = true; try { const quote = await omniVideoAPI.quoteBilling({ service_type: 'video', model: currentCapability.value.model, usage: { second: normalizeDuration(duration.value) }, pricing_context: { resolution: resolution.value || '720p', has_audio: chosenAssets.value.some((asset) => asset.type === 'audio') } }); estimatedPoints.value = quote.amount } catch (_) { estimatedPoints.value = null } finally { quotingEstimate.value = false } }
+async function quoteCurrentRequest() { if (!currentCapability.value?.model) return; quotingEstimate.value = true; try { const quote = await omniVideoAPI.quoteBilling({ model: currentCapability.value.model, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', has_video_input: chosenAssets.value.some((asset) => asset.type === 'video'), has_audio: chosenAssets.value.some((asset) => asset.type === 'audio') }); estimatedPoints.value = quote.amount } catch (_) { estimatedPoints.value = null } finally { quotingEstimate.value = false } }
 
 async function suggestPolish() {
   if (!prompt.value.trim() || polishingPrompt.value) return
@@ -597,15 +598,15 @@ function promptDocumentFor(text, preferredAssetIds = []) {
   const value = String(text || '')
   const used = new Map()
   const preferred = preferredAssetIds.map(Number)
-  const refs = [...value.matchAll(/@([^\s@]+)/g)].flatMap((match) => {
-    const alias = match[1]
+  const refs = findAssetMentions(value, assets.value).flatMap((mention) => {
+    const alias = mention.alias
     const candidates = assets.value.filter((item) => assetLegacyAliases(item).includes(alias))
     const scoped = candidates.filter((item) => preferred.includes(Number(item.id)))
     const pool = scoped.length ? scoped : candidates
     const occurrence = used.get(alias) || 0
     used.set(alias, occurrence + 1)
     const asset = pool.length === 1 ? pool[0] : pool[occurrence] || null
-    return asset ? [{ asset_id: asset.id, alias, occurrence, start: match.index, end: match.index + match[0].length }] : []
+    return asset ? [{ asset_id: asset.id, alias, occurrence, start: mention.index, end: mention.end }] : []
   })
   return { text: value, refs }
 }

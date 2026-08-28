@@ -113,9 +113,18 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(library, /local image="\$1" sha="\$2" data_dir="\$3"\s+local name="minidrama-preflight-/);
   assert.match(library, /docker build[^\n]*\|\| \\/);
   assert.match(library, /fail "Immutable image build failed/);
-  assert.match(library, /docker build --pull --build-arg/);
-  assert.doesNotMatch(dockerfile, /mirrors\.aliyun\.com/);
-  assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-300/);
+  assert.match(library, /MINIDRAMA_PULL_BASE_IMAGES/);
+  assert.match(library, /docker build "\$\{pull_args\[@\]\}" --build-arg/);
+  assert.doesNotMatch(library, /docker build --pull/);
+  assert.match(dockerfile, /mirrors\.aliyun\.com/);
+  assert.match(dockerfile, /ARG DEBIAN_MIRROR=mirrors\.aliyun\.com/);
+  assert.match(dockerfile, /--mount=type=cache,id=richidrama-builder-apt-lists/);
+  assert.match(dockerfile, /--mount=type=cache,id=richidrama-runtime-apt-lists/);
+  const runtimeStage = dockerfile.split('FROM node:18-bookworm-slim AS runtime')[1];
+  assert.ok(runtimeStage.indexOf('ARG APP_REVISION') > runtimeStage.indexOf('apt-get install'));
+  assert.match(dockerfile, /npm ci --include=dev --no-audit --no-fund/);
+  assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-60/);
+  assert.match(source, /"\$code" == 401 \|\| "\$code" == 404/);
   assert.doesNotMatch(source + compatibility, /git reset|git remote set-url/);
 });
 
@@ -125,7 +134,12 @@ test('GitHub workflows gate preview and production', () => {
   const cleanup = read('.github/workflows/preview-cleanup.yml');
   const production = read('.github/workflows/deploy.yml');
   assert.match(validation, /node --test test\/\*\.test\.js/);
-  assert.match(validation, /docker build --build-arg/);
+  assert.match(validation, /docker\/setup-buildx-action@v3/);
+  assert.match(validation, /docker\/build-push-action@v6/);
+  assert.match(validation, /cache-from: type=gha,scope=validation-container/);
+  assert.match(validation, /cache-to: type=gha,mode=max,scope=validation-container/);
+  assert.match(validation, /DEBIAN_MIRROR=deb\.debian\.org/);
+  assert.match(validation, /load: true/);
   assert.match(validation, /shellcheck -e SC1091/);
   assert.match(validation, /Verify preview Nginx configuration/);
   assert.match(validation, /nginx-preview-vhost\.conf/);

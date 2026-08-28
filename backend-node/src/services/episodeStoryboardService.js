@@ -635,6 +635,25 @@ function tryIncrementalSave(db, log, episodeIdNum, accumulated, savedNums, style
   } catch (_) { /* 流式解析错误静默忽略，等待最终完整解析 */ }
 }
 
+function getActiveStoryboardSnapshot(db, episodeId) {
+  return db.prepare(
+    `SELECT id, updated_at
+     FROM storyboards
+     WHERE episode_id = ? AND deleted_at IS NULL
+     ORDER BY id ASC`
+  ).all(Number(episodeId)).map((row) => ({
+    id: Number(row.id),
+    updated_at: row.updated_at == null ? null : String(row.updated_at),
+  }));
+}
+
+function storyboardSnapshotsMatch(expected, current) {
+  if (expected.length !== current.length) return false;
+  return expected.every((row, index) => (
+    row.id === current[index].id && row.updated_at === current[index].updated_at
+  ));
+}
+
 /**
  * @param {Set|null} skipShotNumbers - 已通过增量流式保存的 storyboard_number 集合，跳过重复插入
  */
@@ -651,7 +670,7 @@ function saveStoryboards(db, log, episodeId, storyboards, cfg, styleOverride, sk
   if (skipShotNumbers === null) {
     const existing = db.prepare('SELECT id FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL').all(episodeIdNum);
     if (existing.length > 0) {
-      db.prepare('UPDATE storyboards SET deleted_at = ? WHERE episode_id = ?').run(now, episodeIdNum);
+      db.prepare('UPDATE storyboards SET deleted_at = ? WHERE episode_id = ? AND deleted_at IS NULL').run(now, episodeIdNum);
     }
   }
 
@@ -810,6 +829,39 @@ function saveStoryboards(db, log, episodeId, storyboards, cfg, styleOverride, sk
 }
 
 /**
+ * 成功解析完整的新分镜后，在一个事务中替换旧分镜。
+ * 快照不一致时停止替换。这样不会覆盖生成期间的人工修改。
+ */
+function replaceStoryboardsAtomically(db, log, episodeId, storyboards, cfg, styleOverride, expectedSnapshot, deriveOpts = {}) {
+  const episodeIdNum = Number(episodeId);
+  const replace = db.transaction(() => {
+    const currentSnapshot = getActiveStoryboardSnapshot(db, episodeIdNum);
+    if (!storyboardSnapshotsMatch(expectedSnapshot, currentSnapshot)) {
+      throw new Error('分镜在生成期间已变化。旧分镜已保留，请重新生成');
+    }
+
+    if (currentSnapshot.length > 0) {
+      const now = new Date().toISOString();
+      const ids = currentSnapshot.map((row) => row.id);
+      const placeholders = ids.map(() => '?').join(', ');
+      const changed = db.prepare(
+        `UPDATE storyboards
+         SET deleted_at = ?, updated_at = ?
+         WHERE id IN (${placeholders}) AND episode_id = ? AND deleted_at IS NULL`
+      ).run(now, now, ...ids, episodeIdNum).changes;
+      if (changed !== ids.length) {
+        throw new Error('旧分镜状态已变化。旧分镜已保留，请重新生成');
+      }
+    }
+
+    const saved = saveStoryboards(db, log, episodeIdNum, storyboards, cfg, styleOverride, null, deriveOpts);
+    if (saved.length === 0) throw new Error('AI生成分镜失败：没有可保存的新分镜');
+    return saved;
+  });
+  return replace();
+}
+
+/**
  * 构建续写 prompt：当首次响应被截断时，携带已生成分镜完整列表 + 末尾详情作为上下文，
  * 请求 AI 从 lastShotNum+1 继续生成剩余分镜。
  * 关键：必须把所有已生成分镜的 shot_number + segment_title + title 全部列出，
@@ -873,6 +925,9 @@ async function processStoryboardGeneration(db, log, cfg, taskId, episodeId, mode
     targetClipDuration: targetClipDurationSec != null && Number(targetClipDurationSec) > 0 ? Number(targetClipDurationSec) : null,
   };
   let streamThrottle = 0;
+  // 重新生成时保留旧分镜。完整结果成功后再原子替换。
+  const originalStoryboardSnapshot = getActiveStoryboardSnapshot(db, episodeIdNum);
+  const isRegeneration = originalStoryboardSnapshot.length > 0;
 
   try {
     taskService.updateTaskStatus(db, taskId, 'processing', 10, '开始生成分镜头...');
@@ -884,10 +939,6 @@ async function processStoryboardGeneration(db, log, cfg, taskId, episodeId, mode
     });
     logDebugStoryboardPrompts(log, `task-${taskId}-initial`, userPrompt, systemPrompt);
 
-    // 提前删除旧分镜，为增量流式保存腾出位置
-    const deleteNow = new Date().toISOString();
-    db.prepare('UPDATE storyboards SET deleted_at = ? WHERE episode_id = ? AND deleted_at IS NULL').run(deleteNow, episodeIdNum);
-
     // 不使用 json_mode：response_format:json_object 要求返回 JSON 对象而非数组，会导致模型包装成
     // {"storyboards":[...]} 或产生乱码 key，改由 extractFirstArray 统一处理任意包装格式。
     const text = await generateTextForStoryboard(db, log, userPrompt, systemPrompt, {
@@ -896,6 +947,7 @@ async function processStoryboardGeneration(db, log, cfg, taskId, episodeId, mode
       streamCallback: (accumulated) => {
         if (accumulated.length - streamThrottle < 400) return;
         streamThrottle = accumulated.length;
+        if (isRegeneration) return;
         tryIncrementalSave(db, log, episodeIdNum, accumulated, streamSavedNums, streamStyle, streamVideoRatio, deriveOpts);
         // 同步更新任务进度（根据已保存分镜数量）
         if (streamSavedNums.size > 0) {
@@ -1009,6 +1061,7 @@ async function processStoryboardGeneration(db, log, cfg, taskId, episodeId, mode
           streamCallback: (accumulated) => {
             if (accumulated.length - streamThrottle < 400) return;
             streamThrottle = accumulated.length;
+            if (isRegeneration) return;
             tryIncrementalSave(db, log, episodeIdNum, accumulated, streamSavedNums, streamStyle, streamVideoRatio, deriveOpts);
           },
         });
@@ -1059,8 +1112,12 @@ async function processStoryboardGeneration(db, log, cfg, taskId, episodeId, mode
 
     taskService.updateTaskStatus(db, taskId, 'processing', 70, '正在保存分镜头...');
 
-    // 传入 streamSavedNums：已增量保存的项目直接从 DB 读取，跳过重复 INSERT
-    const saved = saveStoryboards(db, log, episodeId, storyboards, cfg, style, streamSavedNums, deriveOpts);
+    // 首次生成保留增量恢复。重新生成只在完整结果可保存后替换旧分镜。
+    const saved = isRegeneration
+      ? replaceStoryboardsAtomically(
+        db, log, episodeId, storyboards, cfg, style, originalStoryboardSnapshot, deriveOpts
+      )
+      : saveStoryboards(db, log, episodeId, storyboards, cfg, style, streamSavedNums, deriveOpts);
 
     // ── 分镜角色补全（字符串匹配，无 AI，极快）──────────────────────────────────
     taskService.updateTaskStatus(db, taskId, 'processing', 75, '正在校验分镜角色关联...');
@@ -1619,6 +1676,9 @@ function reorderStoryboards(db, log, episodeId, ids) {
 module.exports = {
   normalizeStoryboardShotNumber,
   dedupeStoryboardRowsByNumber,
+  getActiveStoryboardSnapshot,
+  replaceStoryboardsAtomically,
+  processStoryboardGeneration,
   getStoryboardsForEpisode,
   reorderStoryboards,
   generateStoryboard,

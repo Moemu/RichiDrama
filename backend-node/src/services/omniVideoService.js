@@ -30,6 +30,35 @@ function maxDurationForModel(model) {
   return /seedance[-_]?2[-_]?5|2[-_]?5[-_]?260628/i.test(String(model || '')) ? 30 : 15;
 }
 
+function quote(db, body, payer) {
+  const model = String(body?.model || '').trim();
+  if (!model || model === 'auto') throw new Error('请选择一个明确的视频模型');
+  if (!payer?.id) throw new Error('缺少报价所属账号');
+  const tenantId = require('./tenantService').tenantForUser(db, payer.id)?.id || null;
+  const tenantOptions = tenantId ? { tenant_id: tenantId } : {};
+  const capability = capabilityService.resolve(db, model, [], tenantOptions);
+  if (!capability.model || capability.model !== model) throw new Error('所选视频模型不可用');
+  const aiConfigs = require('./aiConfigService');
+  const billing = require('./billingService');
+  const billingTarget = aiConfigs.resolveBillingTarget(db, 'video', capability.model, capability.config_id, tenantOptions);
+  const config = aiConfigs.getConfig(db, capability.config_id);
+  let billingSettings = {};
+  try { billingSettings = JSON.parse(config?.settings || '{}'); } catch (_) {}
+  const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key);
+  const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
+  if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
+  return billing.quote(db, payer, {
+    service_type: 'video',
+    model: billingTarget.billing_key,
+    usage,
+    pricing_context: {
+      has_video_input: !!body.has_video_input,
+      resolution: body.resolution || '480p',
+      has_audio: !!body.has_audio,
+    },
+  });
+}
+
 function create(db, log, body, billingUser) {
   body = { ...(body || {}) };
   if (!String(body.model || '').trim() || String(body.model).trim() === 'auto') throw new Error('请选择一个明确的视频模型');
@@ -676,4 +705,4 @@ function cancelJob(db, log, jobId, user) {
   return get(db, jobId);
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, SHOT_ASSET_LIMITS };
+module.exports = { create, quote, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, SHOT_ASSET_LIMITS };

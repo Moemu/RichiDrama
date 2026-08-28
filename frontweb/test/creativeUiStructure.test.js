@@ -41,6 +41,19 @@ test('维护者工作流恢复一键入口、资源模型和分镜实时刷新',
   assert.match(props, /propAPI\.generateImage\(prop\.id, model \|\| undefined/)
 })
 
+test('自由创作报价由后端按模型的有效计量单位计算', async () => {
+  const [source, apiSource] = await Promise.all([
+    readSource('../src/views/FreeCreate.vue'),
+    readSource('../src/api/omniVideo.js'),
+  ])
+
+  const quoteHandler = source.slice(source.indexOf('async function quoteCurrentRequest'), source.indexOf('function confirmSubmit'))
+  assert.match(apiSource, /request\.post\('\/omni-video-jobs\/quote', body\)/)
+  assert.match(quoteHandler, /model: currentCapability\.value\.model/)
+  assert.match(quoteHandler, /duration: normalizeDuration\(duration\.value\)/)
+  assert.doesNotMatch(quoteHandler, /usage:\s*\{\s*second:/)
+})
+
 test('首页委托共享头部提供新建、账户和素材入口', async () => {
   const [source, header] = await Promise.all([
     readSource('../src/views/FilmList.vue'),

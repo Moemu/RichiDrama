@@ -1634,11 +1634,25 @@ function createAndGenerateImage(db, log, opts) {
   const charIdNum = character_id != null ? Number(character_id) : null;
   const sceneIdNum = scene_id != null ? Number(scene_id) : null;
 
+  // Image routes historically created ownerless async tasks.  The image still
+  // completed, but a non-admin user received 404 while polling that task.
+  // Derive ownership from the already-authorized project instead of trusting
+  // a client-supplied user id.
+  const dramaOwner = db.prepare(
+    'SELECT owner_user_id FROM dramas WHERE id = ? AND deleted_at IS NULL'
+  ).get(dramaIdNum);
+  const ownerUserId = Number(opts.owner_user_id || dramaOwner?.owner_user_id) || null;
+  const tenantId = ownerUserId
+    ? require('./tenantService').tenantForUser(db, ownerUserId)?.id || null
+    : null;
+
   let resourceId;
   if (charIdNum != null) resourceId = `character_${charIdNum}`;
   else if (sceneIdNum != null) resourceId = `scene_${sceneIdNum}`;
   else resourceId = String(dramaIdNum);
-  const task = taskService.createTaskFromContext(db, log, 'image_generation', resourceId);
+  const task = taskService.createTaskFromContext(
+    db, log, 'image_generation', resourceId, ownerUserId, tenantId
+  );
   const taskId = task.id;
 
   // 资源图计费:与分镜图路由同口径(未定价即拒绝;后台链路无请求上下文不重复计费)
@@ -1663,8 +1677,8 @@ function createAndGenerateImage(db, log, opts) {
       dramaIdNum,
       charIdNum,
       sceneIdNum,
-      imageBilling.authorizationId ? (require('./billingRequestContext').current()?.actor?.id ?? null) : null,
-      require('./billingRequestContext').current()?.tenant_id ?? null,
+      ownerUserId,
+      tenantId,
       imageBilling.authorizationId,
       provider || 'openai',
       prompt || '',
@@ -1680,9 +1694,9 @@ function createAndGenerateImage(db, log, opts) {
   } catch (e) {
     if ((e.message || '').includes('scene_id') || (e.message || '').includes('character_id')) {
       const info = db.prepare(
-        `INSERT INTO image_generations (drama_id, provider, prompt, model, size, quality, status, task_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
-      ).run(dramaIdNum, provider || 'openai', prompt || '', model || null, size || null, quality || null, taskId, now, now);
+        `INSERT INTO image_generations (drama_id, owner_user_id, tenant_id, provider, prompt, model, size, quality, status, task_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+      ).run(dramaIdNum, ownerUserId, tenantId, provider || 'openai', prompt || '', model || null, size || null, quality || null, taskId, now, now);
       imageGenId = info.lastInsertRowid;
     } else {
       throw e;

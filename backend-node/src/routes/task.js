@@ -4,7 +4,18 @@ const response = require('../response');
 function ownedTask(db, taskId, user) {
   const task = db.prepare('SELECT * FROM async_tasks WHERE id = ? AND deleted_at IS NULL').get(taskId);
   if (!task) return null;
-  if (user.role !== 'admin' && Number(task.owner_user_id) !== Number(user.id)) return false;
+  if (user.role !== 'admin' && Number(task.owner_user_id) !== Number(user.id)) {
+    // Compatibility for image tasks created before async task ownership was
+    // persisted.  Authorize through the linked project without rewriting old
+    // task or generation records.
+    const linkedImage = db.prepare(`SELECT 1
+      FROM image_generations i JOIN dramas d ON d.id = i.drama_id
+      WHERE i.task_id = ? AND i.deleted_at IS NULL
+        AND d.owner_user_id = ? AND d.deleted_at IS NULL`).get(taskId, user.id);
+    const linkedVideo = db.prepare(`SELECT 1 FROM video_generations
+      WHERE task_id = ? AND owner_user_id = ? AND deleted_at IS NULL`).get(taskId, user.id);
+    if (!linkedImage && !linkedVideo) return false;
+  }
   return task;
 }
 
@@ -68,3 +79,5 @@ module.exports = function taskRoutes(db, log) {
     cancelTaskStatus: cancelTaskStatus(db, log),
   };
 };
+
+module.exports.ownedTask = ownedTask;

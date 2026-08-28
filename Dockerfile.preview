@@ -15,7 +15,7 @@ RUN apt-get update \
 WORKDIR /build
 COPY frontweb/package.json frontweb/package-lock.json* ./frontweb/
 RUN npm config set registry https://registry.npmmirror.com
-RUN cd frontweb && npm install --no-audit --no-fund
+RUN cd frontweb && npm ci --include=dev --no-audit --no-fund
 COPY frontweb ./frontweb
 RUN cd frontweb && npm run build
 # The ONLY permitted difference between a preview and production page state:
