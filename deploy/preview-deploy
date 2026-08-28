@@ -101,7 +101,7 @@ curl -fsS --max-time 15 --resolve "$HOST:80:127.0.0.1" -u "preview:$PASSWORD" "h
 PROD_DOMAIN="${MINIDRAMA_PROD_DOMAIN:-drama.richbest.cn}"
 curl -fsS --max-time 10 -H "Host: $PROD_DOMAIN" http://127.0.0.1/ready >/dev/null || \
   fail 'The existing production route failed after the ingress reload.'
-unset AUTH_HEADER PASSWORD
+unset PASSWORD
 
 prune_release_images
 
