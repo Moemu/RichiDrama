@@ -58,7 +58,7 @@ jobs:
             incoming="/data/minidrama-incoming/${sha}.tar.gz"
             bootstrap="/data/minidrama-bootstrap/${sha}"
             rm -rf -- "$bootstrap"
-            mkdir -p /data/minidrama-incoming /data/minidrama-bootstrap
+            mkdir -p /data/minidrama-incoming "$bootstrap"
             git -C "$repo" archive --format=tar.gz --output="$incoming" "$sha"
             tar -xzf "$incoming" -C "$bootstrap"
             bash "$bootstrap/deploy/release-deploy" "$sha"
