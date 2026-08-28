@@ -17,10 +17,14 @@ COPY frontweb/package.json frontweb/package-lock.json* ./frontweb/
 RUN npm config set registry https://registry.npmmirror.com
 RUN cd frontweb && npm ci --include=dev --no-audit --no-fund
 COPY frontweb ./frontweb
-RUN cd frontweb && npm run build
 # The ONLY permitted difference between a preview and production page state:
-# a " (preview)" suffix in the document title.
+# a " (preview)" suffix in the document title. The suffix must be baked into
+# the client bundle as well — the SPA router rewrites document.title on every
+# navigation, which would otherwise discard the badge injected below.
 ARG PREVIEW_TITLE_BADGE=""
+RUN cd frontweb \
+    && if [ -n "$PREVIEW_TITLE_BADGE" ]; then export VITE_TITLE_BADGE=' (preview)'; fi \
+    && npm run build
 RUN if [ -n "$PREVIEW_TITLE_BADGE" ]; then sed -i 's|</title>| (preview)</title>|' frontweb/dist/index.html; fi
 
 COPY backend-node/package.json backend-node/package-lock.json* ./backend-node/
