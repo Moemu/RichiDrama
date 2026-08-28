@@ -7,13 +7,14 @@ FROM node:18-bookworm-slim AS builder
 
 # Use the regional mirror during application builds. This keeps a cold build
 # independent of the slow Debian route seen on the production host.
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
+ARG DEBIAN_MIRROR=mirrors.aliyun.com
+RUN sed -i "s|deb.debian.org|${DEBIAN_MIRROR}|g; s|security.debian.org|${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.sources
 
 # 编译原生模块所需工具链
-RUN apt-get update \
+RUN --mount=type=cache,id=richidrama-builder-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
-        python3 make g++ git ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+        python3 make g++ git ca-certificates
 
 WORKDIR /build
 
@@ -38,16 +39,20 @@ COPY backend-node ./backend-node
 # ============================================================
 FROM node:18-bookworm-slim AS runtime
 
-ARG APP_REVISION=unknown
+ARG DEBIAN_MIRROR=mirrors.aliyun.com
 
 # Keep the cold-build path usable on the production network.
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
+RUN sed -i "s|deb.debian.org|${DEBIAN_MIRROR}|g; s|security.debian.org|${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.sources
 
 # sharp 运行时基础库 + ffmpeg（视频合并/后期处理依赖）+ tini（信号转发）
-RUN apt-get update \
+RUN --mount=type=cache,id=richidrama-runtime-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates tini ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+        ca-certificates tini ffmpeg
+
+# Keep the commit-specific value after reusable OS layers. A new SHA must not
+# invalidate apt installation on every release.
+ARG APP_REVISION=unknown
 
 WORKDIR /app/backend-node
 

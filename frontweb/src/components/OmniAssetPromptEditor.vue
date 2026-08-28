@@ -32,7 +32,7 @@
           <img v-else-if="asset.type === 'video' && thumbUrl(asset)" :src="thumbUrl(asset)" class="pa-thumb-img" :alt="asset.alias || asset.name" loading="lazy" decoding="async" />
           <span v-else class="pa-thumb-icon">{{ icon(asset.type) }}</span>
         </span>
-        <span class="pa-name">{{ asset.alias || asset.name }}</span>
+        <span class="pa-name">{{ asset.name || asset.alias }}</span>
         <span v-if="asset._chosen" class="pa-chosen">已选</span>
       </button>
       <p v-if="!pickerAssets.length" class="pa-empty">没有匹配的素材</p>
@@ -48,6 +48,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { insertTokenAtOffset } from '@/utils/promptInsertion'
 import { ASSET_POINTER_CANCEL, ASSET_POINTER_DROP, ASSET_POINTER_MOVE } from '@/utils/assetPointerDrag'
+import { assetAliasValues, findAssetMentions, promptAliasForAsset } from '@/utils/assetMentions'
 const props = defineProps({
   modelValue: { type: String, default: '' },
   /** 全部可选素材（不限于已选）；插入未选中的时会 emit pick 自动加入创作 */
@@ -87,7 +88,7 @@ onMounted(() => {
 const pickerQuery = computed(() => (activeMentionRange()?.query || '').toLocaleLowerCase())
 const pickerMatches = computed(() =>
   (props.assets || [])
-    .filter((a) => a && a.id != null && (!pickerQuery.value || String(a.alias || a.name || '').toLocaleLowerCase().includes(pickerQuery.value)))
+    .filter((a) => a && a.id != null && (!pickerQuery.value || assetAliasValues(a).join(' ').toLocaleLowerCase().includes(pickerQuery.value)))
     .map((a) => ({ ...a, _chosen: props.chosenIds.has(a.id) }))
 )
 const pickerAssets = computed(() => pickerMatches.value.slice(0, 30))
@@ -140,24 +141,21 @@ function positionPickerAndMention() {
 }
 
 function referencesFromText(value) {
-  return [...new Set([...String(value || '').matchAll(/@([^\s@]+)/g)].map((match) => match[1]))]
+  return [...new Set(findAssetMentions(value, props.assets).map((mention) => mention.alias))]
 }
 function assetMatchesAlias(asset, alias) {
-  return [asset?.alias, asset?.reference_alias, asset?.name, ...(asset?.legacy_aliases || [])]
-    .map((value) => String(value || '').trim())
-    .filter(Boolean)
-    .includes(alias)
+  return assetAliasValues(asset).includes(alias)
 }
 function syncReferences(value) {
   const refs = []; const unresolvedRefs = []; const occurrences = new Map()
   const persisted = Array.isArray(props.referenceDocument?.refs) ? props.referenceDocument.refs : []
-  for (const match of String(value || '').matchAll(/@([^\s@]+)/g)) {
-    const alias = match[1]; const occurrence = occurrences.get(alias) || 0
+  for (const mention of findAssetMentions(value, props.assets)) {
+    const alias = mention.alias; const occurrence = occurrences.get(alias) || 0
     occurrences.set(alias, occurrence + 1)
     const matches = (props.assets || []).filter((asset) => asset && assetMatchesAlias(asset, alias))
     const previous = persisted.find((entry) => String(entry?.alias || '') === alias && Number(entry?.occurrence || 0) === occurrence && matches.some((asset) => Number(asset.id) === Number(entry.asset_id)))
     const asset = previous ? matches.find((item) => Number(item.id) === Number(previous.asset_id)) : (matches.length === 1 ? matches[0] : null)
-    if (asset) refs.push({ asset_id: asset.id, alias, occurrence, start: match.index, end: match.index + match[0].length })
+    if (asset) refs.push({ asset_id: asset.id, alias, occurrence, start: mention.index, end: mention.end })
     else if (matches.length > 1) unresolvedRefs.push({ alias, occurrence, candidate_asset_ids: matches.map((asset) => asset.id) })
   }
   resolvedReferences.value = refs
@@ -174,7 +172,7 @@ function syncReferences(value) {
 function insertAsset(asset, opts = {}) {
   // 未选中的先加入创作; entity 类素材(无素材库 id)只插入引用, 不触发加入创作
   if (asset.id != null && !props.chosenIds.has(asset.id)) emit('pick', asset)
-  const token = `@${asset.alias || asset.name}`
+  const token = `@${promptAliasForAsset(asset)}`
   const explicitOffset = Number.isFinite(Number(opts.offset)) ? Number(opts.offset) : null
   const mention = explicitOffset == null ? activeMentionRange() : null
   const scrollPosition = { top: editorRef.value?.scrollTop || 0, left: editorRef.value?.scrollLeft || 0 }
@@ -243,23 +241,22 @@ function renderEditor(value, force = false) {
   if (!el || (!force && document.activeElement === el)) return
   el.replaceChildren()
   const source = String(value || '')
-  const matcher = /@([^\s@]+)/g
-  let last = 0; let found; const occurrences = new Map()
-  while ((found = matcher.exec(source))) {
-    if (found.index > last) el.append(document.createTextNode(source.slice(last, found.index)))
-    const alias = found[1]; const occurrence = occurrences.get(alias) || 0; occurrences.set(alias, occurrence + 1); const asset = matchingAsset(alias, occurrence)
-    if (!asset) el.append(document.createTextNode(found[0]))
+  let last = 0; const occurrences = new Map()
+  for (const mention of findAssetMentions(source, props.assets)) {
+    if (mention.index > last) el.append(document.createTextNode(source.slice(last, mention.index)))
+    const alias = mention.alias; const occurrence = occurrences.get(alias) || 0; occurrences.set(alias, occurrence + 1); const asset = matchingAsset(alias, occurrence)
+    if (!asset) el.append(document.createTextNode(mention.token))
     else {
       const chip = document.createElement('span')
-      chip.className = 'prompt-asset-chip'; chip.contentEditable = 'false'; chip.dataset.token = found[0]
+      chip.className = 'prompt-asset-chip'; chip.contentEditable = 'false'; chip.dataset.token = mention.token
       chip.setAttribute('role', 'img'); chip.setAttribute('aria-label', `引用素材：${alias}`)
       const url = thumbUrl(asset)
       if (url && asset.type !== 'audio') { const image = document.createElement('img'); image.src = url; image.alt = ''; chip.append(image) }
       else { const icon = document.createElement('span'); icon.textContent = iconForAsset(asset.type); icon.setAttribute('aria-hidden', 'true'); chip.append(icon) }
-      const name = document.createElement('b'); name.textContent = alias; chip.append(name)
+      const name = document.createElement('b'); name.textContent = asset.name || alias; chip.append(name)
       el.append(chip)
     }
-    last = found.index + found[0].length
+    last = mention.end
   }
   if (last < source.length) el.append(document.createTextNode(source.slice(last)))
 }
