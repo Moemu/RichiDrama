@@ -1,0 +1,30 @@
+D:\Work\LocalMiniDrama\backend-node\test\mediaProxy.test.js:101
+  const expectedCanonicalKey = `drama/${record.key ?? ''}`;
+        ^
+
+SyntaxError: Identifier 'expectedCanonicalKey' has already been declared
+[90m    at wrapSafe (node:internal/modules/cjs/loader:1743:18)[39m
+[90m    at Module._compile (node:internal/modules/cjs/loader:1786:20)[39m
+[90m    at Object..js (node:internal/modules/cjs/loader:1943:10)[39m
+[90m    at Module.load (node:internal/modules/cjs/loader:1533:32)[39m
+[90m    at Module._load (node:internal/modules/cjs/loader:1335:12)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)[39m
+[90m    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)[39m
+[90m    at node:internal/main/run_main_module:33:47[39m
+
+Node.js v24.14.0
+[31m✖ test\mediaProxy.test.js [90m(106.2495ms)[39m[39m
+[34mℹ tests 1[39m
+[34mℹ suites 0[39m
+[34mℹ pass 0[39m
+[34mℹ fail 1[39m
+[34mℹ cancelled 0[39m
+[34mℹ skipped 0[39m
+[34mℹ todo 0[39m
+[34mℹ duration_ms 120.5494[39m
+
+[31m✖ failing tests:[39m
+
+test at test\mediaProxy.test.js:1:1
+[31m✖ test\mediaProxy.test.js [90m(106.2495ms)[39m[39m
+  [32m'test failed'[39m

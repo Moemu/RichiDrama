@@ -99,16 +99,18 @@ cd frontweb && npm run build
 
 ### Local Debugging Startup (重要)
 
-**本地调试后端必须带环境变量启动，否则视频生成会卡死：**
+**本地调试后端必须以 dev 档启动（`MINIDRAMA_PROFILE=dev`），否则视频生成会卡死：**
 
 ```bash
 cd backend-node
-CFG_IMAGE_PROXY__USE_FOR_VIDEO=false node --watch src/server.js
+MINIDRAMA_PROFILE=dev node --watch src/server.js
 ```
+
+（`run_dev.ps1` / `run_dev.bat` 已内置该变量。）
 
 **原因**：`config.yaml` 默认 `image_proxy.use_for_video: true`，视频生成时会把本地参考图上传到中转图床（`imageproxy.zhongzhuan.chat`）转公网 URL。线上图床可达没问题，但**本地调试时图床响应慢/不稳，每张图最多等 180s×2 重试，3 张参考图会把异步任务 `processVideoGeneration` 阻塞数分钟**，表现为任务队列一直 processing 不推进。
 
-`CFG_IMAGE_PROXY__USE_FOR_VIDEO=false` 关闭图床后，本地图片直接转 base64 提交给火山，几秒内完成提交。
+dev 档已内置等价覆盖（旧手工方式 `CFG_IMAGE_PROXY__USE_FOR_VIDEO=false` 仍可用作逃生舱），并强制本地存储；关闭后本地图片直接转 base64 提交给火山，几秒内完成提交。
 
 #### config 环境变量覆盖机制
 

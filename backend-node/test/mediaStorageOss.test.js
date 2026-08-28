@@ -8,6 +8,24 @@ const path = require('path');
 const http = require('http');
 const { archiveLocalFile, mirrorAndTrack, migrateLocalTree, staticHandler, readMediaBuffer, pruneVerifiedLocalCopies, startArchiveScheduler } = require('../src/services/mediaStorageService');
 const Database = require('better-sqlite3');
+const crypto = require('crypto');
+const express = require('express');
+
+test('static handler sets cache headers on hot-copy hits (sendFile path)', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-hot-'));
+  fs.mkdirSync(path.join(root, 'videos'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'videos', 'local.mp4'), 'abc123');
+  const app = express();
+  app.use('/static', staticHandler({ storage: { type: 'oss' } }, root));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  t.after(() => server.close());
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/static/videos/local.mp4`);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), 'abc123');
+  assert.equal(response.headers.get('cache-control'), 'public, max-age=3600');
+  assert.equal(response.headers.get('accept-ranges'), 'bytes');
+});
 
 function ossConfig(endpoint) {
   return { storage: { type: 'oss', oss: { endpoint, bucket: 'test-bucket', access_key_id: 'test-id', access_key_secret: 'test-secret', prefix: 'drama', public_base_url: 'https://cdn.example.test', auto_archive_enabled: true, force_path_style: true } } };
@@ -183,9 +201,11 @@ test('missing local media is read through the protected static route from OSS', 
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); t.after(() => server.close());
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-oss-static-'));
   const handler = staticHandler(ossConfig(`http://127.0.0.1:${server.address().port}`), root);
-  let sent = null; let type = null;
-  await handler({ path: '/images/legacy.png' }, { type: (value) => { type = value; return { send: (value2) => { sent = value2; } }; } }, () => assert.fail('should proxy'));
+  let sent = null; let type = null; const headers = {};
+  await handler({ path: '/images/legacy.png' }, { setHeader: (n, v) => { headers[n] = v; }, type: (value) => { type = value; return { send: (value2) => { sent = value2; } }; } }, () => assert.fail('should proxy'));
   assert.equal(type, 'image/png'); assert.equal(sent.toString(), 'proxied');
+  // Cache semantics: repeated carousel/list revisits must not refetch bytes.
+  assert.equal(headers['Cache-Control'], 'public, max-age=3600');
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -198,6 +218,7 @@ test('OSS static fallback preserves video byte-range responses', async (t) => {
   const res = {
     status(value) { calls.status = value; return this; },
     set(value, next) { if (typeof value === 'string') calls.headers[value] = next; else Object.assign(calls.headers, value); return this; },
+    setHeader(name, value) { calls.headers[name] = value; return this; },
     type(value) { calls.type = value; return this; },
     send(value) { calls.body = value; return this; },
     end() { calls.ended = true; return this; },
@@ -206,6 +227,8 @@ test('OSS static fallback preserves video byte-range responses', async (t) => {
   assert.equal(calls.status, 206);
   assert.equal(calls.type, 'video/mp4');
   assert.equal(calls.headers['Content-Range'], 'bytes 2-5/10');
+  assert.equal(calls.headers['Cache-Control'], 'public, max-age=3600');
+  assert.equal(calls.headers['Accept-Ranges'], 'bytes');
   assert.equal(calls.body.toString(), '2345');
   await handler({ path: '/videos/legacy.mp4', headers: { range: 'bytes=999-' } }, res, () => assert.fail('should proxy'));
   assert.equal(calls.status, 416);
