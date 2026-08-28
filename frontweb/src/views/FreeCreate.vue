@@ -158,6 +158,7 @@ import { videosAPI } from '@/api/videos'
 import { dramaAPI } from '@/api/drama'
 import { storyboardsAPI } from '@/api/storyboards'
 import OmniAssetPromptEditor from '@/components/OmniAssetPromptEditor.vue'
+import { findAssetMentions, promptAliasForAsset } from '@/utils/assetMentions'
 import GenerationSettings from '@/components/GenerationSettings.vue'
 import { clearPromptDraft, currentDraftUserId, readPromptDraft, shouldRestorePromptDraft, writePromptDraft } from '@/utils/promptDraft'
 import { formatChinaDateTime } from '@/utils/time'
@@ -298,7 +299,7 @@ const promptAssets = computed(() => {
     const name = assetDisplayName(asset)
     const siblings = groups.get(name) || []
     const index = siblings.findIndex((item) => Number(item.id) === Number(asset.id))
-    const alias = siblings.length > 1 ? `${name}（${assetTypeLabel(asset.type)}${index + 1}）` : name
+    const alias = promptAliasForAsset(asset) || (siblings.length > 1 ? `${name}（${assetTypeLabel(asset.type)}${index + 1}）` : name)
     return { ...asset, alias, legacy_aliases: assetLegacyAliases(asset) }
   })
 })
@@ -581,15 +582,15 @@ function promptDocumentFor(text, preferredAssetIds = []) {
   const value = String(text || '')
   const used = new Map()
   const preferred = preferredAssetIds.map(Number)
-  const refs = [...value.matchAll(/@([^\s@]+)/g)].flatMap((match) => {
-    const alias = match[1]
+  const refs = findAssetMentions(value, assets.value).flatMap((mention) => {
+    const alias = mention.alias
     const candidates = assets.value.filter((item) => assetLegacyAliases(item).includes(alias))
     const scoped = candidates.filter((item) => preferred.includes(Number(item.id)))
     const pool = scoped.length ? scoped : candidates
     const occurrence = used.get(alias) || 0
     used.set(alias, occurrence + 1)
     const asset = pool.length === 1 ? pool[0] : pool[occurrence] || null
-    return asset ? [{ asset_id: asset.id, alias, occurrence, start: match.index, end: match.index + match[0].length }] : []
+    return asset ? [{ asset_id: asset.id, alias, occurrence, start: mention.index, end: mention.end }] : []
   })
   return { text: value, refs }
 }
