@@ -28,7 +28,7 @@ jobs:
     if: >-
       (github.event_name == 'workflow_dispatch') ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch != 'main')
-    name: Preview smoke
+    name: Deploy PR preview
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: preview
@@ -40,6 +40,7 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
           EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
         run: |
           if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
@@ -65,7 +66,7 @@ jobs:
           [[ "$pr" =~ ^[1-9][0-9]*$ ]]
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${sha}" -f state=pending -f context='preview / smoke' -f description='Preview deployment is running' >/dev/null
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${sha}" -f state=pending -f context='preview / smoke' -f description='Preview deployment is running' -f "target_url=$RUN_URL" >/dev/null
       - name: Deploy isolated preview
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -115,10 +116,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.pr.outputs.sha }}
-        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=success -f context='preview / smoke' -f description='Approved preview passed' >/dev/null
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=success -f context='preview / smoke' -f description='Approved preview passed' -f "target_url=$RUN_URL" >/dev/null
       - name: Mark preview failed
         if: failure() && steps.pr.outputs.sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.pr.outputs.sha }}
-        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=failure -f context='preview / smoke' -f description='Preview deployment failed' >/dev/null
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=failure -f context='preview / smoke' -f description='Preview deployment failed' -f "target_url=$RUN_URL" >/dev/null
