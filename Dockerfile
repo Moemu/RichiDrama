@@ -6,7 +6,6 @@
 FROM node:18-bookworm-slim AS builder
 
 # 编译原生模块所需工具链
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 make g++ git ca-certificates \
@@ -38,7 +37,6 @@ FROM node:18-bookworm-slim AS runtime
 ARG APP_REVISION=unknown
 
 # sharp 运行时基础库 + ffmpeg（视频合并/后期处理依赖）+ tini（信号转发）
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates tini ffmpeg \
