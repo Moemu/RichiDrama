@@ -120,6 +120,8 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(dockerfile, /ARG DEBIAN_MIRROR=mirrors\.aliyun\.com/);
   assert.match(dockerfile, /--mount=type=cache,id=richidrama-builder-apt-lists/);
   assert.match(dockerfile, /--mount=type=cache,id=richidrama-runtime-apt-lists/);
+  const runtimeStage = dockerfile.split('FROM node:18-bookworm-slim AS runtime')[1];
+  assert.ok(runtimeStage.indexOf('ARG APP_REVISION') > runtimeStage.indexOf('apt-get install'));
   assert.match(dockerfile, /npm ci --include=dev --no-audit --no-fund/);
   assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-60/);
   assert.match(source, /"\$code" == 401 \|\| "\$code" == 404/);

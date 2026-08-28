@@ -39,7 +39,6 @@ COPY backend-node ./backend-node
 # ============================================================
 FROM node:18-bookworm-slim AS runtime
 
-ARG APP_REVISION=unknown
 ARG DEBIAN_MIRROR=mirrors.aliyun.com
 
 # Keep the cold-build path usable on the production network.
@@ -50,6 +49,10 @@ RUN --mount=type=cache,id=richidrama-runtime-apt-lists,target=/var/lib/apt/lists
     apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates tini ffmpeg
+
+# Keep the commit-specific value after reusable OS layers. A new SHA must not
+# invalidate apt installation on every release.
+ARG APP_REVISION=unknown
 
 WORKDIR /app/backend-node
 
