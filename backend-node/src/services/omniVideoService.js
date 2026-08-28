@@ -59,7 +59,7 @@ function create(db, log, body, billingUser) {
   body.duration = Math.min(maxDurationForModel(capability.model), Math.max(4, Math.round(Number(body.duration) || 15)));
   const creationMode = body.creation_mode || body.settings?.creation_mode || 'multi_reference';
   validateCreationMode(creationMode, assets, capability);
-  const routed = routeAssets(expandVideoReferences(db, log, assets, capability.supports), capability.supports, body.audio_strategy);
+  const routed = routeAssets(db, expandVideoReferences(db, log, assets, capability.supports), capability.supports, body.audio_strategy);
   const sd2 = sd2IdentityState(routed, capability);
   if (sd2.invalid.length) enforceSd2IdentityAssets(routed, capability, log);
   const waitingForSd2 = sd2.pending.length > 0;
@@ -238,7 +238,30 @@ function referenceRenderRule(usage) {
   return '该参考图的主体内容必须在画面中清晰、可辨认地出现；若是人物、场景或道具，分别保持其身份、空间或外观，不得以泛化内容替代。';
 }
 
-function routeAssets(assets, supports, audioStrategy) {
+function assetMetadata(asset) {
+  if (asset?.metadata && typeof asset.metadata === 'object') return asset.metadata;
+  try { return asset?.metadata_json ? JSON.parse(asset.metadata_json) : null; } catch (_) { return null; }
+}
+
+function hasSyncedOssObject(db, asset, storage, cfg) {
+  if (!asset?.local_path || !storage?.isOss?.(cfg)) return false;
+  let expectedKey;
+  try { expectedKey = storage.objectKey(cfg, asset.local_path); } catch (_) { return false; }
+  try {
+    const record = db?.prepare(`SELECT archive_status, oss_key FROM media_archive_records
+      WHERE local_path = ? LIMIT 1`).get(asset.local_path);
+    if (record && ['oss_synced', 'local_pruned'].includes(record.archive_status) && record.oss_key === expectedKey) return true;
+  } catch (_) { /* Older databases remain local-first. */ }
+  const persisted = assetMetadata(asset)?.persistence?.oss;
+  return persisted?.status === 'synced' && persisted.key === expectedKey;
+}
+
+function resolveAssetModelUrl(db, asset, storage, cfg) {
+  if (hasSyncedOssObject(db, asset, storage, cfg)) return storage.objectUrl(cfg, asset.local_path);
+  return asset.local_path || asset.url;
+}
+
+function routeAssets(db, assets, supports, audioStrategy) {
   let storage = null;
   try { storage = require('./mediaStorageService'); } catch (_) {}
   let cfg = null;
@@ -252,12 +275,10 @@ function routeAssets(assets, supports, audioStrategy) {
     if (asset.type === 'audio') { send = send && !!supports.audio_reference && audioStrategy !== 'post_mix'; strategy = send ? 'native' : 'post_mix'; }
     if (asset.type === 'video') { send = send && !!supports.video_reference; strategy = send ? 'native' : 'keyframe_or_post'; }
     // 真人标记是声明信息，不把供应商认证资源作为生成前置条件。
-    // After an OSS migration old local_path values remain unchanged, but their
-    // local files may no longer exist. Prefer the CDN object URL so reference
-    // media can still be supplied to the model without filesystem access.
-    const modelUrl = asset.local_path && storage?.isOss?.(cfg)
-      ? storage.objectUrl(cfg, asset.local_path)
-      : (asset.local_path || asset.url);
+    // Use a public OSS URL only after this exact object is recorded as synced.
+    // Fresh derived keyframes have a local_path before any mirror starts. Keep
+    // that path so the provider adapter reads the real local bytes.
+    const modelUrl = resolveAssetModelUrl(db, asset, storage, cfg);
     return { ...asset, model_url: modelUrl, send_to_model: send, strategy };
   });
 }
@@ -655,4 +676,4 @@ function cancelJob(db, log, jobId, user) {
   return get(db, jobId);
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, SHOT_ASSET_LIMITS };
+module.exports = { create, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, SHOT_ASSET_LIMITS };
