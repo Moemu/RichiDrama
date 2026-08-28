@@ -22,7 +22,7 @@ test('preview deployment is production-identical except dataset and title', () =
   assert.match(source, /--network "\$PROD_PROXY_NETWORK" --network-alias "pr-\$PR_NUMBER"/);
   assert.doesNotMatch(
     source + library,
-    /ANCHOR_CONTAINER|ip route del default|NET_ADMIN|"container:\$|GATEWAY_CONTAINER|ensure_preview_edge|ensure_preview_media|PREVIEW_NETWORK|media-proxy|media-cold|static_missing_mode|remote_read_base/
+    /ANCHOR_CONTAINER|ip route del default|NET_ADMIN|"container:\$|GATEWAY_CONTAINER|ensure_preview_edge\b|PREVIEW_NETWORK|media-proxy|static_missing_mode|remote_read_base/
   );
   // Previews are HTTP-only: no certificate machinery may return.
   assert.doesNotMatch(source + library + vhost, /certbot|letsencrypt|TLS_PROXY_NETWORK|TLS_NGINX_CONTAINER|listen 443/);
@@ -33,7 +33,7 @@ test('preview deployment is production-identical except dataset and title', () =
   assert.match(source, /MINIDRAMA_PROFILE=preview/);
   assert.doesNotMatch(source, /MINIDRAMA_STORAGE_TYPE|static_missing_mode|remote_read_base/);
   // The retired security-theatre machinery must stay retired.
-  assert.doesNotMatch(source + library, /media-proxy|nginx-preview-edge|OverlayFS/);
+  assert.doesNotMatch(source + library, /media-proxy|nginx-preview-edge/);
   // Migration safety against the current production snapshot is mandatory.
   assert.match(source, /create_online_snapshot "\$DATA_DIR\/drama_generator\.db"/);
   assert.match(source, /verify_migrations "\$IMAGE" "\$DATA_DIR"/);
@@ -48,6 +48,15 @@ test('preview deployment is production-identical except dataset and title', () =
   assert.match(library, /mv "\$stale" "\$disabled"/);
   // Candidate images must be pruned on every successful preview.
   assert.match(source, /prune_release_images/);
+  // Media tree fidelity: an OverlayFS union view mounts the real production
+  // hot-copy tree under the container storage path — legacy uploads exist
+  // ONLY there, so production-identical behaviour requires the view. Writes
+  // and deletions land in the preview-private upper directory.
+  assert.match(library, /ensure_preview_media_tree/);
+  assert.match(library, /"lowerdir=\$lower,upperdir=\$upper,workdir=\$work"/);
+  assert.match(library, /umount -l "\$view"/);
+  assert.match(source, /MEDIA_TREE="\$\(ensure_preview_media_tree "\$PR_DIR"\)"/);
+  assert.match(source, /-v "\$MEDIA_TREE:\/app\/backend-node\/data\/storage"/);
   // Title badge: the single permitted page-level difference, build-time only.
   assert.match(previewDockerfile, /PREVIEW_TITLE_BADGE/);
   assert.match(previewDockerfile, /\(preview\)<\/title>/);

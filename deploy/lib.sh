@@ -238,6 +238,11 @@ remove_preview_resources() {
   if mountpoint -q "$legacy_view" 2>/dev/null; then
     umount -l "$legacy_view" >/dev/null 2>&1 || true
   fi
+  # Same for the current per-PR media view.
+  local media_view="$PREVIEW_ROOT/pr-$pr/storage-view"
+  if mountpoint -q "$media_view" 2>/dev/null; then
+    umount -l "$media_view" >/dev/null 2>&1 || true
+  fi
   # Drop any stale per-PR ingress reference (legacy layout) before removing the
   # containers, so Nginx never proxies to an unavailable upstream.
   if docker ps --format '{{.Names}}' | grep -Fqx "$HTTP_NGINX_CONTAINER"; then
@@ -246,6 +251,34 @@ remove_preview_resources() {
   mapfile -t preview_containers < <(docker ps -aq --filter "label=com.richidrama.preview-pr=$pr")
   ((${#preview_containers[@]} == 0)) || docker rm -f "${preview_containers[@]}" >/dev/null
   safe_remove_preview_dir "$pr"
+}
+
+# Media tree fidelity: production serves media from its local hot-copy tree,
+# and legacy uploads exist ONLY there (the OSS archive ledger starts later).
+# Mount an OverlayFS union view into the preview container at the exact
+# storage path: reads present the real production bytes, writes and deletions
+# land in the preview-private upper directory — production bytes stay
+# immutable. Re-created fresh on every deploy; failure degrades to an empty
+# storage tree (the application then behaves like a fresh install).
+ensure_preview_media_tree() {
+  local pr_dir="$1"
+  local lower="${MINIDRAMA_MEDIA_SOURCE_DIR:-${PROD_DATA_DIR}/storage}"
+  local upper="$pr_dir/storage-upper" work="$pr_dir/storage-work" view="$pr_dir/storage-view"
+  [[ -d "$lower" ]] || {
+    log "No production media directory at $lower; preview storage starts empty."
+    printf '%s\n' ''
+    return 0
+  }
+  # Always remount: the lower tree changes with production and the view must
+  # reflect the latest state at deploy time.
+  umount -l "$view" >/dev/null 2>&1 || true
+  rm -rf -- "$upper" "$work"
+  mkdir -p "$upper" "$work" "$view"
+  if ! mount -t overlay overlay -o "lowerdir=$lower,upperdir=$upper,workdir=$work" "$view"; then
+    log 'OverlayFS media view unavailable; preview storage starts empty.'
+    return 0
+  fi
+  printf '%s\n' "$view"
 }
 
 install_ingress_conf_at() {
