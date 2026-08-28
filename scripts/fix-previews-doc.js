@@ -10,7 +10,7 @@ const mid = [
   '预览与生产**应用行为逐字段一致**：同一 Docker 网络、同一份环境配置（存储后端、OSS 凭据、外部集成）、同一套媒体服务路径。唯一允许的差异：',
   '',
   '- **数据集**：每个 PR 使用生产库在线快照的隔离副本（迁移先双跑验证），预览内的写操作不会触碰生产数据。',
-  `- **页面标题**：预览镜像构建时在 ${BT}</title>${BT} 前注入 ${BT} (preview)${BT} 后缀（${BT}Dockerfile.preview${BT} 的 ${BT}PREVIEW_TITLE_BADGE${BT}，生产构建该参数为空）。`,
+  `- **页面标题**：预览镜像构建时把 ${BT} (preview)${BT} 后缀写入静态 ${BT}<title>${BT}，并以 ${BT}VITE_TITLE_BADGE${BT} 烘焙进前端产物（${BT}Dockerfile.preview${BT} 的 ${BT}PREVIEW_TITLE_BADGE${BT}，生产构建该参数为空），路由切换重写 ${BT}document.title${BT} 后后缀仍然保留。`,
   '',
   '结构上只有三件套：',
   '',

@@ -1,6 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { safeRedirectPath } from '@/utils/routeRecovery'
 
+// Preview builds bake a " (preview)" suffix in (Dockerfile.preview's
+// PREVIEW_TITLE_BADGE); production builds leave it empty.
+const TITLE_BADGE = import.meta.env.VITE_TITLE_BADGE || ''
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -82,7 +86,7 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   if (to.meta.title) {
-    document.title = `${to.meta.title} - 瑞池传媒短剧平台`
+    document.title = `${to.meta.title} - 瑞池传媒短剧平台${TITLE_BADGE}`
   }
   const user = JSON.parse(localStorage.getItem('lmd_auth_user') || 'null')
   if (!to.meta.public && !localStorage.getItem('lmd_auth_token')) return { path: '/login', query: { redirect: to.fullPath } }

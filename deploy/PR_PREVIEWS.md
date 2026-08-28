@@ -4,7 +4,7 @@
 
 每个 PR 自动运行 `Validation`。此流程运行后端测试、前端测试、前端构建、空数据库迁移和容器构建。
 
-内部 PR 打开或更新时自动触发 `PR Preview`（`pull_request_target`）。该流程运行在受保护的 `preview` environment 中，需要管理员批准后才会部署；也可以通过 `workflow_dispatch` 手动输入 PR 编号重跑。只有仓库成员的同一仓库分支会被部署，其他来源一律拒绝。
+内部 PR 的 `Validation` 成功完成后自动触发 `PR Preview`（`workflow_run` 链式触发，即 validation -> preview；验证失败或运行在 `main` 上时不会部署）。该流程运行在受保护的 `preview` environment 中，需要管理员批准后才会部署；也可以通过 `workflow_dispatch` 手动输入 PR 编号重跑。只有仓库成员的同一仓库分支会被部署，其他来源一律拒绝。
 
 预览成功后，提交获得 `preview / smoke` 状态。`main` 分支要求此状态。
 
@@ -24,7 +24,7 @@
 预览与生产**应用行为逐字段一致**：同一 Docker 网络、同一份环境配置（存储后端、OSS 凭据、外部集成）、同一套媒体服务路径。唯一允许的差异：
 
 - **数据集**：每个 PR 使用生产库在线快照的隔离副本（迁移先双跑验证），预览内的写操作不会触碰生产数据。
-- **页面标题**：预览镜像构建时在 `</title>` 前注入 ` (preview)` 后缀（`Dockerfile.preview` 的 `PREVIEW_TITLE_BADGE`，生产构建该参数为空）。
+- **页面标题**：预览镜像构建时把 ` (preview)` 后缀写入静态 `<title>`，并以 `VITE_TITLE_BADGE` 烘焙进前端产物（`Dockerfile.preview` 的 `PREVIEW_TITLE_BADGE`，生产构建该参数为空），路由切换重写 `document.title` 后后缀仍然保留。
 
 结构上只有三件套：
 

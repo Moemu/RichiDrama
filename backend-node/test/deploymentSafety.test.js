@@ -144,8 +144,14 @@ test('GitHub workflows gate preview and production', () => {
   assert.match(validation, /Verify preview Nginx configuration/);
   assert.match(validation, /nginx-preview-vhost\.conf/);
   assert.match(validation, /1\.27-alpine nginx -t/);
-  assert.match(preview, /pull_request_target/);
-  assert.match(preview, /types: \[opened, synchronize, reopened\]/);
+  // Previews chain after Validation (validation -> preview): the smoke deploy
+  // runs only for a non-main branch once the Validation run of the same head
+  // commit has succeeded.
+  assert.match(preview, /workflow_run:\n    workflows: \[Validation\]/);
+  assert.match(preview, /types: \[completed\]/);
+  assert.match(preview, /workflow_run\.conclusion == 'success'/);
+  assert.match(preview, /head_branch != 'main'/);
+  assert.doesNotMatch(preview, /pull_request_target/);
   assert.match(preview, /environment: preview/);
   assert.match(preview, /preview \/ smoke/);
   assert.match(preview, /head\.repo\.full_name/);

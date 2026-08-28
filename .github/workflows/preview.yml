@@ -1,8 +1,12 @@
 name: PR Preview
 
+# Previews chain after Validation (validation -> preview): the smoke deploy
+# runs only once the Validation run for the same head commit has succeeded.
+# workflow_run always resolves this file from the default branch.
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
+  workflow_run:
+    workflows: [Validation]
+    types: [completed]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -16,12 +20,15 @@ permissions:
   statuses: write
 
 concurrency:
-  group: preview-pr-${{ github.event.pull_request.number || inputs.pr_number }}
+  group: preview-${{ github.event.workflow_run.head_branch || inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
   deploy:
-    name: Preview smoke
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch != 'main')
+    name: Deploy PR preview
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: preview
@@ -30,11 +37,24 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
         run: |
-          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
-          data="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+            data="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          else
+            # Validation approved exactly this commit; deploy only when an
+            # open internal PR is headed by it.
+            sha="$WORKFLOW_SHA"
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+            data="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${sha}/pulls" | \
+              jq -c --arg sha "$sha" '[.[] | select(.state == "open" and .base.ref == "main" and .head.sha == $sha)][0] // empty')"
+            [[ -n "$data" ]] || { echo 'No open internal PR is headed by the validated commit.' >&2; exit 1; }
+          fi
           test "$(jq -r .state <<<"$data")" = open
           test "$(jq -r .base.ref <<<"$data")" = main
           test "$(jq -r .head.repo.full_name <<<"$data")" = "$GITHUB_REPOSITORY"
@@ -42,9 +62,11 @@ jobs:
           [[ "$association" == MEMBER || "$association" == COLLABORATOR || "$association" == OWNER ]]
           sha="$(jq -r .head.sha <<<"$data")"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
-          echo "pr=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          pr="$(jq -r .number <<<"$data")"
+          [[ "$pr" =~ ^[1-9][0-9]*$ ]]
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${sha}" -f state=pending -f context='preview / smoke' -f description='Preview deployment is running' >/dev/null
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${sha}" -f state=pending -f context='preview / smoke' -f description='Preview deployment is running' -f "target_url=$RUN_URL" >/dev/null
       - name: Deploy isolated preview
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -94,10 +116,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.pr.outputs.sha }}
-        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=success -f context='preview / smoke' -f description='Approved preview passed' >/dev/null
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=success -f context='preview / smoke' -f description='Approved preview passed' -f "target_url=$RUN_URL" >/dev/null
       - name: Mark preview failed
         if: failure() && steps.pr.outputs.sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.pr.outputs.sha }}
-        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=failure -f context='preview / smoke' -f description='Preview deployment failed' >/dev/null
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=failure -f context='preview / smoke' -f description='Preview deployment failed' -f "target_url=$RUN_URL" >/dev/null
