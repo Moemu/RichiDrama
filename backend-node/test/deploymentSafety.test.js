@@ -119,6 +119,7 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(dockerfile, /mirrors\.aliyun\.com/);
   assert.match(dockerfile, /npm ci --include=dev --no-audit --no-fund/);
   assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-60/);
+  assert.match(source, /"\$code" == 401 \|\| "\$code" == 404/);
   assert.doesNotMatch(source + compatibility, /git reset|git remote set-url/);
 });
 

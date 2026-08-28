@@ -91,7 +91,9 @@ check_external() {
   grep -q "\"revision\":\"$SHA\"" <<<"$body" || return 1
   curl -fsS --max-time 10 -H "Host: $DOMAIN" http://127.0.0.1/ >/dev/null || return 1
   code="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" http://127.0.0.1/api/v1/__release_probe__)"
-  [[ "$code" == 404 ]]
+  # The authentication layer can reject an unknown protected API path before
+  # the final 404 handler. Both responses prove that the API ingress is live.
+  [[ "$code" == 401 || "$code" == 404 ]]
 }
 
 check_external
