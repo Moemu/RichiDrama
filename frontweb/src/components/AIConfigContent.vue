@@ -555,7 +555,9 @@ input_reference = (图片文件，可选)</pre>
           <el-input
             v-model="form.api_key"
             type="password"
-            :placeholder="form.service_type === 'jimeng2_character_auth' ? 'Bearer Token' : (form.provider === 'jimeng_ai_api' ? '即梦 Session，多个用英文逗号分隔' : 'API 密钥')"
+            :placeholder="editingId
+              ? '已保存（脱敏显示，保持不变无需修改；输入新值即可覆盖）'
+              : (form.service_type === 'jimeng2_character_auth' ? 'Bearer Token' : (form.provider === 'jimeng_ai_api' ? '即梦 Session，多个用英文逗号分隔' : 'API 密钥'))"
             show-password
           />
         </el-form-item>
@@ -2151,6 +2153,7 @@ async function fetchJimeng2MaterialAssets(firstPage) {
     const data = await aiAPI.listJimeng2MaterialAssets({
       base_url: form.value.base_url.trim(),
       api_key: form.value.api_key,
+      config_id: editingId.value || undefined,
       limit: 20,
       cursor: firstPage ? undefined : jimeng2AssetsNextCursor.value || undefined,
     })

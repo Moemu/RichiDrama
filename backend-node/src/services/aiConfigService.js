@@ -3,6 +3,19 @@ const fs = require('fs');
 const path = require('path');
 const { normalizeMaterialHubToken } = require('./jimengMaterialHubService');
 
+// 对外回显掩码：仅保留前 4 位与后 4 位，中间以 **** 代替。
+// 内部调用（aiClient / testConnection 等）仍使用真实 api_key，仅路由层回显时脱敏。
+function maskApiKey(key) {
+  if (key == null || key === '') return '';
+  const s = String(key);
+  if (s.length <= 8) return '****';
+  return s.slice(0, 4) + '****' + s.slice(-4);
+}
+
+function isMaskedApiKey(key) {
+  return typeof key === 'string' && key.includes('****');
+}
+
 function normalizeApiKeyForService(serviceType, apiKey) {
   if (serviceType === 'jimeng2_character_auth' && apiKey != null) {
     return normalizeMaterialHubToken(apiKey);
@@ -32,12 +45,12 @@ function ensureSingleDefaultPerType(db) {
   const types = ['text', 'image', 'storyboard_image', 'video', 'video_postprocess', 'tts', 'jimeng2_character_auth', 'model_ark_asset'];
   for (const st of types) {
     const rows = db.prepare(
-      'SELECT id, priority FROM ai_service_configs WHERE deleted_at IS NULL AND owner_tenant_id IS NULL AND service_type = ? AND is_default = 1 ORDER BY priority DESC, id ASC'
+      'SELECT id, priority FROM ai_service_configs WHERE deleted_at IS NULL AND COALESCE(owner_tenant_id, 0) = 0 AND service_type = ? AND is_default = 1 ORDER BY priority DESC, id ASC'
     ).all(st);
     if (rows.length <= 1) continue;
     const keepId = rows[0].id;
     db.prepare(
-      'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND owner_tenant_id IS NULL AND service_type = ? AND id != ?'
+      'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND COALESCE(owner_tenant_id, 0) = 0 AND service_type = ? AND id != ?'
     ).run(st, keepId);
   }
 }
@@ -108,7 +121,7 @@ function resolveBillingTarget(db, serviceType, model, configId, options = {}) {
 
 function clearOtherDefault(db, serviceType, exceptId, ownerTenantId = null) {
   const stmt = db.prepare(
-    'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND service_type = ? AND id != ? AND ((? IS NULL AND owner_tenant_id IS NULL) OR owner_tenant_id = ?)'
+    'UPDATE ai_service_configs SET is_default = 0 WHERE deleted_at IS NULL AND service_type = ? AND id != ? AND ((COALESCE(?, 0) = 0 AND COALESCE(owner_tenant_id, 0) = 0) OR owner_tenant_id = ?)'
   );
   stmt.run(serviceType, exceptId, ownerTenantId, ownerTenantId);
 }
@@ -121,10 +134,12 @@ function getConfig(db, id) {
 function listOwnedTenantConfigs(db, tenantId, serviceType) {
   const params = [Number(tenantId)];
   const legacy = require('./tenantService').usesLegacyGlobalConfigs(db, tenantId);
+  // legacy 组视图同时展示全局配置与本组自有配置;只看 IS NULL 会把
+  // 运营工作台向该组添加的配置(owner_tenant_id=组)从列表里排除。
   let sql = `SELECT c.*, b.is_default AS tenant_is_default, b.priority AS tenant_priority
     FROM ai_service_configs c LEFT JOIN tenant_ai_config_bindings b ON b.ai_config_id=c.id AND b.tenant_id=? AND b.is_active=1
-    WHERE c.deleted_at IS NULL AND ${legacy ? 'c.owner_tenant_id IS NULL' : 'c.owner_tenant_id = ?'}`;
-  if (!legacy) params.push(Number(tenantId));
+    WHERE c.deleted_at IS NULL AND ${legacy ? '(COALESCE(c.owner_tenant_id, 0) = 0 OR c.owner_tenant_id = ?)' : 'c.owner_tenant_id = ?'}`;
+  params.push(Number(tenantId));
   if (serviceType) { sql += ' AND c.service_type = ?'; params.push(serviceType); }
   sql += ' ORDER BY b.is_default DESC, b.priority DESC, c.created_at DESC';
   return db.prepare(sql).all(...params).map(rowToConfig);
@@ -175,6 +190,8 @@ function createConfig(db, log, req) {
     }
   }
   const defaultModel = req.default_model != null ? String(req.default_model).trim() || null : null;
+  // 从脱敏导出文件导入的掩码 Key 不是真实凭据，不能原样入库
+  const rawApiKey = isMaskedApiKey(req.api_key) ? '' : (req.api_key || '');
   const info = db.prepare(
     `INSERT INTO ai_service_configs (service_type, provider, api_protocol, name, base_url, api_key, model, default_model, billing_key, endpoint, query_endpoint, priority, is_default, is_active, settings, owner_tenant_id, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
@@ -184,7 +201,7 @@ function createConfig(db, log, req) {
     req.api_protocol || '',
     req.name || '',
     req.base_url || '',
-    normalizeApiKeyForService(req.service_type, req.api_key || ''),
+    normalizeApiKeyForService(req.service_type, rawApiKey),
     model,
     defaultModel,
     req.billing_key != null ? String(req.billing_key).trim() || null : null,
@@ -193,7 +210,7 @@ function createConfig(db, log, req) {
     req.priority ?? 0,
     req.is_default ? 1 : 0,
     req.settings || null,
-    Number.isSafeInteger(Number(req.owner_tenant_id)) ? Number(req.owner_tenant_id) : null,
+    (Number(req.owner_tenant_id) > 0) ? Number(req.owner_tenant_id) : null,
     now,
     now
   );
@@ -224,7 +241,8 @@ function updateConfig(db, log, id, req) {
     updates.push('base_url = ?');
     params.push(req.base_url);
   }
-  if (req.api_key != null) {
+  // 掩码值（未修改的回显）不覆盖已保存的真实 Key；只有用户输入新 Key 才更新
+  if (req.api_key != null && !isMaskedApiKey(req.api_key)) {
     updates.push('api_key = ?');
     const st = req.service_type != null ? req.service_type : existing.service_type;
     params.push(normalizeApiKeyForService(st, req.api_key));
@@ -651,6 +669,8 @@ module.exports = {
   updateConfig,
   deleteConfig,
   testConnection,
+  maskApiKey,
+  isMaskedApiKey,
   getVendorLockStatus,
   applyVendorLock,
   bulkUpdateApiKey,

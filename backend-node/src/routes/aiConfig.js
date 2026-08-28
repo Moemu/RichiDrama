@@ -1,6 +1,16 @@
 const aiConfigService = require('../services/aiConfigService');
 const response = require('../response');
 
+// 回显统一脱敏：只保留前 4 位 + 后 4 位。真实 Key 仅留在后端内部使用。
+function maskConfig(config) {
+  if (!config) return config;
+  return { ...config, api_key: aiConfigService.maskApiKey(config.api_key) };
+}
+
+function maskConfigs(list) {
+  return (list || []).map(maskConfig);
+}
+
 function list(db) {
   return (req, res) => {
     const requestedTenantId = Number(req.query?.tenant_id);
@@ -8,14 +18,14 @@ function list(db) {
       if (req.auth?.role !== 'admin') return response.forbidden(res, '仅运营后台可管理分组 API');
       const tenant = require('../services/tenantService').tenantDetail(db, requestedTenantId);
       if (!tenant) return response.notFound(res, '项目分组不存在');
-      return response.success(res, aiConfigService.listOwnedTenantConfigs(db, requestedTenantId, req.query.service_type));
+      return response.success(res, maskConfigs(aiConfigService.listOwnedTenantConfigs(db, requestedTenantId, req.query.service_type)));
     }
     const tenant = require('../services/tenantService').tenantForUser(db, req.auth?.id);
     const options = tenant ? { tenant_id: tenant.id } : {};
     const list = req.auth?.role === 'admin'
       ? aiConfigService.listConfigs(db, req.query.service_type, options)
       : aiConfigService.listPublicConfigs(db, req.query.service_type, options);
-    response.success(res, list);
+    response.success(res, maskConfigs(list));
   };
 }
 
@@ -26,8 +36,9 @@ function get(db) {
     const config = aiConfigService.getConfig(db, id);
     if (!config) return response.notFound(res, '配置不存在');
     const tenantId = Number(req.query?.tenant_id);
-    if (tenantId && Number(config.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
-    response.success(res, config);
+    // legacy 组视图包含全局配置(owner 为空),单条查询同样放行
+    if (tenantId && Number(config.owner_tenant_id) > 0 && Number(config.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
+    response.success(res, maskConfig(config));
   };
 }
 
@@ -61,7 +72,10 @@ function create(db, log, cfg) {
         model: body.model ?? [],
       });
       if (tenantId) require('../services/tenantService').bindOwnedConfig(db, tenantId, config, { is_default: body.is_default !== false, priority: body.priority });
-      response.created(res, config);
+      // 新建的全局配置要立即补绑到 legacy 项目组,否则在这些组里不可见,
+      // 生成与计费解析也选不到它(表现:添加成功但列表不显示、模型不走计费)。
+      else require('../services/tenantService').bindGlobalConfigToLegacyTenants(db, config);
+      response.created(res, maskConfig(config));
     } catch (err) {
       log.errorw('Create AI config failed', { error: err.message });
       response.internalError(res, '创建失败');
@@ -77,7 +91,11 @@ function update(db, log, cfg) {
     let body = req.body || {};
     const tenantId = Number(body.tenant_id || req.query?.tenant_id);
     const owned = aiConfigService.getConfig(db, id);
-    if (tenantId && Number(owned?.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
+    if (!owned) return response.notFound(res, '配置不存在');
+    // legacy 组视图会列出全局配置(owner 为空);从该视图编辑/删除全局配置
+    // 不应按分组归属 404——全局配置本就由平台管理员维护。
+    const editingGlobalFromTenantView = tenantId && !Number(owned.owner_tenant_id);
+    if (tenantId && !editingGlobalFromTenantView && Number(owned.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
 
     // 普通成员只拿到不含凭据的共享配置列表。限制其更新字段，避免前端的
     // 空端点/空设置覆盖管理员已经保存的供应商接入和计费参数。
@@ -109,8 +127,10 @@ function update(db, log, cfg) {
     if (tenantId) body = { ...body, is_default: false };
     const config = aiConfigService.updateConfig(db, log, id, body);
     if (!config) return response.notFound(res, '配置不存在');
-    if (tenantId) require('../services/tenantService').bindOwnedConfig(db, tenantId, config, { is_default: req.body?.is_default !== false, priority: req.body?.priority });
-    response.success(res, config);
+    // 仅当配置真正归属该组时才更新分组绑定;bindOwnedConfig 会拒绝
+    // 绑定全局配置(legacy 视图编辑全局配置的场景)。
+    if (tenantId && !editingGlobalFromTenantView) require('../services/tenantService').bindOwnedConfig(db, tenantId, config, { is_default: req.body?.is_default !== false, priority: req.body?.priority });
+    response.success(res, maskConfig(config));
   };
 }
 
@@ -123,7 +143,9 @@ function remove(db, log, cfg) {
     if (isNaN(id)) return response.badRequest(res, '无效的配置ID');
     const tenantId = Number(req.query?.tenant_id);
     const owned = aiConfigService.getConfig(db, id);
-    if (tenantId && Number(owned?.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
+    if (!owned) return response.notFound(res, '配置不存在');
+    // 与 update 一致:legacy 组视图删除全局配置不按分组归属 404
+    if (tenantId && Number(owned.owner_tenant_id) > 0 && Number(owned.owner_tenant_id) !== tenantId) return response.notFound(res, '配置不存在');
     const ok = aiConfigService.deleteConfig(db, log, id);
     if (!ok) return response.notFound(res, '配置不存在');
     response.success(res, { message: '删除成功' });
@@ -222,12 +244,18 @@ function modelArkAsset(log) {
 }
 
 /** 即梦2角色认证：代理 GET 素材列表（表单未保存也可用当前填写的网关与 Token） */
-function listJimeng2MaterialAssets(log) {
+function listJimeng2MaterialAssets(db, log) {
   return async (req, res) => {
     const body = req.body || {};
     const base_url = (body.base_url || '').toString().trim().replace(/\/$/, '');
     const { normalizeMaterialHubToken } = require('../services/jimengMaterialHubService');
     let api_key = normalizeMaterialHubToken(body.api_key || '');
+    // 编辑已有配置时表单里是脱敏回显，掩码值不能用来调用网关；
+    // 携带 config_id 则改用服务端保存的真实 Token。
+    if (aiConfigService.isMaskedApiKey(api_key) && body.config_id != null) {
+      const stored = aiConfigService.getConfig(db, Number(body.config_id));
+      if (stored) api_key = normalizeMaterialHubToken(stored.api_key || '');
+    }
     if (!base_url || !api_key) {
       return response.badRequest(res, '请先填写网关 URL 与 Token');
     }
@@ -250,7 +278,7 @@ module.exports = function aiConfigRoutes(db, log, cfg) {
     update: update(db, log, cfg),
     delete: remove(db, log, cfg),
     testConnection: testConnection(db, log),
-    listJimeng2MaterialAssets: listJimeng2MaterialAssets(log),
+    listJimeng2MaterialAssets: listJimeng2MaterialAssets(db, log),
     modelArkAsset: modelArkAsset(log),
     bulkUpdateKey: bulkUpdateKey(db, log, cfg),
   };

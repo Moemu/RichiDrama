@@ -605,7 +605,7 @@ function generateFramePrompt(db, log, storyboardId, frameType, panelCount, model
   if (!validTypes) {
     throw new Error('不支持的 frame_type，可选: first, key, last, panel, action');
   }
-  const task = taskService.createTask(db, log, 'frame_prompt_generation', String(storyboardId));
+  const task = taskService.createTaskFromContext(db, log, 'frame_prompt_generation', String(storyboardId));
   setImmediate(() => {
     processFramePromptGeneration(db, log, task.id, storyboardId, frameType, panelCount || 0, model);
   });
