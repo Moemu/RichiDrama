@@ -95,7 +95,7 @@ check_external() {
 }
 
 check_external
-OBSERVATION_SECONDS="${MINIDRAMA_OBSERVATION_SECONDS:-300}"
+OBSERVATION_SECONDS="${MINIDRAMA_OBSERVATION_SECONDS:-60}"
 elapsed=0
 while (( elapsed < OBSERVATION_SECONDS )); do
   sleep 15
