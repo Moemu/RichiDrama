@@ -112,42 +112,6 @@ async function readObjectByKey(cfg, key) {
   return result.body;
 }
 
-// Streaming variant for the preview media proxy and the remote-read fallback:
-// resolves as soon as response headers land so large objects are piped through
-// without buffering. The client's byte-range request is forwarded verbatim so
-// seek/resume contracts survive the hop (Aliyun honours unsigned Range).
-async function openObjectStream(cfg, key, { range } = {}) {
-  if (!isOss(cfg)) throw new Error('openObjectStream requires storage.type=oss');
-  const oss = ossConfig(cfg);
-  const date = new Date().toUTCString();
-  const headers = { Date: date, Authorization: ossAuthorization(oss, 'GET', '', date, key) };
-  if (range && /^bytes=/i.test(range.trim())) headers.Range = range.trim();
-  return await new Promise((resolve, reject) => {
-    const target = endpointUrl(oss, key); const url = new URL(target);
-    const transport = url.protocol === 'https:' ? https : http;
-    const req = transport.request(url, { method: 'GET', headers }, (res) => {
-      resolve({ status: res.statusCode || 0, headers: res.headers, stream: res });
-    });
-    req.setTimeout(Math.max(5_000, Number(120_000)), () => req.destroy(new Error('OSS request timed out')));
-    req.on('error', reject);
-    req.end();
-  });
-}
-
-function remoteReadBase(cfg) {
-  return String(cfg?.storage?.remote_read_base_url || '').trim().replace(/\/+$/, '');
-}
-
-// Non-buffering HTTP request helper sharing requestBuffer's timeout posture.
-function requestStream(urlText, { headers = {} }) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(urlText); const transport = url.protocol === 'https:' ? https : http;
-    const req = transport.request(url, { method: 'GET', headers }, (res) => resolve({ status: res.statusCode || 0, headers: res.headers, stream: res }));
-    req.setTimeout(Math.max(5_000, Number(60_000)), () => req.destroy(new Error('media proxy timed out')));
-    req.on('error', reject);
-    req.end();
-  });
-}
 async function verifyOssObject(cfg, localPath) {
   if (!isOss(cfg)) return { ok: false, reason: 'local_storage' };
   const oss = ossConfig(cfg); const key = objectKey(cfg, localPath); const date = new Date().toUTCString();
@@ -292,8 +256,6 @@ async function retryPendingMirrors(db, cfg, storageRoot, log, limit = 100) {
 function staticHandler(cfg, storageRoot) {
   const maxAge = Math.max(0, Number(cfg?.storage?.static_cache_max_age_seconds ?? 3600));
   const cacheControl = `public, max-age=${maxAge}`;
-  const missingMode404 = cfg?.storage?.static_missing_mode === '404';
-  const remoteBase = remoteReadBase(cfg);
   return async (req, res, next) => {
     let key; try { key = normalizeKey(decodeURIComponent(req.path)); } catch (_) { return res.status(400).end(); }
     const local = path.join(storageRoot, key);
@@ -308,20 +270,10 @@ function staticHandler(cfg, storageRoot) {
       return res.sendFile(local);
     }
     try {
-      let body = null;
-      if (!remoteBase || !mediaContentType(key)) {
-        body = await readMediaBuffer(cfg, storageRoot, key);
-      } else {
-        body = await readViaRemote(req, res, { base: remoteBase, key, cacheControl });
-      }
+      const body = await readMediaBuffer(cfg, storageRoot, key);
       if (body === null || body === undefined) {
-        // Default keeps the historical passthrough so callers above can decide.
-        // Previews set static_missing_mode=404: their data volume intentionally
-        // carries no media bytes, and the SPA fallback would otherwise answer
-        // every media request with index.html instead of a visible miss.
-        if (missingMode404) {
-          return res.status(404).type('text/plain').end('media not found');
-        }
+        // Historical passthrough: the SPA fallback decides what a miss means
+        // (identical behaviour in every deployment, previews included).
         return next();
       }
       const type = mediaContentType(key) || 'application/octet-stream';
@@ -353,36 +305,6 @@ function staticHandler(cfg, storageRoot) {
   };
 }
 
-// Remote-read fallback for preview deployments whose data volume has no media
-// bytes at all. Streams through (never buffers), forwards client Range
-// verbatim, and returns true when the response was fully handled; null means
-// "treat as a miss" so the caller keeps its existing semantics.
-async function readViaRemote(req, res, { base, key, cacheControl }) {
-  const target = `${base}/media/${key.split('/').map((segment) => encodeURIComponent(segment)).join('/')}`;
-  const rangeHeader = String(req.headers?.range || '');
-  const headers = {};
-  if (/^bytes=/i.test(rangeHeader.trim())) headers.Range = rangeHeader.trim();
-  let upstream;
-  try {
-    upstream = await requestStream(target, { headers });
-  } catch (_) { return null; }
-  const status = upstream.status || 0;
-  if (status !== 200 && status !== 206) {
-    upstream.stream.resume(); // drain then treat as miss
-    return null;
-  }
-  res.status(status);
-  for (const headerName of ['content-range', 'content-length', 'etag']) {
-    const value = upstream.headers[headerName];
-    if (value != null) res.setHeader(headerName, value);
-  }
-  res.setHeader('Accept-Ranges', 'bytes');
-  res.setHeader('Content-Type', mediaContentType(key) || 'application/octet-stream');
-  res.setHeader('Cache-Control', cacheControl);
-  upstream.stream.on('error', () => res.destroy());
-  upstream.stream.pipe(res);
-  return true;
-}
 async function migrateLocalTree(cfg, storageRoot, log, options = {}) {
   if (!isOss(cfg)) throw new Error('storage.type must be oss before migration');
   if (options.remove_local) assertOssDeliveryReady(cfg);
@@ -426,4 +348,4 @@ function startArchiveScheduler(cfg, storageRoot, log, options = {}) {
   return { runNow, stop: () => clearInterval(timer) };
 }
 
-module.exports = { normalizeKey, isOss, objectKey, objectUrl, publicBaseUrl, putBuffer, readMediaBuffer, readObjectByKey, openObjectStream, mediaContentType, remoteReadBase, verifyOssObject, archiveLocalFile, mirrorAndTrack, retryPendingMirrors, pruneVerifiedLocalCopies, staticHandler, migrateLocalTree, startArchiveScheduler, assertOssDeliveryReady };
+module.exports = { normalizeKey, isOss, objectKey, objectUrl, publicBaseUrl, putBuffer, readMediaBuffer, readObjectByKey, mediaContentType, verifyOssObject, archiveLocalFile, mirrorAndTrack, retryPendingMirrors, pruneVerifiedLocalCopies, staticHandler, migrateLocalTree, startArchiveScheduler, assertOssDeliveryReady };

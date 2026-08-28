@@ -1,13 +1,4 @@
-# preview 档：MINIDRAMA_PROFILE=preview 时叠加在 config.yaml 之上。
-# 预览代码不得触碰任何外部资源：强制本地存储、关闭中转图床代理。
-# （容器网络层面另有 --internal 双保险；此处是应用层的自我声明。）
-storage:
-  type: local
-  # 预览数据卷只含 DB 快照与热拷贝联合视图；冷归档对象在本地未命中时
-  # 经由受信的媒体代理容器按需回源（该容器持有凭据，预览自身没有）。
-  remote_read_base_url: http://minidrama-preview-media-proxy:8090
-  # 静态未命中兜底：若代理不可用，呈现干净的 404，
-  # 而不是放行给 SPA 兜底路由返回 index.html。
-  static_missing_mode: '404'
-image_proxy:
-  use_for_video: false
+# preview 档刻意为空集：预览与生产的应用行为逐字段一致——
+# 同样的存储后端、同样的 OSS 凭据、同样的外部调用。
+# 唯一允许的差异是数据集（按 PR 隔离的快照）与页面标题徽标，
+# 二者分别在部署层与镜像构建层实现，不属于应用配置。

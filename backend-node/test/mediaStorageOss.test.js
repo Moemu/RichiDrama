@@ -6,38 +6,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
-const { archiveLocalFile, mirrorAndTrack, migrateLocalTree, staticHandler, readMediaBuffer, openObjectStream, pruneVerifiedLocalCopies, startArchiveScheduler } = require('../src/services/mediaStorageService');
+const { archiveLocalFile, mirrorAndTrack, migrateLocalTree, staticHandler, readMediaBuffer, pruneVerifiedLocalCopies, startArchiveScheduler } = require('../src/services/mediaStorageService');
 const Database = require('better-sqlite3');
 const crypto = require('crypto');
 const express = require('express');
-
-test('openObjectStream signs the GET once and forwards the client range verbatim', async (t) => {
-  const received = [];
-  const server = http.createServer((req, res) => {
-    received.push({ url: req.url, date: req.headers.date, auth: req.headers.authorization, range: req.headers.range || null });
-    res.writeHead(206); res.end('0123');
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); t.after(() => server.close());
-  const endpoint = `http://127.0.0.1:${server.address().port}`;
-  const cfg = ossConfig(endpoint);
-
-  const first = await openObjectStream(cfg, 'drama/videos/r.mp4', { range: 'bytes=2-5' });
-  assert.equal(first.status, 206);
-  const chunks = []; first.stream.on('data', (c) => chunks.push(c));
-  await new Promise((resolve) => first.stream.on('end', resolve));
-  assert.equal(Buffer.concat(chunks).toString(), '0123');
-
-  const signed = received[0];
-  assert.equal(signed.url, '/test-bucket/drama/videos/r.mp4');
-  assert.equal(signed.range, 'bytes=2-5');
-  // The same Date string must appear as both the Date header and inside the
-  // canonical signing text — recompute from what the wire carried.
-  const canonical = `GET\n\n\n${signed.date}\n/test-bucket/drama/videos/r.mp4`;
-  assert.equal(signed.auth, `OSS test-id:${crypto.createHmac('sha1', 'test-secret').update(canonical).digest('base64')}`);
-
-  await openObjectStream(cfg, 'drama/videos/r.mp4');
-  assert.equal(received[1].range, null);
-});
 
 test('static handler sets cache headers on hot-copy hits (sendFile path)', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-hot-'));

@@ -115,53 +115,50 @@ test('an explicit CFG_* variable still wins over the profile overlay', () => {
   }
 });
 
-test('preview profile wires the on-demand remote read fallback', () => {
+test('preview profile is an intentional empty set (production-identical)', () => {
   process.env.MINIDRAMA_PROFILE = 'preview';
-  const overlay = [
-    'storage:',
-    '  type: local',
-    "  remote_read_base_url: http://minidrama-preview-media-proxy:8090",
-    "  static_missing_mode: '404'",
-    'image_proxy:',
-    '  use_for_video: false',
-  ].join('\n');
-  const dir = writeFixture({ preview: overlay });
+  const dir = writeFixture({ preview: '# intentionally empty\n' });
   delete require.cache[MOD_PATH];
-  const { cfg } = loadFrom(dir);
-  assert.equal(cfg.storage.remote_read_base_url, 'http://minidrama-preview-media-proxy:8090');
-  assert.equal(cfg.storage.static_missing_mode, '404');
-  assert.equal(cfg.image_proxy.use_for_video, false);
+  const { mod, cfg } = loadFrom(dir);
+  assert.equal(mod.getActiveProfile(), 'preview');
+  assert.equal(cfg.image_proxy.use_for_video, true); // unchanged from base
 });
 
-// static_missing_mode: the preview data volume intentionally carries no media
-// bytes; a miss must answer 404 rather than falling through to the SPA handler,
-// which would return index.html for every ./static URL.
+// Static-handler cache semantics: successful media responses must be
+// cacheable so repeated carousel/pager views stop refetching bytes — in
+// production and previews alike.
 const { staticHandler } = require('../src/services/mediaStorageService.js');
 
-function runStaticHandler(cfg) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-static-')); // empty storage root
+function runStaticHandler(cfg, body) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-static-'));
+  fs.mkdirSync(path.dirname(path.join(root, 'some/missing.png')), { recursive: true });
+  if (body !== undefined) fs.writeFileSync(path.join(root, 'some/missing.png'), body);
   const middleware = staticHandler(cfg, root);
+  const headers = {};
   const res = {
     statusCode: null,
     status(code) { this.statusCode = code; return this; },
     type() { return this; },
-    end(body) { this.body = body ?? ''; },
+    setHeader(name, value) { headers[name] = value; return this; },
+    sendFile() { this.sentFile = true; return this; },
+    send(value) { this.body = value; return this; },
+    end(body2) { this.body = body2 ?? ''; return this; },
   };
   let nextCalled = false;
   const next = () => { nextCalled = true; };
   // Express strips the /static mount prefix before dispatching here.
   const req = { path: '/some/missing.png', headers: {} };
-  return Promise.resolve(middleware(req, res, next)).then(() => ({ statusCode: res.statusCode, nextCalled }));
+  return Promise.resolve(middleware(req, res, next)).then(() => ({ statusCode: res.statusCode, nextCalled, headers, sentFile: res.sentFile === true }));
 }
 
-test('static handler with passthrough (default) defers missing files', async () => {
+test('static handler misses defer to the SPA fallback exactly like production', async () => {
   const outcome = await runStaticHandler({ storage: { type: 'local' } });
   assert.equal(outcome.nextCalled, true);
   assert.equal(outcome.statusCode, null);
 });
 
-test('static handler under static_missing_mode=404 answers a clean miss', async () => {
-  const outcome = await runStaticHandler({ storage: { type: 'local', static_missing_mode: '404' } });
-  assert.equal(outcome.statusCode, 404);
-  assert.equal(outcome.nextCalled, false);
+test('static handler hits are cacheable on the sendFile path', async () => {
+  const outcome = await runStaticHandler({ storage: { type: 'oss' } }, 'media-bytes');
+  assert.equal(outcome.sentFile, true);
+  assert.equal(outcome.headers['Cache-Control'], 'public, max-age=3600');
 });
