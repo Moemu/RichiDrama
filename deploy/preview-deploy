@@ -91,7 +91,6 @@ docker run -d --name "$APP_CONTAINER" \
 
 wait_container_ready "$APP_CONTAINER" "$SHA" 90 || fail 'Preview application did not become ready.'
 
-AUTH_HEADER="$(printf 'preview:%s' "$PASSWORD" | openssl base64 -A)"
 [[ "$(curl -sS --max-time 15 --resolve "$HOST:80:127.0.0.1" -o /dev/null -w '%{http_code}' "http://$HOST/ready")" == 401 ]] || \
   fail 'Preview Basic Auth accepted a request without credentials.'
 [[ "$(curl -sS --max-time 15 --resolve "$HOST:80:127.0.0.1" -u 'preview:incorrect' -o /dev/null -w '%{http_code}' "http://$HOST/ready")" == 401 ]] || \

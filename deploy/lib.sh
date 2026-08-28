@@ -232,6 +232,12 @@ safe_remove_preview_dir() {
 remove_preview_resources() {
   local pr="$1"
   validate_pr "$pr"
+  # Legacy overlay views from earlier deployments must be detached before the
+  # per-PR directory can be removed ('Device or resource busy' otherwise).
+  local legacy_view="$PREVIEW_ROOT/pr-$pr/media-view"
+  if mountpoint -q "$legacy_view" 2>/dev/null; then
+    umount -l "$legacy_view" >/dev/null 2>&1 || true
+  fi
   # Drop any stale per-PR ingress reference (legacy layout) before removing the
   # containers, so Nginx never proxies to an unavailable upstream.
   if docker ps --format '{{.Names}}' | grep -Fqx "$HTTP_NGINX_CONTAINER"; then
