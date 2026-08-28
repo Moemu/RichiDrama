@@ -21,6 +21,16 @@ test('storyboard navigation uses real video, including retained source after pos
   assert.doesNotMatch(freeCreate, /storyboard-placeholder\.svg|shotCover\(/)
 })
 
+test('an empty episode shows one explicit empty state instead of a phantom first shot', () => {
+  assert.match(freeCreate, /<template v-if="currentShot">/)
+  assert.match(freeCreate, /<section v-else class="empty-shot-workspace"/)
+  assert.match(freeCreate, /当前剧集还没有分镜/)
+  assert.match(freeCreate, /@click="addShot\(false\)">添加第一个镜头/)
+  assert.match(freeCreate, /:disabled="!currentShot" @click="addShot\(true\)">当前镜头后添加/)
+  assert.match(freeCreate, /const workspaceReady = ref\(false\)/)
+  assert.match(freeCreate, /finally \{ workspaceReady\.value = true \}/)
+})
+
 test('clicking a completed history record previews it without changing the adopted version', () => {
   assert.match(freeCreate, /function selectHistoryJob\(job\) \{ playOnSelection\.value = true; selectedHistoryJobId\.value = job\.id \}/)
   assert.match(freeCreate, /return selected \|\| adopted \|\| bound \|\| shotHistory\.value\[0\] \|\| null/)

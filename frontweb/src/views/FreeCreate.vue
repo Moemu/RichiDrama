@@ -17,7 +17,7 @@
     <section class="workbench" :class="`mobile-${mobileWorkspaceTab}`">
       <aside class="panel shot-panel" aria-label="镜头导航">
         <div class="shot-heading"><b>镜头列表</b><small>{{ shots.length }} 个 · 滚轮切镜</small></div>
-        <div class="shot-actions"><el-button size="small" type="primary" plain @click="addShot(false)">+ 尾部添加</el-button><el-button size="small" @click="addShot(true)">当前镜头后添加</el-button></div>
+        <div class="shot-actions"><el-button size="small" type="primary" plain @click="addShot(false)">+ 尾部添加</el-button><el-button size="small" :disabled="!currentShot" @click="addShot(true)">当前镜头后添加</el-button></div>
         <div ref="shotListRef" class="shot-list" tabindex="0" aria-label="镜头列表，可用上下方向键或滚轮切换镜头" @keydown.up.prevent="selectRelative(-1)" @keydown.down.prevent="selectRelative(1)" @wheel.prevent="onShotListWheel">
           <article v-for="(shot, index) in shots" :key="shot.id" class="shot-card" :class="{ active: shot.id === activeShotId, dragging: draggedShotId === shot.id }" :aria-current="shot.id === activeShotId ? 'true' : undefined" draggable="true" @dragstart="draggedShotId = shot.id" @dragend="draggedShotId = null" @dragover.prevent @drop="dropShot(shot.id)" @click="selectShot(shot)">
             <div class="shot-title"><span class="drag-handle">⠿</span><span class="shot-number">{{ index + 1 }}</span><b :title="shot.title || '未命名镜头'">{{ shot.title || '未命名镜头' }}</b><span class="shot-controls"><el-button text size="small" :disabled="index === 0" aria-label="上移镜头" @click.stop="moveShot(index, -1)">↑</el-button><el-button text size="small" :disabled="index === shots.length - 1" aria-label="下移镜头" @click.stop="moveShot(index, 1)">↓</el-button><el-button text size="small" aria-label="重命名镜头" @click.stop="renameShot(shot)"><el-icon><Edit /></el-icon></el-button></span><el-button class="shot-delete" type="danger" plain size="small" :disabled="shots.length <= 1" :title="shots.length <= 1 ? '至少保留一个镜头；请先新增镜头再删除当前镜头' : '删除镜头'" aria-label="删除镜头" @click.stop="removeShot(shot)"><el-icon><Delete /></el-icon><span>删除</span></el-button></div>
@@ -27,6 +27,7 @@
         </div>
       </aside>
 
+      <template v-if="currentShot">
       <section class="center-stage" aria-label="当前镜头播放与时间线">
         <div class="player-tools"><el-button text size="small" @click="selectRelative(-1)">上一镜</el-button><el-button text size="small" @click="selectRelative(1)">下一镜</el-button><span class="current-version">当前采用：{{ activeJob ? `版本 #${activeJob.video_generation_id || activeJob.id}` : '暂无版本' }}</span><el-tag :type="stageTagType" effect="dark">{{ stageLabel }}</el-tag></div>
         <div class="video-stage" :class="{ rendering: ['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status), 'has-video': !!activeVideoUrl }">
@@ -111,6 +112,20 @@
           <p v-if="!shotHistory.length" class="generation-history-empty">尚无生成记录。每次生成都会保留为独立版本。</p>
         </section>
       </aside>
+      </template>
+      <section v-else class="empty-shot-workspace" aria-label="空镜头工作区" aria-live="polite">
+        <template v-if="!workspaceReady">
+          <span class="empty-shot-kicker">正在加载镜头</span>
+          <h2>正在读取当前剧集</h2>
+          <p>请稍候。</p>
+        </template>
+        <template v-else>
+          <span class="empty-shot-kicker">0 个镜头</span>
+          <h2>当前剧集还没有分镜</h2>
+          <p>先添加一个空白镜头，或使用页面底部的 AI 生成分镜。</p>
+          <el-button type="primary" @click="addShot(false)">添加第一个镜头</el-button>
+        </template>
+      </section>
     </section>
 
     <el-dialog v-model="framePicker.open" :title="framePicker.target === 'first_frame' ? '选择首帧' : '选择尾帧'" width="540px" append-to-body>
@@ -167,6 +182,7 @@ import { beginAssetPointerDrag, shouldSuppressAssetClick } from '@/utils/assetPo
 const componentProps = defineProps({ projectEpisodeId: { type: [Number, String], default: null }, projectDramaId: { type: [Number, String], default: null }, embedded: { type: Boolean, default: false } })
 const emit = defineEmits(['reordered', 'changed'])
 const assets = ref([]), capabilities = ref([]), jobs = ref([]), sequence = ref(null), shots = ref([]), activeShotId = ref(null), projects = ref([]), freeProjectId = ref(null)
+const workspaceReady = ref(false)
 const mobileWorkspaceTab = ref('stage')
 const route = useRoute()
 const router = useRouter()
@@ -1110,6 +1126,7 @@ onMounted(async () => {
     assets.value = (media.items || []).filter((item) => item && Number.isFinite(Number(item.id))).map((item) => ({ ...item, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' }))
     projects.value = projectResult?.items || projectResult || []; capabilities.value = caps || []; uploadLimits.value = limits || null; jobs.value = (history || []).map(normalizeJob); jobs.value.filter((job) => activeGenerationStatuses.has(job.status)).forEach((job) => poll(job.id)); sequence.value = seq; if (Number(seq?.drama_id)) freeProjectId.value = Number(seq.drama_id); shots.value = seq.shots || []; if (shots.value[0]) loadShot(shots.value[0])
   } catch (error) { ElMessage.error(error.message || '全能创作工作台加载失败') }
+  finally { workspaceReady.value = true }
 })
 onMounted(() => {
   // 媒体库的“用选中素材创作”会传递 assets=1,2,3；旧实现只识别单个
@@ -1247,6 +1264,8 @@ defineExpose({ refreshProjectShots })
 /* 2026-08 usability pass: readable T0 controls, wheel navigation, and media-light lists. */
 /* Keep the right-hand shot list as the only scrolling surface in the desktop storyboard workspace. */
 .project-storyboard-page .shot-list{flex:1 1 auto;min-height:0}
+.empty-shot-workspace{grid-column:1 / 3;grid-row:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:clamp(28px,6vw,72px);border-right:1px solid var(--border-color);background:radial-gradient(circle at 50% 34%,color-mix(in srgb,var(--studio-accent) 12%,transparent),transparent 42%),var(--bg-page);color:var(--text-primary);text-align:center}.empty-shot-workspace h2,.empty-shot-workspace p{margin:0}.empty-shot-workspace h2{font-size:clamp(1.25rem,2vw,1.75rem)}.empty-shot-workspace p{max-width:34rem;color:var(--text-muted);line-height:1.6}.empty-shot-workspace .el-button{margin-top:8px}.empty-shot-kicker{color:var(--studio-accent);font-size:.75rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+@media(max-width:720px){.empty-shot-workspace{order:-1;min-height:420px;border-right:0;border-bottom:1px solid var(--border-color)}}
 /* At short desktop heights, the prompt must shrink and scroll inside the stage.
    It must never push the player above the visible workbench. */
 @media(min-width:761px){.center-stage{min-height:0;overflow:hidden}.shot-script{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior-y:contain}.project-storyboard-page .center-stage{height:100%}}
