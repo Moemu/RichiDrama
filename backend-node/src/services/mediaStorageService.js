@@ -14,6 +14,17 @@ function normalizeKey(value) {
   if (!key || key.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error('Invalid media storage key');
   return key;
 }
+
+const MEDIA_CONTENT_TYPES = {
+  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.png': 'image/png',
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
+  '.avif': 'image/avif', '.mp3': 'audio/mpeg', '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4', '.m3u8': 'application/vnd.apple.mpegurl',
+};
+function mediaContentType(keyOrPath) {
+  const ext = path.extname(String(keyOrPath || '')).toLowerCase();
+  return MEDIA_CONTENT_TYPES[ext] || null;
+}
 function isOss(cfg) { return String(cfg?.storage?.type || 'local').toLowerCase() === 'oss'; }
 function ossConfig(cfg) { return cfg?.storage?.oss || {}; }
 function assertOssDeliveryReady(cfg) {
@@ -81,7 +92,18 @@ async function readMediaBuffer(cfg, storageRoot, localPath) {
   const absolute = path.join(storageRoot, relative);
   if (fs.existsSync(absolute)) return fs.readFileSync(absolute);
   if (!isOss(cfg)) return null;
-  const oss = ossConfig(cfg); const key = objectKey(cfg, relative); const date = new Date().toUTCString();
+  const buf = await readObjectByKey(cfg, objectKey(cfg, relative));
+  if (!buf) return null;
+  return buf;
+}
+
+// Full-object read by explicit OSS key. Server-side one-off tooling only
+// (preview cold-media fill): the caller must already hold the production
+// configuration; this never hands credentials to a sandboxed process.
+async function readObjectByKey(cfg, key) {
+  if (!isOss(cfg)) return null;
+  const oss = ossConfig(cfg);
+  const date = new Date().toUTCString();
   const result = await requestBuffer(endpointUrl(oss, key), { method: 'GET', headers: {
     Date: date, Authorization: ossAuthorization(oss, 'GET', '', date, key),
   } });
@@ -89,6 +111,7 @@ async function readMediaBuffer(cfg, storageRoot, localPath) {
   if (result.status < 200 || result.status >= 300) throw new Error(`OSS read failed: HTTP ${result.status}`);
   return result.body;
 }
+
 async function verifyOssObject(cfg, localPath) {
   if (!isOss(cfg)) return { ok: false, reason: 'local_storage' };
   const oss = ossConfig(cfg); const key = objectKey(cfg, localPath); const date = new Date().toUTCString();
@@ -109,7 +132,7 @@ async function archiveLocalFile(cfg, storageRoot, localPath, log, options = {}) 
   const buffer = fs.readFileSync(absolute);
   if (!buffer.length) throw new Error(`Local media file is empty: ${relative}`);
   const ext = path.extname(relative).toLowerCase();
-  const type = options.contentType || ({ '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' }[ext] || 'application/octet-stream');
+  const type = options.contentType || MEDIA_CONTENT_TYPES[ext] || 'application/octet-stream';
   const saved = await putBuffer(cfg, relative, buffer, type);
   if (options.removeLocal) fs.unlinkSync(absolute);
   if (log) log.info('Media archived to OSS', { local_path: relative, oss_key: saved.key, bytes: buffer.length });
@@ -231,18 +254,29 @@ async function retryPendingMirrors(db, cfg, storageRoot, log, limit = 100) {
   return { synced, failed };
 }
 function staticHandler(cfg, storageRoot) {
+  const maxAge = Math.max(0, Number(cfg?.storage?.static_cache_max_age_seconds ?? 3600));
+  const cacheControl = `public, max-age=${maxAge}`;
   return async (req, res, next) => {
     let key; try { key = normalizeKey(decodeURIComponent(req.path)); } catch (_) { return res.status(400).end(); }
     const local = path.join(storageRoot, key);
     // The application route remains the authorization boundary. If a future
     // retention job removes a verified local hot copy, proxy bytes from the
     // private OSS object instead of leaking a permanent public object URL.
-    if (fs.existsSync(local)) return res.sendFile(local);
+    if (fs.existsSync(local)) {
+      // send@0.19 only writes its defaults when these headers are absent — set
+      // ours first so media responses are actually cacheable (kill repeated
+      // full downloads on carousel/pager revisits).
+      res.setHeader('Cache-Control', cacheControl);
+      return res.sendFile(local);
+    }
     try {
       const body = await readMediaBuffer(cfg, storageRoot, key);
-      if (!body) return next();
-      const ext = path.extname(key).toLowerCase();
-      const type = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' }[ext] || 'application/octet-stream';
+      if (body === null || body === undefined) {
+        // Historical passthrough: the SPA fallback decides what a miss means
+        // (identical behaviour in every deployment, previews included).
+        return next();
+      }
+      const type = mediaContentType(key) || 'application/octet-stream';
       // Local files are served by sendFile, which implements byte ranges.
       // Preserve that contract after a hot copy has been pruned and the bytes
       // are read from private OSS, otherwise Chromium can discard a video
@@ -260,14 +294,17 @@ function staticHandler(cfg, storageRoot) {
         const chunk = body.subarray(start, end + 1);
         return res.status(206).set({
           'Accept-Ranges': 'bytes',
+          'Cache-Control': cacheControl,
           'Content-Range': `bytes ${start}-${end}/${total}`,
           'Content-Length': String(chunk.length),
         }).type(type).send(chunk);
       }
+      res.setHeader('Cache-Control', cacheControl);
       res.type(type).send(body);
     } catch (error) { next(error); }
   };
 }
+
 async function migrateLocalTree(cfg, storageRoot, log, options = {}) {
   if (!isOss(cfg)) throw new Error('storage.type must be oss before migration');
   if (options.remove_local) assertOssDeliveryReady(cfg);
@@ -311,4 +348,4 @@ function startArchiveScheduler(cfg, storageRoot, log, options = {}) {
   return { runNow, stop: () => clearInterval(timer) };
 }
 
-module.exports = { normalizeKey, isOss, objectKey, objectUrl, publicBaseUrl, putBuffer, readMediaBuffer, verifyOssObject, archiveLocalFile, mirrorAndTrack, retryPendingMirrors, pruneVerifiedLocalCopies, staticHandler, migrateLocalTree, startArchiveScheduler, assertOssDeliveryReady };
+module.exports = { normalizeKey, isOss, objectKey, objectUrl, publicBaseUrl, putBuffer, readMediaBuffer, readObjectByKey, mediaContentType, verifyOssObject, archiveLocalFile, mirrorAndTrack, retryPendingMirrors, pruneVerifiedLocalCopies, staticHandler, migrateLocalTree, startArchiveScheduler, assertOssDeliveryReady };

@@ -18,6 +18,10 @@ RUN npm config set registry https://registry.npmmirror.com
 RUN cd frontweb && npm install --no-audit --no-fund
 COPY frontweb ./frontweb
 RUN cd frontweb && npm run build
+# The ONLY permitted difference between a preview and production page state:
+# a " (preview)" suffix in the document title.
+ARG PREVIEW_TITLE_BADGE=""
+RUN if [ -n "$PREVIEW_TITLE_BADGE" ]; then sed -i 's|</title>| (preview)</title>|' frontweb/dist/index.html; fi
 
 COPY backend-node/package.json backend-node/package-lock.json* ./backend-node/
 COPY backend-node/.npmrc ./backend-node/.npmrc

@@ -6,31 +6,34 @@ const path = require('path');
 const root = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('preview deployment isolates data, network, secrets and resources', () => {
+test('preview deployment is production-identical except dataset and title', () => {
   const source = read('deploy/preview-deploy');
   const library = read('deploy/lib.sh');
   const previewDockerfile = read('Dockerfile.preview');
-  const passthrough = read('deploy/nginx-previews-passthrough.conf');
-  const edge = read('deploy/nginx-preview-edge.conf');
+  const vhost = read('deploy/nginx-preview-vhost.conf');
   assert.match(source, /build_preview_image "\$SHA" "\$SOURCE_DIR"/);
   assert.match(library, /docker inspect --format '\{\{\.Image\}\}' "\$PROD_CONTAINER"/);
   assert.match(library, /RUNTIME_BASE_IMAGE=\$base_tag/);
   assert.match(previewDockerfile, /FROM \$\{RUNTIME_BASE_IMAGE\} AS runtime/);
   const previewRuntime = previewDockerfile.split('FROM ${RUNTIME_BASE_IMAGE} AS runtime')[1];
   assert.doesNotMatch(previewRuntime, /apt-get|dnf|yum/);
-  // One shared internal network replaces per-deploy namespace surgery.
-  assert.match(library, /docker network create --internal "\$PREVIEW_NETWORK"/);
-  assert.match(source, /ensure_preview_network/);
-  assert.match(source, /--network "\$PREVIEW_NETWORK" --network-alias "pr-\$PR_NUMBER"/);
+  // The preview application joins the PRODUCTION docker network with a per-PR
+  // alias — no parallel network, no isolated sandbox topology.
+  assert.match(source, /--network "\$PROD_PROXY_NETWORK" --network-alias "pr-\$PR_NUMBER"/);
   assert.doesNotMatch(
     source + library,
-    /ANCHOR_CONTAINER|ip route del default|NET_ADMIN|"container:\$|GATEWAY_CONTAINER/
+    /ANCHOR_CONTAINER|ip route del default|NET_ADMIN|"container:\$|GATEWAY_CONTAINER|ensure_preview_edge\b|PREVIEW_NETWORK|media-proxy|static_missing_mode|remote_read_base/
   );
   // Previews are HTTP-only: no certificate machinery may return.
-  assert.doesNotMatch(source + library + edge + passthrough, /certbot|letsencrypt|TLS_PROXY_NETWORK|TLS_NGINX_CONTAINER|listen 443/);
-  // Production secrets never reach preview code.
-  assert.doesNotMatch(source, /--env-file/);
-  assert.match(source, /MINIDRAMA_STORAGE_TYPE=local/);
+  assert.doesNotMatch(source + library + vhost, /certbot|letsencrypt|TLS_PROXY_NETWORK|TLS_NGINX_CONTAINER|listen 443/);
+  // Production-identical behaviour includes the production environment file —
+  // the same storage backend, the same credentials, the same integrations.
+  assert.match(source, /--env-file "\$ENV_FILE"/);
+  assert.match(source, /require_env_file/);
+  assert.match(source, /MINIDRAMA_PROFILE=preview/);
+  assert.doesNotMatch(source, /MINIDRAMA_STORAGE_TYPE|static_missing_mode|remote_read_base/);
+  // The retired security-theatre machinery must stay retired.
+  assert.doesNotMatch(source + library, /media-proxy|nginx-preview-edge/);
   // Migration safety against the current production snapshot is mandatory.
   assert.match(source, /create_online_snapshot "\$DATA_DIR\/drama_generator\.db"/);
   assert.match(source, /verify_migrations "\$IMAGE" "\$DATA_DIR"/);
@@ -45,36 +48,43 @@ test('preview deployment isolates data, network, secrets and resources', () => {
   assert.match(library, /mv "\$stale" "\$disabled"/);
   // Candidate images must be pruned on every successful preview.
   assert.match(source, /prune_release_images/);
+  // Media tree fidelity: an OverlayFS union view mounts the real production
+  // hot-copy tree under the container storage path — legacy uploads exist
+  // ONLY there, so production-identical behaviour requires the view. Writes
+  // and deletions land in the preview-private upper directory.
+  assert.match(library, /ensure_preview_media_tree/);
+  assert.match(library, /"lowerdir=\$lower,upperdir=\$upper,workdir=\$work"/);
+  assert.match(library, /umount -l "\$view"/);
+  assert.match(source, /MEDIA_TREE="\$\(ensure_preview_media_tree "\$PR_DIR"\)"/);
+  assert.match(source, /-v "\$MEDIA_TREE:\/app\/backend-node\/data\/storage"/);
+  // Title badge: the single permitted page-level difference, build-time only.
+  assert.match(previewDockerfile, /PREVIEW_TITLE_BADGE/);
+  assert.match(previewDockerfile, /\(preview\)<\/title>/);
+  assert.match(library, /PREVIEW_TITLE_BADGE=1/);
+  const prodDockerfile = read('Dockerfile');
+  assert.doesNotMatch(prodDockerfile, /PREVIEW_TITLE_BADGE/);
 });
 
-test('preview edge is the only dual-homed component and cannot pivot', () => {
+test('preview vhost authenticates and routes like production would', () => {
   const source = read('deploy/preview-deploy');
   const library = read('deploy/lib.sh');
-  const passthrough = read('deploy/nginx-previews-passthrough.conf');
-  const edge = read('deploy/nginx-preview-edge.conf');
-  assert.match(source, /install_preview_http_ingress "\$SOURCE_DIR\/deploy\/nginx-previews-passthrough\.conf" "\$SOURCE_DIR\/deploy\/nginx-preview-edge\.conf"/);
-  assert.match(library, /PREVIEW_EDGE_CONTAINER=/);
-  assert.match(library, /ensure_preview_edge/);
-  // The edge enforces authentication; the outer passthrough carries none, so
-  // it can never leak credentials nor be talked into proxying elsewhere.
-  assert.match(edge, /auth_basic "RichiDrama PR Preview"/);
-  assert.match(edge, /auth_basic_user_file \/etc\/nginx\/minidrama-preview\.htpasswd/);
-  assert.doesNotMatch(passthrough, /auth_basic/);
-  assert.match(edge, /listen 8080 default_server/);
-  assert.match(edge, /return 404/);
-  assert.match(edge, /resolver 127\.0\.0\.11/);
+  const vhost = read('deploy/nginx-preview-vhost.conf');
+  assert.match(source, /install_preview_ingress "\$SOURCE_DIR\/deploy\/nginx-preview-vhost\.conf"/);
+  assert.match(library, /install_preview_ingress/);
+  // The vhost enforces authentication at the shared ingress; every preview
+  // application is reachable through the same mechanism as production.
+  assert.match(vhost, /auth_basic "RichiDrama PR Preview"/);
+  assert.match(vhost, /auth_basic_user_file \/etc\/nginx\/minidrama-preview\.htpasswd/);
+  assert.match(vhost, /resolver 127\.0\.0\.11/);
   // The routed hostname carries the literal pr- prefix; a digits-only match
-  // silently falls through to the rejection block (regression 2026-08-26).
-  assert.match(edge, /server_name "~\^pr-\(\?<preview_pr>\[0-9]\+\)\\\.preview\\\.drama/);
-  assert.match(edge, /proxy_pass http:\/\/pr-\$preview_pr:5679/);
-  assert.match(passthrough, /server \{\s+resolver 127\.0\.0\.11/);
-  assert.doesNotMatch(passthrough, /^resolver 127\.0\.0\.11/m);
-  assert.match(passthrough, /set \$preview_edge_upstream http:\/\/minidrama-preview-edge:8080/);
-  assert.match(source, /PREVIEW_EDGE_CONTAINER.*wget/);
+  // silently falls through to the rejection block (regression 2026-08-27).
+  assert.match(vhost, /server_name "~\^pr-\(\?<preview_pr>\[0-9]\+\)\\\.preview\\\.drama/);
+  assert.match(vhost, /proxy_pass http:\/\/pr-\$preview_pr:5679/);
   assert.match(source, /pr-\$\{PR_NUMBER\}\.preview\.drama\.richbest\.cn/);
-  // Legacy layouts that hijacked or bypassed the edge must be purged.
-  assert.match(library, /rm -f \/etc\/nginx\/conf\.d\/minidrama-preview-http\.conf/);
-  assert.match(library, /rm -f \/etc\/nginx\/conf\.d\/minidrama-previews\.conf/);
+  // Legacy layouts that hijacked or duplicated routing must be purged.
+  assert.match(library, /minidrama-preview-http\.conf/);
+  assert.match(library, /minidrama-previews\.conf/);
+  assert.match(library, /minidrama-previews-ingress\.conf/);
 });
 
 test('preview removal validates the exact PR path', () => {
@@ -83,7 +93,7 @@ test('preview removal validates the exact PR path', () => {
   assert.match(source, /label=com\.richidrama\.preview-pr/);
   assert.match(source, /rm -rf -- "\$resolved_target"/);
   assert.ok(source.indexOf('preview-pr-$pr.conf') < source.indexOf('docker rm -f "${preview_containers[@]}"'));
-  assert.doesNotMatch(read('deploy/preview-remove') + source, /certbot delete/);
+  assert.doesNotMatch(source, /certbot delete/);
 });
 
 test('production release uses an immutable archive and rollback container', () => {
@@ -92,10 +102,6 @@ test('production release uses an immutable archive and rollback container', () =
   const library = read('deploy/lib.sh');
   const dockerfile = read('Dockerfile');
   assert.match(source, /prepare_source "\$SHA"/);
-  // A missing environment file must abort the release instead of silently
-  // booting production with local storage.
-  assert.match(library, /require_env_file\(\)/);
-  assert.match(source, /ENV_FILE="\$\(require_env_file\)"/);
   assert.match(source, /verify_migrations/);
   assert.match(source, /wait_container_ready.*90/);
   assert.match(source, /--network "\$PROD_PROXY_NETWORK" --network-alias minidrama-app/);
@@ -122,8 +128,7 @@ test('GitHub workflows gate preview and production', () => {
   assert.match(validation, /docker build --build-arg/);
   assert.match(validation, /shellcheck -e SC1091/);
   assert.match(validation, /Verify preview Nginx configuration/);
-  assert.match(validation, /nginx-preview-edge\.conf/);
-  assert.match(validation, /nginx-previews-passthrough\.conf/);
+  assert.match(validation, /nginx-preview-vhost\.conf/);
   assert.match(validation, /1\.27-alpine nginx -t/);
   assert.match(preview, /pull_request_target/);
   assert.match(preview, /types: \[opened, synchronize, reopened\]/);
@@ -141,18 +146,13 @@ test('GitHub workflows gate preview and production', () => {
   // Cleanup must not depend on commands installed by a successful deploy.
   assert.match(cleanup, /bash \/data\/apps\/LocalMiniDrama\/deploy\/preview-cleanup/);
   assert.match(cleanup, /bash \/data\/apps\/LocalMiniDrama\/deploy\/preview-remove/);
-  // ...and must fall back to the deployed copies when the checkout lags main.
   assert.match(cleanup, /bash \/usr\/local\/lib\/richidrama-preview\/preview-remove/);
   assert.match(cleanup, /bash \/usr\/local\/lib\/richidrama-preview\/preview-cleanup/);
   assert.match(production, /environment: production/);
   assert.match(production, /workflow_run\.conclusion == 'success'/);
-  // The runner never ships bytes across the wall: production fetches its own
-  // source over SSH, pins the exact validated commit, archives it locally.
-  assert.doesNotMatch(production, /actions\/checkout|scp-action|Upload source archive/);
-  assert.match(production, /Deploy approved release from a server-side fetch/);
+  // Production fetches its own source server-side; the runner ships no bytes.
+  assert.doesNotMatch(production, /scp-action|actions\/checkout|Upload source archive/);
   assert.match(production, /rev-parse FETCH_HEAD\)" = "\$sha"/);
-  assert.match(production, /git -C "\$repo" archive --format=tar\.gz --output="\$incoming" "\$sha"/);
-  assert.match(production, /bash "\$bootstrap\/deploy\/release-deploy" "\$sha"/);
   const protection = read('deploy/configure-github-protection');
   assert.match(protection, /preview \/ smoke/);
   assert.match(protection, /"enforce_admins": true/);

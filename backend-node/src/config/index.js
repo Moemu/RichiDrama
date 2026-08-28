@@ -90,6 +90,71 @@ function getEnvOverrideLog() {
   return _envOverrideLog || [];
 }
 
+const PROFILE_NAMES = ['dev', 'preview', 'prod'];
+let _activeProfile = null;
+function getActiveProfile() {
+  return _activeProfile;
+}
+
+/**
+ * 深度合并 profile 覆盖到基础配置：profile 定义过的叶子节点整体生效，
+ * 未提及的字段保持 config.yaml 原值。数组整体替换。
+ */
+function deepMergeProfile(base, override) {
+  for (const [key, value] of Object.entries(override || {})) {
+    if (
+      value && typeof value === 'object' && !Array.isArray(value) &&
+      base[key] && typeof base[key] === 'object' && !Array.isArray(base[key])
+    ) {
+      deepMergeProfile(base[key], value);
+    } else {
+      base[key] = value;
+    }
+  }
+  return base;
+}
+
+/**
+ * MINIDRAMA_PROFILE=dev|preview|prod 时，把 configs/profiles/<name>.yaml
+ * 叠加到基础配置之上（位于 CFG_* 显式环境变量之下一层）。
+ * 未设置时不做任何事——行为与历史版本逐字段一致。
+ * @returns {string[]} 生效的合并说明（用于启动日志）
+ */
+function applyProfile(cfg) {
+  const name = String(process.env.MINIDRAMA_PROFILE || '').trim().toLowerCase();
+  if (!name) return [];
+  if (!PROFILE_NAMES.includes(name)) {
+    throw new Error(`Unknown MINIDRAMA_PROFILE "${name}". Allowed: ${PROFILE_NAMES.join(', ')} (or unset).`);
+  }
+  _activeProfile = name;
+  // Mirrors configPaths: the working tree wins (local debugging), then the
+  // shipped configs directory relative to this module.
+  const profilePaths = [
+    path.join(process.cwd(), 'configs', 'profiles', `${name}.yaml`),
+    path.join(__dirname, '..', '..', 'configs', 'profiles', `${name}.yaml`),
+  ];
+  const file = profilePaths.find((p) => fs.existsSync(p));
+  if (!file) {
+    throw new Error(`Profile file missing for MINIDRAMA_PROFILE=${name}. Looked at: ${profilePaths.join(', ')}`);
+  }
+  const overlay = yaml.load(fs.readFileSync(file, 'utf8')) || {};
+  const leaves = [];
+  (function collect(node, prefix) {
+    for (const [key, value] of Object.entries(node || {})) {
+      const dotPath = prefix ? `${prefix}.${key}` : key;
+      if (value && typeof value === 'object' && !Array.isArray(value)) collect(value, dotPath);
+      else leaves.push(dotPath);
+    }
+  })(overlay, '');
+  deepMergeProfile(cfg, overlay);
+  return leaves.map((dotPath) => `profile:${name} -> ${dotPath}`);
+}
+
+let _profileLog = [];
+function getProfileLog() {
+  return _profileLog || [];
+}
+
 function loadConfig() {
   loadOptionalDeploymentEnv();
   let raw = null;
@@ -106,9 +171,11 @@ function loadConfig() {
   if (!parsed?.app?.name) {
     throw new Error('Invalid config: missing app section');
   }
+  _activeProfile = null;
+  _profileLog = applyProfile(parsed);
   // 环境变量覆盖（仅本地调试用；线上不设 CFG_* 变量即不触发）
   _envOverrideLog = applyEnvOverrides(parsed);
   return parsed;
 }
 
-module.exports = { loadConfig, getEnvOverrideLog };
+module.exports = { loadConfig, getEnvOverrideLog, getActiveProfile, getProfileLog };

@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
 const { getDb } = require('./db/index.js');
-const { loadConfig } = require('./config/index.js');
+const { loadConfig, getActiveProfile } = require('./config/index.js');
 const logger = require('./logger.js');
 const { setupRouter } = require('./routes/index.js');
 
@@ -28,6 +28,7 @@ function readinessStatus(db, webDist) {
   return {
     status: checks.database && checks.frontend ? 'ready' : 'not_ready',
     checks,
+    profile: getActiveProfile(),
     ...revisionInfo(),
   };
 }

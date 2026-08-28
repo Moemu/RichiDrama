@@ -1,0 +1,7 @@
+# dev 档：MINIDRAMA_PROFILE=dev 时叠加在 config.yaml 之上。
+# 显式 CFG_* 环境变量仍可在此之上进一步覆盖（逃生舱保留）。
+# storage.local 与基线一致，但显式写出以自证意图，防止上游默认漂移。
+storage:
+  type: local
+image_proxy:
+  use_for_video: false

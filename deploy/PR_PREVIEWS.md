@@ -21,15 +21,20 @@
 
 ## 预览架构
 
-预览是纯 HTTP，不签发任何证书：
+预览与生产**应用行为逐字段一致**：同一 Docker 网络、同一份环境配置（存储后端、OSS 凭据、外部集成）、同一套媒体服务路径。唯一允许的差异：
 
-- 所有预览共享一个 Docker 内部网络 `minidrama-previews`（`--internal`，无公网出口、无默认路由）。
-- 每个 PR 只有一个容器 `minidrama-pr-<number>`，以别名 `pr-<number>` 加入该网络。
-- 专用的 `minidrama-preview-edge` 容器是**唯一**同时连接入口网络与预览网络的组件：它按 `pr-<number>.preview.drama.richbest.cn` 匹配主机名并执行 Basic Auth，其余一切 Host 在查询上游之前直接返回 404——预览代码即使发起请求也无法借它进入生产网络。
-- 端口 80 入口容器只加载一份静态透传配置 `deploy/nginx-previews-passthrough.conf`（不含凭据），把预览域名转发给 edge；另一份 `deploy/nginx-preview-edge.conf` 安装在 edge 上。两份文件都不随预览增删变化。
-- 预览数据来自生产库在线快照；迁移会在快照副本上先完整验证两次，然后才启动预览应用。生产数据目录永不挂载进预览。
-- 预览容器不接收任何生产环境变量（OSS 凭据等绝不进入预览代码），显式使用本地存储；候选镜像按发布裁剪策略在每次预览成功后回收。
-- 所有预览共享一组 Basic Auth 凭据（`/data/minidrama-previews/auth`），域名固定可预测——这是免证书方案的既定取舍，由强制鉴权兜底。
+- **数据集**：每个 PR 使用生产库在线快照的隔离副本（迁移先双跑验证），预览内的写操作不会触碰生产数据。
+- **页面标题**：预览镜像构建时在 `</title>` 前注入 ` (preview)` 后缀（`Dockerfile.preview` 的 `PREVIEW_TITLE_BADGE`，生产构建该参数为空）。
+
+结构上只有三件套：
+
+- 每个 PR 一个容器 `minidrama-pr-<number>`，加入**生产所在的 Docker 网络**（`lens-rhyme_default`），别名 `pr-<number>`——与生产应用同构的网络位置。
+- 端口 80 入口加载一份静态 vhost `deploy/nginx-preview-vhost.conf`：按 `pr-<number>.preview.drama.richbest.cn` 匹配主机名，经 Basic Auth 后代理到对应容器。文件不随预览增删变化。
+- `MINIDRAMA_PROFILE=preview` 标记运行档位（配置为空集，仅作 /ready 与日志的可观测信号）。
+
+基本鉴权凭据共享于 `/data/minidrama-previews/auth`。这是单人仓库下的有意取舍：预览代码即仓库成员自己的代码，作者门禁（author_association + 同仓库分支校验）是真正的安全边界，预览不应也无法“防御”作者本人。
+
+迁移安全不变：预览数据来自生产库在线快照，迁移先在快照副本上双跑验证后才启动预览应用。
 
 Runner 只发送 PR 编号和 commit SHA。服务器通过 GitHub SSH Deploy Key 获取 PR ref，并在本机创建源码包。
 
@@ -37,19 +42,17 @@ Runner 只发送 PR 编号和 commit SHA。服务器通过 GitHub SSH Deploy Key
 
 安装 Docker 和 `flock`。
 
-当前服务器使用两个长驻容器：
+当前服务器使用一个入口容器：
 
-- `lens-rhyme-nginx-1` 处理端口 80（生产站点与预览域名的透传）。
-- `minidrama-preview-edge` 由预览部署自动创建/更新，持有 Basic Auth 并路由到具体预览容器。
+- `lens-rhyme-nginx-1` 处理端口 80（生产站点与预览域名的鉴权代理）。
 
-首次预览部署会自动创建 `minidrama-previews` 网络，并把入口容器接入该网络（`--gw-priority -1` 保证其默认路由不变）。
+预览容器由预览部署自动创建/更新，与生产应用同网络位置；入口容器无需加入任何额外网络。
 
 如服务器名称不同，可以设置：
 
 ```text
 MINIDRAMA_HTTP_NGINX_CONTAINER
 MINIDRAMA_PROXY_NETWORK
-MINIDRAMA_PREVIEW_NETWORK
 ```
 
 在火山引擎 DNS 中添加记录（外部访问预览的前提）：

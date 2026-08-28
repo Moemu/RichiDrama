@@ -1,8 +1,10 @@
 # RichiDrama local dev launcher: backend (5679) + frontend (3013)
 # Usage: powershell -ExecutionPolicy Bypass -File ./run_dev.ps1
-# Why env var: backend MUST start with CFG_IMAGE_PROXY__USE_FOR_VIDEO=false in local debug,
-# otherwise video gen uploads local ref images to a slow proxy and blocks async tasks for minutes.
-# See AGENTS.md. Online is unaffected (no env var there).
+# Why profile: backend starts with MINIDRAMA_PROFILE=dev, which pins storage to
+# local and disables the image proxy for videos (the old explicit
+# CFG_IMAGE_PROXY__USE_FOR_VIDEO=false semantics). Otherwise video gen uploads
+# local ref images to a slow proxy and blocks async tasks for minutes.
+# See AGENTS.md. Online is unaffected (prod/preview profiles apply on deploy).
 
 $ErrorActionPreference = 'SilentlyContinue'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -34,7 +36,7 @@ Stop-Port $FrontendPort
 
 Write-Host ""
 Write-Host "[2/4] Starting backend (port $BackendPort)..." -ForegroundColor Cyan
-$beScript = "cd '$root\backend-node'; `$env:CFG_IMAGE_PROXY__USE_FOR_VIDEO='false'; Write-Host 'backend running, Ctrl+C to stop' -ForegroundColor Green; npm run dev"
+$beScript = "cd '$root\backend-node'; `$env:MINIDRAMA_PROFILE='dev'; Write-Host 'backend running (profile=dev), Ctrl+C to stop' -ForegroundColor Green; npm run dev"
 Start-Process powershell -ArgumentList "-NoExit", "-Command", $beScript -WindowStyle Normal
 
 Write-Host ""

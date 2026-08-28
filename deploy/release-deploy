@@ -77,7 +77,7 @@ docker run -d --name "$PROD_CONTAINER" --restart unless-stopped \
   --health-cmd "node -e \"require('http').get('http://127.0.0.1:5679/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\"" \
   --health-interval 30s --health-timeout 10s --health-retries 3 --health-start-period 40s \
   -p 10588:5679 "${ENV_ARGS[@]}" \
-  -e NODE_ENV=production -e PORT=5679 -e "APP_REVISION=$SHA" \
+  -e NODE_ENV=production -e PORT=5679 -e "APP_REVISION=$SHA" -e MINIDRAMA_PROFILE=prod \
   -v "$PROD_DATA_DIR:/app/backend-node/data" "$IMAGE" >/dev/null
 
 wait_container_ready "$PROD_CONTAINER" "$SHA" 90
