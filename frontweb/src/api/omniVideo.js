@@ -12,7 +12,7 @@ export const omniVideoAPI = {
   },
   capabilities() { return request.get('/video-model-capabilities') },
   create(body) { return request.post('/omni-video-jobs', { ...body, idempotency_key: body?.idempotency_key || createClientRequestId() }) },
-  quoteBilling(body) { return request.post('/billing/quotes', body) },
+  quoteBilling(body) { return request.post('/omni-video-jobs/quote', body) },
   polishPrompt(body) { return request.post('/omni-video-jobs/polish-prompt', body) },
   retry(id) { return request.post(`/omni-video-jobs/${id}/retry`) },
   cancel(id) { return request.post(`/omni-video-jobs/${id}/cancel`) },
