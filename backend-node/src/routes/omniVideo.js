@@ -4,6 +4,7 @@ const capabilityService = require('../services/videoModelCapabilities');
 const sequenceService = require('../services/omniSequenceService');
 module.exports = function routes(db, log, cfg) { return {
   list(req, res) { try { response.success(res, omniVideoService.list(db, { ...(req.query || {}), owner_user_id: req.auth.id })); } catch (err) { response.internalError(res, err.message); } },
+  quote(req, res) { try { response.success(res, omniVideoService.quote(db, req.body || {}, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
   create(req, res) { try {
     const body = req.body || {};
     if (!Number.isInteger(Number(body.drama_id)) || Number(body.drama_id) <= 0) return response.badRequest(res, '请选择计费归属项目后再生成');

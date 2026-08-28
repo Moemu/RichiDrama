@@ -5,6 +5,10 @@
 
 FROM node:18-bookworm-slim AS builder
 
+# Use the regional mirror during application builds. This keeps a cold build
+# independent of the slow Debian route seen on the production host.
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
+
 # 编译原生模块所需工具链
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -17,7 +21,7 @@ WORKDIR /build
 COPY frontweb/package.json frontweb/package-lock.json* ./frontweb/
 # 使用国内镜像源，加速安装
 RUN npm config set registry https://registry.npmmirror.com
-RUN cd frontweb && npm install --no-audit --no-fund
+RUN cd frontweb && npm ci --include=dev --no-audit --no-fund
 
 COPY frontweb ./frontweb
 RUN cd frontweb && npm run build
@@ -35,6 +39,9 @@ COPY backend-node ./backend-node
 FROM node:18-bookworm-slim AS runtime
 
 ARG APP_REVISION=unknown
+
+# Keep the cold-build path usable on the production network.
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
 
 # sharp 运行时基础库 + ffmpeg（视频合并/后期处理依赖）+ tini（信号转发）
 RUN apt-get update \

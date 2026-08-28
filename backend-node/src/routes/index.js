@@ -369,6 +369,7 @@ function setupRouter(cfg, db, log) {
   r.get('/tool-runs/:id/stream', tools.stream);
   r.post('/tools/:type/runs', (req, res, next) => { require('../services/billingRequestContext').disableAutoBilling(); next(); }, tools.execute);
   r.get('/omni-video-jobs', omniVideo.list);
+  r.post('/omni-video-jobs/quote', omniVideo.quote);
   r.post('/omni-video-jobs', omniVideo.create);
   r.post('/omni-video-jobs/polish-prompt', omniVideo.polishPrompt);
   r.post('/omni-video-jobs/:id/retry', omniVideo.retry);
