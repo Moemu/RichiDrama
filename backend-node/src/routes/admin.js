@@ -2,6 +2,7 @@ const auth = require('../services/authService');
 const billing = require('../services/billingService');
 const operations = require('../services/adminOperationsService');
 const tenants = require('../services/tenantService');
+const customerOrganizations = require('../services/customerOrganizationService');
 const response = require('../response');
 
 module.exports = function adminRoutes(db, log = console) {
@@ -58,6 +59,32 @@ module.exports = function adminRoutes(db, log = console) {
       const tenant = tenants.replaceBindings(db, Number(req.params.id), req.body || {});
       billing.audit(db, req.auth.id, 'tenant.bindings.replace', 'tenant', tenant.id, { ai_config_ids: req.body?.ai_config_ids || [], sd2_config_ids: req.body?.sd2_config_ids || [], price_book_id: req.body?.price_book_id || null });
       response.success(res, tenant);
+    }),
+    customerOrganizations: (_req, res) => response.success(res, customerOrganizations.listOrganizations(db).map((item) => ({ ...item, ...billing.publicAccount({ ...item, organization_id: item.id, account_scope: 'organization', account_name: item.name }) }))),
+    customerOrganization: (req, res) => {
+      const organization = customerOrganizations.organizationDetail(db, Number(req.params.id));
+      return organization ? response.success(res, { ...organization, account: billing.publicAccount({ ...organization.account, organization_id: organization.id, account_scope: 'organization', account_name: organization.name }) }) : response.notFound(res, '客户账户不存在');
+    },
+    createCustomerOrganization: guarded((req, res) => {
+      const organization = customerOrganizations.saveOrganization(db, req.auth.id, req.body || {});
+      billing.audit(db, req.auth.id, 'customer_organization.create', 'customer_organization', organization.id, { name: organization.name, config_tenant_id: organization.config_tenant_id });
+      response.created(res, organization);
+    }),
+    updateCustomerOrganization: guarded((req, res) => {
+      const organization = customerOrganizations.saveOrganization(db, req.auth.id, req.body || {}, Number(req.params.id));
+      if (!organization) return response.notFound(res, '客户账户不存在');
+      billing.audit(db, req.auth.id, 'customer_organization.update', 'customer_organization', organization.id, { name: organization.name, status: organization.status, config_tenant_id: organization.config_tenant_id });
+      response.success(res, organization);
+    }),
+    replaceCustomerOrganizationMembers: guarded((req, res) => {
+      const organization = customerOrganizations.replaceMembers(db, Number(req.params.id), req.body?.members || []);
+      billing.audit(db, req.auth.id, 'customer_organization.members.replace', 'customer_organization', organization.id, { member_ids: organization.members.map((item) => item.id) });
+      response.success(res, organization);
+    }),
+    adjustCustomerOrganizationBalance: guarded((req, res) => {
+      const body = req.body || {};
+      const result = billing.adjustOrganizationBalance(db, req.auth.id, Number(req.params.id), body.amount_credits, body.reason, { operation: body.operation, idempotency_key: body.idempotency_key });
+      response.success(res, billing.publicAccount({ ...result, organization_id: Number(req.params.id), account_scope: 'organization' }));
     }),
     adjust: guarded((req, res) => {
       const body = req.body || {};

@@ -127,6 +127,12 @@ function setupRouter(cfg, db, log) {
   adminRouter.patch('/tenants/:id', admin.updateTenant);
   adminRouter.put('/tenants/:id/members/:userId', admin.setTenantMember);
   adminRouter.put('/tenants/:id/bindings', admin.replaceTenantBindings);
+  adminRouter.get('/customer-organizations', admin.customerOrganizations);
+  adminRouter.post('/customer-organizations', admin.createCustomerOrganization);
+  adminRouter.get('/customer-organizations/:id', admin.customerOrganization);
+  adminRouter.patch('/customer-organizations/:id', admin.updateCustomerOrganization);
+  adminRouter.put('/customer-organizations/:id/members', admin.replaceCustomerOrganizationMembers);
+  adminRouter.post('/customer-organizations/:id/balance-adjustments', admin.adjustCustomerOrganizationBalance);
   adminRouter.get('/price-books', admin.priceBooks);
   adminRouter.post('/price-books', admin.createPriceBook);
   adminRouter.patch('/price-books/:id', admin.updatePriceBook);

@@ -1,6 +1,6 @@
 <template>
   <button v-if="visible" class="account-balance" type="button" title="打开账户中心" @click="router.push('/account')">
-    <span>可用余额</span>
+    <span>{{ account?.account_scope === 'organization' ? '共享额度' : '可用余额' }}</span>
     <strong>{{ displayCredits }}</strong>
     <small v-if="frozen > 0">冻结 {{ frozen }}</small>
   </button>
