@@ -9966,7 +9966,7 @@ html.light .nav-sub-item.sb-nav-over { background: rgba(99,102,241,0.10); }
 }
 .storyboard-stage-active{height:100dvh;overflow:hidden}
 .storyboard-stage-active .main{max-width:none;height:calc(100dvh - 58px);box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;padding:10px 32px}
-.storyboard-stage-active .workflow-shell{flex:none;margin:0 0 8px;padding:8px 14px}
+.storyboard-stage-active .workflow-shell{flex:none;margin:0 0 8px;padding:8px 14px;overflow:clip!important}
 .storyboard-stage-active .workflow-head{display:none}
 .storyboard-stage-active .workflow-steps{margin-top:0}
 .storyboard-stage-active .omni-page.embedded.project-storyboard-page{position:static!important;top:auto;height:auto!important;min-height:0!important;overflow:hidden!important;flex:1;z-index:auto}

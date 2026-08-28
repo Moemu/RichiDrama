@@ -16,6 +16,31 @@ test('自由创作只渲染一个提示词编辑器', async () => {
   assert.match(source, /@keydown\.down\.prevent="selectRelative\(1\)"/)
 })
 
+test('维护者工作流恢复一键入口、资源模型和分镜实时刷新', async () => {
+  const [film, freeCreate, characters, scenes, props] = await Promise.all([
+    readSource('../src/views/FilmCreate.vue'),
+    readSource('../src/views/FreeCreate.vue'),
+    readSource('../src/composables/filmCreate/useCharacters.js'),
+    readSource('../src/composables/filmCreate/useScenes.js'),
+    readSource('../src/composables/filmCreate/useProps.js'),
+  ])
+
+  assert.match(film, /const showLegacyPipeline = ref\(true\)/)
+  assert.match(film, /const pipelinePanelExpanded = ref\(false\)/)
+  assert.match(film, /v-model="resourceImageModel"/)
+  assert.match(film, /onGenerateCharacterImage\(char, resourceImageModel \|\| undefined\)/)
+  assert.match(film, /onGenerateSceneImage\(scene, sceneUseQuadGrid, resourceImageModel \|\| undefined\)/)
+  assert.match(film, /onGeneratePropImage\(prop, propUseQuadGrid, resourceImageModel \|\| undefined\)/)
+  assert.match(film, /AI 生成分镜/)
+  assert.match(film, /每段\(秒\)/)
+  assert.match(film, /\.storyboard-stage-active \.workflow-shell\{[^}]*overflow:clip!important/)
+  assert.match(film, /freeCreateRef\.value/)
+  assert.match(freeCreate, /defineExpose\(\{ refreshProjectShots \}\)/)
+  assert.match(characters, /characterAPI\.generateImage\(char\.id, model \|\| undefined/)
+  assert.match(scenes, /model: model \|\| undefined/)
+  assert.match(props, /propAPI\.generateImage\(prop\.id, model \|\| undefined/)
+})
+
 test('首页委托共享头部提供新建、账户和素材入口', async () => {
   const [source, header] = await Promise.all([
     readSource('../src/views/FilmList.vue'),

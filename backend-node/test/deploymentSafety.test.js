@@ -67,6 +67,8 @@ test('preview edge is the only dual-homed component and cannot pivot', () => {
   // silently falls through to the rejection block (regression 2026-08-26).
   assert.match(edge, /server_name "~\^pr-\(\?<preview_pr>\[0-9]\+\)\\\.preview\\\.drama/);
   assert.match(edge, /proxy_pass http:\/\/pr-\$preview_pr:5679/);
+  assert.match(passthrough, /server \{\s+resolver 127\.0\.0\.11/);
+  assert.doesNotMatch(passthrough, /^resolver 127\.0\.0\.11/m);
   assert.match(passthrough, /set \$preview_edge_upstream http:\/\/minidrama-preview-edge:8080/);
   assert.match(source, /PREVIEW_EDGE_CONTAINER.*wget/);
   assert.match(source, /pr-\$\{PR_NUMBER\}\.preview\.drama\.richbest\.cn/);
