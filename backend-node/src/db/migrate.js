@@ -548,12 +548,17 @@ function ensureAllColumns(database) {
     { name: 'project_title_snapshot', type: 'TEXT' },
     { name: 'source_kind', type: 'TEXT' },
     { name: 'source_id', type: 'TEXT' },
+    { name: 'organization_id', type: 'INTEGER' },
   ]);
   ensureColumns(database, 'billing_usage_logs', [
     { name: 'drama_id', type: 'INTEGER' },
     { name: 'project_title_snapshot', type: 'TEXT' },
     { name: 'source_kind', type: 'TEXT' },
     { name: 'source_id', type: 'TEXT' },
+    { name: 'organization_id', type: 'INTEGER' },
+  ]);
+  ensureColumns(database, 'billing_reconciliation_cases', [
+    { name: 'organization_id', type: 'INTEGER' },
   ]);
   try {
     database.exec('CREATE INDEX IF NOT EXISTS idx_billing_usage_project_created ON billing_usage_logs(drama_id, created_at DESC)');

@@ -19,15 +19,69 @@ function creditsToMicro(v) {
   return Number(result);
 }
 
+function safeMicroAdd(...values) {
+  let result = 0n;
+  for (const value of values) {
+    if (!Number.isSafeInteger(value)) throw new Error('积分超出安全范围');
+    result += BigInt(value);
+  }
+  if (result > BigInt(Number.MAX_SAFE_INTEGER) || result < BigInt(Number.MIN_SAFE_INTEGER)) throw new Error('积分超出安全范围');
+  return Number(result);
+}
+
 function account(db, userId) {
   const at = now();
   db.prepare('INSERT OR IGNORE INTO billing_accounts (user_id, updated_at) VALUES (?, ?)').run(userId, at);
   return db.prepare('SELECT * FROM billing_accounts WHERE user_id = ?').get(userId);
 }
 
+function payerAccount(db, userId) {
+  const organizations = require('./customerOrganizationService');
+  const membership = organizations.membershipForUser(db, userId);
+  if (!membership) return { ...account(db, userId), account_scope: 'personal', organization_id: null, account_name: null };
+  if (membership.status !== 'active') throw new Error('客户共享账户已停用，请联系运营管理员');
+  return {
+    ...organizations.account(db, membership.id),
+    user_id: Number(userId),
+    account_scope: 'organization',
+    organization_id: membership.id,
+    account_name: membership.name,
+    organization_role: membership.membership_role,
+  };
+}
+
+function payerAccountForAuthorization(db, authorization) {
+  if (Number(authorization?.organization_id) > 0) {
+    const organizations = require('./customerOrganizationService');
+    const organization = organizations.organizationDetail(db, authorization.organization_id);
+    if (!organization) throw new Error('预授权关联的客户账户不存在');
+    return {
+      ...organizations.account(db, organization.id),
+      user_id: authorization.user_id,
+      account_scope: 'organization',
+      organization_id: organization.id,
+      account_name: organization.name,
+    };
+  }
+  return { ...account(db, authorization.user_id), account_scope: 'personal', organization_id: null, account_name: null };
+}
+
+function updatePayerAccount(db, payer, fields) {
+  const entries = Object.entries(fields);
+  if (!entries.length) return;
+  const table = payer.account_scope === 'organization' ? 'organization_billing_accounts' : 'billing_accounts';
+  const key = payer.account_scope === 'organization' ? 'organization_id' : 'user_id';
+  db.prepare(`UPDATE ${table} SET ${entries.map(([name]) => `${name}=?`).join(',')},updated_at=? WHERE ${key}=?`)
+    .run(...entries.map(([, value]) => value), now(), payer.account_scope === 'organization' ? payer.organization_id : payer.user_id);
+}
+
 function publicAccount(row) {
   return {
     user_id: row.user_id,
+    account_scope: row.account_scope || 'personal',
+    organization_id: row.organization_id || null,
+    account_name: row.account_name || null,
+    organization_role: row.organization_role || null,
     balance_micro: row.balance_micro,
     frozen_micro: row.frozen_micro,
     available_micro: row.balance_micro - row.frozen_micro,
@@ -160,16 +214,18 @@ function createAuthorization(db, user, input) {
   const tenantId = require('./tenantService').tenantForUser(db, user.id)?.id || null;
   const project = projectSnapshot(db, user.id, input);
   const execute = db.transaction(() => {
-    const acct = account(db, user.id); const available = acct.balance_micro - acct.frozen_micro;
+    const acct = payerAccount(db, user.id); const available = safeMicroAdd(acct.balance_micro, -acct.frozen_micro);
     if (available < priced.amount_micro) throw new Error('余额不足');
-    const frozenAfter = acct.frozen_micro + priced.amount_micro;
-    db.prepare('UPDATE billing_accounts SET frozen_micro = ?, updated_at = ? WHERE user_id = ?').run(frozenAfter, at, user.id);
+    const frozenAfter = safeMicroAdd(acct.frozen_micro, priced.amount_micro);
+    updatePayerAccount(db, acct, { frozen_micro: frozenAfter });
     const sourceKind = input.source_kind || input.reference_type || null;
     const sourceId = input.source_id ?? input.reference_id ?? null;
     const snapshot = { ...priced, tenant_id: tenantId, ...project, source_kind: sourceKind, source_id: sourceId, reference_type: input.reference_type || null, reference_id: input.reference_id || null };
-    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, drama_id, project_title_snapshot, source_kind, source_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, idempotency_key, reference_type, reference_id, reason, snapshot_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'authorization', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, user.id, tenantId, project.drama_id, project.project_title_snapshot, sourceKind, sourceId == null ? null : String(sourceId), priced.amount_micro, acct.balance_micro, frozenAfter, id, idempotencyKey, input.reference_type || null, input.reference_id || null, input.reason || null, json(snapshot), at);
+    snapshot.organization_id = acct.organization_id || null;
+    snapshot.account_scope = acct.account_scope;
+    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, organization_id, drama_id, project_title_snapshot, source_kind, source_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, idempotency_key, reference_type, reference_id, reason, snapshot_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'authorization', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, user.id, tenantId, acct.organization_id || null, project.drama_id, project.project_title_snapshot, sourceKind, sourceId == null ? null : String(sourceId), priced.amount_micro, acct.balance_micro, frozenAfter, id, idempotencyKey, input.reference_type || null, input.reference_id || null, input.reason || null, json(snapshot), at);
   });
   execute();
   return { authorization_id: id, amount_micro: priced.amount_micro, amount: microToCredits(priced.amount_micro), snapshot: priced };
@@ -208,9 +264,9 @@ function settleAuthorization(db, user, authorizationId, input = {}) {
   const chargedMicro = actual.amount_micro;
   const supplementalMicro = Math.max(0, chargedMicro - auth.amount_micro);
   const execute = db.transaction(() => {
-    const acct = account(db, auth.user_id);
+    const acct = payerAccountForAuthorization(db, auth);
     if (acct.frozen_micro < auth.amount_micro) throw new Error('预授权冻结状态异常');
-    const availableAfterRelease = acct.balance_micro - (acct.frozen_micro - auth.amount_micro);
+    const availableAfterRelease = safeMicroAdd(acct.balance_micro, -acct.frozen_micro, auth.amount_micro);
     if (availableAfterRelease < chargedMicro) {
       const error = new Error('实际用量超出预授权且可用余额不足，等待管理员对账');
       error.code = 'BILLING_ACTUAL_USAGE_EXCEEDS_AVAILABLE_BALANCE';
@@ -219,15 +275,14 @@ function settleAuthorization(db, user, authorizationId, input = {}) {
       error.supplemental_micro = supplementalMicro;
       throw error;
     }
-    const balanceAfter = acct.balance_micro - chargedMicro; const frozenAfter = acct.frozen_micro - auth.amount_micro;
-    db.prepare(`UPDATE billing_accounts SET balance_micro = ?, frozen_micro = ?, total_consumed_micro = total_consumed_micro + ?, updated_at = ? WHERE user_id = ?`)
-      .run(balanceAfter, frozenAfter, chargedMicro, at, auth.user_id);
-    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, drama_id, project_title_snapshot, source_kind, source_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, reference_type, reference_id, reason, snapshot_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'settlement', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, auth.user_id, auth.tenant_id || null, auth.drama_id || null, auth.project_title_snapshot || null, auth.source_kind || auth.reference_type || null, auth.source_id || auth.reference_id || null, -chargedMicro, balanceAfter, frozenAfter, authorizationId, auth.reference_type, auth.reference_id, input.reason || null, json({ ...snapshot, actual_usage: actual.usage, authorized_micro: auth.amount_micro, charged_micro: chargedMicro, supplemental_charged_micro: supplementalMicro, overage_micro: supplementalMicro }), at);
-    db.prepare(`INSERT INTO billing_usage_logs (id, user_id, tenant_id, drama_id, project_title_snapshot, source_kind, source_id, transaction_id, authorization_id, service_type, model, usage_json, charged_micro, provider_request_id, reference_type, reference_id, snapshot_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(uuid(), auth.user_id, auth.tenant_id || null, auth.drama_id || null, auth.project_title_snapshot || null, auth.source_kind || auth.reference_type || null, auth.source_id || auth.reference_id || null, id, authorizationId, snapshot.service_type, snapshot.model, json(actual.usage), chargedMicro, input.provider_request_id || null, auth.reference_type, auth.reference_id, json(snapshot), at);
+    const balanceAfter = safeMicroAdd(acct.balance_micro, -chargedMicro); const frozenAfter = safeMicroAdd(acct.frozen_micro, -auth.amount_micro);
+    updatePayerAccount(db, acct, { balance_micro: balanceAfter, frozen_micro: frozenAfter, total_consumed_micro: safeMicroAdd(acct.total_consumed_micro, chargedMicro) });
+    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, organization_id, drama_id, project_title_snapshot, source_kind, source_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, reference_type, reference_id, reason, snapshot_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'settlement', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, auth.user_id, auth.tenant_id || null, auth.organization_id || null, auth.drama_id || null, auth.project_title_snapshot || null, auth.source_kind || auth.reference_type || null, auth.source_id || auth.reference_id || null, -chargedMicro, balanceAfter, frozenAfter, authorizationId, auth.reference_type, auth.reference_id, input.reason || null, json({ ...snapshot, actual_usage: actual.usage, authorized_micro: auth.amount_micro, charged_micro: chargedMicro, supplemental_charged_micro: supplementalMicro, overage_micro: supplementalMicro }), at);
+    db.prepare(`INSERT INTO billing_usage_logs (id, user_id, tenant_id, organization_id, drama_id, project_title_snapshot, source_kind, source_id, transaction_id, authorization_id, service_type, model, usage_json, charged_micro, provider_request_id, reference_type, reference_id, snapshot_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(uuid(), auth.user_id, auth.tenant_id || null, auth.organization_id || null, auth.drama_id || null, auth.project_title_snapshot || null, auth.source_kind || auth.reference_type || null, auth.source_id || auth.reference_id || null, id, authorizationId, snapshot.service_type, snapshot.model, json(actual.usage), chargedMicro, input.provider_request_id || null, auth.reference_type, auth.reference_id, json(snapshot), at);
   });
   execute(); return { transaction_id: id, charged_micro: chargedMicro, charged: microToCredits(chargedMicro), supplemental_charged_micro: supplementalMicro, overage_micro: supplementalMicro, reused: false };
 }
@@ -253,20 +308,19 @@ function collectSettlementSupplement(db, actor, authorizationId, reason) {
   if (existing) return { authorization_id: authorizationId, transaction_id: existing.id, supplemental_micro: Math.abs(Number(existing.amount_micro || 0)), supplemental: microToCredits(Math.abs(Number(existing.amount_micro || 0))), reused: true };
   const at = now(); const id = uuid();
   db.transaction(() => {
-    const acct = account(db, auth.user_id);
-    if (acct.balance_micro - acct.frozen_micro < supplementalMicro) {
+    const acct = payerAccountForAuthorization(db, auth);
+    if (safeMicroAdd(acct.balance_micro, -acct.frozen_micro) < supplementalMicro) {
       const error = new Error('历史实际用量差额补扣时可用余额不足，等待管理员对账');
       error.code = 'BILLING_ACTUAL_USAGE_EXCEEDS_AVAILABLE_BALANCE';
       error.actual_micro = actual.amount_micro;
       error.supplemental_micro = supplementalMicro;
       throw error;
     }
-    const balanceAfter = acct.balance_micro - supplementalMicro;
-    db.prepare('UPDATE billing_accounts SET balance_micro=?, total_consumed_micro=total_consumed_micro+?, updated_at=? WHERE user_id=?')
-      .run(balanceAfter, supplementalMicro, at, auth.user_id);
-    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, idempotency_key, reference_type, reference_id, reason, created_by, snapshot_json, created_at)
-      VALUES (?, ?, ?, 'adjustment', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, auth.user_id, auth.tenant_id || null, -supplementalMicro, balanceAfter, acct.frozen_micro, authorizationId, idempotencyKey, auth.reference_type, auth.reference_id,
+    const balanceAfter = safeMicroAdd(acct.balance_micro, -supplementalMicro);
+    updatePayerAccount(db, acct, { balance_micro: balanceAfter, total_consumed_micro: safeMicroAdd(acct.total_consumed_micro, supplementalMicro) });
+    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, organization_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, idempotency_key, reference_type, reference_id, reason, created_by, snapshot_json, created_at)
+      VALUES (?, ?, ?, ?, 'adjustment', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, auth.user_id, auth.tenant_id || null, auth.organization_id || null, -supplementalMicro, balanceAfter, acct.frozen_micro, authorizationId, idempotencyKey, auth.reference_type, auth.reference_id,
         String(reason || '').trim() || '按供应商真实用量补扣历史结算差额', actor.id,
         json({ authorization_id: authorizationId, settlement_transaction_id: settlement.id, actual_usage: actual.usage, actual_micro: actual.amount_micro, originally_charged_micro: originallyCharged, already_supplemented_micro: alreadySupplemented, supplemental_micro: supplementalMicro }), at);
     db.prepare('UPDATE billing_usage_logs SET charged_micro=charged_micro+? WHERE id=?').run(supplementalMicro, usageLog.id);
@@ -346,12 +400,12 @@ function voidAuthorization(db, user, authorizationId, reason) {
   if (existing) return { authorization_id: authorizationId, released_micro: auth.amount_micro, reused: true };
   const at = now(); const id = uuid();
   db.transaction(() => {
-    const acct = account(db, auth.user_id); if (acct.frozen_micro < auth.amount_micro) throw new Error('预授权冻结状态异常');
-    const frozenAfter = acct.frozen_micro - auth.amount_micro;
-    db.prepare('UPDATE billing_accounts SET frozen_micro = ?, updated_at = ? WHERE user_id = ?').run(frozenAfter, at, auth.user_id);
-    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, reference_type, reference_id, reason, snapshot_json, created_at)
-      VALUES (?, ?, ?, 'void', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, auth.user_id, auth.tenant_id || null, 0, acct.balance_micro, frozenAfter, authorizationId, auth.reference_type, auth.reference_id, reason || '调用未完成，释放预授权', auth.snapshot_json, at);
+    const acct = payerAccountForAuthorization(db, auth); if (acct.frozen_micro < auth.amount_micro) throw new Error('预授权冻结状态异常');
+    const frozenAfter = safeMicroAdd(acct.frozen_micro, -auth.amount_micro);
+    updatePayerAccount(db, acct, { frozen_micro: frozenAfter });
+    db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, organization_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, reference_type, reference_id, reason, snapshot_json, created_at)
+      VALUES (?, ?, ?, ?, 'void', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, auth.user_id, auth.tenant_id || null, auth.organization_id || null, 0, acct.balance_micro, frozenAfter, authorizationId, auth.reference_type, auth.reference_id, reason || '调用未完成，释放预授权', auth.snapshot_json, at);
   })();
   return { authorization_id: authorizationId, released_micro: auth.amount_micro, released: microToCredits(auth.amount_micro) };
 }
@@ -382,6 +436,7 @@ function markPendingReconciliation(db, user, authorizationId, input = {}) {
   const snapshot = auth.snapshot || {};
   const record = {
     id: uuid(), authorization_id: authorizationId, user_id: auth.user_id,
+    organization_id: auth.organization_id || null,
     service_type: snapshot.service_type, model: snapshot.model,
     provider_request_id: input.provider_request_id || null,
     reason: input.reason || '供应商成功响应但未返回可核验用量',
@@ -389,9 +444,9 @@ function markPendingReconciliation(db, user, authorizationId, input = {}) {
     due_at: input.due_at || reconciliationDueAt(), created_at: now(),
   };
   db.prepare(`INSERT INTO billing_reconciliation_cases
-    (id, authorization_id, user_id, service_type, model, provider_request_id, status, reason, observed_usage_json, due_at, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`)
-    .run(record.id, record.authorization_id, record.user_id, record.service_type, record.model, record.provider_request_id, record.reason, record.observed_usage_json, record.due_at, record.created_at);
+    (id, authorization_id, user_id, organization_id, service_type, model, provider_request_id, status, reason, observed_usage_json, due_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`)
+    .run(record.id, record.authorization_id, record.user_id, record.organization_id, record.service_type, record.model, record.provider_request_id, record.reason, record.observed_usage_json, record.due_at, record.created_at);
   audit(db, user.id, 'billing.reconciliation.pending', 'authorization', authorizationId, {
     service_type: record.service_type, model: record.model, provider_request_id: record.provider_request_id, due_at: record.due_at, reason: record.reason,
   });
@@ -584,11 +639,11 @@ function adjustBalance(db, actorId, userId, credits, reason, options = {}) {
   }
   const at = now(); const id = uuid();
   db.transaction(() => {
-    const acct = account(db, userId); const after = acct.balance_micro + amount;
+    const acct = account(db, userId); const after = safeMicroAdd(acct.balance_micro, amount);
     if (after < acct.frozen_micro || after < 0) throw new Error('调整后余额不能小于已冻结金额');
     const granted = operation === 'grant' && amount > 0 ? amount : 0;
-    db.prepare(`UPDATE billing_accounts SET balance_micro = ?, total_recharged_micro = total_recharged_micro + ?, updated_at = ? WHERE user_id = ?`)
-      .run(after, granted, at, userId);
+    db.prepare(`UPDATE billing_accounts SET balance_micro = ?, total_recharged_micro = ?, updated_at = ? WHERE user_id = ?`)
+      .run(after, safeMicroAdd(acct.total_recharged_micro, granted), at, userId);
     db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, type, amount_micro, balance_after_micro, frozen_after_micro, idempotency_key, reason, created_by, snapshot_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, userId, require('./tenantService').tenantForUser(db, userId)?.id || null, operation === 'grant' ? 'recharge' : 'adjustment', amount, after, acct.frozen_micro, idempotencyKey, String(reason || '').trim() || '管理员余额调整', actorId, json({ operation }), at);
@@ -620,15 +675,47 @@ function setBalance(db, actorId, userId, targetCredits, reason, options = {}) {
   return account(db, userId);
 }
 
+function adjustOrganizationBalance(db, actorId, organizationId, credits, reason, options = {}) {
+  const organizations = require('./customerOrganizationService');
+  const organization = organizations.organizationDetail(db, organizationId);
+  if (!organization) throw new Error('客户账户不存在');
+  const amount = creditsToMicro(credits); if (!amount) throw new Error('调整金额不能为 0');
+  const operation = ['grant', 'debit', 'refund'].includes(options.operation) ? options.operation : (amount > 0 ? 'grant' : 'debit');
+  if ((operation === 'grant' || operation === 'refund') && amount < 0) throw new Error('发放或退款金额必须为正数');
+  if (operation === 'debit' && amount > 0) throw new Error('扣减金额必须为负数');
+  const requestedIdempotencyKey = String(options.idempotency_key || '').trim();
+  if (!requestedIdempotencyKey) throw new Error('idempotency_key 必填');
+  const idempotencyKey = `organization:${organization.id}:${requestedIdempotencyKey}`;
+  const existing = db.prepare('SELECT id FROM billing_transactions WHERE organization_id=? AND idempotency_key=?').get(organization.id, idempotencyKey);
+  if (existing) return organizations.account(db, organization.id);
+  const at = now(); const id = uuid();
+  db.transaction(() => {
+    const acct = organizations.account(db, organization.id); const after = safeMicroAdd(acct.balance_micro, amount);
+    if (after < acct.frozen_micro || after < 0) throw new Error('调整后余额不能小于已冻结金额');
+    const granted = operation === 'grant' && amount > 0 ? amount : 0;
+    updatePayerAccount(db, { ...acct, account_scope: 'organization', organization_id: organization.id }, {
+      balance_micro: after,
+      total_recharged_micro: safeMicroAdd(acct.total_recharged_micro, granted),
+    });
+    db.prepare(`INSERT INTO billing_transactions (id,user_id,tenant_id,organization_id,type,amount_micro,balance_after_micro,frozen_after_micro,idempotency_key,reason,created_by,snapshot_json,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, actorId, organization.config_tenant_id, organization.id, operation === 'grant' ? 'recharge' : 'adjustment', amount, after, acct.frozen_micro, idempotencyKey, String(reason || '').trim() || '管理员调整客户共享额度', actorId, json({ operation, account_scope: 'organization', organization_id: organization.id }), at);
+  })();
+  audit(db, actorId, 'billing.organization_balance.adjust', 'customer_organization', organization.id, { amount_micro: amount, operation, idempotency_key: requestedIdempotencyKey, reason });
+  return organizations.account(db, organization.id);
+}
+
 function listUsers(db) {
   return db.prepare(`SELECT u.id, u.username, u.display_name, u.role, u.console_access, u.account_kind, u.is_active, u.created_at, u.last_login_at,
     tm.tenant_id, tm.role AS tenant_role, tenant.name AS tenant_name,
+    om.organization_id, om.role AS organization_role, org.name AS organization_name,
     COALESCE(a.balance_micro, 0) balance_micro, COALESCE(a.frozen_micro, 0) frozen_micro,
     COALESCE(a.total_recharged_micro, 0) total_recharged_micro, COALESCE(a.total_consumed_micro, 0) total_consumed_micro,
     COALESCE((SELECT SUM(t.amount_micro) FROM billing_transactions t WHERE t.user_id=u.id AND t.amount_micro>0 AND t.snapshot_json LIKE '%\"operation\":\"refund\"%'), 0) total_refunded_micro
     FROM users u LEFT JOIN billing_accounts a ON a.user_id = u.id
     LEFT JOIN tenant_memberships tm ON tm.user_id = u.id
     LEFT JOIN tenants tenant ON tenant.id = tm.tenant_id
+    LEFT JOIN customer_organization_memberships om ON om.user_id=u.id
+    LEFT JOIN customer_organizations org ON org.id=om.organization_id
     ORDER BY u.id`).all().map((r) => ({
       ...r, is_active: !!r.is_active, console_access: !!r.console_access, account_kind: r.account_kind || (r.role === 'admin' ? 'platform_admin' : 'creator'), balance: microToCredits(r.balance_micro), frozen: microToCredits(r.frozen_micro),
       available: microToCredits(r.balance_micro - r.frozen_micro), total_granted: microToCredits(r.total_recharged_micro),
@@ -764,6 +851,11 @@ function appendLedgerFilters(where, params, tableAlias, userAlias, filters = {})
     if (tenantId === 0) where += ` AND ${tableAlias}.tenant_id IS NULL`;
     else if (Number.isInteger(tenantId) && tenantId > 0) { where += ` AND ${tableAlias}.tenant_id = ?`; params.push(tenantId); }
   }
+  if (filters.organization_id !== undefined && filters.organization_id !== null && String(filters.organization_id) !== '') {
+    const organizationId = Number(filters.organization_id);
+    if (organizationId === 0) where += ` AND ${tableAlias}.organization_id IS NULL`;
+    else if (Number.isInteger(organizationId) && organizationId > 0) { where += ` AND ${tableAlias}.organization_id = ?`; params.push(organizationId); }
+  }
   const from = shanghaiDayBoundary(filters.date_from);
   const to = shanghaiDayBoundary(filters.date_to, true);
   if (from) { where += ` AND ${tableAlias}.created_at >= ?`; params.push(from); }
@@ -800,7 +892,7 @@ function listTransactions(db, filters = {}) {
   let where = 'WHERE 1=1', p = [];
   if (filters.user_id) { where += ' AND t.user_id = ?'; p.push(Number(filters.user_id)); }
   where = appendLedgerFilters(where, p, 't', 'u', filters);
-  const rows = db.prepare(`SELECT t.*, u.username, u.role, tn.name AS tenant_name FROM billing_transactions t JOIN users u ON u.id = t.user_id LEFT JOIN tenants tn ON tn.id = t.tenant_id ${where} ORDER BY t.created_at DESC, t.rowid DESC LIMIT 300`).all(...p);
+  const rows = db.prepare(`SELECT t.*, u.username, u.role, tn.name AS tenant_name, org.name AS organization_name FROM billing_transactions t JOIN users u ON u.id = t.user_id LEFT JOIN tenants tn ON tn.id = t.tenant_id LEFT JOIN customer_organizations org ON org.id=t.organization_id ${where} ORDER BY t.created_at DESC, t.rowid DESC LIMIT 300`).all(...p);
   return rows.map((r) => ({ ...r, amount: microToCredits(r.amount_micro), balance_after: microToCredits(r.balance_after_micro), frozen_after: microToCredits(r.frozen_after_micro), snapshot: parse(r.snapshot_json) }));
 }
 
@@ -816,7 +908,7 @@ function pagedTransactions(db, filters = {}) {
   where = appendLedgerFilters(where, params, 't', 'u', filters);
   const meta = pagination(filters);
   const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_transactions t JOIN users u ON u.id = t.user_id ${where}`).get(...params)?.total || 0);
-  const rows = db.prepare(`SELECT t.*, u.username, u.role, tn.name AS tenant_name FROM billing_transactions t JOIN users u ON u.id = t.user_id LEFT JOIN tenants tn ON tn.id = t.tenant_id ${where} ORDER BY t.created_at DESC, t.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
+  const rows = db.prepare(`SELECT t.*, u.username, u.role, tn.name AS tenant_name, org.name AS organization_name FROM billing_transactions t JOIN users u ON u.id = t.user_id LEFT JOIN tenants tn ON tn.id = t.tenant_id LEFT JOIN customer_organizations org ON org.id=t.organization_id ${where} ORDER BY t.created_at DESC, t.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
   return {
     items: rows.map((r) => ({ ...r, amount: microToCredits(r.amount_micro), balance_after: microToCredits(r.balance_after_micro), frozen_after: microToCredits(r.frozen_after_micro), snapshot: parse(r.snapshot_json) })),
     total,
@@ -828,7 +920,7 @@ function pagedTransactions(db, filters = {}) {
 function listUsage(db, filters = {}) {
   let where = 'WHERE 1=1', p = []; if (filters.user_id) { where += ' AND l.user_id = ?'; p.push(Number(filters.user_id)); }
   where = appendLedgerFilters(where, p, 'l', 'u', filters);
-  return db.prepare(`SELECT l.*, u.username, u.display_name, u.role FROM billing_usage_logs l JOIN users u ON u.id = l.user_id ${where} ORDER BY l.created_at DESC LIMIT 300`).all(...p)
+  return db.prepare(`SELECT l.*, u.username, u.display_name, u.role, org.name AS organization_name FROM billing_usage_logs l JOIN users u ON u.id = l.user_id LEFT JOIN customer_organizations org ON org.id=l.organization_id ${where} ORDER BY l.created_at DESC LIMIT 300`).all(...p)
     .map((r) => ({ ...r, charged: microToCredits(r.charged_micro), usage: parse(r.usage_json), snapshot: parse(r.snapshot_json) }));
 }
 
@@ -840,7 +932,7 @@ function pagedUsage(db, filters = {}) {
   if (filters.model) { where += ' AND l.model=?'; params.push(String(filters.model)); }
   const meta = pagination(filters);
   const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_usage_logs l JOIN users u ON u.id = l.user_id ${where}`).get(...params)?.total || 0);
-  const rows = db.prepare(`SELECT l.*, u.username, u.display_name, u.role, tn.name AS tenant_name FROM billing_usage_logs l JOIN users u ON u.id = l.user_id LEFT JOIN tenants tn ON tn.id = l.tenant_id ${where} ORDER BY l.created_at DESC, l.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
+  const rows = db.prepare(`SELECT l.*, u.username, u.display_name, u.role, tn.name AS tenant_name, org.name AS organization_name FROM billing_usage_logs l JOIN users u ON u.id = l.user_id LEFT JOIN tenants tn ON tn.id = l.tenant_id LEFT JOIN customer_organizations org ON org.id=l.organization_id ${where} ORDER BY l.created_at DESC, l.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
   return {
     items: rows.map((r) => ({ ...r, charged: microToCredits(r.charged_micro), usage: parse(r.usage_json), snapshot: parse(r.snapshot_json) })),
     total,
@@ -1064,4 +1156,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { account, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };
+module.exports = { account, payerAccount, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, adjustOrganizationBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };

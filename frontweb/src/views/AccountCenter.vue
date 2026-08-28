@@ -12,9 +12,9 @@
 
     <div v-show="accountTab === 'overview'" class="account-view overview-view">
       <section class="cards">
-        <article><span>可用积分</span><strong>{{ account.available ?? 0 }}</strong><small>可立即用于新的生成任务</small></article>
+        <article><span>{{ account.account_scope === 'organization' ? '企业共享额度' : '可用积分' }}</span><strong>{{ account.available ?? 0 }}</strong><small>{{ account.account_name || '可立即用于新的生成任务' }}</small></article>
         <article><span>冻结积分</span><strong>{{ account.frozen ?? 0 }}</strong><small>任务完成后会结算或自动释放</small></article>
-        <article><span>累计消费</span><strong>{{ account.total_consumed ?? 0 }}</strong><small>仅统计已经完成的实际扣费</small></article>
+        <article><span>累计消费</span><strong>{{ account.total_consumed ?? 0 }}</strong><small>{{ account.account_scope === 'organization' ? '统计该客户账户的全部实际扣费' : '仅统计已经完成的实际扣费' }}</small></article>
       </section>
       <section class="panel billing-guide"><div><h2>账单怎么看</h2><p>每次生成先冻结一个最高额度，防止并发任务超额；成功后按真实用量结算，未完成或失败则释放冻结。冻结不是已扣费。</p></div><div class="guide-steps"><span>1. 冻结上限</span><i>→</i><span>2. 生成任务</span><i>→</i><span>3. 实际结算 / 释放</span></div></section>
       <section class="overview-links" aria-label="账户快捷入口">
