@@ -52,9 +52,19 @@
           <el-select v-model="freeProjectId" filterable :disabled="!!sequence?.drama_id" placeholder="选择计费项目" aria-label="选择计费归属项目"><el-option v-for="project in projects" :key="project.id" :label="project.title" :value="project.id"/></el-select>
         </section>
         <small class="mode-note">{{ creationMode === 'first_last_frame' ? '必须设置一张首帧（必填），尾帧可选；模型不支持时不可提交。' : '图片、视频、音频可按用途自由编排，按模型能力自动路由。' }}</small>
-        <div v-if="!currentCapability" class="model-config-alert" role="status">
-          <b>尚未配置视频模型</b>
-          <span>请联系运营管理员绑定已验证的视频模型。配置完成后，本工作台会自动读取模型限制。</span>
+        <div v-if="workspaceReady && videoModelState !== 'ready'" class="model-config-alert" :class="`is-${videoModelState}`" role="alert">
+          <template v-if="videoModelState === 'required'">
+            <b>请选择视频模型</b>
+            <span>请在下方“生成参数”中选择一个视频模型。选择后，系统会显示对应的素材能力与生成限制。</span>
+          </template>
+          <template v-else-if="videoModelState === 'invalid'">
+            <b>当前视频模型不可用</b>
+            <span>此镜头保存的模型已不在可用列表中。请在下方重新选择视频模型。</span>
+          </template>
+          <template v-else>
+            <b>暂无可用视频模型</b>
+            <span>当前项目组没有可选的视频模型。请联系运营管理员检查模型绑定。</span>
+          </template>
         </div>
         <div class="creation-generate-dock" aria-label="当前镜头生成操作">
           <div class="creation-generate-summary"><b>生成镜头 {{ activeShotIndex + 1 }}</b><small>本次将发送 {{ requestAssets.length }} 个素材 · {{ duration }} 秒</small></div>
@@ -76,7 +86,7 @@
         </div>
         <section class="t0-generation-settings" aria-label="生成参数">
           <div class="t0-settings-heading"><b>生成参数</b><div v-if="isProjectMode" class="template-status"><el-tag size="small" :type="currentGenerationMode === 'custom' ? 'warning' : 'info'">{{ currentGenerationMode === 'master' ? '首镜母版' : currentGenerationMode === 'custom' ? '当前镜头覆盖' : '跟随首镜' }}</el-tag><el-button v-if="currentGenerationMode === 'custom'" text size="small" @click="restoreCurrentShotMaster">恢复跟随首镜</el-button></div><small>{{ currentGenerationMode === 'master' ? '调整后同步所有跟随镜头' : currentGenerationMode === 'custom' ? '本镜独立，不受首镜变化影响' : '默认采用第一个镜头参数，可单独覆盖' }}</small></div>
-          <GenerationSettings v-model="generationSettings" :max-duration="maxDuration" />
+          <GenerationSettings v-model="generationSettings" :max-duration="maxDuration" :video-model-invalid="videoModelState !== 'ready'" :video-model-error="videoModelFieldError" />
           <div class="parameters"><label>音频<el-select v-model="audioStrategy" size="small"><el-option label="音频参考" value="reference_only"/><el-option label="成片混音" value="post_mix"/></el-select></label></div>
         </section>
 
@@ -387,6 +397,16 @@ watch(activeVideoUrl, (url) => {
 }, { immediate: true })
 const canExtractFrames = computed(() => Number(activeJob.value?.video_generation_id) > 0 && activeJob.value?.status === 'completed')
 const currentCapability = computed(() => capabilities.value.find((item) => item.model === model.value) || null)
+const videoModelState = computed(() => {
+  if (!capabilities.value.length) return 'unavailable'
+  if (!model.value) return 'required'
+  return currentCapability.value ? 'ready' : 'invalid'
+})
+const videoModelFieldError = computed(() => ({
+  required: '请选择视频模型',
+  invalid: '当前选择不可用，请重新选择',
+  unavailable: '当前项目组暂无可用模型',
+})[videoModelState.value] || '')
 const shotLimits = computed(() => {
   const base = uploadLimits.value?.shot || { total: 12, image: 9, video: 3, audio: 3 }
   const limits = currentCapability.value?.limits || {}

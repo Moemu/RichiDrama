@@ -586,7 +586,10 @@ test('生产工作流保持稳定导航、比例预览和可展开的次要信�
   assert.match(free, /\.project-storyboard-page \.video-stage\{flex:0 0 auto!important;width:auto;height:clamp\(190px,28dvh,300px\);margin:12px auto!important;aspect-ratio:var\(--preview-aspect-ratio,16 \/ 9\)\}/)
   assert.match(free, /video-stage\.has-video \.main-video\{inset:0!important;transform:none\}/)
   assert.match(free, /class="creation-secondary-section"/)
-  assert.match(free, /尚未配置视频模型/)
+  assert.match(free, /videoModelState === 'required'/)
+  assert.match(free, /请选择视频模型/)
+  assert.match(free, /暂无可用视频模型/)
+  assert.match(free, /:video-model-invalid="videoModelState !== 'ready'"/)
 })
 
 test('切换成片先预加载下一条，再替换主播放器画面', async () => {
