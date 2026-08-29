@@ -97,7 +97,7 @@
         <el-tabs v-model="scriptWorkbenchMode" class="script-workbench-tabs">
           <el-tab-pane label="创作剧本" name="create">
             <div class="script-pane-inner">
-              <div class="script-sub-block">
+              <div class="script-sub-block script-story-block">
                 <h2 class="section-title">故事生成</h2>
                 <p class="section-desc">输入一段故事梗概，AI 帮你扩写成完整剧本，或直接导入小说章节</p>
                 <el-input
@@ -140,7 +140,7 @@
                 </div>
               </div>
               <div class="script-sub-divider" />
-              <div id="anchor-script" class="script-sub-block">
+              <div id="anchor-script" class="script-sub-block script-content-block">
                 <h2 class="section-title">剧本</h2>
                 <div class="row gap" style="margin-bottom: 10px; flex-wrap: wrap;">
                   <el-select
@@ -12080,4 +12080,24 @@ html.light .frame-layout-anchor {
 }
 .sb-omni-material-delete{position:absolute;z-index:2;top:6px;right:6px;min-width:24px!important;width:24px;height:24px;padding:0!important;border:1px solid rgba(255,255,255,.76)!important;background:rgba(30,36,54,.88)!important;color:#fff!important;box-shadow:0 1px 5px rgba(0,0,0,.38)}
 .sb-omni-material-delete:hover,.sb-omni-material-delete:focus-visible{border-color:#fff!important;background:var(--el-color-danger)!important;outline:2px solid color-mix(in srgb,var(--el-color-danger) 58%,transparent);outline-offset:1px}
+/* 生产工作流布局修复：状态变化不能移动导航，长文本必须获得稳定编辑空间。 */
+@media(min-width:961px){
+  .workflow-step:hover,.workflow-step.active{transform:none!important}
+  .workflow-step.active{animation:none!important}
+  .script-stage-active .script-pane-inner{grid-template-columns:minmax(20rem,.9fr) 1px minmax(0,1.3fr)}
+  .script-stage-active .script-sub-block{overflow:hidden;padding-right:0}
+  .script-stage-active .script-story-block,.script-stage-active .script-content-block{display:flex;flex-direction:column}
+  .script-stage-active .script-story-block>.story-textarea,.script-stage-active .script-content-block>.story-textarea{flex:1 1 auto;min-height:0}
+  .script-stage-active .script-story-block>.story-textarea:deep(.el-textarea__inner),.script-stage-active .script-content-block>.story-textarea:deep(.el-textarea__inner){height:100%!important;min-height:8rem!important;resize:none}
+  .merge-stage-active .config-grid{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+  .merge-stage-active .config-grid>.el-form-item{min-width:0;align-items:flex-start}
+  .merge-stage-active .video-option-row{display:grid;grid-template-columns:auto minmax(0,1fr);width:100%;min-width:0}
+  .merge-stage-active .video-option-hint,.merge-stage-active .video-watermark-input{grid-column:1 / -1;width:100%;min-width:0;max-width:none}
+  .merge-stage-active .merge-format-preview{flex:0 0 auto;align-items:start}
+  .merge-stage-active .main>:is(.merge-settings,.merge-output){overflow-y:auto;overscroll-behavior-y:contain;scrollbar-width:thin}
+}
+@media(min-width:961px) and (max-width:1500px){.merge-stage-active .config-grid{grid-template-columns:minmax(0,1fr)}}
+.storyboard-stage-active .main{padding-top:8px;padding-bottom:2px}
+.storyboard-stage-active .workflow-shell{margin-bottom:6px}
+.storyboard-stage-active .workflow-next-action{margin-top:6px;margin-bottom:0;padding-block:7px}
 </style>

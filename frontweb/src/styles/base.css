@@ -33,7 +33,7 @@ select { font: inherit; }
 button,
 [role="button"] { -webkit-tap-highlight-color: transparent; }
 
-:focus-visible {
+:focus-visible:not(.el-input__inner):not(.el-textarea__inner):not(.el-select__input) {
   outline: 2px solid var(--ui-focus);
   outline-offset: 2px;
 }

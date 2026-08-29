@@ -30,7 +30,7 @@
       <template v-if="currentShot">
       <section class="center-stage" aria-label="当前镜头播放与时间线">
         <div class="player-tools"><el-button text size="small" @click="selectRelative(-1)">上一镜</el-button><el-button text size="small" @click="selectRelative(1)">下一镜</el-button><span class="current-version">当前采用：{{ activeJob ? `版本 #${activeJob.video_generation_id || activeJob.id}` : '暂无版本' }}</span><el-tag :type="stageTagType" effect="dark">{{ stageLabel }}</el-tag></div>
-        <div class="video-stage" :class="{ rendering: ['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status), 'has-video': !!activeVideoUrl }">
+        <div class="video-stage" :class="{ rendering: ['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status), 'has-video': !!activeVideoUrl }" :style="{ '--preview-aspect-ratio': previewAspectRatio }">
           <template v-if="mediaLayers.length"><video v-for="layer in mediaLayers" :key="layer.id" :src="layer.url" :controls="layer.id === topMediaLayerId && layer.ready" playsinline preload="metadata" :autoplay="playOnSelection && layer.id === topMediaLayerId" class="main-video" :class="{ 'is-ready': layer.ready, 'is-current': layer.id === topMediaLayerId }" @canplay="promoteMediaLayer(layer.id)" @error="discardMediaLayer(layer.id)" /></template>
           <template v-else-if="['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status)"><div class="render-ring ring-one"></div><div class="render-ring ring-two"></div><div class="render-play">▶</div><b>{{ activeJob?.status === 'sd2_waiting' ? '真人素材认证准备中，完成后将自动生成' : generationProgressLabel }}</b><div class="generation-progress" role="status" aria-live="polite"><span><i :style="{ width: `${generationProgress}%` }"></i></span><em>{{ generationProgress }}%</em><small>{{ generationProgressMessage }}</small></div><el-button v-if="canCancelJob(activeJob)" size="small" type="warning" plain @click="cancelJob(activeJob)">取消未提交任务</el-button></template>
           <template v-else-if="activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)"><el-icon class="stage-warning"><WarningFilled /></el-icon><b>{{ stageLabel }}</b><small>{{ failureHint(activeJob) }}</small><div class="failure-actions"><el-button v-if="activeJob.status === 'unknown' || activeJob.status === 'billing_reconciliation'" type="primary" @click="refreshUnknownJob(activeJob)">手动刷新状态</el-button><el-button v-if="canAdoptSource(activeJob)" type="primary" @click="adoptSource(activeJob)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(activeJob)" :type="canAdoptSource(activeJob) ? 'default' : 'primary'" @click="retryPostprocess(activeJob)">仅重试{{ activeJob.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-else-if="activeJob.status === 'retryable'" type="primary" @click="retry(activeJob)">重新生成</el-button></div></template>
@@ -52,7 +52,20 @@
           <el-select v-model="freeProjectId" filterable :disabled="!!sequence?.drama_id" placeholder="选择计费项目" aria-label="选择计费归属项目"><el-option v-for="project in projects" :key="project.id" :label="project.title" :value="project.id"/></el-select>
         </section>
         <small class="mode-note">{{ creationMode === 'first_last_frame' ? '必须设置一张首帧（必填），尾帧可选；模型不支持时不可提交。' : '图片、视频、音频可按用途自由编排，按模型能力自动路由。' }}</small>
-        <el-alert v-if="!currentCapability" class="model-config-alert" type="warning" :closable="false" title="尚未配置可用的视频模型" description="请联系运营管理员为当前项目组绑定已验证的视频模型；配置后本工作台会自动读取它的素材能力与限制。" />
+        <div v-if="workspaceReady && videoModelState !== 'ready'" class="model-config-alert" :class="`is-${videoModelState}`" role="alert">
+          <template v-if="videoModelState === 'required'">
+            <b>请选择视频模型</b>
+            <span>请在下方“生成参数”中选择一个视频模型。选择后，系统会显示对应的素材能力与生成限制。</span>
+          </template>
+          <template v-else-if="videoModelState === 'invalid'">
+            <b>当前视频模型不可用</b>
+            <span>此镜头保存的模型已不在可用列表中。请在下方重新选择视频模型。</span>
+          </template>
+          <template v-else>
+            <b>暂无可用视频模型</b>
+            <span>当前项目组没有可选的视频模型。请联系运营管理员检查模型绑定。</span>
+          </template>
+        </div>
         <div class="creation-generate-dock" aria-label="当前镜头生成操作">
           <div class="creation-generate-summary"><b>生成镜头 {{ activeShotIndex + 1 }}</b><small>本次将发送 {{ requestAssets.length }} 个素材 · {{ duration }} 秒</small></div>
           <div class="creation-generate-actions"><el-button size="small" @click="requestPreviewOpen = true">预览请求</el-button><el-button class="generate-button" type="primary" :loading="creating" :disabled="!canCreate" @click="create">{{ creating ? '生成中…' : '生成当前镜头' }}</el-button></div>
@@ -73,11 +86,14 @@
         </div>
         <section class="t0-generation-settings" aria-label="生成参数">
           <div class="t0-settings-heading"><b>生成参数</b><div v-if="isProjectMode" class="template-status"><el-tag size="small" :type="currentGenerationMode === 'custom' ? 'warning' : 'info'">{{ currentGenerationMode === 'master' ? '首镜母版' : currentGenerationMode === 'custom' ? '当前镜头覆盖' : '跟随首镜' }}</el-tag><el-button v-if="currentGenerationMode === 'custom'" text size="small" @click="restoreCurrentShotMaster">恢复跟随首镜</el-button></div><small>{{ currentGenerationMode === 'master' ? '调整后同步所有跟随镜头' : currentGenerationMode === 'custom' ? '本镜独立，不受首镜变化影响' : '默认采用第一个镜头参数，可单独覆盖' }}</small></div>
-          <GenerationSettings v-model="generationSettings" :max-duration="maxDuration" />
+          <GenerationSettings v-model="generationSettings" :max-duration="maxDuration" :video-model-invalid="videoModelState !== 'ready'" :video-model-error="videoModelFieldError" />
           <div class="parameters"><label>音频<el-select v-model="audioStrategy" size="small"><el-option label="音频参考" value="reference_only"/><el-option label="成片混音" value="post_mix"/></el-select></label></div>
         </section>
 
-        <div class="materials-title"><div><b>当前镜头素材</b><small>仅显示本镜已加入的素材；上传后会自动加入本镜。</small></div><div><el-button text size="small" @click="projectLibraryOpen = true">从项目素材库加入</el-button><el-button text size="small" @click="$router.push('/media-library')">管理素材</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
+        <details class="creation-secondary-section">
+          <summary><b>当前镜头素材</b><small>已加入 {{ chosenAssets.length }} 个 · 按需展开</small></summary>
+          <div class="creation-secondary-body">
+        <div class="materials-title"><div><b>素材与引用</b><small>仅显示本镜已加入的素材；上传后会自动加入本镜。</small></div><div><el-button text size="small" @click="projectLibraryOpen = true">从项目素材库加入</el-button><el-button text size="small" @click="$router.push('/media-library')">管理素材</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
         <input ref="fileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="uploadFiles" />
         <div class="dropzone" @click="pickFiles" @dragover.prevent @drop.prevent="dropFiles"><el-icon><Upload /></el-icon>拖入图片、视频或音频</div>
         <small class="upload-limit-note">{{ limitSummary }}</small>
@@ -100,8 +116,12 @@
         </div>
         <div v-if="audioStrategy === 'post_mix'" class="audio-options"><el-checkbox v-model="keepOriginalAudio">保留原声</el-checkbox><el-slider v-model="audioVolume" :min="0" :max="2" :step="0.1"/><el-input-number v-model="audioFadeSeconds" :min="0" :max="10" size="small"/></div>
         <div v-if="expiredIdentityAssets.length" class="identity-expired-warn"><el-icon><WarningFilled /></el-icon><span>以下真人素材认证未成功：{{ expiredIdentityAssets.map((a) => a.alias || a.name).join('、') }}。请检查素材或认证配置后重新勾选“含真人”。</span></div>
+          </div>
+        </details>
+        <details class="creation-secondary-section creation-history-section">
+          <summary><b>本镜生成记录</b><small>{{ shotHistory.length }} 个版本 · 按需展开</small></summary>
+          <div class="creation-secondary-body">
         <section class="generation-history">
-          <div class="generation-history-head"><b>本镜生成记录</b><small>{{ shotHistory.length }} 个版本</small></div>
           <div class="generation-history-grid">
             <article v-for="job in shotHistory" :key="job.id" class="generation-history-item" :class="{ active: String(selectedHistoryJobId) === String(job.id) }" role="button" tabindex="0" @click="selectHistoryJob(job)" @keydown.enter.prevent="selectHistoryJob(job)" @keydown.space.prevent="selectHistoryJob(job)">
               <img v-if="historyPoster(job)" :src="historyPoster(job)" alt="" class="history-poster"/><span v-else class="history-video-empty"><el-icon><VideoCamera /></el-icon>{{ job.videoUrl ? '点击切换成片' : (['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(job.status) ? '处理中' : '暂无预览') }}</span>
@@ -111,6 +131,8 @@
           </div>
           <p v-if="!shotHistory.length" class="generation-history-empty">尚无生成记录。每次生成都会保留为独立版本。</p>
         </section>
+          </div>
+        </details>
       </aside>
       </template>
       <section v-else class="empty-shot-workspace" aria-label="空镜头工作区" aria-live="polite">
@@ -375,6 +397,16 @@ watch(activeVideoUrl, (url) => {
 }, { immediate: true })
 const canExtractFrames = computed(() => Number(activeJob.value?.video_generation_id) > 0 && activeJob.value?.status === 'completed')
 const currentCapability = computed(() => capabilities.value.find((item) => item.model === model.value) || null)
+const videoModelState = computed(() => {
+  if (!capabilities.value.length) return 'unavailable'
+  if (!model.value) return 'required'
+  return currentCapability.value ? 'ready' : 'invalid'
+})
+const videoModelFieldError = computed(() => ({
+  required: '请选择视频模型',
+  invalid: '当前选择不可用，请重新选择',
+  unavailable: '当前项目组暂无可用模型',
+})[videoModelState.value] || '')
 const shotLimits = computed(() => {
   const base = uploadLimits.value?.shot || { total: 12, image: 9, video: 3, audio: 3 }
   const limits = currentCapability.value?.limits || {}
@@ -385,6 +417,10 @@ const shotLimits = computed(() => {
   }
 })
 const maxDuration = computed(() => Math.max(4, Number(currentCapability.value?.limits?.duration?.max || 15)))
+const previewAspectRatio = computed(() => {
+  const [width, height] = String(aspectRatio.value || '16:9').split(':').map(Number)
+  return width > 0 && height > 0 ? `${width} / ${height}` : '16 / 9'
+})
 const normalizeDuration = (value) => Math.min(maxDuration.value, Math.max(4, Math.round(Number(value) || 15)))
 const generationSettings = computed({ get: () => ({ video_model: model.value, aspect_ratio: aspectRatio.value, duration: duration.value, resolution: resolution.value, upscale_resolution: upscaleResolution.value, target_fps: targetFps.value }), set: (next) => { model.value = next.video_model || ''; aspectRatio.value = next.aspect_ratio || '16:9'; duration.value = normalizeDuration(next.duration); resolution.value = next.resolution || '720p'; upscaleResolution.value = next.upscale_resolution || null; targetFps.value = next.target_fps || null } })
 const selectionCounts = computed(() => chosenAssets.value.reduce((result, asset) => { if (Object.prototype.hasOwnProperty.call(result, asset.type)) result[asset.type] += 1; return result }, { image: 0, video: 0, audio: 0 }))
@@ -1416,4 +1452,18 @@ defineExpose({ refreshProjectShots })
 .billing-project-field{display:grid;grid-template-columns:minmax(0,1fr) minmax(156px,44%);gap:10px;align-items:center;margin:12px 0;padding:10px;border:1px solid color-mix(in srgb,var(--studio-accent) 52%,var(--border-color));border-radius:8px;background:color-mix(in srgb,var(--studio-accent) 10%,var(--bg-raised))}.billing-project-field b{display:block;color:var(--text-primary);font-size:13px}.billing-project-field small{display:block;margin-top:4px;color:var(--text-muted);line-height:1.45;font-size:11px}.billing-project-field :deep(.el-select__wrapper){min-height:34px;border-color:color-mix(in srgb,var(--studio-accent) 58%,var(--border-color))}@media(max-width:1080px){.billing-project-field{grid-template-columns:1fr}.billing-project-field :deep(.el-select){width:100%}}
 /* 素材区分为本镜工作集和项目检索库：编辑镜头时只浏览正在使用的素材。 */
 .materials-title>div:first-child{min-width:0}.materials-title>div:first-child small{display:block;max-width:210px;margin-top:2px;line-height:1.35;color:var(--text-muted)!important;font-size:11px!important}.current-shot-material-pool{min-height:72px}.current-shot-material-empty{grid-column:1 / -1;margin:0;padding:12px 4px;color:var(--text-muted);font-size:12px;line-height:1.5}.project-asset-library-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 160px;gap:10px}.project-asset-library-note{margin:10px 0;color:var(--el-text-color-secondary);font-size:13px;line-height:1.5}.project-asset-library-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px;max-height:min(54vh,500px);overflow:auto;padding:2px}.project-asset-library-card{position:relative;display:grid;gap:4px;min-width:0;padding:6px;overflow:hidden;border:1px solid var(--el-border-color);border-radius:8px;background:var(--el-fill-color-blank);color:var(--el-text-color-primary);text-align:left;cursor:pointer}.project-asset-library-card:hover{border-color:var(--studio-teal)}.project-asset-library-card.selected{border:2px solid #fff;box-shadow:0 0 0 2px rgb(84 234 212 / 52%)}.project-asset-library-card img,.project-asset-library-card>span{display:grid;width:100%;height:82px;place-items:center;object-fit:cover;border-radius:5px;background:var(--el-fill-color-light);color:var(--el-text-color-secondary)}.project-asset-library-card b,.project-asset-library-card small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.project-asset-library-card b{font-size:12px}.project-asset-library-card small{font-size:11px;color:var(--el-text-color-secondary)}.project-asset-library-card em{position:absolute;right:6px;top:6px;padding:2px 5px;border-radius:4px;background:#111c;color:#fff;font-size:10px;font-style:normal}.project-asset-library-card.selected em{background:#fff;color:#151515;font-weight:700}.project-asset-library-empty{grid-column:1 / -1;margin:0;padding:24px 0;text-align:center;color:var(--el-text-color-secondary);font-size:13px}@media(max-width:640px){.project-asset-library-toolbar{grid-template-columns:1fr}.project-asset-library-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* 项目分镜修复：舞台与成片使用同一比例，顶部信息不能被主编辑区压缩。 */
+.project-storyboard-page .player-tools{flex:0 0 44px;min-height:44px;overflow:visible}
+.project-storyboard-page .frame-actions,.project-storyboard-page .time-ruler,.project-storyboard-page .shot-tabs{flex:0 0 auto}
+.project-storyboard-page .video-stage{flex:0 0 auto!important;width:auto;height:clamp(190px,28dvh,300px);margin:12px auto!important;aspect-ratio:var(--preview-aspect-ratio,16 / 9)}
+.project-storyboard-page .main-video{width:100%!important;height:100%!important;aspect-ratio:inherit;object-fit:contain}
+.project-storyboard-page .video-stage.has-video .main-video{inset:0!important;transform:none}
+.model-config-alert{display:grid;gap:3px;margin:9px 0;padding:9px 10px;border:1px solid color-mix(in srgb,var(--status-warning) 46%,var(--border-color));border-radius:9px;background:color-mix(in srgb,var(--status-warning) 9%,var(--bg-raised));color:var(--text-regular)}
+.model-config-alert b{color:var(--text-primary);font-size:12px}.model-config-alert span{font-size:11px;line-height:1.45}
+.creation-secondary-section{margin-top:10px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-raised);overflow:hidden}
+.creation-secondary-section>summary{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 11px;color:var(--text-primary);cursor:pointer;list-style:none}
+.creation-secondary-section>summary::-webkit-details-marker{display:none}.creation-secondary-section>summary::after{content:'展开';flex:none;color:var(--text-muted);font-size:10px}.creation-secondary-section[open]>summary::after{content:'收起'}
+.creation-secondary-section>summary b{font-size:12px}.creation-secondary-section>summary small{margin-left:auto;color:var(--text-muted);font-size:10px}
+.creation-secondary-body{padding:0 10px 10px;border-top:1px solid var(--border-subtle)}
+.creation-secondary-body .materials-title{margin-top:10px}.creation-history-section .generation-history{margin-top:0;padding-top:10px;border-top:0}
 </style>

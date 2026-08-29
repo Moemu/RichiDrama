@@ -1,7 +1,7 @@
 <template>
   <section class="generation-settings" aria-label="生成参数">
     <UiChoiceField v-if="showTextModel" label="文本模型" :model-value="value.text_model || 'auto'" :options="textModelOptions" @update:model-value="set('text_model', $event)" />
-    <UiChoiceField label="视频模型" :model-value="value.video_model || ''" :options="videoModelOptions" @update:model-value="set('video_model', $event)" />
+    <UiChoiceField label="视频模型" :model-value="value.video_model || ''" :options="videoModelOptions" :invalid="videoModelInvalid" :error="videoModelError" @update:model-value="set('video_model', $event)" />
     <UiChoiceField class="duration-setting" label="时长（秒）" :model-value="duration" :options="durationOptions.map((second) => ({ label: `${second} 秒`, value: second }))" @update:model-value="set('duration', $event)" />
     <UiChoiceField label="分辨率" :model-value="value.resolution || '720p'" :options="resolutionOptions" @update:model-value="set('resolution', $event)" />
     <UiChoiceField label="AI 超分（新镜头默认 1080p）" :model-value="value.upscale_resolution || ''" :options="upscaleOptions" @update:model-value="set('upscale_resolution', $event || null)" />
@@ -23,7 +23,13 @@ import { omniVideoAPI } from '@/api/omniVideo'
 import { videosAPI } from '@/api/videos'
 import UiChoiceField from '@/components/ui/UiChoiceField.vue'
 
-const props = defineProps({ modelValue: { type: Object, default: () => ({}) }, showTextModel: { type: Boolean, default: false }, maxDuration: { type: Number, default: 60 } })
+const props = defineProps({
+  modelValue: { type: Object, default: () => ({}) },
+  showTextModel: { type: Boolean, default: false },
+  maxDuration: { type: Number, default: 60 },
+  videoModelInvalid: { type: Boolean, default: false },
+  videoModelError: { type: String, default: '' },
+})
 const emit = defineEmits(['update:modelValue'])
 const textModels = ref([]), videoModels = ref([])
 let modelOptionsCache = null
