@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
 const theme = read('../src/styles/theme.css')
+const base = read('../src/styles/base.css')
 const index = read('../index.html')
 const themeComposable = read('../src/composables/useTheme.js')
 const plan = read('../../docs/plans/2026-08-13-light-dark-ui-full-adaptation.md')
@@ -34,6 +35,10 @@ test('native loading surfaces and browser chrome follow the selected theme', () 
 
 test('interaction and display preferences remain accessible', () => {
   assert.match(theme, /:focus-visible[^{]*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/s)
+  assert.doesNotMatch(theme, /input:focus-visible|textarea:focus-visible|select:focus-visible/)
+  assert.match(theme, /\[tabindex\]:not\(\[tabindex="-1"\]\):not\(\.el-input__inner\):not\(\.el-textarea__inner\):not\(\.el-select__input\):focus-visible/)
+  assert.match(theme, /\.el-input__wrapper\.is-focus, \.el-textarea__wrapper:focus-within, \.el-select__wrapper\.is-focused \{ box-shadow:/)
+  assert.match(base, /:focus-visible:not\(\.el-input__inner\):not\(\.el-textarea__inner\):not\(\.el-select__input\)/)
   assert.match(theme, /@media \(prefers-reduced-motion: reduce\)/)
   assert.match(theme, /@media \(prefers-contrast: more\)/)
   assert.match(theme, /@media \(forced-colors: active\)/)

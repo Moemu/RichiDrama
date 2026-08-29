@@ -159,8 +159,9 @@ h1 { font-size: 28px; letter-spacing: -.02em; }
 h2 { font-size: 22px; letter-spacing: -.015em; }
 h3 { font-size: 19px; letter-spacing: -.01em; }
 p { line-height: 1.7; }
-button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible,
-[tabindex]:not([tabindex="-1"]):focus-visible, .el-button:focus-visible, .el-radio-button__inner:focus-visible {
+button:focus-visible, a:focus-visible,
+[tabindex]:not([tabindex="-1"]):not(.el-input__inner):not(.el-textarea__inner):not(.el-select__input):focus-visible,
+.el-button:focus-visible, .el-radio-button__inner:focus-visible {
   outline: 2px solid var(--focus-ring) !important; outline-offset: 2px;
 }
 
@@ -331,7 +332,7 @@ html body #app .muted, html body #app small { font-size: 13px !important; line-h
     --border-subtle: #a59c91;
     --focus-ring: #4d3cb7;
   }
-  button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  button:focus-visible, a:focus-visible {
     outline-width: 3px;
   }
 }

@@ -578,7 +578,7 @@ test('生产工作流保持稳定导航、比例预览和可展开的次要信�
   assert.match(film, /\.workflow-step\.active\{animation:none!important\}/)
   assert.match(film, /script-story-block/)
   assert.match(film, /script-content-block/)
-  assert.match(film, /\.story-textarea:deep\(\.el-textarea__inner\.is-focus\)\{outline-offset:-2px!important\}/)
+  assert.doesNotMatch(film, /\.el-textarea__inner\.is-focus\)\{outline-offset:/)
   assert.match(film, /\.merge-stage-active \.video-option-hint,\.merge-stage-active \.video-watermark-input\{grid-column:1 \/ -1;width:100%;min-width:0/)
   assert.match(film, /\.merge-stage-active \.main>:is\(\.merge-settings,\.merge-output\)\{overflow-y:auto;overscroll-behavior-y:contain/)
   assert.match(free, /'--preview-aspect-ratio': previewAspectRatio/)

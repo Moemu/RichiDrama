@@ -12089,7 +12089,6 @@ html.light .frame-layout-anchor {
   .script-stage-active .script-story-block,.script-stage-active .script-content-block{display:flex;flex-direction:column}
   .script-stage-active .script-story-block>.story-textarea,.script-stage-active .script-content-block>.story-textarea{flex:1 1 auto;min-height:0}
   .script-stage-active .script-story-block>.story-textarea:deep(.el-textarea__inner),.script-stage-active .script-content-block>.story-textarea:deep(.el-textarea__inner){height:100%!important;min-height:8rem!important;resize:none}
-  .script-stage-active .story-textarea:deep(.el-textarea__inner.is-focus){outline-offset:-2px!important}
   .merge-stage-active .config-grid{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
   .merge-stage-active .config-grid>.el-form-item{min-width:0;align-items:flex-start}
   .merge-stage-active .video-option-row{display:grid;grid-template-columns:auto minmax(0,1fr);width:100%;min-width:0}
