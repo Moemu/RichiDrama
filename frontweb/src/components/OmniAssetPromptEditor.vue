@@ -70,6 +70,7 @@ let dragCounter = 0
 let lastCaretOffset = 0
 let layoutCache = null
 let dragRaf = 0
+let pickerRaf = 0
 let latestDragPoint = null
 let emittedReferenceSignature = ''
 
@@ -82,6 +83,8 @@ onMounted(() => {
   window.addEventListener(ASSET_POINTER_MOVE, onAssetPointerMove)
   window.addEventListener(ASSET_POINTER_DROP, onAssetPointerDrop)
   window.addEventListener(ASSET_POINTER_CANCEL, onAssetPointerCancel)
+  window.addEventListener('resize', schedulePickerPosition)
+  window.addEventListener('scroll', schedulePickerPosition, true)
 })
 
 // @ 选择器：显示全部素材，已选的标记 _chosen
@@ -129,15 +132,52 @@ onBeforeUnmount(() => {
   window.removeEventListener(ASSET_POINTER_MOVE, onAssetPointerMove)
   window.removeEventListener(ASSET_POINTER_DROP, onAssetPointerDrop)
   window.removeEventListener(ASSET_POINTER_CANCEL, onAssetPointerCancel)
+  window.removeEventListener('resize', schedulePickerPosition)
+  window.removeEventListener('scroll', schedulePickerPosition, true)
+  if (pickerRaf) cancelAnimationFrame(pickerRaf)
 })
 
+function schedulePickerPosition() {
+  if (!showPicker.value || pickerRaf) return
+  pickerRaf = requestAnimationFrame(() => {
+    pickerRaf = 0
+    positionPickerAndMention()
+  })
+}
+
 function positionPickerAndMention() {
-  const rect = editorRef.value?.getBoundingClientRect()
-  if (!rect) return
-  const width = Math.min(Math.max(280, window.innerWidth - 16), Math.max(420, Math.min(760, rect.width)))
-  const height = Math.min(260, Math.max(180, window.innerHeight - 24))
-  const top = rect.top >= height + 12 ? rect.top - height - 8 : rect.bottom + 8
-  pickerStyle.value = { position: 'fixed', left: `${Math.max(8, Math.min(window.innerWidth - width - 8, rect.left))}px`, top: `${Math.max(8, top)}px`, width: `${width}px`, maxHeight: `${height}px` }
+  const editorRect = editorRef.value?.getBoundingClientRect()
+  if (!editorRect) return
+  const selection = window.getSelection()
+  let anchor = null
+  if (selection?.rangeCount && editorRef.value?.contains(selection.anchorNode)) {
+    const range = selection.getRangeAt(0).cloneRange()
+    range.collapse(true)
+    const caretRect = visualRectForCollapsedRange(range)
+    if (caretRect) anchor = { left: caretRect.left, top: caretRect.top, bottom: caretRect.top + Math.max(18, caretRect.height || 0) }
+  }
+  anchor ||= { left: editorRect.left, top: editorRect.top, bottom: Math.min(editorRect.bottom, editorRect.top + 24) }
+  const viewportPad = 8
+  const gap = 6
+  const visibleTop = Math.max(viewportPad, editorRect.top)
+  const visibleBottom = Math.min(window.innerHeight - viewportPad, editorRect.bottom)
+  if (anchor.bottom < visibleTop || anchor.top > visibleBottom) {
+    showPicker.value = false
+    return
+  }
+  const width = Math.min(window.innerWidth - viewportPad * 2, Math.max(320, Math.min(640, editorRect.width)))
+  const spaceBelow = window.innerHeight - anchor.bottom - gap - viewportPad
+  const spaceAbove = anchor.top - gap - viewportPad
+  const placeBelow = spaceBelow >= 180 || spaceBelow >= spaceAbove
+  const maxHeight = Math.min(260, Math.max(96, placeBelow ? spaceBelow : spaceAbove))
+  const left = Math.max(viewportPad, Math.min(window.innerWidth - width - viewportPad, anchor.left))
+  const top = placeBelow
+    ? Math.max(viewportPad, Math.min(window.innerHeight - viewportPad, anchor.bottom + gap))
+    : Math.max(viewportPad, Math.min(window.innerHeight - viewportPad, anchor.top - gap))
+  pickerStyle.value = {
+    position: 'fixed', left: `${left}px`, top: `${top}px`, width: `${width}px`, maxHeight: `${maxHeight}px`,
+    transform: placeBelow ? 'none' : 'translateY(-100%)', transformOrigin: placeBelow ? 'top left' : 'bottom left',
+  }
 }
 
 function referencesFromText(value) {

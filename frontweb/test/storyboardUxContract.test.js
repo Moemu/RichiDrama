@@ -71,6 +71,11 @@ test('asset mention menus are teleported translucent overlays with bounded inter
   assert.match(promptEditor, /pickerMatches\.value\.slice\(0, 30\)/)
   assert.match(promptEditor, /pickerMatchCount > pickerAssets\.length/)
   assert.match(promptEditor, /loading="lazy" decoding="async"/)
+  assert.match(promptEditor, /const caretRect = visualRectForCollapsedRange\(range\)/)
+  assert.match(promptEditor, /window\.addEventListener\('scroll', schedulePickerPosition, true\)/)
+  assert.match(promptEditor, /transform: placeBelow \? 'none' : 'translateY\(-100%\)'/)
+  assert.match(promptEditor, /if \(anchor\.bottom < visibleTop \|\| anchor\.top > visibleBottom\)/)
+  assert.doesNotMatch(promptEditor, /const top = rect\.top >= height \+ 12/)
 })
 
 test('asset drag shows an exact text-boundary caret and rejects whitespace-only lines', () => {
