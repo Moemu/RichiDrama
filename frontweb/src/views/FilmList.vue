@@ -15,10 +15,9 @@
       <div v-loading="loading" class="projects-wrap" :class="{ 'showing-records': recordsOpen }">
         <section class="media-stage" aria-labelledby="media-stage-title">
           <div class="media-canvas" aria-hidden="true">
-            <template v-if="heroVideoLayers.length"><video v-for="layer in heroVideoLayers" :key="layer.id" :src="layer.url" :autoplay="layer.id === activeHeroLayerId && layer.ready" muted playsinline preload="auto" :class="{ 'hero-video-layer': true, 'is-ready': layer.ready, 'is-current': layer.id === activeHeroLayerId }" @loadeddata="promoteHeroVideoLayer(layer.id, $event)" @canplay="promoteHeroVideoLayer(layer.id, $event)" @ended="layer.id === activeHeroLayerId && advanceHeroVideo()" @error="discardHeroVideoLayer(layer.id)"></video></template>
+            <template v-if="heroVideos.length"><video v-for="video in heroVideos" :key="video.key" :ref="element => setHeroVideoElement(video.key, element)" :src="video.url" muted playsinline preload="auto" :class="{ 'hero-video-layer': true, 'is-ready': !!heroVideoReady[video.key], 'is-current': video.key === displayedHeroVideoKey, 'is-incoming': video.key === incomingHeroVideoKey }" @loadeddata="markHeroVideoReady(video, $event)" @canplay="markHeroVideoReady(video, $event)" @timeupdate="maybeAdvanceHeroVideo(video, $event)" @ended="finishHeroVideo(video)" @error="discardHeroVideo(video)"></video></template>
             <div v-else class="media-empty-motion"><i></i><i></i><i></i></div>
           </div>
-          <video v-if="nextHeroVideo" class="hero-video-preload" :key="nextHeroVideo.key" :src="nextHeroVideo.url" muted playsinline preload="metadata" aria-hidden="true" tabindex="-1"></video>
           <div class="media-stage-shade"></div>
           <div class="media-stage-content">
             <p class="stage-kicker"><span></span> 创作中心</p>
@@ -48,7 +47,7 @@
           <aside v-if="allRecords.length" class="recent-stack" aria-label="最近项目">
             <p>最近项目</p>
             <button v-for="(record, index) in allRecords.slice(0, 3)" :key="`${record.type}-${record.id}`" type="button" @click="openRecord(record)">
-              <span class="recent-thumb"><video v-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><img v-else-if="recordCover(record)" :src="recordCover(record)" alt="" /><i v-else>{{ String(index + 1).padStart(2, '0') }}</i></span><div><small>{{ record.type === 'drama' ? '短剧' : '全能视频' }}</small><b>{{ record.title }}</b><em>{{ record.meta }}</em></div><i>→</i>
+              <span class="recent-thumb"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" /><video v-else-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><i v-else>{{ String(index + 1).padStart(2, '0') }}</i></span><div><small>{{ record.type === 'drama' ? '短剧' : '全能视频' }}</small><b>{{ record.title }}</b><em>{{ record.meta }}</em></div><i>→</i>
             </button>
           </aside>
           <aside v-if="recordsOpen" id="creation-records" class="records-panel" aria-labelledby="records-title">
@@ -64,7 +63,7 @@
               <article v-for="(record, index) in filteredRecords" :key="`${record.type}-${record.id}`" class="record-row">
                 <button type="button" class="record-open" @click="openRecord(record)">
                   <span class="record-index">{{ String(index + 1).padStart(2, '0') }}</span>
-                  <span class="record-thumb" :class="{ 'has-image': recordCover(record) || recordVideo(record) }"><video v-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><img v-else-if="recordCover(record)" :src="recordCover(record)" alt="" loading="lazy" decoding="async" /><i v-else>{{ record.type === 'drama' ? '剧' : '片' }}</i></span>
+                  <span class="record-thumb" :class="{ 'has-image': recordCover(record) || recordVideo(record) }"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" loading="lazy" decoding="async" /><video v-else-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><i v-else>{{ record.type === 'drama' ? '剧' : '片' }}</i></span>
                   <span class="record-title"><small>{{ record.label }}</small><b :title="record.title">{{ record.title }}</b><em>{{ record.description }}</em></span>
                   <span class="record-meta">{{ record.meta }}</span><span class="record-arrow">→</span>
                 </button>
@@ -358,7 +357,7 @@
 </template>
 
 <script setup>
-import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, ref, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Edit, Delete, Download, PictureFilled, QuestionFilled, FolderOpened, MagicStick } from '@element-plus/icons-vue'
@@ -482,10 +481,16 @@ const heroVideoFailed = ref(false)
 const heroVideoIndex = ref(0)
 /** 主页背景展示模式：default=系统默认兜底；recent=自己的最近作品。默认兜底，切换才显示最近。 */
 const heroMode = ref('default')
-const heroVideoLayers = ref([])
+const heroVideoReady = ref({})
+const displayedHeroVideoKey = ref('')
+const incomingHeroVideoKey = ref('')
+const heroVideoElements = new Map()
 let heroRotationTimer = null
-let heroVideoLayerSequence = 0
-let heroVideoLayerTransitionTimer = null
+let heroVideoRevealTimer = null
+let heroVideoTransitionTimer = null
+let heroVideoSwapSequence = 0
+let heroVideoActivatingKey = ''
+let heroVideoAdvanceKey = ''
 
 function assetCoverUrl(asset) {
   if (!asset) return ''
@@ -503,24 +508,26 @@ function assetMediaUrl(asset) {
 
 const heroMedia = computed(() => workspaceAssets.value.filter(asset => assetCoverUrl(asset)).slice(0, 10))
 const heroVideos = computed(() => {
-  const seen = new Set()
+  const recentSeen = new Set()
   const recentVideos = [...workspaceVideos.value]
     .filter(video => video.status === 'completed' && assetMediaUrl(video))
     .map(video => ({ key: `video-${video.id}-${assetMediaUrl(video)}`, url: assetMediaUrl(video), projectId: video.drama_id || null }))
     .filter(video => {
-      if (seen.has(video.url)) return false
-      seen.add(video.url)
+      if (recentSeen.has(video.url)) return false
+      recentSeen.add(video.url)
       return true
     })
     // 主页只保留最近四条，控制预加载数量；同一项目的多个成片也属于可轮播作品。
     .slice(0, 4)
   // 默认展示系统默认兜底资源；仅当用户手动切换到「最近作品」模式才展示自己的成片。
+  const defaultSeen = new Set()
   const defaults = defaultHeroVideos.value
     .filter(video => video.status === 'completed' && (video.oss_url || assetMediaUrl(video)))
-    .map(video => ({ key: `default-video-${video.id}-${(video.oss_url || assetMediaUrl(video))}`, url: video.oss_url || assetMediaUrl(video), projectId: null }))
+    // 同源 /static 响应有明确的浏览器缓存策略。仅在没有持久化路径时使用 CDN 地址。
+    .map(video => ({ key: `default-video-${video.id}-${(assetMediaUrl(video) || video.oss_url)}`, url: assetMediaUrl(video) || video.oss_url, projectId: null }))
     .filter(video => {
-      if (seen.has(video.url)) return false
-      seen.add(video.url)
+      if (defaultSeen.has(video.url)) return false
+      defaultSeen.add(video.url)
       return true
     })
     .slice(0, 3)
@@ -528,36 +535,88 @@ const heroVideos = computed(() => {
 })
 const activeHeroVideo = computed(() => heroVideos.value[heroVideoIndex.value] || null)
 const nextHeroVideo = computed(() => heroVideos.value.length > 1 ? heroVideos.value[(heroVideoIndex.value + 1) % heroVideos.value.length] : null)
-const activeHeroLayerId = computed(() => heroVideoLayers.value.at(-1)?.id || null)
-function discardHeroVideoLayer(id) {
-  const index = heroVideoLayers.value.findIndex((layer) => layer.id === id)
-  if (index < 0) return
-  heroVideoLayers.value.splice(index, 1)
-  if (!heroVideoLayers.value.length) handleHeroVideoError()
+function setHeroVideoElement(key, element) {
+  if (element) heroVideoElements.set(key, element)
+  else heroVideoElements.delete(key)
 }
-function promoteHeroVideoLayer(id, event) {
-  const layer = heroVideoLayers.value.find((item) => item.id === id)
-  if (!layer || layer.ready) return
-  layer.ready = true
-  // 只在静音的主页背景视频上显式续播；浏览器不会因轮播切换停在首帧。
-  event?.currentTarget?.play?.().catch(() => {})
-  window.clearTimeout(heroVideoLayerTransitionTimer)
-  heroVideoLayerTransitionTimer = window.setTimeout(() => {
-    const current = heroVideoLayers.value.find((item) => item.id === id)
-    if (current) heroVideoLayers.value = [current]
-  }, 220)
+function pauseInactiveHeroVideos(activeKey) {
+  heroVideoElements.forEach((element, key) => { if (key !== activeKey) element.pause?.() })
 }
-watch(activeHeroVideo, (video) => {
-  const url = String(video?.url || '')
-  if (!url) {
-    window.clearTimeout(heroVideoLayerTransitionTimer)
-    heroVideoLayers.value = []
+function revealHeroVideo(video, element) {
+  if (!video?.key || activeHeroVideo.value?.key !== video.key || heroVideoActivatingKey === video.key) return
+  heroVideoActivatingKey = video.key
+  heroVideoAdvanceKey = ''
+  const sequence = ++heroVideoSwapSequence
+  window.clearTimeout(heroVideoRevealTimer)
+  if (element.ended || element.currentTime > 0.12) {
+    try { element.currentTime = 0 } catch (_) {}
+  }
+  const reveal = () => {
+    if (sequence !== heroVideoSwapSequence || activeHeroVideo.value?.key !== video.key) return
+    window.clearTimeout(heroVideoRevealTimer)
+    if (!displayedHeroVideoKey.value || displayedHeroVideoKey.value === video.key) {
+      incomingHeroVideoKey.value = ''
+      displayedHeroVideoKey.value = video.key
+      heroVideoActivatingKey = ''
+      pauseInactiveHeroVideos(video.key)
+      return
+    }
+    // 旧视频保持全亮。新视频在上层完成淡入后，才替换当前视频。
+    incomingHeroVideoKey.value = video.key
+    window.clearTimeout(heroVideoTransitionTimer)
+    heroVideoTransitionTimer = window.setTimeout(() => {
+      if (sequence !== heroVideoSwapSequence || activeHeroVideo.value?.key !== video.key) return
+      displayedHeroVideoKey.value = video.key
+      incomingHeroVideoKey.value = ''
+      heroVideoActivatingKey = ''
+      pauseInactiveHeroVideos(video.key)
+    }, 160)
+  }
+  element.play?.().catch(() => {})
+  if (typeof element.requestVideoFrameCallback === 'function') element.requestVideoFrameCallback(reveal)
+  heroVideoRevealTimer = window.setTimeout(reveal, 500)
+}
+function markHeroVideoReady(video, event) {
+  if (!video?.key) return
+  if (!heroVideoReady.value[video.key]) heroVideoReady.value = { ...heroVideoReady.value, [video.key]: true }
+  if (activeHeroVideo.value?.key === video.key) revealHeroVideo(video, event.currentTarget)
+}
+function discardHeroVideo(video) {
+  if (!video?.key) return
+  heroVideoReady.value = { ...heroVideoReady.value, [video.key]: false }
+  if (activeHeroVideo.value?.key === video.key) handleHeroVideoError()
+}
+function maybeAdvanceHeroVideo(video, event) {
+  if (video?.key !== displayedHeroVideoKey.value || video.key !== activeHeroVideo.value?.key || heroVideoAdvanceKey === video.key) return
+  const element = event.currentTarget
+  if (Number.isFinite(element.duration) && element.duration > 0.5 && element.duration - element.currentTime <= 0.2) {
+    heroVideoAdvanceKey = video.key
+    advanceHeroVideo()
+  }
+}
+function finishHeroVideo(video) {
+  if (video?.key !== activeHeroVideo.value?.key || heroVideoAdvanceKey === video.key) return
+  heroVideoAdvanceKey = video.key
+  advanceHeroVideo()
+}
+watch(activeHeroVideo, async (video) => {
+  heroVideoAdvanceKey = ''
+  heroVideoActivatingKey = ''
+  ++heroVideoSwapSequence
+  window.clearTimeout(heroVideoRevealTimer)
+  window.clearTimeout(heroVideoTransitionTimer)
+  incomingHeroVideoKey.value = ''
+  if (!video?.key) {
+    displayedHeroVideoKey.value = ''
+    pauseInactiveHeroVideos('')
     return
   }
-  const latest = heroVideoLayers.value.at(-1)
-  if (latest?.url === url) return
-  // 保留上一条背景成片，直到下一条媒体可播放；主页切换不再闪出静态封面。
-  heroVideoLayers.value.push({ id: ++heroVideoLayerSequence, url, ready: heroVideoLayers.value.length === 0 })
+  await nextTick()
+  const element = heroVideoElements.get(video.key)
+  if (element && element.readyState >= 3) {
+    heroVideoReady.value = { ...heroVideoReady.value, [video.key]: true }
+    revealHeroVideo(video, element)
+  }
 }, { immediate: true })
 
 function stopHeroRotation() {
@@ -1097,7 +1156,7 @@ onMounted(async () => {
   } catch (_) {}
 })
 
-onBeforeUnmount(() => { stopHeroRotation(); window.clearTimeout(heroVideoLayerTransitionTimer) })
+onBeforeUnmount(() => { stopHeroRotation(); window.clearTimeout(heroVideoRevealTimer); window.clearTimeout(heroVideoTransitionTimer); pauseInactiveHeroVideos('') })
 </script>
 
 <style scoped>
@@ -2153,12 +2212,11 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
   .recent-stack>p{padding:.9rem .9rem .48rem;font-size:.68rem}.recent-stack button{min-height:5.2rem;padding:.6rem .8rem}.recent-thumb{width:3rem;height:3rem}.recent-stack small{font-size:.62rem}.recent-stack b{font-size:.98rem}.recent-stack em{font-size:.68rem}.recent-stack>button>i{font-size:.85rem}
 }
 @media (max-width:70rem){.records-panel{right:1rem;left:1rem;width:auto}.records-panel .records-heading{grid-template-columns:1fr auto}.records-panel .record-search{grid-column:1/-1}.records-panel .record-open{grid-template-columns:1.5rem 4.2rem minmax(0,1fr) 1rem}.records-panel .record-thumb{width:4.2rem;height:3.2rem}.records-panel .record-meta{display:none}}
-.hero-video-preload{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 /* 媒体是舞台背景层，不能进入普通文档流把首屏文字推到视口外。 */
-.media-stage>.media-canvas{position:absolute;inset:0}
-/* 主页轮播不使用静态 poster 过渡：新视频可播放后才淡入，旧视频始终留在底层。 */
-.media-canvas>.hero-video-layer{position:absolute;inset:0;z-index:1;opacity:0;pointer-events:none;transition:opacity 220ms var(--motion-ease)}
-.media-canvas>.hero-video-layer.is-ready{opacity:1}
-.media-canvas>.hero-video-layer.is-current{z-index:2}
+.media-stage>.media-canvas{position:absolute;z-index:0;inset:0;isolation:isolate}
+/* 视频节点按作品固定挂载。新视频完成首帧绘制后才替换旧视频。 */
+.media-canvas>.hero-video-layer{position:absolute;inset:0;z-index:1;opacity:0;pointer-events:none;transition:opacity 160ms linear}
+.media-canvas>.hero-video-layer.is-ready.is-current{z-index:2;opacity:1}
+.media-canvas>.hero-video-layer.is-ready.is-incoming{z-index:3;opacity:1}
 @media(prefers-reduced-motion:reduce){.media-canvas>.hero-video-layer{transition:none}}
 </style>
