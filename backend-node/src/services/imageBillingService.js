@@ -4,7 +4,20 @@
 const { randomUUID } = require('crypto');
 const billingRequestContext = require('./billingRequestContext');
 
-function createResourceImageBilling(db, { model, dramaId, sourceId } = {}) {
+function hasReferenceValue(value) {
+  if (Array.isArray(value)) return value.some(hasReferenceValue);
+  if (typeof value === 'string') return Boolean(value.trim());
+  return Boolean(value);
+}
+
+function imagePricingContext(input = {}) {
+  return {
+    has_image_input: [input.image_url, input.reference_images, input.reference_image_urls]
+      .some(hasReferenceValue),
+  };
+}
+
+function createResourceImageBilling(db, { model, dramaId, sourceId, image_url, reference_images, reference_image_urls } = {}) {
   const ctx = billingRequestContext.current();
   const actor = ctx?.actor;
   if (!actor?.id) {
@@ -20,6 +33,7 @@ function createResourceImageBilling(db, { model, dramaId, sourceId } = {}) {
     service_type: 'image',
     model: billingTarget.billing_key,
     usage: { image: 1 },
+    pricing_context: imagePricingContext({ image_url, reference_images, reference_image_urls }),
     reference_type: 'image_generation',
     reference_id: dramaId || null,
     drama_id: dramaId || null,
@@ -49,4 +63,4 @@ function createResourceImageBilling(db, { model, dramaId, sourceId } = {}) {
   };
 }
 
-module.exports = { createResourceImageBilling };
+module.exports = { createResourceImageBilling, imagePricingContext };

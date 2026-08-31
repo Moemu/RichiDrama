@@ -3,6 +3,7 @@ const billing = require('../services/billingService');
 const operations = require('../services/adminOperationsService');
 const tenants = require('../services/tenantService');
 const customerOrganizations = require('../services/customerOrganizationService');
+const providerPrices = require('../services/providerPriceService');
 const response = require('../response');
 
 module.exports = function adminRoutes(db, log = console) {
@@ -109,6 +110,20 @@ module.exports = function adminRoutes(db, log = console) {
     priceBooks: (_req, res) => response.success(res, billing.listPriceBooks(db)),
     createPriceBook: guarded((req, res) => response.created(res, billing.savePriceBook(db, req.auth.id, req.body || {}))),
     updatePriceBook: guarded((req, res) => response.success(res, billing.savePriceBook(db, req.auth.id, req.body || {}, req.params.id))),
+    providerPriceProbe: guardedAsync(async (req, res) => response.success(res, await providerPrices.probe(db, req.auth.id, { billPeriod: req.body?.bill_period }))),
+    providerPriceProbeStatus: (_req, res) => response.success(res, providerPrices.sourceCheck(db)),
+    providerPriceSync: guardedAsync(async (req, res) => response.success(res, await providerPrices.sync(db, req.auth.id, { triggerType: 'manual' }))),
+    providerPriceSyncs: (req, res) => response.success(res, providerPrices.listSyncs(db, req.query?.limit)),
+    providerPriceSyncDetail: (req, res) => {
+      const item = providerPrices.syncView(db, req.params.id);
+      return item ? response.success(res, item) : response.notFound(res, '同步批次不存在');
+    },
+    updateProviderPriceCandidate: guarded((req, res) => response.success(res, providerPrices.updateCandidate(db, req.auth.id, req.params.id, Number(req.params.candidateId), req.body || {}))),
+    createProviderPriceDraft: guarded((req, res) => response.created(res, providerPrices.createDraft(db, req.auth.id, req.params.id))),
+    publishPriceBook: guarded((req, res) => response.success(res, providerPrices.publish(db, req.auth.id, Number(req.params.id), confirmed(req)))),
+    rollbackPriceBook: guarded((req, res) => response.success(res, providerPrices.rollback(db, req.auth.id, Number(req.params.id), confirmed(req)))),
+    notices: (req, res) => response.success(res, providerPrices.listNotices(db, req.query?.limit)),
+    archiveNotice: guarded((req, res) => response.success(res, providerPrices.archiveNotice(db, req.auth.id, req.params.id))),
     transactions: (req, res) => response.success(res, billing.pagedTransactions(db, req.query)),
     usage: (req, res) => response.success(res, billing.pagedUsage(db, req.query)),
     usageSummary: (req, res) => response.success(res, billing.usageSummary(db, req.query)),

@@ -73,7 +73,12 @@ test('request-scoped tasks and resource image billing inherit the current owner 
     tenants.bindGlobalConfigToLegacyTenants(db, config);
     billing.savePriceBook(db, admin.id, {
       name: 'resource image price', status: 'published',
-      items: [{ service_type: 'image', model: 'resource-image-model', meter: 'image', unit_price: 12 }],
+      items: [{ service_type: 'image', model: 'resource-image-model', meter: 'image', unit_price: 12,
+        conditions_json: { unit_size: 1, default_rate_id: 'text_to_image', rates: [
+          { id: 'image_to_image', when: { has_image_input: true }, unit_price_points: 8, unit_size: 1 },
+          { id: 'text_to_image', when: { has_image_input: false }, unit_price_points: 12, unit_size: 1 },
+        ] },
+      }],
     });
     billing.adjustBalance(db, admin.id, admin.id, 100, 'resource image test');
     const project = dramas.createDrama(db, log, { title: 'resource billing project', owner_user_id: admin.id });
@@ -90,6 +95,17 @@ test('request-scoped tasks and resource image billing inherit the current owner 
       resourceBilling.settle(log, 'provider-request-1');
       const usage = db.prepare('SELECT charged_micro FROM billing_usage_logs WHERE authorization_id=?').get(resourceBilling.authorizationId);
       assert.equal(usage.charged_micro, 120000);
+
+      const referencedBilling = createResourceImageBilling(db, {
+        model: 'resource-image-model', dramaId: project.id, sourceId: 'character_2',
+        reference_image_urls: ['', '/static/reference.png'],
+      });
+      const referencedAuth = billing.getAuthorization(db, referencedBilling.authorizationId);
+      assert.equal(referencedAuth.snapshot.pricing_context.has_image_input, true);
+      assert.equal(referencedAuth.amount_micro, 80000);
+      referencedBilling.settle(log, 'provider-request-2');
+      const referencedUsage = db.prepare('SELECT charged_micro FROM billing_usage_logs WHERE authorization_id=?').get(referencedBilling.authorizationId);
+      assert.equal(referencedUsage.charged_micro, 80000);
     });
   } finally { teardown(dbPath); }
 });
