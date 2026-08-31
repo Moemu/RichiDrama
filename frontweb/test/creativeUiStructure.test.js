@@ -216,6 +216,13 @@ test('提示词引用只改变勾选态，不清空已加入本镜的素材', as
   assert.match(source, /v-for="asset in referencedAssets"/)
 })
 
+test('视频生成允许纯文本提示词并使用模型素材上限', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+  assert.doesNotMatch(source, /请先在提示词中插入至少一个\s*@\s*素材/)
+  assert.match(source, /total:\s*15,\s*image:\s*9,\s*video:\s*3,\s*audio:\s*3/)
+  assert.match(source, /creationMode\.value === 'first_last_frame'[\s\S]*\['first_frame', 'last_frame'\]\.includes\(asset\.usage\)/)
+})
+
 test('从项目素材库加入本镜不会自动改写提示词', async () => {
   const source = await readSource('../src/views/FreeCreate.vue')
   const handler = source.slice(source.indexOf('function toggleProjectLibraryAsset'), source.indexOf('function onMaterialCardClick'))

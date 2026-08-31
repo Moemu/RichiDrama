@@ -445,7 +445,7 @@ input_reference = (图片文件，可选)</pre>
     { "type": "image_url", "image_url": { "url": "https://..." }, "role": "reference_image" }
   ],
   "ratio": "9:16", "duration": 8, "watermark": false }</pre>
-                  <b>说明：</b>全能模式下列均为参考图（场景、角色…），每张均 <code>role: reference_image</code>；最多 9 张，时长 Seedance 2.x 按 4–15 秒吸附。
+                  <b>说明：</b>全能模式下列均为参考图（场景、角色…），每张均 <code>role: reference_image</code>；Seedance 2.0 最多 9 张，其他模型以能力信息为准。
                 </div>
               </el-collapse-item>
               <el-collapse-item name="dashscope-vid">

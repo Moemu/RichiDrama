@@ -2707,7 +2707,7 @@ const sbUniversalUploadLimits = ref(null)
 const sbOmniFramePicker = ref({ open: false, sbId: null, target: 'first' })
 const sbOmniShotLimits = computed(() => {
   const shot = sbUniversalUploadLimits.value?.shot
-  return { total: shot?.total ?? 12, image: shot?.image ?? 9, video: shot?.video ?? 3, audio: shot?.audio ?? 3 }
+  return { total: shot?.total ?? 15, image: shot?.image ?? 9, video: shot?.video ?? 3, audio: shot?.audio ?? 3 }
 })
 const sbUniversalUploadLimitNote = computed(() => {
   const files = sbUniversalUploadLimits.value?.files

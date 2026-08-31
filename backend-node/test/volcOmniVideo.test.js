@@ -7,6 +7,30 @@ const { callVolcengineOmniVideoApi } = require('../src/services/videoClient');
 
 const log = { info() {}, warn() {}, error() {} };
 
+test('Seedance omni sends a valid text-only video request without reference material', async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return { ok: true, text: async () => JSON.stringify({ id: 'task-text-only', status: 'processing' }) };
+  };
+  try {
+    const output = await callVolcengineOmniVideoApi({
+      base_url: 'https://video.example.test', api_key: 'test-key', model: ['seedance-2.0'], default_model: 'seedance-2.0',
+    }, log, {
+      prompt: '雨夜的未来城市', model: 'seedance-2.0', duration: 5, aspect_ratio: '16:9',
+      reference_urls: [], video_gen_id: 41,
+    });
+
+    assert.equal(output.task_id, 'task-text-only');
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].body.content, [{ type: 'text', text: '雨夜的未来城市' }]);
+    assert.equal(calls[0].body.task_type, undefined);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('Seedance omni request carries every image reference and the selected audio reference', async () => {
   const originalFetch = global.fetch;
   const calls = [];
