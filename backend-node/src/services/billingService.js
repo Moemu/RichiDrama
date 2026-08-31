@@ -726,7 +726,12 @@ function listUsers(db) {
 function listPriceBooks(db) {
   const books = db.prepare('SELECT * FROM billing_price_books ORDER BY updated_at DESC, id DESC').all();
   const itemStmt = db.prepare('SELECT * FROM billing_price_book_items WHERE price_book_id = ? ORDER BY service_type, model, meter');
-  return books.map((b) => ({ ...b, items: itemStmt.all(b.id).map((i) => ({ ...i, is_free: !!i.is_free, unit_price: microToCredits(i.unit_price_micro), conditions_json: parse(i.conditions_json, null) })) }));
+  return books.map((b) => ({
+    ...b,
+    system_managed: !!b.system_managed,
+    version: Number(b.version || 1),
+    items: itemStmt.all(b.id).map((i) => ({ ...i, is_free: !!i.is_free, unit_price: microToCredits(i.unit_price_micro), conditions_json: parse(i.conditions_json, null) })),
+  }));
 }
 
 function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo, items) {
@@ -757,7 +762,7 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
       try { ratePrice = creditsToMicro(rate.unit_price_points); } catch (_) { throw new Error('条件价格必须使用非负积分（最多四位小数）和整数计量单位'); }
       if (ratePrice < 0 || !Number.isSafeInteger(Number(rate.unit_size || conditions.unit_size || 1)) || Number(rate.unit_size || conditions.unit_size || 1) <= 0) throw new Error('条件价格必须使用非负积分（最多四位小数）和整数计量单位');
       const keys = Object.keys(rate.when || {});
-      if (keys.some((key) => !['has_video_input', 'resolution', 'has_audio'].includes(key))) throw new Error('条件价格只能使用已由视频请求明确传入的 has_video_input、resolution、has_audio 字段');
+      if (keys.some((key) => !['has_video_input', 'has_image_input', 'resolution', 'has_audio'].includes(key))) throw new Error('条件价格只能使用请求明确传入的 has_video_input、has_image_input、resolution、has_audio 字段');
       rateWhen.push(rate.when || {});
     }
     for (let left = 0; left < rateWhen.length; left += 1) {
@@ -811,13 +816,19 @@ function savePriceBook(db, actorId, input, id) {
   const at = now(); let bookId = id ? Number(id) : null;
   const items = Array.isArray(input.items) ? input.items : [];
   if (!String(input.name || '').trim() && !bookId) throw new Error('价目表名称必填');
-  const status = ['draft','published','archived'].includes(input.status) ? input.status : 'draft';
+  let status = ['draft','published','archived'].includes(input.status) ? input.status : 'draft';
+  if (bookId) {
+    const current = db.prepare('SELECT status FROM billing_price_books WHERE id=?').get(bookId);
+    if (!current) throw new Error('价目表不存在');
+    if (current.status !== 'draft') throw new Error('已发布或已归档价目不可原地修改，请创建新版本');
+    if (status !== 'draft') throw new Error('草稿必须通过发布接口生效');
+    status = 'draft';
+  }
   const effectiveFrom = input.effective_from || null;
   const effectiveTo = input.effective_to || null;
   validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo, items);
   const write = db.transaction(() => {
     if (bookId) {
-      const exists = db.prepare('SELECT id FROM billing_price_books WHERE id = ?').get(bookId); if (!exists) throw new Error('价目表不存在');
       db.prepare(`UPDATE billing_price_books SET name = ?, status = ?, effective_from = ?, effective_to = ?, updated_at = ? WHERE id = ?`)
         .run(String(input.name || '').trim(), status, effectiveFrom, effectiveTo, at, bookId);
       db.prepare('DELETE FROM billing_price_book_items WHERE price_book_id = ?').run(bookId);

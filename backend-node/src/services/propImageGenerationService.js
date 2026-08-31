@@ -73,6 +73,7 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
       model: model || undefined,
       dramaId: prop.drama_id || null,
       sourceId: `prop_${propId}`,
+      reference_image_urls: opts?.reference_image_urls,
     });
   } catch (billingErr) {
     log.error('Prop image billing authorization failed', { prop_id: propId, error: billingErr.message });
@@ -92,6 +93,10 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
       model: model || undefined,
       preferred_provider: preferredProvider || undefined,
       user_negative_prompt: userNeg || undefined,
+      reference_image_urls: opts?.reference_image_urls,
+      files_base_url: opts?.files_base_url,
+      storage_local_path: opts?.storage_local_path,
+      system_prompt: opts?.system_prompt,
     });
   } catch (err) {
     const errMsg = '图片生成请求失败: ' + (err.message || '未知错误');

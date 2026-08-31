@@ -1627,6 +1627,10 @@ function createAndGenerateImage(db, log, opts) {
     quality,
     provider,
     user_negative_prompt,
+    reference_image_urls,
+    files_base_url,
+    storage_local_path,
+    system_prompt,
   } = opts;
   const negRow = (user_negative_prompt && String(user_negative_prompt).trim()) || null;
   const now = new Date().toISOString();
@@ -1662,6 +1666,7 @@ function createAndGenerateImage(db, log, opts) {
       model: model || undefined,
       dramaId: dramaIdNum || null,
       sourceId: resourceId,
+      reference_image_urls,
     });
   } catch (billingErr) {
     log.error('Resource image billing authorization failed', { resource_id: resourceId, error: billingErr.message });
@@ -1716,6 +1721,10 @@ function createAndGenerateImage(db, log, opts) {
         image_type,
         image_gen_id: imageGenId,
         user_negative_prompt: user_negative_prompt || undefined,
+        reference_image_urls,
+        files_base_url,
+        storage_local_path,
+        system_prompt,
       });
       const now2 = new Date().toISOString();
       if (result.error) {
