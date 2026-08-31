@@ -29,6 +29,14 @@ test('storyboard preview controls stay hidden until a playable video exists', ()
   assert.match(freeCreate, /完成生成后，播放器和成片操作将在这里显示/)
 })
 
+test('development mode can preview the video error state without creating a task', () => {
+  assert.match(freeCreate, /const videoStatusPreviewEnabled = import\.meta\.env\.DEV/)
+  assert.match(freeCreate, /v-if="videoStatusPreviewEnabled"[^>]*@click="previewVideoError = true">预览错误状态/)
+  assert.match(freeCreate, /此预览不会创建任务/)
+  assert.match(freeCreate, /@click="previewVideoError = false">退出错误预览/)
+  assert.match(freeCreate, /watch\(activeShotId, \(\) => \{ previewVideoError\.value = false \}\)/)
+})
+
 test('an empty episode shows one explicit empty state instead of a phantom first shot', () => {
   assert.match(freeCreate, /<template v-if="currentShot">/)
   assert.match(freeCreate, /<section v-else class="empty-shot-workspace"/)
