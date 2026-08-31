@@ -40,9 +40,9 @@
         </template>
         <section v-else class="generation-stage-status" :class="{ 'is-processing': !previewVideoError && ['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status), 'is-failed': previewVideoError || (activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)) }" :role="previewVideoError || (activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)) ? 'alert' : 'status'" aria-live="polite">
           <div class="generation-status-heading"><b>视频状态</b><el-tag :type="previewVideoError ? 'danger' : stageTagType" effect="dark">{{ previewVideoError ? '错误预览' : stageLabel }}</el-tag></div>
-          <template v-if="previewVideoError"><div class="generation-error-copy"><el-icon class="stage-warning"><WarningFilled /></el-icon><div><b>视频生成失败</b><small>示例错误：视频生成失败。请检查模型配置或素材后重试。此预览不会创建任务。</small></div></div><div class="failure-actions"><el-button size="small" @click="previewVideoError = false">退出错误预览</el-button></div></template>
+          <template v-if="previewVideoError"><div class="generation-error-copy"><el-icon class="stage-warning"><WarningFilled /></el-icon><GenerationFailureDetails :job="previewVideoErrorJob" /></div><small class="preview-error-note">开发预览不会创建任务，也不会调用模型服务。</small><div class="failure-actions"><el-button size="small" @click="previewVideoError = false">退出错误预览</el-button></div></template>
           <template v-else-if="['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status)"><b>{{ activeJob?.status === 'sd2_waiting' ? '真人素材认证准备中，完成后将自动生成' : generationProgressLabel }}</b><div class="generation-progress" role="status"><span><i :style="{ width: `${generationProgress}%` }"></i></span><em>{{ generationProgress }}%</em><small>{{ generationProgressMessage }}</small></div><el-button v-if="canCancelJob(activeJob)" size="small" type="warning" plain @click="cancelJob(activeJob)">取消未提交任务</el-button></template>
-          <template v-else-if="activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)"><div class="generation-error-copy"><el-icon class="stage-warning"><WarningFilled /></el-icon><div><b>{{ stageLabel }}</b><small>{{ failureHint(activeJob) }}</small></div></div><div class="failure-actions"><el-button v-if="activeJob.status === 'unknown' || activeJob.status === 'billing_reconciliation'" type="primary" @click="refreshUnknownJob(activeJob)">手动刷新状态</el-button><el-button v-if="canAdoptSource(activeJob)" type="primary" @click="adoptSource(activeJob)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(activeJob)" :type="canAdoptSource(activeJob) ? 'default' : 'primary'" @click="retryPostprocess(activeJob)">仅重试{{ activeJob.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-else-if="activeJob.status === 'retryable'" type="primary" @click="retry(activeJob)">重新生成</el-button></div></template>
+          <template v-else-if="activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)"><div class="generation-error-copy"><el-icon class="stage-warning"><WarningFilled /></el-icon><GenerationFailureDetails :job="activeJob" /></div><div class="failure-actions"><el-button v-if="activeJob.status === 'unknown' || activeJob.status === 'billing_reconciliation'" type="primary" @click="refreshUnknownJob(activeJob)">手动刷新状态</el-button><el-button v-if="canAdoptSource(activeJob)" type="primary" @click="adoptSource(activeJob)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(activeJob)" :type="canAdoptSource(activeJob) ? 'default' : 'primary'" @click="retryPostprocess(activeJob)">仅重试{{ activeJob.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-else-if="activeJob.status === 'retryable'" type="primary" @click="retry(activeJob)">重新生成</el-button></div></template>
           <template v-else><b>尚未生成视频</b><small>完成生成后，播放器和成片操作将在这里显示。</small><el-button v-if="videoStatusPreviewEnabled" size="small" plain @click="previewVideoError = true">预览错误状态</el-button></template>
         </section>
         <div class="shot-tabs"><span class="active">镜头提示词</span><span>输入或拖入 @ 素材</span><span>镜头 {{ activeShotIndex + 1 }} / {{ shots.length }}</span></div>
@@ -207,6 +207,7 @@ import GenerationSettings from '@/components/GenerationSettings.vue'
 import { clearPromptDraft, currentDraftUserId, readPromptDraft, shouldRestorePromptDraft, writePromptDraft } from '@/utils/promptDraft'
 import { formatChinaDateTime } from '@/utils/time'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
+import GenerationFailureDetails from '@/components/GenerationFailureDetails.vue'
 import { beginAssetPointerDrag, shouldSuppressAssetClick } from '@/utils/assetPointerDrag'
 
 const componentProps = defineProps({ projectEpisodeId: { type: [Number, String], default: null }, projectDramaId: { type: [Number, String], default: null }, embedded: { type: Boolean, default: false } })
@@ -216,6 +217,7 @@ const workspaceReady = ref(false)
 const mobileWorkspaceTab = ref('stage')
 const videoStatusPreviewEnabled = import.meta.env.DEV
 const previewVideoError = ref(false)
+const previewVideoErrorJob = Object.freeze({ id: 'DEV-PREVIEW', status: 'failed', error_msg: 'input image content[1] may contain real person. Request id: 02178652123456789abcdef0123456789be64' })
 const route = useRoute()
 const router = useRouter()
 const embedded = computed(() => componentProps.embedded)
@@ -452,12 +454,6 @@ function failureLabel(job) {
   if (job?.upscale_status === 'failed') return '超分失败：原片已保留'
   if (job?.interpolation_status === 'failed') return '智能插帧失败（上一阶段成片已保留）'
   return '生成链路失败：请查看具体原因'
-}
-function failureHint(job) {
-  const detail = String(job?.error_msg || '').trim()
-  if (job?.upscale_status === 'failed') return detail || 'AI MediaKit 超分失败，原片已保留，可仅重试超分。'
-  if (job?.interpolation_status === 'failed') return detail || 'AI MediaKit 插帧失败，上一阶段视频已保留，可仅重试插帧。'
-  return detail || '请调整提示词或素材后重新生成。'
 }
 function canRetryPostprocess(job) { return job?.status === 'failed' && ((job.upscale_status === 'failed' && !!job.source_local_path) || (job.interpolation_status === 'failed' && !!(job.upscale_local_path || job.source_local_path))) }
 function canAdoptSource(job) {
@@ -1469,6 +1465,7 @@ defineExpose({ refreshProjectShots })
 .project-storyboard-page .main-video{width:100%!important;height:100%!important;aspect-ratio:inherit;object-fit:contain}
 .project-storyboard-page .video-stage.has-video .main-video{inset:0!important;transform:none}
 .generation-stage-status{display:grid;flex:0 0 auto;gap:10px;min-width:0;margin:12px;padding:16px 18px;border:1px solid var(--border-subtle);border-radius:12px;background:color-mix(in srgb,var(--bg-surface) 94%,#070a11);color:var(--text-regular);overflow-wrap:anywhere}
+.preview-error-note{padding-left:34px}
 .generation-status-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.generation-status-heading>b{color:var(--text-primary);font-size:13px}.generation-stage-status>small,.generation-error-copy small{display:block;color:var(--text-muted);font-size:12px;line-height:1.6;white-space:normal}.generation-stage-status.is-processing{border-color:color-mix(in srgb,var(--studio-accent) 42%,var(--border-subtle))}.generation-stage-status.is-failed{border-color:color-mix(in srgb,var(--status-danger) 48%,var(--border-subtle));background:color-mix(in srgb,var(--status-danger) 8%,var(--bg-surface))}.generation-error-copy{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start}.generation-error-copy .stage-warning{font-size:24px}.failure-actions{display:flex;flex-wrap:wrap;gap:8px}.generation-stage-status .generation-progress{margin-top:0;max-width:520px}.generation-stage-status>.el-button{justify-self:start}
 :global(html.light) .generation-stage-status{background:rgba(255,255,255,.82)}
 @media(max-width:760px){.generation-stage-status{margin:10px;padding:14px}.failure-actions .el-button{margin-left:0}}
