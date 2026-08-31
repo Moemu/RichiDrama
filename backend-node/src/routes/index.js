@@ -98,6 +98,11 @@ function setupRouter(cfg, db, log) {
   r.get('/billing/usage', billing.usage);
   r.get('/billing/transactions', billing.transactions);
   r.post('/billing/quotes', billing.quote);
+  r.get('/notices/active', (req, res) => response.success(res, require('../services/providerPriceService').activeNotices(db, req.auth.id)));
+  r.post('/notices/:id/acknowledge', (req, res) => {
+    try { response.success(res, require('../services/providerPriceService').acknowledgeNotice(db, req.auth.id, req.params.id)); }
+    catch (error) { response.badRequest(res, error.message); }
+  });
   // Authorization lifecycle is service-owned. Clients may quote a price, but
   // cannot settle or release a provider call themselves.
   r.get('/models/available', (req, res) => {
@@ -136,6 +141,17 @@ function setupRouter(cfg, db, log) {
   adminRouter.get('/price-books', admin.priceBooks);
   adminRouter.post('/price-books', admin.createPriceBook);
   adminRouter.patch('/price-books/:id', admin.updatePriceBook);
+  adminRouter.post('/price-books/:id/publish', admin.publishPriceBook);
+  adminRouter.post('/price-books/:id/rollback', admin.rollbackPriceBook);
+  adminRouter.post('/provider-prices/volcengine/probe', admin.providerPriceProbe);
+  adminRouter.get('/provider-prices/volcengine/probe', admin.providerPriceProbeStatus);
+  adminRouter.post('/provider-prices/volcengine/sync', admin.providerPriceSync);
+  adminRouter.get('/provider-price-syncs', admin.providerPriceSyncs);
+  adminRouter.get('/provider-price-syncs/:id', admin.providerPriceSyncDetail);
+  adminRouter.patch('/provider-price-syncs/:id/candidates/:candidateId', admin.updateProviderPriceCandidate);
+  adminRouter.post('/provider-price-syncs/:id/create-draft', admin.createProviderPriceDraft);
+  adminRouter.get('/notices', admin.notices);
+  adminRouter.post('/notices/:id/archive', admin.archiveNotice);
   adminRouter.get('/transactions', admin.transactions);
   adminRouter.get('/usage', admin.usage);
   adminRouter.get('/usage-summary', admin.usageSummary);
