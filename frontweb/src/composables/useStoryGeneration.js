@@ -32,6 +32,7 @@ export async function runGenerateStoryFromPremise({
   /** 为 true 时保存集数/梗概后不调用 loadDrama（用于剧本管理页生成后直接 router.push 进创作页） */
   skipPostLoad = false,
 }) {
+  if (storyGenerating.value || scriptGenerating.value) return { ok: false }
   const text = (premise || '').trim()
   if (!text) {
     ElMessage.warning('请先输入故事梗概')
