@@ -29,15 +29,23 @@
 
       <template v-if="currentShot">
       <section class="center-stage" aria-label="当前镜头播放与时间线">
-        <div class="player-tools"><el-button text size="small" @click="selectRelative(-1)">上一镜</el-button><el-button text size="small" @click="selectRelative(1)">下一镜</el-button><span class="current-version">当前采用：{{ activeJob ? `版本 #${activeJob.video_generation_id || activeJob.id}` : '暂无版本' }}</span><el-tag :type="stageTagType" effect="dark">{{ stageLabel }}</el-tag></div>
-        <div class="video-stage" :class="{ rendering: ['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status), 'has-video': !!activeVideoUrl }" :style="{ '--preview-aspect-ratio': previewAspectRatio }">
-          <template v-if="mediaLayers.length"><video v-for="layer in mediaLayers" :key="layer.id" :src="layer.url" :controls="layer.id === topMediaLayerId && layer.ready" playsinline preload="metadata" :autoplay="playOnSelection && layer.id === topMediaLayerId" class="main-video" :class="{ 'is-ready': layer.ready, 'is-current': layer.id === topMediaLayerId }" @canplay="promoteMediaLayer(layer.id)" @error="discardMediaLayer(layer.id)" /></template>
-          <template v-else-if="['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status)"><div class="render-ring ring-one"></div><div class="render-ring ring-two"></div><div class="render-play">▶</div><b>{{ activeJob?.status === 'sd2_waiting' ? '真人素材认证准备中，完成后将自动生成' : generationProgressLabel }}</b><div class="generation-progress" role="status" aria-live="polite"><span><i :style="{ width: `${generationProgress}%` }"></i></span><em>{{ generationProgress }}%</em><small>{{ generationProgressMessage }}</small></div><el-button v-if="canCancelJob(activeJob)" size="small" type="warning" plain @click="cancelJob(activeJob)">取消未提交任务</el-button></template>
-          <template v-else-if="activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)"><el-icon class="stage-warning"><WarningFilled /></el-icon><b>{{ stageLabel }}</b><small>{{ failureHint(activeJob) }}</small><div class="failure-actions"><el-button v-if="activeJob.status === 'unknown' || activeJob.status === 'billing_reconciliation'" type="primary" @click="refreshUnknownJob(activeJob)">手动刷新状态</el-button><el-button v-if="canAdoptSource(activeJob)" type="primary" @click="adoptSource(activeJob)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(activeJob)" :type="canAdoptSource(activeJob) ? 'default' : 'primary'" @click="retryPostprocess(activeJob)">仅重试{{ activeJob.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-else-if="activeJob.status === 'retryable'" type="primary" @click="retry(activeJob)">重新生成</el-button></div></template>
-          <template v-else><div class="empty-play">▶</div><b>尚未生成视频</b></template>
-        </div>
-        <div v-if="activeVideoUrl" class="frame-actions" aria-label="成片操作"><el-button size="small" @click="downloadCurrentVideo">下载成片</el-button><template v-if="activeJob"><el-button size="small" type="primary" :disabled="savedResultJobId === activeJob.id" @click="saveResultAsAsset">{{ savedResultJobId === activeJob.id ? '已加入素材' : '作为视频素材继续创作' }}</el-button><el-button v-if="isProjectMode && savedResultJobId === activeJob.id" size="small" @click="$router.push(`/film/${projectDramaId}/canvas`)">在项目画布中打开</el-button><template v-if="canExtractFrames"><el-button size="small" :loading="extractingPosition === 'first'" :disabled="!!extractingPosition" @click="extractFrame('first')">提取首帧</el-button><el-button size="small" :loading="extractingPosition === 'last'" :disabled="!!extractingPosition" @click="extractFrame('last')">提取尾帧</el-button></template></template></div>
-        <div class="time-ruler" aria-label="镜头时长"><span>时长 {{ duration }} 秒</span><span>最多 {{ maxDuration }} 秒</span></div>
+        <template v-if="activeVideoUrl">
+          <div class="player-tools"><el-button text size="small" @click="selectRelative(-1)">上一镜</el-button><el-button text size="small" @click="selectRelative(1)">下一镜</el-button><span class="current-version">当前采用：{{ activeJob ? `版本 #${activeJob.video_generation_id || activeJob.id}` : '已有成片' }}</span><el-tag :type="stageTagType" effect="dark">{{ stageLabel }}</el-tag></div>
+          <div class="video-stage has-video" :style="{ '--preview-aspect-ratio': previewAspectRatio }">
+            <template v-if="mediaLayers.length"><video v-for="layer in mediaLayers" :key="layer.id" :src="layer.url" :controls="layer.id === topMediaLayerId && layer.ready" playsinline preload="metadata" :autoplay="playOnSelection && layer.id === topMediaLayerId" class="main-video" :class="{ 'is-ready': layer.ready, 'is-current': layer.id === topMediaLayerId }" @canplay="promoteMediaLayer(layer.id)" @error="discardMediaLayer(layer.id)" /></template>
+            <template v-else><b>正在载入成片…</b></template>
+          </div>
+          <div class="frame-actions" aria-label="成片操作"><el-button size="small" @click="downloadCurrentVideo">下载成片</el-button><template v-if="activeJob"><el-button size="small" type="primary" :disabled="savedResultJobId === activeJob.id" @click="saveResultAsAsset">{{ savedResultJobId === activeJob.id ? '已加入素材' : '作为视频素材继续创作' }}</el-button><el-button v-if="isProjectMode && savedResultJobId === activeJob.id" size="small" @click="$router.push(`/film/${projectDramaId}/canvas`)">在项目画布中打开</el-button><template v-if="canExtractFrames"><el-button size="small" :loading="extractingPosition === 'first'" :disabled="!!extractingPosition" @click="extractFrame('first')">提取首帧</el-button><el-button size="small" :loading="extractingPosition === 'last'" :disabled="!!extractingPosition" @click="extractFrame('last')">提取尾帧</el-button></template></template></div>
+          <div class="time-ruler" aria-label="镜头时长"><span>时长 {{ duration }} 秒</span><span>最多 {{ maxDuration }} 秒</span></div>
+        </template>
+        <section v-else class="generation-stage-status" :class="{ 'is-processing': previewVideoProgress || (!previewVideoError && ['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status)), 'is-failed': previewVideoError || (activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)) }" :role="previewVideoError || (activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)) ? 'alert' : 'status'" aria-live="polite">
+          <div class="generation-status-heading"><b>视频状态</b><el-tag :type="previewVideoError ? 'danger' : stageTagType" effect="dark">{{ previewVideoError ? '错误预览' : previewVideoProgress ? '进度预览' : stageLabel }}</el-tag></div>
+          <template v-if="previewVideoError"><div class="generation-error-copy"><el-icon class="stage-warning"><WarningFilled /></el-icon><GenerationFailureDetails :job="previewVideoErrorJob" /></div><small class="preview-error-note">开发预览不会创建任务，也不会调用模型服务。</small><div class="failure-actions"><el-button size="small" @click="previewVideoError = false">退出错误预览</el-button></div></template>
+          <template v-else-if="previewVideoProgress"><b>正在生成当前镜头</b><div class="generation-progress is-indeterminate" role="status"><span><i></i></span><em>生成中</em><small>模型服务正在生成视频</small></div><small>开发预览不会创建任务，也不会调用模型服务。</small><el-button size="small" @click="previewVideoProgress = false">退出进度预览</el-button></template>
+          <template v-else-if="['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status)"><b>{{ activeJob?.status === 'sd2_waiting' ? '真人素材认证准备中，完成后将自动生成' : generationProgressLabel }}</b><div class="generation-progress" :class="{ 'is-indeterminate': generationProgressIndeterminate }" role="status"><span><i :style="generationProgressIndeterminate ? undefined : { width: `${generationProgress}%` }"></i></span><em>{{ generationProgressIndeterminate ? '生成中' : `${generationProgress}%` }}</em><small>{{ generationProgressMessage }}</small></div><el-button v-if="canCancelJob(activeJob)" size="small" type="warning" plain @click="cancelJob(activeJob)">取消未提交任务</el-button></template>
+          <template v-else-if="activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)"><div class="generation-error-copy"><el-icon class="stage-warning"><WarningFilled /></el-icon><GenerationFailureDetails :job="activeJob" /></div><div class="failure-actions"><el-button v-if="activeJob.status === 'unknown' || activeJob.status === 'billing_reconciliation'" type="primary" @click="refreshUnknownJob(activeJob)">手动刷新状态</el-button><el-button v-if="canAdoptSource(activeJob)" type="primary" @click="adoptSource(activeJob)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(activeJob)" :type="canAdoptSource(activeJob) ? 'default' : 'primary'" @click="retryPostprocess(activeJob)">仅重试{{ activeJob.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-else-if="activeJob.status === 'retryable'" type="primary" @click="retry(activeJob)">重新生成</el-button></div></template>
+          <template v-else><b>尚未生成视频</b><small>完成生成后，播放器和成片操作将在这里显示。</small><div v-if="videoStatusPreviewEnabled" class="failure-actions"><el-button size="small" plain @click="previewVideoProgress = true; previewVideoError = false">预览生成进度</el-button><el-button size="small" plain @click="previewVideoError = true; previewVideoProgress = false">预览错误状态</el-button></div></template>
+        </section>
         <div class="shot-tabs"><span class="active">镜头提示词</span><span>输入或拖入 @ 素材</span><span>镜头 {{ activeShotIndex + 1 }} / {{ shots.length }}</span></div>
         <!-- 提示词渲染只读取当前镜头工作集。项目库素材必须先“加入本镜”，
              才能成为 @ 引用候选，绝不能借用其他镜头的同名素材。 -->
@@ -200,6 +208,7 @@ import GenerationSettings from '@/components/GenerationSettings.vue'
 import { clearPromptDraft, currentDraftUserId, readPromptDraft, shouldRestorePromptDraft, writePromptDraft } from '@/utils/promptDraft'
 import { formatChinaDateTime } from '@/utils/time'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
+import GenerationFailureDetails from '@/components/GenerationFailureDetails.vue'
 import { beginAssetPointerDrag, shouldSuppressAssetClick } from '@/utils/assetPointerDrag'
 
 const componentProps = defineProps({ projectEpisodeId: { type: [Number, String], default: null }, projectDramaId: { type: [Number, String], default: null }, embedded: { type: Boolean, default: false } })
@@ -207,6 +216,10 @@ const emit = defineEmits(['reordered', 'changed'])
 const assets = ref([]), capabilities = ref([]), jobs = ref([]), sequence = ref(null), shots = ref([]), activeShotId = ref(null), projects = ref([]), freeProjectId = ref(null)
 const workspaceReady = ref(false)
 const mobileWorkspaceTab = ref('stage')
+const videoStatusPreviewEnabled = import.meta.env.DEV
+const previewVideoError = ref(false)
+const previewVideoProgress = ref(false)
+const previewVideoErrorJob = Object.freeze({ id: 'DEV-PREVIEW', status: 'failed', error_msg: 'input image content[1] may contain real person. Request id: 02178652123456789abcdef0123456789be64' })
 const route = useRoute()
 const router = useRouter()
 const embedded = computed(() => componentProps.embedded)
@@ -345,7 +358,8 @@ function promptAssetFor(asset) { return promptAssets.value.find((item) => Number
 const referencedAssets = computed(() => chosenAssets.value.filter((asset) => selected.value.has(asset.id)))
 const chosenImageAssets = computed(() => chosenAssets.value.filter((asset) => asset.type === 'image'))
 const promptReferencedIds = computed(() => new Set((promptDocument.value?.refs || []).map((entry) => Number(entry.asset_id)).filter(Number.isInteger)))
-const requestAssets = computed(() => chosenAssets.value.filter((asset) => promptReferencedIds.value.has(Number(asset.id))))
+const requestAssets = computed(() => chosenAssets.value.filter((asset) => promptReferencedIds.value.has(Number(asset.id))
+  || (creationMode.value === 'first_last_frame' && ['first_frame', 'last_frame'].includes(asset.usage))))
 const activeProjectAssetId = computed(() => isProjectMode.value ? projectDramaId.value : (assetScope.value === 'project' ? Number(freeProjectId.value) || null : null))
 const visibleAssets = computed(() => assets.value.filter((asset) => {
   if (isProjectMode.value) return assetScope.value === 'all' || (assetScope.value === 'project' ? Number(asset.drama_id) === projectDramaId.value : !asset.drama_id)
@@ -408,7 +422,7 @@ const videoModelFieldError = computed(() => ({
   unavailable: '当前项目组暂无可用模型',
 })[videoModelState.value] || '')
 const shotLimits = computed(() => {
-  const base = uploadLimits.value?.shot || { total: 12, image: 9, video: 3, audio: 3 }
+  const base = uploadLimits.value?.shot || { total: 15, image: 9, video: 3, audio: 3 }
   const limits = currentCapability.value?.limits || {}
   if (!limits.total_reference?.max) return base
   return {
@@ -443,12 +457,6 @@ function failureLabel(job) {
   if (job?.upscale_status === 'failed') return '超分失败：原片已保留'
   if (job?.interpolation_status === 'failed') return '智能插帧失败（上一阶段成片已保留）'
   return '生成链路失败：请查看具体原因'
-}
-function failureHint(job) {
-  const detail = String(job?.error_msg || '').trim()
-  if (job?.upscale_status === 'failed') return detail || 'AI MediaKit 超分失败，原片已保留，可仅重试超分。'
-  if (job?.interpolation_status === 'failed') return detail || 'AI MediaKit 插帧失败，上一阶段视频已保留，可仅重试插帧。'
-  return detail || '请调整提示词或素材后重新生成。'
 }
 function canRetryPostprocess(job) { return job?.status === 'failed' && ((job.upscale_status === 'failed' && !!job.source_local_path) || (job.interpolation_status === 'failed' && !!(job.upscale_local_path || job.source_local_path))) }
 function canAdoptSource(job) {
@@ -514,6 +522,7 @@ async function adoptVersion(job) {
 const stageLabel = computed(() => ({ completed: '成片完成', sd2_waiting: '真人素材认证准备中', processing: '生成中', upscale_pending: '等待超分', upscaling: 'AI 超分中', interpolation_pending: '等待插帧', interpolating: '智能插帧中', persisting: '成片持久化中', billing_reconciliation: '等待计费对账', failed: failureLabel(activeJob.value), retryable: '可重试', invalid: '无效任务', unknown: '状态暂不可用' })[activeJob.value?.status] || '镜头草稿')
 const stageTagType = computed(() => ({ completed: 'success', failed: 'danger', retryable: 'warning', invalid: 'info' })[activeJob.value?.status] || 'info')
 const generationProgress = computed(() => Math.max(0, Math.min(100, Number(activeJob.value?.task_progress || 0))))
+const generationProgressIndeterminate = computed(() => activeJob.value?.status === 'processing' && !!String(activeJob.value?.provider_task_id || '').trim() && generationProgress.value < 70)
 const generationProgressLabel = computed(() => ['upscale_pending','upscaling'].includes(activeJob.value?.status) ? '正在进行 AI 超分' : activeJob.value?.status === 'interpolating' ? '正在进行智能插帧' : activeJob.value?.status === 'persisting' ? '正在持久化最终成片' : (stagePhase.value || '正在生成当前镜头'))
 const generationStallMinutes = computed(() => {
   const updatedAt = activeJob.value?.task_updated_at || activeJob.value?.updated_at || activeJob.value?.created_at
@@ -945,8 +954,12 @@ function onShotListWheel(event) {
 function addShotMaterial(asset) {
   if (selectedOrder.value.includes(asset.id)) return true
   const typeCount = selectionCounts.value[asset.type] || 0
-  if (chosenAssets.value.length >= shotLimits.value.total || typeCount >= shotLimits.value[asset.type]) {
-    ElMessage.warning(`当前镜头最多选择 ${shotLimits.value[asset.type]} 个${typeName(asset.type)}，总数最多 ${shotLimits.value.total} 个`)
+  if (typeCount >= shotLimits.value[asset.type]) {
+    ElMessage.warning(`当前模型最多引用 ${shotLimits.value[asset.type]} 个${typeName(asset.type)}`)
+    return false
+  }
+  if (chosenAssets.value.length >= shotLimits.value.total) {
+    ElMessage.warning(`当前模型最多引用 ${shotLimits.value.total} 个素材`)
     return false
   }
   selectedOrder.value = [...selectedOrder.value, asset.id]
@@ -1078,7 +1091,7 @@ async function certify(asset) {
 function notifyBalanceChanged() { window.dispatchEvent(new CustomEvent('lmd:balance-changed')) }
 function replacePolledJob(id, job) { const index = jobs.value.findIndex((item) => String(item.id) === String(id)); const historyIndex = shotHistory.value.findIndex((item) => String(item.id) === String(id)); if (index >= 0) jobs.value[index] = job; if (historyIndex >= 0) shotHistory.value[historyIndex] = job }
 async function refreshUnknownJob(job) { try { const next = normalizeJob(await omniVideoAPI.get(job.id)); replacePolledJob(job.id, next); if (String(currentShot.value?.omni_job_id) === String(job.id)) currentShot.value.status = next.status; if (activeGenerationStatuses.has(next.status)) poll(next.id); else notifyBalanceChanged() } catch (error) { ElMessage.error(error.message || '状态刷新失败，请稍后重试') } }
-async function create() { creating.value = true; stagePhase.value = '保存镜头'; try { if (!canCreate.value) throw new Error(isProjectMode.value ? '请补齐当前视频创作模式所需的素材与模型能力' : '请选择计费归属项目并补齐生成参数'); if (!requestAssets.value.length) throw new Error('请先在提示词中插入至少一个 @ 素材'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id, drama_id: Number(freeProjectId.value) }), prompt: prompt.value, prompt_document: promptDocument.value, asset_selection_policy: 'prompt_references', creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', upscale_resolution: upscaleResolution.value || null, target_fps: targetFps.value || null, audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: requestAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: promptAssetFor(asset).alias, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const status = res.status || 'processing'; const job = { id: res.omni_job_id, prompt: prompt.value, status, video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = status; notifyBalanceChanged(); stagePhase.value = status === 'sd2_waiting' ? '真人素材认证准备中，完成后自动生成' : '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
+async function create() { creating.value = true; stagePhase.value = '保存镜头'; try { if (!canCreate.value) throw new Error(isProjectMode.value ? '请补齐当前视频创作模式所需的素材与模型能力' : '请选择计费归属项目并补齐生成参数'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id, drama_id: Number(freeProjectId.value) }), prompt: prompt.value, prompt_document: promptDocument.value, asset_selection_policy: 'prompt_references', creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', upscale_resolution: upscaleResolution.value || null, target_fps: targetFps.value || null, audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: requestAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: promptAssetFor(asset).alias, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const status = res.status || 'processing'; const job = { id: res.omni_job_id, prompt: prompt.value, status, video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = status; notifyBalanceChanged(); stagePhase.value = status === 'sd2_waiting' ? '真人素材认证准备中，完成后自动生成' : '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
 async function poll(id) {
   if (!id || pollingJobIds.has(String(id))) return
   pollingJobIds.add(String(id))
@@ -1123,6 +1136,7 @@ async function saveResultAsAsset() { const job = activeJob.value; if (!job?.vide
 async function extractFrame(position) { if (!canExtractFrames.value || extractingPosition.value) return; extractingPosition.value = position; try { const asset = await omniVideoAPI.extractVideoFrame(activeJob.value.video_generation_id, position); const item = { ...asset, alias: asset.name, usage: position === 'first' ? 'first_frame' : 'last_frame' }; assets.value.unshift(item); toggle(item); ElMessage.success(position === 'first' ? '首帧已提取到素材库，并设为当前镜头首帧' : '尾帧已提取到素材库，并设为当前镜头尾帧') } catch (error) { ElMessage.error(error.message || '提取视频帧失败') } finally { extractingPosition.value = '' } }
 
 watch(prompt, () => { persistCurrentPromptDraft(); scheduleSave() })
+watch(activeShotId, () => { previewVideoError.value = false; previewVideoProgress.value = false })
 watch([model, aspectRatio, duration, resolution, upscaleResolution, targetFps], () => { if (isProjectMode.value && !loadingShot.value) projectGenerationDirty.value = true; persistCurrentPromptDraft(); scheduleSave() })
 watch([creationMode, audioStrategy, keepOriginalAudio, audioVolume, audioFadeSeconds], () => { persistCurrentPromptDraft(); scheduleSave() })
 watch(chosenAssets, () => { persistCurrentPromptDraft(); scheduleSave() }, { deep: true })
@@ -1458,6 +1472,12 @@ defineExpose({ refreshProjectShots })
 .project-storyboard-page .video-stage{flex:0 0 auto!important;width:auto;height:clamp(190px,28dvh,300px);margin:12px auto!important;aspect-ratio:var(--preview-aspect-ratio,16 / 9)}
 .project-storyboard-page .main-video{width:100%!important;height:100%!important;aspect-ratio:inherit;object-fit:contain}
 .project-storyboard-page .video-stage.has-video .main-video{inset:0!important;transform:none}
+.generation-stage-status{display:grid;flex:0 0 auto;gap:10px;min-width:0;margin:12px;padding:16px 18px;border:1px solid var(--border-subtle);border-radius:12px;background:color-mix(in srgb,var(--bg-surface) 94%,#070a11);color:var(--text-regular);overflow-wrap:anywhere}
+.generation-progress.is-indeterminate>span{overflow:hidden}.generation-progress.is-indeterminate>span>i{width:38%;animation:generation-progress-scan 1.35s ease-in-out infinite}@keyframes generation-progress-scan{0%{transform:translateX(-120%)}50%{transform:translateX(82%)}100%{transform:translateX(265%)}}@media(prefers-reduced-motion:reduce){.generation-progress.is-indeterminate>span>i{width:100%;opacity:.45;animation:none}}
+.preview-error-note{padding-left:34px}
+.generation-status-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.generation-status-heading>b{color:var(--text-primary);font-size:13px}.generation-stage-status>small,.generation-error-copy small{display:block;color:var(--text-muted);font-size:12px;line-height:1.6;white-space:normal}.generation-stage-status.is-processing{border-color:color-mix(in srgb,var(--studio-accent) 42%,var(--border-subtle))}.generation-stage-status.is-failed{border-color:color-mix(in srgb,var(--status-danger) 48%,var(--border-subtle));background:color-mix(in srgb,var(--status-danger) 8%,var(--bg-surface))}.generation-error-copy{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start}.generation-error-copy .stage-warning{font-size:24px}.failure-actions{display:flex;flex-wrap:wrap;gap:8px}.generation-stage-status .generation-progress{margin-top:0;max-width:520px}.generation-stage-status>.el-button{justify-self:start}
+:global(html.light) .generation-stage-status{background:rgba(255,255,255,.82)}
+@media(max-width:760px){.generation-stage-status{margin:10px;padding:14px}.failure-actions .el-button{margin-left:0}}
 .model-config-alert{display:grid;gap:3px;margin:9px 0;padding:9px 10px;border:1px solid color-mix(in srgb,var(--status-warning) 46%,var(--border-color));border-radius:9px;background:color-mix(in srgb,var(--status-warning) 9%,var(--bg-raised));color:var(--text-regular)}
 .model-config-alert b{color:var(--text-primary);font-size:12px}.model-config-alert span{font-size:11px;line-height:1.45}
 .creation-secondary-section{margin-top:10px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-raised);overflow:hidden}

@@ -3,7 +3,9 @@ const path = require('path');
 const taskService = require('./taskService');
 const videoService = require('./videoService');
 const capabilityService = require('./videoModelCapabilities');
-const SHOT_ASSET_LIMITS = { total: 12, image: 9, video: 3, audio: 3 };
+// Seedance 2.0 publishes limits per media type. There is no separate
+// 12-item combined limit, so the combined ceiling is the sum of those limits.
+const SHOT_ASSET_LIMITS = { total: 15, image: 9, video: 3, audio: 3 };
 
 const IMAGE_USAGES = new Set(['primary', 'identity', 'environment', 'style', 'prop', 'first_frame', 'last_frame', 'reference']);
 
@@ -74,12 +76,7 @@ function create(db, log, body, billingUser) {
   const tenantId = Number(body.tenant_id) || require('./tenantService').tenantForUser(db, payer.id)?.id || null;
   const tenantOptions = tenantId ? { tenant_id: tenantId } : {};
   const assetSelectionPolicy = body.asset_selection_policy === 'prompt_references' ? 'prompt_references' : 'all_selected';
-  if (assetSelectionPolicy === 'prompt_references') {
-    const references = promptReferenceEntries(body.prompt_document, prompt);
-    const referencedIds = new Set(references.map((entry) => Number(entry.asset_id)).filter(Number.isInteger));
-    if (!referencedIds.size) throw new Error('“仅提示词 @ 素材”模式下必须提供可解析的 @ 素材引用');
-    input = input.filter((entry) => referencedIds.has(Number(entry.asset_id)));
-  }
+  if (assetSelectionPolicy === 'prompt_references') input = selectPromptReferenceInputs(input, body.prompt_document, prompt);
   if (input.length > 50) throw new Error('一次创作最多使用 50 个素材');
   const assets = prioritizePromptReferenceAssets(input.map((entry, ordinal) => resolveAsset(db, entry, ordinal, body.owner_user_id)), body.prompt_document, prompt);
   const capability = capabilityService.resolve(db, body.model, assets, tenantOptions);
@@ -226,6 +223,18 @@ function promptReferenceEntries(promptDocument, prompt) {
     if (!/^图片\d+$/u.test(alias) && !byAlias.has(alias)) byAlias.set(alias, { asset_id: null, alias });
   });
   return [...byAlias.values()];
+}
+
+/**
+ * Text-only video is valid. An empty @ reference list therefore selects no
+ * optional material. First/last-frame inputs remain explicit mode inputs and
+ * do not require duplicate @ tokens in the prompt.
+ */
+function selectPromptReferenceInputs(input, promptDocument, prompt) {
+  const entries = Array.isArray(input) ? input : [];
+  const references = promptReferenceEntries(promptDocument, prompt);
+  const referencedIds = new Set(references.map((entry) => Number(entry.asset_id)).filter(Number.isInteger));
+  return entries.filter((entry) => referencedIds.has(Number(entry.asset_id)) || ['first_frame', 'last_frame'].includes(entry.usage));
 }
 
 /** Keep explicitly referenced assets at the front, so model image slots cannot be occupied by unrelated selections. */
@@ -705,4 +714,4 @@ function cancelJob(db, log, jobId, user) {
   return get(db, jobId);
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, quote, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, SHOT_ASSET_LIMITS };
+module.exports = { create, quote, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, SHOT_ASSET_LIMITS };

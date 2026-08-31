@@ -3943,7 +3943,7 @@ async function callVideoApi(db, log, opts) {
 /**
  * ??????????????????/ChatFire ? ???? DashScope?
  */
-async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 300, intervalMs = 10000) {
+async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 300, intervalMs = 10000, onProgress = null) {
   const provider = (config.provider || '').toLowerCase();
   const protocol = resolveVideoProtocol(config);
   const isDashScope = protocol === 'dashscope';
@@ -4065,6 +4065,24 @@ async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 
           body_head: raw.slice(0, 800),
         });
         continue;
+      }
+
+      if (typeof onProgress === 'function') {
+        const observedStatus = extractPollTaskStatus(data)
+          || data?.data?.task_status
+          || data?.output?.task_status
+          || data?.state
+          || '';
+        const progressValue = data?.progress ?? data?.data?.progress ?? data?.output?.progress;
+        try {
+          await onProgress({
+            attempt: pollRound,
+            status: String(observedStatus || '').toLowerCase(),
+            provider_progress: Number.isFinite(Number(progressValue)) ? Number(progressValue) : null,
+          });
+        } catch (progressError) {
+          log.warn('[poll] 进度回调失败', { video_gen_id: videoGenId, error: progressError.message });
+        }
       }
 
       if (isKling) {

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 
 const assetService = require('../src/services/assetService');
-const { validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, safeSnapshot, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState } = require('../src/services/omniVideoService');
+const { validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, safeSnapshot, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, selectPromptReferenceInputs } = require('../src/services/omniVideoService');
 const { normalizeSupports } = require('../src/services/videoModelCapabilities');
 
 const log = { info() {}, warn() {}, error() {} };
@@ -239,6 +239,20 @@ test('omni video rejects material counts above the per-shot media limits', () =>
     () => validateShotAssetLimits(Array.from({ length: 4 }, () => ({ type: 'audio' }))),
     /per-shot limit of 3/
   );
+  assert.doesNotThrow(() => validateShotAssetLimits([
+    ...Array.from({ length: 9 }, () => ({ type: 'image' })),
+    ...Array.from({ length: 3 }, () => ({ type: 'video' })),
+    ...Array.from({ length: 3 }, () => ({ type: 'audio' })),
+  ]));
+});
+
+test('prompt-reference selection permits text-only video and keeps frame inputs', () => {
+  const selected = [{ asset_id: 1, usage: 'reference' }];
+  assert.deepEqual(selectPromptReferenceInputs(selected, { text: '纯文本生成', refs: [] }, '纯文本生成'), []);
+  assert.deepEqual(
+    selectPromptReferenceInputs([{ asset_id: 2, usage: 'first_frame' }], { text: '首帧生成', refs: [] }, '首帧生成'),
+    [{ asset_id: 2, usage: 'first_frame' }]
+  );
 });
 
 test('global and project asset scopes are isolated for the same owner', () => {
@@ -253,7 +267,7 @@ test('global and project asset scopes are isolated for the same owner', () => {
   assert.equal(assetService.list(db, { owner_user_id: 7 }).total, 2);
 });
 
-test('Seedance 2.5 applies its model-specific reference limits instead of the legacy 12-asset limit', () => {
+test('Seedance 2.5 applies its model-specific reference limits instead of legacy model limits', () => {
   const capability = { model: 'doubao-seedance-2-5-260628', limits: { total_reference: { max: 50 }, image_reference: { max: 30 }, video_reference: { max: 10 }, audio_reference: { max: 10 } } };
   assert.deepEqual(assetLimitsForCapability(capability), { total: 50, image: 30, video: 10, audio: 10 });
   assert.doesNotThrow(() => validateShotAssetLimits(Array.from({ length: 30 }, () => ({ type: 'image' })), capability));

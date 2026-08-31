@@ -21,6 +21,30 @@ test('storyboard navigation uses real video, including retained source after pos
   assert.doesNotMatch(freeCreate, /storyboard-placeholder\.svg|shotCover\(/)
 })
 
+test('storyboard preview controls stay hidden until a playable video exists', () => {
+  assert.match(freeCreate, /<template v-if="activeVideoUrl">\s*<div class="player-tools"/)
+  assert.match(freeCreate, /<div class="video-stage has-video"/)
+  assert.match(freeCreate, /<section v-else class="generation-stage-status"/)
+  assert.match(freeCreate, /generation-error-copy/)
+  assert.match(freeCreate, /完成生成后，播放器和成片操作将在这里显示/)
+})
+
+test('development mode can preview the video error state without creating a task', () => {
+  assert.match(freeCreate, /const videoStatusPreviewEnabled = import\.meta\.env\.DEV/)
+  assert.match(freeCreate, /@click="previewVideoError = true; previewVideoProgress = false">预览错误状态/)
+  assert.match(freeCreate, /开发预览不会创建任务，也不会调用模型服务/)
+  assert.match(freeCreate, /GenerationFailureDetails :job="previewVideoErrorJob"/)
+  assert.match(freeCreate, /@click="previewVideoError = false">退出错误预览/)
+  assert.match(freeCreate, /watch\(activeShotId, \(\) => \{ previewVideoError\.value = false; previewVideoProgress\.value = false \}\)/)
+})
+
+test('development mode can preview indeterminate provider progress without creating a task', () => {
+  assert.match(freeCreate, /预览生成进度/)
+  assert.match(freeCreate, /generation-progress is-indeterminate/)
+  assert.match(freeCreate, /模型服务正在生成视频/)
+  assert.match(freeCreate, /@click="previewVideoProgress = false">退出进度预览/)
+})
+
 test('an empty episode shows one explicit empty state instead of a phantom first shot', () => {
   assert.match(freeCreate, /<template v-if="currentShot">/)
   assert.match(freeCreate, /<section v-else class="empty-shot-workspace"/)

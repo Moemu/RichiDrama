@@ -216,6 +216,13 @@ test('提示词引用只改变勾选态，不清空已加入本镜的素材', as
   assert.match(source, /v-for="asset in referencedAssets"/)
 })
 
+test('视频生成允许纯文本提示词并使用模型素材上限', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+  assert.doesNotMatch(source, /请先在提示词中插入至少一个\s*@\s*素材/)
+  assert.match(source, /total:\s*15,\s*image:\s*9,\s*video:\s*3,\s*audio:\s*3/)
+  assert.match(source, /creationMode\.value === 'first_last_frame'[\s\S]*\['first_frame', 'last_frame'\]\.includes\(asset\.usage\)/)
+})
+
 test('从项目素材库加入本镜不会自动改写提示词', async () => {
   const source = await readSource('../src/views/FreeCreate.vue')
   const handler = source.slice(source.indexOf('function toggleProjectLibraryAsset'), source.indexOf('function onMaterialCardClick'))
@@ -237,7 +244,7 @@ test('镜头素材集合从镜头保存的 assets 恢复，未引用素材不丢
 test('工作台不以镜头时长重复模拟生成进度', async () => {
   const source = await readSource('../src/views/FreeCreate.vue')
 
-  assert.match(source, /class="generation-progress" role="status"/)
+  assert.match(source, /class="generation-progress"[^>]*role="status"/)
   assert.match(source, /class="time-ruler" aria-label="镜头时长"><span>时长 \{\{ duration \}\} 秒<\/span><span>最多 \{\{ maxDuration \}\} 秒<\/span>/)
   assert.doesNotMatch(source, /class="time-ruler"><span>0秒<\/span><div><i/)
 })
@@ -533,6 +540,9 @@ test('视频创作界面展示已持久化的任务进度和最近状态说明',
   const source = await readSource('../src/views/FreeCreate.vue')
   assert.match(source, /class="generation-progress"/)
   assert.match(source, /const generationProgress = computed/)
+  assert.match(source, /const generationProgressIndeterminate = computed/)
+  assert.match(source, /generationProgressIndeterminate \? '生成中'/)
+  assert.match(source, /generation-progress-scan/)
   assert.match(source, /task_progress/)
   assert.match(source, /task_message/)
   assert.match(source, /const pollingJobIds = new Set\(\)/)
@@ -548,9 +558,10 @@ test('成片操作栏不会覆盖视频，嵌入分镜保持三栏创作节奏',
     readSource('../src/views/FilmCreate.vue'),
   ])
 
-  const videoStageStart = free.indexOf('<div class="video-stage"')
-  const frameActionsStart = free.indexOf('<div v-if="activeVideoUrl" class="frame-actions"')
-  assert.ok(videoStageStart >= 0 && frameActionsStart > videoStageStart, 'the frame actions must follow the video stage')
+  const playablePreviewStart = free.indexOf('<template v-if="activeVideoUrl">')
+  const videoStageStart = free.indexOf('<div class="video-stage has-video"', playablePreviewStart)
+  const frameActionsStart = free.indexOf('<div class="frame-actions"', videoStageStart)
+  assert.ok(playablePreviewStart >= 0 && videoStageStart > playablePreviewStart && frameActionsStart > videoStageStart, 'preview controls and frame actions must wait for a playable video')
   assert.doesNotMatch(free.slice(videoStageStart, frameActionsStart), /<div class="frame-actions"/)
   assert.match(free, /\.frame-actions\{display:flex;flex:0 0 auto/)
   assert.match(film, /左侧导航栏已移除，工作区占满整个视口宽度/)
@@ -561,10 +572,10 @@ test('成片操作栏不会覆盖视频，嵌入分镜保持三栏创作节奏',
   assert.match(free, /omni-page:not\(\.project-storyboard-page\) \.creation-panel\{grid-column:1;grid-row:1/)
   assert.match(free, /omni-page:not\(\.project-storyboard-page\) \.shot-panel\{grid-column:3;grid-row:1/)
   assert.match(free, /shot-video-placeholder\{background:radial-gradient\(circle at 50% 42%,#704cff/)
-  assert.match(free, /'has-video': !!activeVideoUrl/)
+  assert.match(free, /<section v-else class="generation-stage-status"/)
+  assert.match(free, /generation-error-copy/)
   assert.match(free, /video-stage\.has-video::before\{display:none!important\}/)
-  assert.match(free, /video-stage\.rendering::before\{animation:stage-atmosphere/)
-  assert.match(free, /video-stage\.rendering \.render-play\{animation:stage-pulse/)
+  assert.match(free, /generation-stage-status\.is-failed/)
   assert.match(free, /shot-script\{min-height:300px/)
 })
 
@@ -582,6 +593,7 @@ test('生产工作流保持稳定导航、比例预览和可展开的次要信�
   assert.match(film, /\.merge-stage-active \.video-option-hint,\.merge-stage-active \.video-watermark-input\{grid-column:1 \/ -1;width:100%;min-width:0/)
   assert.match(film, /\.merge-stage-active \.main>:is\(\.merge-settings,\.merge-output\)\{overflow-y:auto;overscroll-behavior-y:contain/)
   assert.match(free, /'--preview-aspect-ratio': previewAspectRatio/)
+  assert.match(free, /<template v-if="activeVideoUrl">[\s\S]*<div class="video-stage has-video"/)
   assert.match(free, /\.project-storyboard-page \.player-tools\{flex:0 0 44px;min-height:44px;overflow:visible\}/)
   assert.match(free, /\.project-storyboard-page \.video-stage\{flex:0 0 auto!important;width:auto;height:clamp\(190px,28dvh,300px\);margin:12px auto!important;aspect-ratio:var\(--preview-aspect-ratio,16 \/ 9\)\}/)
   assert.match(free, /video-stage\.has-video \.main-video\{inset:0!important;transform:none\}/)

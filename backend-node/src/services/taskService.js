@@ -103,13 +103,13 @@ function updateTaskError(db, taskId, errMsg) {
   releaseTaskAuthorization(db, taskId, errMsg || '异步任务失败，释放预授权');
 }
 
-function updateTaskResult(db, taskId, result) {
+function updateTaskResult(db, taskId, result, message = null) {
   const now = new Date().toISOString();
   const resultStr = typeof result === 'string' ? result : JSON.stringify(result || {});
   db.prepare(
-    `UPDATE async_tasks SET status = 'completed', progress = 100, result = ?, completed_at = ?, updated_at = ?
+    `UPDATE async_tasks SET status = 'completed', progress = 100, result = ?, message = COALESCE(?, message), completed_at = ?, updated_at = ?
      WHERE id = ?`
-  ).run(resultStr, now, now, taskId);
+  ).run(resultStr, message, now, now, taskId);
 }
 
 function rowToTask(r) {

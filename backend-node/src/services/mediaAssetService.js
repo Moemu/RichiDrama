@@ -27,7 +27,7 @@ function readableUploadName(value) {
 function limits() {
   return {
     files: { image: { max_mb: LIMITS.image, extensions: EXTENSIONS.image }, video: { max_mb: LIMITS.video, extensions: EXTENSIONS.video }, audio: { max_mb: LIMITS.audio, extensions: EXTENSIONS.audio } },
-    shot: { total: 12, image: 9, video: 3, audio: 3 },
+    shot: { total: 15, image: 9, video: 3, audio: 3 },
   };
 }
 
