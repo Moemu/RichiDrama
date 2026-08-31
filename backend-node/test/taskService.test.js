@@ -158,3 +158,19 @@ describe('taskService.failOrphanedAsyncTasksOnStartup', () => {
     assert.equal(db.prepare('SELECT status FROM video_generations WHERE id = 3').get().status, 'invalid');
   });
 });
+
+describe('taskService.updateTaskResult', () => {
+  it('can replace a stale progress message when a task completes', () => {
+    const db = createTestDb();
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO async_tasks (id, type, status, progress, message, resource_id, created_at, updated_at)
+      VALUES ('video-complete', 'video_generation', 'processing', 5, '正在准备参考素材', '1', ?, ?)`).run(now, now);
+
+    taskService.updateTaskResult(db, 'video-complete', { status: 'completed' }, '视频生成完成');
+
+    const task = taskService.getTask(db, 'video-complete');
+    assert.equal(task.status, 'completed');
+    assert.equal(task.progress, 100);
+    assert.equal(task.message, '视频生成完成');
+  });
+});

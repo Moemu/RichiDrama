@@ -237,7 +237,7 @@ test('镜头素材集合从镜头保存的 assets 恢复，未引用素材不丢
 test('工作台不以镜头时长重复模拟生成进度', async () => {
   const source = await readSource('../src/views/FreeCreate.vue')
 
-  assert.match(source, /class="generation-progress" role="status"/)
+  assert.match(source, /class="generation-progress"[^>]*role="status"/)
   assert.match(source, /class="time-ruler" aria-label="镜头时长"><span>时长 \{\{ duration \}\} 秒<\/span><span>最多 \{\{ maxDuration \}\} 秒<\/span>/)
   assert.doesNotMatch(source, /class="time-ruler"><span>0秒<\/span><div><i/)
 })
@@ -533,6 +533,9 @@ test('视频创作界面展示已持久化的任务进度和最近状态说明',
   const source = await readSource('../src/views/FreeCreate.vue')
   assert.match(source, /class="generation-progress"/)
   assert.match(source, /const generationProgress = computed/)
+  assert.match(source, /const generationProgressIndeterminate = computed/)
+  assert.match(source, /generationProgressIndeterminate \? '生成中'/)
+  assert.match(source, /generation-progress-scan/)
   assert.match(source, /task_progress/)
   assert.match(source, /task_message/)
   assert.match(source, /const pollingJobIds = new Set\(\)/)

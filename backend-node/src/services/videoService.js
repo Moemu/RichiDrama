@@ -478,6 +478,7 @@ function settleGenerationBeforePostProcess(db, log, row, videoGenId, providerUsa
 
 async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, videoUrl, logLabel, providerUsage = null, providerRequestId = null, providerResponseSnapshot = null) {
   const now = new Date().toISOString();
+  if (row?.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 70, '视频已生成，正在下载并保存原片');
   let localPath = null;
   let storagePath = null;
   try {
@@ -686,7 +687,7 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
       video_url: videoUrl,
       poster_local_path: posterLocalPath,
       status: 'completed',
-    });
+    }, '视频生成完成');
   }
   // OSS is a durability concern, not a user-visible generation-success gate.
   // Failure here leaves the completed local asset playable and schedules retry.
@@ -707,6 +708,9 @@ async function pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspec
     1,
     Math.ceil((generationTimeoutMinutes * 60 * 1000) / POLL_INTERVAL_MS)
   );
+  if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 15, '任务已提交模型服务，正在等待生成结果');
+  let lastProgressState = '';
+  let lastProgressWriteAt = 0;
   const pollResult = await videoClient.pollVideoTask(
     db,
     log,
@@ -714,7 +718,21 @@ async function pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspec
     providerTaskId,
     config,
     pollMaxAttempts,
-    POLL_INTERVAL_MS
+    POLL_INTERVAL_MS,
+    ({ status }) => {
+      if (!row.task_id) return;
+      const normalized = String(status || '').toLowerCase();
+      const nowMs = Date.now();
+      if (normalized === lastProgressState && nowMs - lastProgressWriteAt < 60_000) return;
+      lastProgressState = normalized;
+      lastProgressWriteAt = nowMs;
+      const message = /queue|submitted|pending|created/.test(normalized)
+        ? '任务已提交模型服务，正在排队'
+        : /process|running|generat|in_progress/.test(normalized)
+          ? '模型服务正在生成视频'
+          : '模型服务已接收任务，正在等待结果';
+      taskService.updateTaskStatus(db, row.task_id, 'processing', 15, message);
+    }
   );
   const now = new Date().toISOString();
   const polledVideo = resolveRemoteVideoUrl(pollResult.video_url, pollResult.error);
@@ -979,13 +997,13 @@ async function processVideoGeneration(db, log, videoGenId) {
     }
     const rowForAspect = { ...row, aspect_ratio: aspectForVideo || row.aspect_ratio };
     const hasOmniRefs = !!(reference_urls && reference_urls.length > 0);
-    if (row.task_id && hasOmniRefs) {
+    if (row.task_id) {
       taskService.updateTaskStatus(
         db,
         row.task_id,
         'processing',
         5,
-        `正在上传 ${reference_urls.length} 张参考图到图床…`
+        hasOmniRefs ? `正在准备 ${reference_urls.length} 个参考素材` : '正在准备生成参数'
       );
     }
     const result = await videoClient.callVideoApi(db, log, {

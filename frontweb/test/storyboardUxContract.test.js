@@ -31,11 +31,18 @@ test('storyboard preview controls stay hidden until a playable video exists', ()
 
 test('development mode can preview the video error state without creating a task', () => {
   assert.match(freeCreate, /const videoStatusPreviewEnabled = import\.meta\.env\.DEV/)
-  assert.match(freeCreate, /v-if="videoStatusPreviewEnabled"[^>]*@click="previewVideoError = true">预览错误状态/)
+  assert.match(freeCreate, /@click="previewVideoError = true; previewVideoProgress = false">预览错误状态/)
   assert.match(freeCreate, /开发预览不会创建任务，也不会调用模型服务/)
   assert.match(freeCreate, /GenerationFailureDetails :job="previewVideoErrorJob"/)
   assert.match(freeCreate, /@click="previewVideoError = false">退出错误预览/)
-  assert.match(freeCreate, /watch\(activeShotId, \(\) => \{ previewVideoError\.value = false \}\)/)
+  assert.match(freeCreate, /watch\(activeShotId, \(\) => \{ previewVideoError\.value = false; previewVideoProgress\.value = false \}\)/)
+})
+
+test('development mode can preview indeterminate provider progress without creating a task', () => {
+  assert.match(freeCreate, /预览生成进度/)
+  assert.match(freeCreate, /generation-progress is-indeterminate/)
+  assert.match(freeCreate, /模型服务正在生成视频/)
+  assert.match(freeCreate, /@click="previewVideoProgress = false">退出进度预览/)
 })
 
 test('an empty episode shows one explicit empty state instead of a phantom first shot', () => {
