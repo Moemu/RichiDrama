@@ -21,6 +21,14 @@ test('storyboard navigation uses real video, including retained source after pos
   assert.doesNotMatch(freeCreate, /storyboard-placeholder\.svg|shotCover\(/)
 })
 
+test('storyboard preview controls stay hidden until a playable video exists', () => {
+  assert.match(freeCreate, /<template v-if="activeVideoUrl">\s*<div class="player-tools"/)
+  assert.match(freeCreate, /<div class="video-stage has-video"/)
+  assert.match(freeCreate, /<section v-else class="generation-stage-status"/)
+  assert.match(freeCreate, /generation-error-copy/)
+  assert.match(freeCreate, /完成生成后，播放器和成片操作将在这里显示/)
+})
+
 test('an empty episode shows one explicit empty state instead of a phantom first shot', () => {
   assert.match(freeCreate, /<template v-if="currentShot">/)
   assert.match(freeCreate, /<section v-else class="empty-shot-workspace"/)
