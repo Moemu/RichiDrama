@@ -932,7 +932,7 @@ function listUsage(db, filters = {}) {
   let where = 'WHERE 1=1', p = []; if (filters.user_id) { where += ' AND l.user_id = ?'; p.push(Number(filters.user_id)); }
   where = appendLedgerFilters(where, p, 'l', 'u', filters);
   return db.prepare(`SELECT l.*, u.username, u.display_name, u.role, org.name AS organization_name FROM billing_usage_logs l JOIN users u ON u.id = l.user_id LEFT JOIN customer_organizations org ON org.id=l.organization_id ${where} ORDER BY l.created_at DESC LIMIT 300`).all(...p)
-    .map((r) => ({ ...r, charged: microToCredits(r.charged_micro), usage: parse(r.usage_json), snapshot: parse(r.snapshot_json) }));
+    .map((r) => ({ ...r, status: 'settled', charged: microToCredits(r.charged_micro), usage: parse(r.usage_json), snapshot: parse(r.snapshot_json) }));
 }
 
 function pagedUsage(db, filters = {}) {
@@ -945,7 +945,7 @@ function pagedUsage(db, filters = {}) {
   const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_usage_logs l JOIN users u ON u.id = l.user_id ${where}`).get(...params)?.total || 0);
   const rows = db.prepare(`SELECT l.*, u.username, u.display_name, u.role, tn.name AS tenant_name, org.name AS organization_name FROM billing_usage_logs l JOIN users u ON u.id = l.user_id LEFT JOIN tenants tn ON tn.id = l.tenant_id LEFT JOIN customer_organizations org ON org.id=l.organization_id ${where} ORDER BY l.created_at DESC, l.rowid DESC LIMIT ? OFFSET ?`).all(...params, meta.page_size, meta.offset);
   return {
-    items: rows.map((r) => ({ ...r, charged: microToCredits(r.charged_micro), usage: parse(r.usage_json), snapshot: parse(r.snapshot_json) })),
+    items: rows.map((r) => ({ ...r, status: 'settled', charged: microToCredits(r.charged_micro), usage: parse(r.usage_json), snapshot: parse(r.snapshot_json) })),
     total,
     page: meta.page,
     page_size: meta.page_size,

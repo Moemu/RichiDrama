@@ -9,6 +9,7 @@ const auth = require('../src/services/authService');
 const billing = require('../src/services/billingService');
 const tenants = require('../src/services/tenantService');
 const organizations = require('../src/services/customerOrganizationService');
+const billingRoutes = require('../src/routes/billing');
 
 function openDatabase(dbPath) {
   const db = getDb({ path: dbPath, type: 'sqlite' });
@@ -19,6 +20,21 @@ function openDatabase(dbPath) {
 function removeDatabase(dbPath) {
   closeDb();
   for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(dbPath + suffix); } catch (_) {} }
+}
+
+function captureResponse() {
+  return {
+    statusCode: 200,
+    payload: null,
+    status(code) { this.statusCode = code; return this; },
+    json(payload) { this.payload = payload; return this; },
+  };
+}
+
+function invoke(handler, authUser, query = {}) {
+  const res = captureResponse();
+  handler({ auth: authUser, query }, res);
+  return res;
 }
 
 test('organization members share one account and authorization snapshots survive membership changes', () => {
@@ -77,6 +93,71 @@ test('existing personal balances and ledger rows stay personal until explicit me
     assert.equal(billing.payerAccount(db, user.id).account_scope, 'personal');
     assert.equal(billing.payerAccount(db, user.id).balance_micro, 500000);
     assert.equal(db.prepare('SELECT organization_id FROM billing_transactions WHERE user_id=?').get(user.id).organization_id, null);
+  } finally { removeDatabase(dbPath); }
+});
+
+test('billing routes expose organization history only to its customer administrator', () => {
+  const dbPath = path.join(os.tmpdir(), `local-mini-drama-organization-history-${Date.now()}-${Math.random()}.db`);
+  let db = openDatabase(dbPath);
+  try {
+    const admin = auth.ensureBootstrapAdmin(db, { info() {}, warn() {} });
+    const customerAdmin = auth.createUser(db, { username: 'customer-admin', password: 'user123456', display_name: '客户管理员' }, admin.id);
+    const member = auth.createUser(db, { username: 'customer-member', password: 'user123456', display_name: '当前成员' }, admin.id);
+    const former = auth.createUser(db, { username: 'former-member', password: 'user123456', display_name: '历史成员' }, admin.id);
+    billing.savePriceBook(db, admin.id, { name: '消费明细测试价目', status: 'published', items: [{ service_type: 'image', model: 'detail-image', meter: 'image', unit_price: 1 }] });
+    const tenant = tenants.tenantForUser(db, customerAdmin.id);
+    const organization = organizations.saveOrganization(db, admin.id, { name: '明细客户账户', config_tenant_id: tenant.id });
+    organizations.replaceMembers(db, organization.id, [
+      { user_id: customerAdmin.id, role: 'organization_admin' },
+      { user_id: member.id, role: 'member' },
+      { user_id: former.id, role: 'member' },
+    ]);
+    billing.adjustOrganizationBalance(db, admin.id, organization.id, 20, '消费明细测试', { operation: 'grant', idempotency_key: 'detail-grant' });
+
+    for (const user of [customerAdmin, member, former]) {
+      const authorization = billing.createAuthorization(db, { id: user.id, role: 'user' }, {
+        idempotency_key: `detail-${user.id}`, service_type: 'image', model: 'detail-image', usage: { image: 1 },
+      });
+      billing.settleAuthorization(db, { id: user.id, role: 'user' }, authorization.authorization_id, { usage: { image: 1 } });
+    }
+    organizations.replaceMembers(db, organization.id, [
+      { user_id: customerAdmin.id, role: 'organization_admin' },
+      { user_id: member.id, role: 'member' },
+    ]);
+
+    let routes = billingRoutes(db);
+    const administratorUsage = invoke(routes.usage, { id: customerAdmin.id, role: 'user' }, { organization_id: 999999, page: 1, page_size: 10 });
+    assert.equal(administratorUsage.statusCode, 200);
+    assert.equal(administratorUsage.payload.data.total, 3);
+    assert.deepEqual(new Set(administratorUsage.payload.data.items.map((item) => item.username)), new Set(['customer-admin', 'customer-member', 'former-member']));
+    assert.ok(administratorUsage.payload.data.items.every((item) => item.status === 'settled'));
+
+    const filtered = invoke(routes.usage, { id: customerAdmin.id, role: 'user' }, { user_id: former.id, date_from: '2000-01-01', date_to: '2099-12-31' });
+    assert.equal(filtered.payload.data.total, 1);
+    assert.equal(filtered.payload.data.items[0].username, 'former-member');
+
+    const memberUsage = invoke(routes.usage, { id: member.id, role: 'user' }, { user_id: customerAdmin.id, organization_id: organization.id });
+    assert.equal(memberUsage.payload.data.total, 1);
+    assert.equal(memberUsage.payload.data.items[0].username, 'customer-member');
+    const memberTransactions = invoke(routes.transactions, { id: member.id, role: 'user' }, { user_id: customerAdmin.id, organization_id: organization.id });
+    assert.ok(memberTransactions.payload.data.items.length > 0);
+    assert.ok(memberTransactions.payload.data.items.every((item) => item.user_id === member.id));
+
+    const memberList = invoke(routes.usageMembers, { id: customerAdmin.id, role: 'user' });
+    assert.equal(memberList.statusCode, 200);
+    assert.equal(memberList.payload.data.length, 3);
+    assert.equal(memberList.payload.data.find((item) => item.id === former.id).is_current, false);
+    assert.equal(invoke(routes.usageMembers, { id: member.id, role: 'user' }).statusCode, 403);
+
+    const operatorUsage = invoke(routes.usage, { id: admin.id, role: 'admin' }, { user_id: former.id });
+    assert.equal(operatorUsage.payload.data.total, 1);
+
+    closeDb();
+    db = openDatabase(dbPath);
+    routes = billingRoutes(db);
+    const restored = invoke(routes.usage, { id: customerAdmin.id, role: 'user' }, { user_id: former.id });
+    assert.equal(restored.payload.data.total, 1);
+    assert.equal(restored.payload.data.items[0].organization_id, organization.id);
   } finally { removeDatabase(dbPath); }
 });
 
