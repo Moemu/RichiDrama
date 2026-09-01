@@ -73,6 +73,12 @@ function list(db, query) {
     sql += ' AND drama_id = ?';
     params.push(query.drama_id);
   }
+  if (String(query.tool_only || '') === '1' || String(query.tool_only || '').toLowerCase() === 'true') {
+    sql += ` AND COALESCE(drama_id, 0) = 0 AND storyboard_id IS NULL AND id NOT IN (
+      SELECT video_generation_id FROM omni_video_jobs
+      WHERE sequence_id IS NOT NULL OR shot_id IS NOT NULL OR storyboard_id IS NOT NULL
+    )`;
+  }
   // Re-generating an episode soft-deletes its former storyboard rows and
   // creates replacements with new IDs. Match the previous rows by episode +
   // storyboard number as well, so their completed videos remain visible in

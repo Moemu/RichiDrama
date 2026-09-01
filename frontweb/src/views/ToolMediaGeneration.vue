@@ -4,7 +4,7 @@
     <header class="media-header">
       <div class="title-wrap">
         <span aria-hidden="true">{{ media === 'image' ? '▣' : '▶' }}</span>
-        <div><p>AI 工具 · 单项输出</p><h1>{{ media === 'image' ? '单图生成' : '单视频生成' }}</h1><small>{{ media === 'image' ? '用文字和参考素材完成图片。' : '选择项目素材，完成一个可复用的视频成片。' }}</small></div>
+        <div><p>AI 工具 · 单项输出</p><h1>{{ media === 'image' ? '单图生成' : '单视频生成' }}</h1><small>{{ media === 'image' ? '用文字和参考素材完成图片。' : '进入页面即可引用已有素材并生成单个视频。' }}</small></div>
       </div>
       <div class="header-actions">
         <router-link to="/ai-tools">返回 AI 工具箱</router-link>
@@ -14,7 +14,7 @@
 
     <section class="media-layout">
       <aside id="media-tool-input" class="control-panel" aria-label="创作输入与生成设置">
-        <section class="input-section project-section">
+        <section v-if="media === 'image'" class="input-section project-section">
           <div class="section-heading"><span>01</span><div><h2>选择项目</h2><p>项目只用于计费和素材归属，不会创建短剧工作流。</p></div></div>
           <label class="field-label">计费归属项目
             <el-select v-model="dramaId" filterable placeholder="选择项目后读取项目素材" aria-label="计费归属项目">
@@ -25,7 +25,7 @@
         </section>
 
         <section class="input-section">
-          <div class="section-heading"><span>02</span><div><h2>定义{{ media === 'image' ? '图片' : '视频' }}</h2><p>先选生成方式，再填写{{ media === 'image' ? '画面' : '镜头' }}提示词。</p></div></div>
+          <div class="section-heading"><span>{{ media === 'image' ? '02' : '01' }}</span><div><h2>定义{{ media === 'image' ? '图片' : '视频' }}</h2><p>先选生成方式，再填写{{ media === 'image' ? '画面' : '镜头' }}提示词。</p></div></div>
           <div class="mode-grid" role="radiogroup" aria-label="创作模式">
             <button v-for="item in modes" :key="item.value" type="button" role="radio" :aria-checked="String(mode === item.value)" :class="{ active: mode === item.value }" :disabled="!modeAvailable(item.value)" @click="mode = item.value">
               <b>{{ item.label }}</b><small>{{ modeAvailable(item.value) ? item.hint : '当前模型不支持' }}</small>
@@ -37,15 +37,15 @@
         </section>
 
         <section v-if="!['text', 'batch'].includes(mode)" class="input-section asset-section">
-          <div class="section-heading"><span>03</span><div><h2>引用素材</h2><p>{{ selectedMode.rule }}</p></div></div>
+          <div class="section-heading"><span>{{ media === 'image' ? '03' : '02' }}</span><div><h2>引用素材</h2><p>{{ selectedMode.rule }}</p></div></div>
           <template v-if="mode === 'first_last'">
             <div class="frame-selectors">
-              <ToolAssetSelector v-model="firstFrameAssetId" :drama-id="Number(dramaId) || null" :types="['image']" label="首帧（必选）" @selected="applyFirstFrame" />
-              <ToolAssetSelector v-model="lastFrameAssetId" :drama-id="Number(dramaId) || null" :types="['image']" label="尾帧（可选）" @selected="applyLastFrame" />
+              <ToolAssetSelector v-model="firstFrameAssetId" :drama-id="media === 'image' ? Number(dramaId) || null : null" :types="['image']" label="首帧（必选）" @selected="applyFirstFrame" />
+              <ToolAssetSelector v-model="lastFrameAssetId" :drama-id="media === 'image' ? Number(dramaId) || null : null" :types="['image']" label="尾帧（可选）" @selected="applyLastFrame" />
             </div>
           </template>
-          <ToolAssetSelector v-else-if="mode === 'multi'" v-model="selectedAssetIds" multiple :max-selections="assetLimit" :drama-id="Number(dramaId) || null" :types="media === 'image' ? ['image'] : ['image', 'video', 'audio']" label="参考素材" @selection-change="applyMultiAssets" />
-          <ToolAssetSelector v-else v-model="selectedAssetId" :drama-id="Number(dramaId) || null" :types="['image']" label="起始参考图" @selected="applySelectedAsset" />
+          <ToolAssetSelector v-else-if="mode === 'multi'" v-model="selectedAssetIds" multiple :max-selections="assetLimit" :drama-id="media === 'image' ? Number(dramaId) || null : null" :types="media === 'image' ? ['image'] : ['image', 'video', 'audio']" label="参考素材" @selection-change="applyMultiAssets" />
+          <ToolAssetSelector v-else v-model="selectedAssetId" :drama-id="media === 'image' ? Number(dramaId) || null : null" :types="['image']" label="起始参考图" @selected="applySelectedAsset" />
           <details class="external-reference">
             <summary>使用公开素材链接</summary>
             <label class="field-label">公开链接
@@ -55,7 +55,7 @@
         </section>
 
         <section class="input-section settings-section">
-          <div class="section-heading"><span>{{ ['text', 'batch'].includes(mode) ? '03' : '04' }}</span><div><h2>生成规格</h2><p>模型会限制可用时长、分辨率和素材类型。</p></div></div>
+          <div class="section-heading"><span>{{ media === 'image' ? (['text', 'batch'].includes(mode) ? '03' : '04') : (mode === 'text' ? '02' : '03') }}</span><div><h2>生成规格</h2><p>模型会限制可用时长、分辨率和素材类型。</p></div></div>
           <label v-if="media === 'image'" class="field-label">模型
             <el-select v-model="model" clearable placeholder="使用当前默认模型"><el-option v-for="item in imageModelOptions" :key="item" :label="item" :value="item" /></el-select>
           </label>
@@ -80,22 +80,23 @@
             <div v-else class="empty-result"><GenerationFailureDetails v-if="featured.status === 'failed'" :job="featured" /><template v-else><span class="processing-mark" aria-hidden="true">{{ activeStatuses.has(featured.status) ? '◌' : '▶' }}</span><b>{{ statusText(featured.status) }}</b><small>{{ featured.task_message || '任务已保存，结果会自动更新。' }}</small></template></div>
             <footer><span>{{ statusText(featured.status) }}</span><b>{{ featured.prompt || '未填写提示词' }}</b><small>{{ formatDate(featured.updated_at || featured.created_at) }}</small></footer>
           </div>
-          <div v-else class="empty-result"><span class="empty-play" aria-hidden="true">▶</span><b>成片会显示在这里</b><small>左侧完成项目、提示词、素材和模型设置后即可生成。</small></div>
+          <div v-else class="empty-result"><span class="empty-play" aria-hidden="true">▶</span><b>成片会显示在这里</b><small>左侧完成提示词、素材和模型设置后即可生成。</small></div>
           <div v-if="featured?.status === 'completed'" class="result-actions">
+            <el-button type="primary" @click="downloadResult">下载{{ media === 'image' ? '图片' : '视频' }}</el-button>
             <el-button :loading="importing" @click="importAsset">保存到素材库</el-button>
-            <el-button v-if="media === 'video'" type="primary" :loading="importing" @click="continueOmni">带入多镜头创作</el-button>
+            <el-button v-if="media === 'video'" :loading="importing" @click="continueOmni">带入多镜头创作</el-button>
           </div>
         </section>
 
         <aside class="generation-history" aria-label="生成历史">
-          <div class="history-heading"><div><h2>最近生成</h2><p>选择记录可查看成片或失败原因。</p></div><el-button text :loading="historyLoading" @click="load">刷新</el-button></div>
-          <div v-if="items.length" class="history-list">
+          <div class="history-heading"><div><h2>最近生成 <small>{{ items.length }}</small></h2><p>{{ historyExpanded ? '选择记录可查看成片或失败原因。' : '历史默认折叠，减少页面干扰。' }}</p></div><div class="history-actions"><el-button text :loading="historyLoading" @click="load">刷新</el-button><el-button text :aria-expanded="String(historyExpanded)" @click="historyExpanded = !historyExpanded">{{ historyExpanded ? '收起' : '展开' }}</el-button></div></div>
+          <div v-if="historyExpanded && items.length" class="history-list">
             <button v-for="item in items" :key="historyKey(item)" type="button" class="history-card" :class="{ active: historyKey(featured) === historyKey(item) }" @click="featured = item">
               <span class="history-preview"><img v-if="media === 'image' && item.image_url" :src="item.image_url" alt="" width="144" height="90" loading="lazy" /><video v-else-if="media === 'video' && (item.local_path || item.video_url)" :src="mediaUrl(item)" muted preload="metadata" /><span v-else aria-hidden="true">●</span></span>
               <span class="history-copy"><b>{{ statusText(item.status) }} · #{{ displayId(item) }}</b><small>{{ item.prompt || '未命名生成' }}</small><em>{{ formatDate(item.updated_at || item.created_at) }}</em></span>
             </button>
           </div>
-          <p v-else class="history-empty">还没有生成记录。首次提交后，任务会保存在这里。</p>
+          <p v-else-if="historyExpanded" class="history-empty">还没有生成记录。首次提交后，任务会保存在这里。</p>
         </aside>
       </section>
     </section>
@@ -122,7 +123,7 @@ const props = defineProps({ media: { type: String, required: true } })
 const router = useRouter()
 const prompt = ref(''), model = ref(''), reference = ref(''), selectedAssetId = ref(null), selectedAsset = ref(null), selectedAssetIds = ref([]), selectedAssets = ref([]), firstFrameAssetId = ref(null), lastFrameAssetId = ref(null), firstFrameAsset = ref(null), lastFrameAsset = ref(null)
 const videoSettings = ref({ video_model: '', duration: 15, resolution: '720p', aspect_ratio: '16:9', upscale_resolution: null, target_fps: null })
-const running = ref(false), importing = ref(false), historyLoading = ref(false), items = ref([]), mode = ref('text'), featured = ref(null), projects = ref([]), capabilities = ref([]), dramaId = ref(null)
+const running = ref(false), importing = ref(false), historyLoading = ref(false), historyExpanded = ref(false), items = ref([]), mode = ref('text'), featured = ref(null), projects = ref([]), capabilities = ref([]), dramaId = ref(null)
 const imageModelOptions = useModelOptions('image')
 const activeStatuses = new Set(['pending', 'processing', 'sd2_waiting', 'upscale_pending', 'upscaling', 'interpolation_pending', 'interpolating', 'persisting', 'billing_reconciliation'])
 let pollTimer = null
@@ -136,7 +137,7 @@ const modes = computed(() => props.media === 'image' ? [
   { label: '文生视频', value: 'text', hint: '只使用提示词', rule: '不需要参考素材。' },
   { label: '图生视频', value: 'image', hint: '从一张图片起镜', rule: '选择一张图片作为起始参考。' },
   { label: '首尾帧', value: 'first_last', hint: '控制起点与终点', rule: '首帧必选，尾帧可选。' },
-  { label: '多参考', value: 'multi', hint: '组合图片、视频、音频', rule: '可选择多个项目或个人素材。' },
+  { label: '多参考', value: 'multi', hint: '组合图片、视频、音频', rule: '可选择账号下的项目素材和个人素材。' },
 ])
 const selectedMode = computed(() => modes.value.find((item) => item.value === mode.value) || modes.value[0])
 const currentCapability = computed(() => capabilities.value.find((item) => item.model === videoSettings.value.video_model) || null)
@@ -149,9 +150,9 @@ const hasRequiredAssets = computed(() => {
   return selectedAssets.value.length > 0 || externalRefs.value.length > 0
 })
 const hasModel = computed(() => props.media === 'image' || (!!videoSettings.value.video_model && videoSettings.value.video_model !== 'auto'))
-const canSubmit = computed(() => !!prompt.value.trim() && Number(dramaId.value) > 0 && hasRequiredAssets.value && hasModel.value && modeAvailable(mode.value) && !running.value)
+const canSubmit = computed(() => !!prompt.value.trim() && (props.media === 'video' || Number(dramaId.value) > 0) && hasRequiredAssets.value && hasModel.value && modeAvailable(mode.value) && !running.value)
 const submitHint = computed(() => {
-  if (!Number(dramaId.value)) return '请选择计费归属项目'
+  if (props.media === 'image' && !Number(dramaId.value)) return '请选择计费归属项目'
   if (!prompt.value.trim()) return `请填写${props.media === 'image' ? '图片' : '视频'}提示词`
   if (!hasRequiredAssets.value) return selectedMode.value.rule
   if (!hasModel.value) return '请选择可用的视频模型'
@@ -201,8 +202,8 @@ async function load(silent = false) {
       items.value = (out.items || out || []).slice(0, 30)
     } else {
       const [omniResult, legacyResult] = await Promise.allSettled([
-        omniVideoAPI.list(),
-        videosAPI.list({ page_size: 30, drama_id: 0 }),
+        omniVideoAPI.list({ tool_only: 1 }),
+        videosAPI.list({ page_size: 30, tool_only: 1 }),
       ])
       const omniItems = omniResult.status === 'fulfilled' ? (omniResult.value.items || omniResult.value || []).map((item) => ({ ...item, history_kind: 'omni' })) : []
       const omniGenerationIds = new Set(omniItems.map((item) => Number(item.video_generation_id)).filter(Boolean))
@@ -224,7 +225,7 @@ async function submit() {
       await imagesAPI.create({ drama_id: Number(dramaId.value), prompt: prompt.value.trim(), model: model.value || undefined, image_url: mode.value === 'image' ? refs[0] : undefined, reference_images: mode.value === 'multi' ? refs : undefined })
     } else {
       const settings = videoSettings.value || {}
-      await omniVideoAPI.create({ drama_id: Number(dramaId.value), prompt: prompt.value.trim(), asset_selection_policy: 'all_selected', creation_mode: mode.value === 'first_last' ? 'first_last_frame' : 'multi_reference', model: settings.video_model, duration: settings.duration, resolution: settings.resolution || '720p', aspect_ratio: settings.aspect_ratio || '16:9', upscale_resolution: settings.upscale_resolution || null, target_fps: settings.target_fps || null, audio_strategy: 'reference_only', assets: requestAssets() })
+      await omniVideoAPI.create({ source_context: 'single_video_tool', prompt: prompt.value.trim(), asset_selection_policy: 'all_selected', creation_mode: mode.value === 'first_last' ? 'first_last_frame' : 'multi_reference', model: settings.video_model, duration: settings.duration, resolution: settings.resolution || '720p', aspect_ratio: settings.aspect_ratio || '16:9', upscale_resolution: settings.upscale_resolution || null, target_fps: settings.target_fps || null, audio_strategy: 'reference_only', assets: requestAssets() })
     }
     ElMessage.success('任务已提交，结果会自动刷新')
     await load(true)
@@ -243,6 +244,16 @@ async function importAsset() {
   finally { importing.value = false }
 }
 async function continueOmni() { const asset = await importAsset(); if (asset?.id) router.push({ path: '/free-create', query: { asset_id: asset.id } }) }
+function downloadResult() {
+  const url = props.media === 'image' ? featured.value?.image_url : mediaUrl(featured.value)
+  if (!url) return ElMessage.warning('当前结果没有可下载文件')
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `richidrama-${props.media}-${displayId(featured.value) || 'result'}.${props.media === 'image' ? 'png' : 'mp4'}`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
 function clearReferences() { selectedAssetId.value = null; selectedAsset.value = null; selectedAssetIds.value = []; selectedAssets.value = []; firstFrameAssetId.value = null; lastFrameAssetId.value = null; firstFrameAsset.value = null; lastFrameAsset.value = null; reference.value = '' }
 
 watch(() => props.media, () => { featured.value = null; mode.value = 'text'; clearReferences(); load() })
@@ -250,7 +261,7 @@ watch(dramaId, clearReferences)
 watch(mode, clearReferences)
 watch(() => videoSettings.value.video_model, () => { if (!modeAvailable(mode.value)) mode.value = 'multi' })
 onMounted(async () => {
-  const [data, modelCapabilities] = await Promise.all([dramaAPI.list({ page_size: 100 }), props.media === 'video' ? omniVideoAPI.capabilities().catch(() => []) : Promise.resolve([])])
+  const [data, modelCapabilities] = await Promise.all([props.media === 'image' ? dramaAPI.list({ page_size: 100 }) : Promise.resolve([]), props.media === 'video' ? omniVideoAPI.capabilities().catch(() => []) : Promise.resolve([])])
   projects.value = data?.items || data || []
   capabilities.value = Array.isArray(modelCapabilities) ? modelCapabilities : []
   await load()

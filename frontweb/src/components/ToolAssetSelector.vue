@@ -9,6 +9,7 @@
     </div>
 
     <template v-if="source === 'library'">
+      <el-input v-model="search" clearable name="asset_search" autocomplete="off" placeholder="搜索素材名称" aria-label="搜索素材" />
       <div v-if="filteredAssets.length" class="asset-grid">
         <button
           v-for="asset in filteredAssets"
@@ -61,14 +62,17 @@ const props = defineProps({
   maxSelections: { type: Number, default: 50 },
 })
 const emit = defineEmits(['update:modelValue', 'selected', 'selection-change'])
-const source = ref('library'), assets = ref([]), uploading = ref(false), loading = ref(false), fileInput = ref(null)
+const source = ref('library'), assets = ref([]), search = ref(''), uploading = ref(false), loading = ref(false), fileInput = ref(null)
 let loadRevision = 0
-const filteredAssets = computed(() => assets.value.filter((asset) => props.types.includes(asset.type)))
+const filteredAssets = computed(() => {
+  const keyword = search.value.trim().toLowerCase()
+  return assets.value.filter((asset) => props.types.includes(asset.type) && (!keyword || `${asset.alias || ''} ${asset.name || ''}`.toLowerCase().includes(keyword)))
+})
 const selectedIds = computed(() => props.multiple
   ? (Array.isArray(props.modelValue) ? props.modelValue.map(Number) : [])
   : (Number(props.modelValue) > 0 ? [Number(props.modelValue)] : []))
 const selectedAssets = computed(() => selectedIds.value.map((id) => assets.value.find((asset) => Number(asset.id) === id)).filter(Boolean))
-const libraryHint = computed(() => props.dramaId ? '当前项目素材 + 个人素材' : '个人素材；选择项目后可读取项目素材')
+const libraryHint = computed(() => props.dramaId ? '当前项目素材 + 个人素材' : '我的全部素材（含项目素材）')
 const accept = computed(() => props.types.map((type) => type === 'image' ? 'image/*' : type === 'video' ? 'video/*' : type === 'audio' ? 'audio/*' : '').filter(Boolean).join(','))
 const acceptedLabel = computed(() => props.types.map(typeLabel).join('、'))
 const assetUrl = (asset) => asset?.local_path ? `/static/${String(asset.local_path).replace(/^\/+/, '')}` : asset?.url || ''
@@ -79,8 +83,9 @@ async function load() {
   const revision = ++loadRevision
   loading.value = true
   try {
-    const requests = [omniVideoAPI.assets({ scope: 'global', page_size: 100 })]
-    if (Number(props.dramaId) > 0) requests.unshift(omniVideoAPI.assets({ scope: 'project', drama_id: Number(props.dramaId), page_size: 100 }))
+    const requests = Number(props.dramaId) > 0
+      ? [loadScope({ scope: 'project', drama_id: Number(props.dramaId) }), loadScope({ scope: 'global' })]
+      : [loadScope({ scope: 'all' })]
     const results = await Promise.allSettled(requests)
     if (revision !== loadRevision) return
     const available = results.filter((result) => result.status === 'fulfilled').flatMap((result) => result.value.items || [])
@@ -91,6 +96,19 @@ async function load() {
     emitSelection()
   } catch (error) { ElMessage.error(error.message || '素材库加载失败') }
   finally { if (revision === loadRevision) loading.value = false }
+}
+async function loadScope(params) {
+  const first = await omniVideoAPI.assets({ ...params, page: 1, page_size: 100 })
+  const items = [...(first.items || [])]
+  const total = Number(first.total || items.length)
+  const pageCount = Math.ceil(total / 100)
+  for (let page = 2; items.length < total && page <= pageCount; page += 1) {
+    const result = await omniVideoAPI.assets({ ...params, page, page_size: 100 })
+    const pageItems = result.items || []
+    items.push(...pageItems)
+    if (!pageItems.length) break
+  }
+  return { items }
 }
 function emitSelection() { emit('selection-change', selectedAssets.value) }
 function select(asset) {

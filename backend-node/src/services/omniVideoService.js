@@ -118,7 +118,7 @@ function create(db, log, body, billingUser) {
   const authorization = waitingForSd2 ? null : billing.createAuthorization(db, payer, {
     idempotency_key: String(body.idempotency_key).trim(),
     service_type: 'video', model: billingTarget.billing_key, usage,
-    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || null, drama_id: body.drama_id || null, source_kind: body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.storyboard_id || body.shot_id || null,
+    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || null, drama_id: body.drama_id || null, source_kind: body.source_context === 'single_video_tool' ? 'single_video_tool' : body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.storyboard_id || body.shot_id || null,
   });
   let task = null;
   let videoGenerationId = null;
@@ -145,7 +145,7 @@ function create(db, log, body, billingUser) {
     videoGenerationId = Number(result.lastInsertRowid);
   }
   const postProcess = { keep_original_audio: !!body.keep_original_audio, audio_volume: clamp(body.audio_volume, 0, 2, 1), audio_fade_seconds: clamp(body.audio_fade_seconds, 0, 10, 0) };
-  const requestSnapshot = { prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, asset_selection_policy: assetSelectionPolicy, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
+  const requestSnapshot = { source_context: body.source_context || null, prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, asset_selection_policy: assetSelectionPolicy, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
   const job = !existingWaitingId ? db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, owner_user_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, storyboard_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(videoGenerationId, body.owner_user_id || payer.id, modelPrompt, body.negative_prompt || null, body.model || 'auto', capability.model,
@@ -482,6 +482,9 @@ function list(db, query = {}) {
   const params = [];
   const filters = ['j.hidden_at IS NULL'];
   if (query.owner_user_id) { filters.push('j.owner_user_id = ?'); params.push(Number(query.owner_user_id)); }
+  if (String(query.tool_only || '') === '1' || String(query.tool_only || '').toLowerCase() === 'true') {
+    filters.push('COALESCE(v.drama_id, 0) = 0 AND j.sequence_id IS NULL AND j.shot_id IS NULL AND COALESCE(j.storyboard_id, v.storyboard_id) IS NULL');
+  }
   if (Number.isInteger(storyboardId) && storyboardId > 0) {
     // Older jobs predate omni_video_jobs.storyboard_id; recover them through
     // their video generation so existing project history remains visible.
@@ -616,7 +619,7 @@ function retry(db, log, id, billingUser) {
   const snapshot = parse(job.request_snapshot_json);
   if (!snapshot?.prompt || !Array.isArray(snapshot.assets) || !snapshot.assets.length) throw new Error('该任务没有可重试的完整请求快照');
   return create(db, log, {
-    prompt: snapshot.prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
+    source_context: snapshot.source_context || undefined, prompt: snapshot.prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
     aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
     upscale_resolution: snapshot.upscale_resolution, target_fps: snapshot.target_fps,
     creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
