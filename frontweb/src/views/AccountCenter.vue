@@ -29,10 +29,13 @@
         <section class="recharge-checkout">
           <div class="recharge-heading"><div><p class="eyebrow">个人账户充值</p><h2>选择充值金额</h2></div><strong>{{ rechargeCredits }}<small> 积分</small></strong></div>
           <el-alert v-if="!paymentOptions.enabled" title="充值功能暂未开放" description="支付配置完成后，可以在此使用支付宝或微信扫码充值。" type="info" :closable="false" show-icon />
-          <div class="amount-presets" aria-label="充值金额"><button v-for="amount in paymentOptions.preset_amounts_yuan || []" :key="amount" type="button" :class="{active: rechargeAmount === amount}" @click="rechargeAmount = amount">¥{{ Number(amount) }}</button></div>
-          <label class="custom-amount"><span>自定义金额</span><el-input v-model="rechargeAmount" inputmode="decimal" placeholder="1.00–5000.00"><template #prepend>¥</template></el-input><small>1 元兑换 100 积分。金额最多保留两位小数。</small></label>
+          <div class="amount-presets" role="radiogroup" aria-label="充值金额">
+            <button v-for="amount in paymentOptions.preset_amounts_yuan || []" :key="amount" type="button" role="radio" :aria-checked="rechargeAmountChoice === amount" :class="{active: rechargeAmountChoice === amount}" @click="selectRechargeAmount(amount)">¥{{ Number(amount) }}</button>
+            <button type="button" role="radio" :aria-checked="rechargeAmountChoice === 'custom'" :class="{active: rechargeAmountChoice === 'custom'}" @click="selectRechargeAmount('custom')">自定义</button>
+          </div>
+          <label v-if="rechargeAmountChoice === 'custom'" class="custom-amount"><span>输入自定义金额</span><el-input ref="customAmountInput" v-model="customRechargeAmount" inputmode="decimal" placeholder="1.00–5000.00"><template #prepend>¥</template></el-input><small>1 元兑换 100 积分。金额最多保留两位小数。</small></label>
           <div class="payment-channels"><button v-for="channel in paymentOptions.channels || []" :key="channel.id" type="button" :disabled="!channel.enabled" :class="{active: rechargeChannel === channel.id}" @click="rechargeChannel = channel.id"><b>{{ channel.id === 'alipay' ? '支付宝' : '微信支付' }}</b><small>{{ channel.enabled ? '扫码支付' : '暂未开放' }}</small></button></div>
-          <el-button type="primary" size="large" :disabled="!canCreatePayment" :loading="creatingPayment" @click="createPayment">生成支付二维码</el-button>
+          <div class="recharge-submit"><span>{{ paymentSubmitHint }}</span><el-button type="primary" size="large" :disabled="!canCreatePayment" :loading="creatingPayment" @click="createPayment">提交充值订单</el-button></div>
         </section>
         <section class="panel payment-history"><div class="panel-title"><div><h2>充值订单</h2><p>支付成功后，积分会自动到账。</p></div><el-button text @click="loadPaymentOrders">刷新</el-button></div>
           <div class="billing-table-scroll"><el-table :data="paymentOrders" empty-text="暂无充值订单"><el-table-column label="时间" min-width="170"><template #default="{row}">{{ formatDate(row.created_at) }}</template></el-table-column><el-table-column label="渠道" width="100"><template #default="{row}">{{ row.channel === 'alipay' ? '支付宝' : '微信' }}</template></el-table-column><el-table-column prop="amount_yuan" label="金额（元）" width="110"/><el-table-column prop="credits" label="积分" width="110"/><el-table-column label="状态" width="120"><template #default="{row}"><el-tag :type="paymentStatus(row.status).type">{{ paymentStatus(row.status).label }}</el-tag></template></el-table-column><el-table-column label="操作" width="110" fixed="right"><template #default="{row}"><el-button v-if="row.status === 'pending'" link type="primary" @click="openPayment(row)">继续支付</el-button></template></el-table-column></el-table></div>
@@ -50,7 +53,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import QRCode from 'qrcode'
 import { accountAPI } from '@/api/account'
@@ -68,8 +71,10 @@ const displayName = ref(JSON.parse(localStorage.getItem('lmd_auth_user') || '{}'
 const accountTab = ref('overview')
 const paymentOptions = ref({ channels: [], preset_amounts_yuan: [] })
 const paymentOrders = ref([])
-const rechargeAmount = ref('50.00')
-const rechargeChannel = ref('alipay')
+const rechargeAmountChoice = ref('50.00')
+const customRechargeAmount = ref('')
+const customAmountInput = ref(null)
+const rechargeChannel = ref('')
 const creatingPayment = ref(false)
 const paymentDialog = ref(false)
 const activePayment = ref(null)
@@ -77,11 +82,19 @@ const paymentQr = ref('')
 const paymentTick = ref(Date.now())
 let paymentPollTimer = null
 let paymentSyncCounter = 0
+const rechargeAmount = computed(() => rechargeAmountChoice.value === 'custom' ? customRechargeAmount.value : rechargeAmountChoice.value)
 const rechargeCredits = computed(() => {
   const amount = Number(rechargeAmount.value)
   return Number.isFinite(amount) && amount > 0 ? new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(amount * 100) : 0
 })
 const canCreatePayment = computed(() => paymentOptions.value.enabled && paymentOptions.value.personal_recharge_allowed && paymentOptions.value.channels?.some((item) => item.id === rechargeChannel.value && item.enabled) && /^\d+(?:\.\d{1,2})?$/.test(rechargeAmount.value))
+const paymentSubmitHint = computed(() => {
+  if (!paymentOptions.value.enabled) return '支付配置完成后可以提交订单。'
+  if (!paymentOptions.value.channels?.some((item) => item.enabled)) return '当前没有可用支付渠道。'
+  if (!rechargeChannel.value) return '请选择支付渠道。'
+  if (!/^\d+(?:\.\d{1,2})?$/.test(rechargeAmount.value)) return '请输入有效的充值金额。'
+  return `将充值 ¥${Number(rechargeAmount.value).toFixed(2)}，预计到账 ${rechargeCredits.value} 积分。`
+})
 const countdownText = computed(() => {
   const seconds = Math.max(0, Math.ceil((Date.parse(activePayment.value?.expires_at || 0) - paymentTick.value) / 1000))
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
@@ -89,6 +102,7 @@ const countdownText = computed(() => {
 const PAYMENT_STATUS = { pending:{label:'等待支付',type:'warning'},paid:{label:'已到账',type:'success'},closed:{label:'已关闭',type:'info'},expired:{label:'已过期',type:'info'},review_required:{label:'需要核查',type:'danger'},failed:{label:'下单失败',type:'danger'} }
 function paymentStatus(status) { return PAYMENT_STATUS[status] || { label: status, type: 'info' } }
 function formatDate(value) { return value ? new Intl.DateTimeFormat('zh-CN', { timeZone:'Asia/Shanghai', dateStyle:'short', timeStyle:'medium' }).format(new Date(value)) : '—' }
+function selectRechargeAmount(value) { rechargeAmountChoice.value = value; if (value === 'custom') nextTick(() => customAmountInput.value?.focus()) }
 
 async function loadAccount() { account.value = await accountAPI.me() }
 async function loadPaymentOrders() { const result = await accountAPI.paymentOrders({ page: 1, page_size: 20 }); paymentOrders.value = result.items || [] }
@@ -143,7 +157,7 @@ onMounted(async () => {
   else ElMessage.error(accountResult.reason?.message || '账户信息加载失败，请刷新重试')
   if (modelResult.status === 'fulfilled') models.value = modelResult.value
   else ElMessage.error(modelResult.reason?.message || '可用模型加载失败，请稍后重试')
-  if (paymentOptionsResult.status === 'fulfilled') { paymentOptions.value = paymentOptionsResult.value; const first = paymentOptions.value.channels?.find((item) => item.enabled); if (first) rechargeChannel.value = first.id; if (paymentOptions.value.preset_amounts_yuan?.[1]) rechargeAmount.value = paymentOptions.value.preset_amounts_yuan[1] }
+  if (paymentOptionsResult.status === 'fulfilled') { paymentOptions.value = paymentOptionsResult.value; const first = paymentOptions.value.channels?.find((item) => item.enabled); rechargeChannel.value = first?.id || ''; if (paymentOptions.value.preset_amounts_yuan?.[1]) rechargeAmountChoice.value = paymentOptions.value.preset_amounts_yuan[1] }
 })
 onBeforeUnmount(stopPaymentPolling)
 </script>
@@ -202,6 +216,7 @@ onBeforeUnmount(stopPaymentPolling)
 .account-view .panel{border-radius:0;border-inline:0;background:transparent;box-shadow:none}.security-view{gap:2.5rem}.security-view .panel{padding:0}.bills{padding-inline:0}.billing-table-scroll{padding-bottom:.5rem}
 @media (prefers-reduced-motion:no-preference){.account-header,.account-tabs,.account-view{animation:account-enter var(--motion-normal,220ms) var(--motion-ease) both}.account-tabs{animation-delay:40ms}.account-view{animation-delay:80ms}.overview-links button{transition:color var(--motion-fast) var(--motion-ease),transform var(--motion-fast) var(--motion-ease)}.overview-links button:hover,.overview-links button:focus-visible{transform:translateY(-2px)}}@keyframes account-enter{from{opacity:0;transform:translateY(.5rem)}to{opacity:1;transform:none}}
 @media(max-width:45rem){.page{max-width:100%;padding:1.25rem}.account-header{align-items:flex-start}.account-intro{font-size:.84rem}.overview-links{grid-template-columns:1fr}.overview-links button,.overview-links button:not(:first-child){padding:1rem 0;border-right:0;border-bottom:1px solid var(--border-subtle)}.overview-links button:last-child{border-bottom:0}}
-.recharge-view{display:grid;grid-template-columns:minmax(21rem,.8fr) minmax(30rem,1.2fr);gap:2rem;align-items:start}.recharge-checkout{display:grid;gap:1.25rem;padding:clamp(1.4rem,3vw,2.4rem);border:1px solid var(--border-subtle);background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 9%,var(--bg-surface)),var(--bg-surface))}.recharge-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem}.recharge-heading h2{margin:0;font-size:clamp(1.5rem,2.5vw,2.2rem)}.recharge-heading strong{font-size:1.7rem;font-variant-numeric:tabular-nums;color:var(--accent)}.recharge-heading strong small{font-size:.75rem;color:var(--text-muted)}.amount-presets{display:grid;grid-template-columns:repeat(4,1fr);gap:.55rem}.amount-presets button,.payment-channels button{border:1px solid var(--border-subtle);background:var(--bg-surface);color:var(--text-primary);cursor:pointer}.amount-presets button{min-height:3.2rem;border-radius:var(--radius-sm);font-size:1rem}.amount-presets button.active,.payment-channels button.active{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--bg-surface))}.custom-amount{display:grid;gap:.45rem}.custom-amount>span{font-size:.84rem;font-weight:650}.custom-amount small{color:var(--text-muted);font-size:.75rem}.payment-channels{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}.payment-channels button{display:grid;gap:.2rem;min-height:4rem;padding:.75rem;border-radius:var(--radius-sm);text-align:left}.payment-channels button:disabled{opacity:.5;cursor:not-allowed}.payment-channels small{color:var(--text-muted)}.payment-history{min-width:0;margin:0;padding:0}.payment-history .panel-title{display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:1rem}.recharge-blocked{max-width:42rem;margin:0}.recharge-blocked p,.recharge-blocked small{color:var(--text-muted)}.payment-dialog{display:grid;justify-items:center;gap:.65rem;text-align:center}.payment-dialog>p{margin:0;color:var(--text-muted)}.payment-dialog>img{width:min(17.5rem,75vw);height:auto;padding:.5rem;background:#fff;border-radius:.5rem}.payment-dialog>strong{font-size:1.8rem}.payment-dialog>span,.payment-dialog>small{color:var(--text-muted)}
-@media(max-width:62rem){.recharge-view{grid-template-columns:1fr}.payment-history{padding-top:1rem}}@media(max-width:45rem){.amount-presets{grid-template-columns:repeat(2,1fr)}.payment-channels{grid-template-columns:1fr}.recharge-checkout{padding:1.15rem}.recharge-heading{align-items:flex-start;flex-direction:column}.recharge-view{gap:1rem}}
+.recharge-view{display:grid;grid-template-columns:minmax(0,1fr);gap:2.25rem;align-content:start}.recharge-checkout{display:grid;gap:1.25rem;padding:clamp(1.4rem,3vw,2.4rem);border:1px solid var(--border-subtle);background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 9%,var(--bg-surface)),var(--bg-surface))}.recharge-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem}.recharge-heading h2{margin:0;font-size:clamp(1.5rem,2.5vw,2.2rem)}.recharge-heading strong{font-size:1.7rem;font-variant-numeric:tabular-nums;color:var(--accent)}.recharge-heading strong small{font-size:.75rem;color:var(--text-muted)}.amount-presets{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.55rem}.amount-presets button,.payment-channels button{border:1px solid var(--border-subtle);background:var(--bg-surface);color:var(--text-primary);cursor:pointer}.amount-presets button{min-height:3.2rem;border-radius:var(--radius-sm);font-size:1rem}.amount-presets button.active,.payment-channels button.active{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--bg-surface))}.custom-amount{display:grid;grid-template-columns:minmax(9rem,.35fr) minmax(16rem,.65fr);align-items:center;gap:.55rem 1rem;padding:.9rem 1rem;border-left:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 5%,transparent)}.custom-amount>span{font-size:.84rem;font-weight:650}.custom-amount small{grid-column:2;color:var(--text-muted);font-size:.75rem}.payment-channels{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}.payment-channels button{display:grid;gap:.2rem;min-height:4rem;padding:.75rem;border-radius:var(--radius-sm);text-align:left}.payment-channels button:disabled{opacity:.5;cursor:not-allowed}.payment-channels small{color:var(--text-muted)}.recharge-submit{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding-top:.25rem}.recharge-submit>span{color:var(--text-muted);font-size:.8rem}.recharge-submit .el-button{min-width:10rem}.payment-history{min-width:0;margin:0;padding:1.5rem clamp(1rem,2vw,1.5rem) 1.25rem;border:1px solid var(--border-subtle)}.payment-history .panel-title{display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:1rem}.recharge-blocked{max-width:42rem;margin:0}.recharge-blocked p,.recharge-blocked small{color:var(--text-muted)}.payment-dialog{display:grid;justify-items:center;gap:.65rem;text-align:center}.payment-dialog>p{margin:0;color:var(--text-muted)}.payment-dialog>img{width:min(17.5rem,75vw);height:auto;padding:.5rem;background:#fff;border-radius:.5rem}.payment-dialog>strong{font-size:1.8rem}.payment-dialog>span,.payment-dialog>small{color:var(--text-muted)}
+@media(max-width:45rem){.amount-presets{grid-template-columns:repeat(2,1fr)}.amount-presets button:last-child{grid-column:1/-1}.custom-amount{grid-template-columns:1fr}.custom-amount small{grid-column:1}.payment-channels{grid-template-columns:1fr}.recharge-submit{align-items:stretch;flex-direction:column}.recharge-submit .el-button{width:100%}.recharge-checkout{padding:1.15rem}.recharge-heading{align-items:flex-start;flex-direction:column}.recharge-view{gap:1.5rem}}
+@media(max-height:48rem) and (min-width:45.01rem){.recharge-checkout{gap:.7rem;padding:1rem 1.4rem}.recharge-heading h2{font-size:1.55rem}.amount-presets button{min-height:2.75rem}.payment-channels button{min-height:3.35rem;padding:.55rem .7rem}.recharge-submit{min-height:2.5rem}}
 </style>
