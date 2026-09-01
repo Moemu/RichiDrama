@@ -45,6 +45,14 @@ test('development mode can preview indeterminate provider progress without creat
   assert.match(freeCreate, /@click="previewVideoProgress = false">退出进度预览/)
 })
 
+test('generation actions use a synchronous single-flight guard before requests', () => {
+  assert.match(freeCreate, /if \(creating\.value \|\| hasActiveShotGeneration\.value\) return; creating\.value = true/)
+  assert.match(freeCreate, /const hasActiveShotGeneration = computed/)
+  assert.match(filmCreate, /if \(isSbVideoGenerating\(sb\.id\)\) return\s+submittingSbVideoIds\.add\(sb\.id\)/)
+  assert.match(filmCreate, /if \(generatingSbImageIds\.has\(sb\.id\) \|\| genStore\.isRunning\(meta\)\) return/)
+  assert.match(filmCreate, /if \(genStore\.isRunning\(meta\)\) return\s+genStore\.markRunning\(meta\)/)
+})
+
 test('an empty episode shows one explicit empty state instead of a phantom first shot', () => {
   assert.match(freeCreate, /<template v-if="currentShot">/)
   assert.match(freeCreate, /<section v-else class="empty-shot-workspace"/)

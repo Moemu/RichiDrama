@@ -106,6 +106,7 @@ export function useProps(deps) {
     }
     const epId = currentEpisodeId.value
     const meta = buildExtractTaskMeta(store, dramaId.value, epId, GEN_RESOURCE.EXTRACT_PROPS, '提取道具')
+    if (genStore.isRunning(meta)) return
     genStore.markRunning(meta)
     try {
       const res = await propAPI.extractFromScript(epId)
@@ -303,6 +304,7 @@ export function useProps(deps) {
     prop.errorMsg = ''
     prop.error_msg = ''
     const meta = buildPropImageMeta(prop)
+    if (generatingPropIds.has(prop.id) || genStore.isRunning(meta)) return
     generatingPropIds.add(prop.id)
     genStore.markRunning(meta)
     try {

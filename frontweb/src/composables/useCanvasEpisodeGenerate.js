@@ -96,6 +96,7 @@ export function useCanvasEpisodeGenerate(deps) {
   }
 
   async function aiGenerateStoryboards() {
+    if (episodeGenerating.value) return
     const ep = getEpisode()
     if (!ep) {
       ElMessage.warning('请先在顶栏选择某一集（AI 生成针对单集剧本）')
@@ -105,6 +106,7 @@ export function useCanvasEpisodeGenerate(deps) {
       ElMessage.warning('该集暂无剧本，请先在列表模式编写或导入剧本')
       return
     }
+    episodeGenerating.value = true
     const existing = getStoryboardsForEpisode()
     if (existing.length > 0) {
       try {
@@ -114,11 +116,11 @@ export function useCanvasEpisodeGenerate(deps) {
           { type: 'warning', confirmButtonText: '继续生成' }
         )
       } catch {
+        episodeGenerating.value = false
         return
       }
     }
 
-    episodeGenerating.value = true
     episodeGenProgress.value = 'AI 正在根据剧本解析分镜…'
     for (const sb of existing) {
       setSbBusy(sb, 'generate_sb', CANVAS_NODE_STATUS_LABELS.generate_sb)
@@ -151,6 +153,7 @@ export function useCanvasEpisodeGenerate(deps) {
   }
 
   async function batchGenerateImages() {
+    if (episodeGenerating.value) return
     const ep = getEpisode()
     if (!ep) {
       ElMessage.warning('请先选择集数')
@@ -164,6 +167,7 @@ export function useCanvasEpisodeGenerate(deps) {
       ElMessage.info('当前集分镜均已有图片（全能模式分镜请直接生视频）')
       return
     }
+    episodeGenerating.value = true
     try {
       await ElMessageBox.confirm(
         `将为 ${todo.length} 个分镜依次生图，耗时可能较长，是否继续？`,
@@ -171,10 +175,10 @@ export function useCanvasEpisodeGenerate(deps) {
         { type: 'info', confirmButtonText: '开始' }
       )
     } catch {
+      episodeGenerating.value = false
       return
     }
 
-    episodeGenerating.value = true
     let ok = 0
     let failed = 0
     try {
@@ -202,6 +206,7 @@ export function useCanvasEpisodeGenerate(deps) {
   }
 
   async function batchGenerateVideos() {
+    if (episodeGenerating.value) return
     const ep = getEpisode()
     if (!ep) {
       ElMessage.warning('请先选择集数')
@@ -213,6 +218,7 @@ export function useCanvasEpisodeGenerate(deps) {
       ElMessage.info('当前集分镜均已有视频')
       return
     }
+    episodeGenerating.value = true
     try {
       await ElMessageBox.confirm(
         `将为 ${todo.length} 个分镜依次生视频，是否继续？`,
@@ -220,10 +226,10 @@ export function useCanvasEpisodeGenerate(deps) {
         { type: 'info', confirmButtonText: '开始' }
       )
     } catch {
+      episodeGenerating.value = false
       return
     }
 
-    episodeGenerating.value = true
     let ok = 0
     let failed = 0
     try {

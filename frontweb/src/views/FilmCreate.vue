@@ -3270,6 +3270,7 @@ const sbVideos = ref({})
 const sbVideoErrors = ref({})
 const generatingSbImageIds = reactive(new Set())
 const generatingSbVideoIds = reactive(new Set())
+const submittingSbVideoIds = reactive(new Set())
 const generatingUniversalSegmentIds = reactive(new Set())
 // 重新生成角色/场景/道具关联分镜图的 loading set，key: 'char-{id}' | 'scene-{id}' | 'prop-{id}'
 const regenSbImagesForAsset = reactive(new Set())
@@ -3968,7 +3969,7 @@ function buildSbGenMeta(sb, resourceType, labelPrefix) {
 
 /** 分镜视频是否正在生成（单条点击、批量、一键成片、任务恢复均覆盖） */
 function isSbVideoGenerating(sbId) {
-  if (generatingSbVideoIds.has(sbId)) return true
+  if (submittingSbVideoIds.has(sbId) || generatingSbVideoIds.has(sbId)) return true
   if (sbId == null || dramaId.value == null || currentEpisodeId.value == null) return false
   return genStore.isRunning({
     dramaId: dramaId.value,
@@ -4353,6 +4354,7 @@ async function onGenerateSbFrameImage(sb, slot) {
     isLast ? GEN_RESOURCE.SB_LAST_IMAGE : GEN_RESOURCE.SB_FIRST_IMAGE,
     isLast ? '尾帧' : '首帧'
   )
+  if (loadingSet.has(sb.id) || genStore.isRunning(meta)) return
   sb.errorMsg = ''
   sb.error_msg = ''
   loadingSet.add(sb.id)
@@ -4461,6 +4463,7 @@ async function onGenerateSbImage(sb) {
   sb.errorMsg = ''
   sb.error_msg = ''
   const meta = buildSbGenMeta(sb, GEN_RESOURCE.SB_IMAGE, '分镜图')
+  if (generatingSbImageIds.has(sb.id) || genStore.isRunning(meta)) return
   generatingSbImageIds.add(sb.id)
   genStore.markRunning(meta)
   try {
@@ -5406,6 +5409,7 @@ async function onImportNovel() {
 }
 
 async function onGenerateScript() {
+  if (scriptGenerating.value) return
   trackFilmCreateAction('save_script_click')
   const content = (scriptContent.value ?? store.scriptContent ?? '').toString().trim()
   if (!content) {
@@ -7830,6 +7834,16 @@ async function onRegenerateLayoutDescription(sb) {
 
 async function onGenerateSbVideo(sb) {
   if (!dramaId.value || !sb?.id || !sbCanSubmitVideo(sb)) return
+  if (isSbVideoGenerating(sb.id)) return
+  submittingSbVideoIds.add(sb.id)
+  try {
+    await runGenerateSbVideo(sb)
+  } finally {
+    submittingSbVideoIds.delete(sb.id)
+  }
+}
+
+async function runGenerateSbVideo(sb) {
   const universal = isSbUniversalMode(sb.id)
   let universalOmniApi = universal
   if (universal) {
@@ -8106,6 +8120,7 @@ async function onGenerateStoryboard() {
   const epId = currentEpisodeId.value
   if (!epId) return
   const meta = buildExtractTaskMeta(store, dramaId.value, epId, GEN_RESOURCE.GENERATE_STORYBOARD, 'AI生成分镜')
+  if (genStore.isRunning(meta)) return
   genStore.markRunning(meta)
   // 生成期间每 2 秒刷新该集分镜列表，让已解析的分镜逐步出现（切集后仍更新原集缓存）
   // 分镜工作台(FreeCreate)自持镜头状态,不会响应 store 变化:
@@ -8458,6 +8473,7 @@ async function onGenerateVideo() {
     resourceId: epId,
     label: `${epLabel} 合成视频`,
   }
+  if (genStore.isRunning(mergeMeta)) return
   store.setVideoStatus('generating', did, epId)
   store.setVideoProgress(5, did, epId)
   genStore.markRunning(mergeMeta)

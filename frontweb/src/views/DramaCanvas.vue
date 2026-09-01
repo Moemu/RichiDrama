@@ -757,11 +757,13 @@ async function onDeleteActiveGroup() {
 }
 
 async function onRunActiveGroup() {
+  if (workflowRunning.value) return
   const group = workflowGroups.value.find((g) => g.id === activeGroupId.value)
   if (!group) {
     ElMessage.warning('请先选择工作流')
     return
   }
+  workflowRunning.value = true
   try {
     await ElMessageBox.confirm(
       `将对 ${(group.storyboard_ids || []).length} 个分镜依次执行：${(group.pipeline || pipelineSteps.value).join(' → ')}\n耗时可能较长，是否继续？`,
@@ -769,10 +771,10 @@ async function onRunActiveGroup() {
       { type: 'warning', confirmButtonText: '开始执行' }
     )
   } catch {
+    workflowRunning.value = false
     return
   }
 
-  workflowRunning.value = true
   workflowProgress.value = '准备执行…'
   try {
     const summary = await runWorkflowGroup(drama.value, {

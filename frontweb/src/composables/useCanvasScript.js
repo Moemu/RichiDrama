@@ -71,6 +71,7 @@ export function useCanvasScript(deps) {
   }
 
   async function saveScript(episodeId, { scriptContent, title }) {
+    if (scriptBusy.value) return
     const did = dramaId.value
     const d = drama.value
     if (!did || !d || !episodeId) throw new Error('缺少项目或集数')
@@ -117,6 +118,7 @@ export function useCanvasScript(deps) {
   }
 
   async function extractCharacters(episodeId, scriptContent) {
+    if (scriptBusy.value) return
     if (!dramaId.value || !episodeId) throw new Error('请先选择集数')
     scriptBusy.value = true
     setScriptBusy(episodeId, 'extract_chars', CANVAS_NODE_STATUS_LABELS.extract_chars)
@@ -130,6 +132,7 @@ export function useCanvasScript(deps) {
   }
 
   async function extractScenes(episodeId) {
+    if (scriptBusy.value) return
     if (!episodeId) throw new Error('请先选择集数')
     scriptBusy.value = true
     setScriptBusy(episodeId, 'extract_scenes', CANVAS_NODE_STATUS_LABELS.extract_scenes)
@@ -143,6 +146,7 @@ export function useCanvasScript(deps) {
   }
 
   async function extractProps(episodeId) {
+    if (scriptBusy.value) return
     if (!episodeId) throw new Error('请先选择集数')
     scriptBusy.value = true
     setScriptBusy(episodeId, 'extract_props', CANVAS_NODE_STATUS_LABELS.extract_props)
@@ -156,6 +160,7 @@ export function useCanvasScript(deps) {
   }
 
   async function extractAll(episodeId, scriptContent) {
+    if (scriptBusy.value) return
     if (!episodeId) throw new Error('请先选择集数')
     const content = (scriptContent || '').trim()
     if (!content) throw new Error('请先填写剧本内容')

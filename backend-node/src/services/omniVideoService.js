@@ -73,6 +73,15 @@ function create(db, log, body, billingUser) {
   let input = Array.isArray(body.assets) ? body.assets : [];
   const payer = billingUser || { id: body.owner_user_id, role: 'admin' };
   if (!payer?.id) throw new Error('缺少生成任务所属账号');
+  if (!body.__sd2_waiting_generation_id) {
+    const active = require('./generationSubmissionGuard').findActiveVideoForTarget(db, {
+      ownerUserId: payer.id,
+      storyboardId: body.storyboard_id,
+      sequenceId: body.sequence_id,
+      shotId: body.shot_id,
+    });
+    if (active) throw new Error('当前镜头已有生成任务，请等待任务结束后再生成');
+  }
   const tenantId = Number(body.tenant_id) || require('./tenantService').tenantForUser(db, payer.id)?.id || null;
   const tenantOptions = tenantId ? { tenant_id: tenantId } : {};
   const assetSelectionPolicy = body.asset_selection_policy === 'prompt_references' ? 'prompt_references' : 'all_selected';

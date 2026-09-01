@@ -229,6 +229,7 @@ const isProjectMode = computed(() => Number.isInteger(projectEpisodeId.value) &&
 const selected = ref(new Set()), selectedOrder = ref([]), assetScope = ref('project'), projectLibraryOpen = ref(false), projectLibraryKeyword = ref(''), prompt = ref(''), model = ref(''), aspectRatio = ref('16:9'), duration = ref(15), resolution = ref('720p'), upscaleResolution = ref('1080p'), targetFps = ref(null), audioStrategy = ref('reference_only'), creationMode = ref('multi_reference')
 const promptDocument = ref({ text: '', refs: [] })
 const keepOriginalAudio = ref(false), audioVolume = ref(1), audioFadeSeconds = ref(0), creating = ref(false), certifyingId = ref(null), extractingPosition = ref(''), savedResultJobId = ref(null), requestPreviewOpen = ref(false), polishingPrompt = ref(false), polishSuggestion = ref(''), stagePhase = ref(''), fileInput = ref(null), uploadLimits = ref(null)
+const retryingJobIds = reactive(new Set())
 const draggedShotId = ref(null), draggedAssetId = ref(null), loadingShot = ref(false)
 const generationModes = ref({}), masterShotId = ref(null), projectGenerationDirty = ref(false)
 const playOnSelection = ref(false)
@@ -446,7 +447,8 @@ const pickerImageAssets = computed(() => assets.value.filter((asset) => asset.ty
 /** 认证中的素材会由服务端等待并自动续跑；仅终态失败才提示用户处理。 */
 const expiredIdentityAssets = computed(() => chosenImageAssets.value.filter((asset) => asset.requires_sd2_identity && ['invalid', 'failed', 'stale'].includes(sd2Status(asset))))
 const framePicker = ref({ open: false, target: 'first_frame' })
-const canCreate = computed(() => !!model.value && !!currentCapability.value && prompt.value.trim() && (isProjectMode.value || Number(freeProjectId.value) > 0) && (creationMode.value !== 'first_last_frame' || (firstFrameCount.value === 1 && lastFrameCount.value <= 1 && currentCapability.value.supports?.first_last_frame)))
+const hasActiveShotGeneration = computed(() => shotHistory.value.some((job) => activeGenerationStatuses.has(job.status)))
+const canCreate = computed(() => !creating.value && !hasActiveShotGeneration.value && !!model.value && !!currentCapability.value && prompt.value.trim() && (isProjectMode.value || Number(freeProjectId.value) > 0) && (creationMode.value !== 'first_last_frame' || (firstFrameCount.value === 1 && lastFrameCount.value <= 1 && currentCapability.value.supports?.first_last_frame)))
 const nativeImageLimit = computed(() => Math.min(shotLimits.value.image, Number(currentCapability.value?.supports?.image_reference?.max || 0)))
 const limitSummary = computed(() => `单文件：图片 ${uploadLimits.value?.files?.image?.max_mb || 30}MB、视频 ${uploadLimits.value?.files?.video?.max_mb || 50}MB、音频 ${uploadLimits.value?.files?.audio?.max_mb || 15}MB；单镜头最多 ${shotLimits.value.total} 个素材。`)
 const selectionSummary = computed(() => `已加入本镜 ${chosenAssets.value.length}/${shotLimits.value.total}；图片 ${selectionCounts.value.image}/${shotLimits.value.image}，视频 ${selectionCounts.value.video}/${shotLimits.value.video}，音频 ${selectionCounts.value.audio}/${shotLimits.value.audio}${currentCapability.value ? `；当前模型原生图片参考 ${selectionCounts.value.image}/${nativeImageLimit.value}` : ''}`)
@@ -475,6 +477,9 @@ async function cancelJob(job) {
   } catch (error) { if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.message || '取消任务失败') }
 }
 async function adoptSource(job) {
+  const actionKey = `adopt-source:${job?.id}`
+  if (retryingJobIds.has(actionKey)) return
+  retryingJobIds.add(actionKey)
   try {
     const next = normalizeJob(await omniVideoAPI.adoptSource(job.id))
     const replace = (items) => {
@@ -490,8 +495,12 @@ async function adoptSource(job) {
     }
     ElMessage.success('已采用已生成原片：不重发火山，不重试后处理')
   } catch (error) { ElMessage.error(error.message || '采用原片失败') }
+  finally { retryingJobIds.delete(actionKey) }
 }
 async function retryPostprocess(job) {
+  const actionKey = `postprocess:${job?.id}`
+  if (retryingJobIds.has(actionKey)) return
+  retryingJobIds.add(actionKey)
   try {
     const stage = job.upscale_status === 'failed' ? 'upscale' : 'interpolation'
     const next = normalizeJob(await omniVideoAPI.retryPostprocess(job.id, stage))
@@ -505,8 +514,12 @@ async function retryPostprocess(job) {
     ElMessage.success(stage === 'upscale' ? '已从超分阶段重新提交，未重发火山生成' : '已从插帧阶段重新提交，未重发火山生成')
     poll(next.id)
   } catch (error) { ElMessage.error(error.message || '阶段重试失败') }
+  finally { retryingJobIds.delete(actionKey) }
 }
 async function adoptVersion(job) {
+  const actionKey = `adopt-version:${job?.id}`
+  if (retryingJobIds.has(actionKey)) return
+  retryingJobIds.add(actionKey)
   try {
     const next = normalizeJob(await omniVideoAPI.adopt(job.id))
     shotHistory.value.forEach((item) => { item.is_current = String(item.id) === String(next.id) })
@@ -518,6 +531,7 @@ async function adoptVersion(job) {
     selectedHistoryJobId.value = next.id
     ElMessage.success('已设为当前成片')
   } catch (error) { ElMessage.error(error.message || '设置当前成片失败') }
+  finally { retryingJobIds.delete(actionKey) }
 }
 const stageLabel = computed(() => ({ completed: '成片完成', sd2_waiting: '真人素材认证准备中', processing: '生成中', upscale_pending: '等待超分', upscaling: 'AI 超分中', interpolation_pending: '等待插帧', interpolating: '智能插帧中', persisting: '成片持久化中', billing_reconciliation: '等待计费对账', failed: failureLabel(activeJob.value), retryable: '可重试', invalid: '无效任务', unknown: '状态暂不可用' })[activeJob.value?.status] || '镜头草稿')
 const stageTagType = computed(() => ({ completed: 'success', failed: 'danger', retryable: 'warning', invalid: 'info' })[activeJob.value?.status] || 'info')
@@ -1092,7 +1106,7 @@ async function certify(asset) {
 function notifyBalanceChanged() { window.dispatchEvent(new CustomEvent('lmd:balance-changed')) }
 function replacePolledJob(id, job) { const index = jobs.value.findIndex((item) => String(item.id) === String(id)); const historyIndex = shotHistory.value.findIndex((item) => String(item.id) === String(id)); if (index >= 0) jobs.value[index] = job; if (historyIndex >= 0) shotHistory.value[historyIndex] = job }
 async function refreshUnknownJob(job) { try { const next = normalizeJob(await omniVideoAPI.get(job.id)); replacePolledJob(job.id, next); if (String(currentShot.value?.omni_job_id) === String(job.id)) currentShot.value.status = next.status; if (activeGenerationStatuses.has(next.status)) poll(next.id); else notifyBalanceChanged() } catch (error) { ElMessage.error(error.message || '状态刷新失败，请稍后重试') } }
-async function create() { creating.value = true; stagePhase.value = '保存镜头'; try { if (!canCreate.value) throw new Error(isProjectMode.value ? '请补齐当前视频创作模式所需的素材与模型能力' : '请选择计费归属项目并补齐生成参数'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id, drama_id: Number(freeProjectId.value) }), prompt: prompt.value, prompt_document: promptDocument.value, asset_selection_policy: 'prompt_references', creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', upscale_resolution: upscaleResolution.value || null, target_fps: targetFps.value || null, audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: requestAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: promptAssetFor(asset).alias, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const status = res.status || 'processing'; const job = { id: res.omni_job_id, prompt: prompt.value, status, video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = status; notifyBalanceChanged(); stagePhase.value = status === 'sd2_waiting' ? '真人素材认证准备中，完成后自动生成' : '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
+async function create() { if (creating.value || hasActiveShotGeneration.value) return; creating.value = true; stagePhase.value = '保存镜头'; try { if (!model.value || !currentCapability.value || !prompt.value.trim() || (!isProjectMode.value && Number(freeProjectId.value) <= 0)) throw new Error(isProjectMode.value ? '请补齐当前视频创作模式所需的素材与模型能力' : '请选择计费归属项目并补齐生成参数'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id, drama_id: Number(freeProjectId.value) }), prompt: prompt.value, prompt_document: promptDocument.value, asset_selection_policy: 'prompt_references', creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', upscale_resolution: upscaleResolution.value || null, target_fps: targetFps.value || null, audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: requestAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: promptAssetFor(asset).alias, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const status = res.status || 'processing'; const job = { id: res.omni_job_id, prompt: prompt.value, status, video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = status; notifyBalanceChanged(); stagePhase.value = status === 'sd2_waiting' ? '真人素材认证准备中，完成后自动生成' : '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
 async function poll(id) {
   if (!id || pollingJobIds.has(String(id))) return
   pollingJobIds.add(String(id))
@@ -1131,7 +1145,7 @@ async function poll(id) {
     }
   } finally { pollingJobIds.delete(String(id)) }
 }
-async function retry(job) { try { const res = await omniVideoAPI.retry(job.id); const next = { id: res.omni_job_id, prompt: job.prompt, status: 'processing', video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value?.id : null, shot_id: isProjectMode.value ? null : currentShot.value?.id, created_at: new Date().toISOString() }; jobs.value.unshift(next); shotHistory.value.unshift(next); selectedHistoryJobId.value = next.id; currentShot.value.omni_job_id = next.id; currentShot.value.status = 'processing'; poll(next.id) } catch (error) { ElMessage.error(error?.message || '重试提交失败，请稍后重试') } }
+async function retry(job) { const key = String(job?.id || ''); if (!key || retryingJobIds.has(key) || hasActiveShotGeneration.value) return; retryingJobIds.add(key); try { const res = await omniVideoAPI.retry(job.id); const next = { id: res.omni_job_id, prompt: job.prompt, status: 'processing', video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value?.id : null, shot_id: isProjectMode.value ? null : currentShot.value?.id, created_at: new Date().toISOString() }; jobs.value.unshift(next); shotHistory.value.unshift(next); selectedHistoryJobId.value = next.id; currentShot.value.omni_job_id = next.id; currentShot.value.status = 'processing'; poll(next.id) } catch (error) { ElMessage.error(error?.message || '重试提交失败，请稍后重试') } finally { retryingJobIds.delete(key) } }
 function downloadCurrentVideo() { if (!activeVideoUrl.value) return; const link = document.createElement('a'); link.href = activeVideoUrl.value; link.download = `local-mini-drama-${activeJob.value?.video_generation_id || currentShot.value?.id || 'storyboard'}.mp4`; document.body.appendChild(link); link.click(); link.remove() }
 async function saveResultAsAsset() { const job = activeJob.value; if (!job?.videoUrl || savedResultJobId.value === job.id) return; try { const generation = job.generation || job; const asset = await omniVideoAPI.createAsset({ drama_id: (isProjectMode.value ? projectDramaId.value : freeProjectId.value) || null, name: `成片 ${job.video_generation_id || job.id}`, type: 'video', url: generation.video_url || job.video_url || job.videoUrl, local_path: generation.local_path || job.local_path || null, source_type: 'omni_generation', video_gen_id: job.video_generation_id || null, processing_status: 'ready', metadata: { source_omni_job_id: job.id, source_video_generation_id: job.video_generation_id || null, resolution: generation.output_resolution || generation.resolution || null, fps: generation.output_fps || null, duration_ms: generation.output_duration_ms || null, upscale_resolution: generation.upscale_resolution || null, target_fps: generation.target_fps || null, postprocess_chain: generation.postprocess_chain || null } }); const item = { ...asset, alias: asset.name, usage: 'motion' }; assets.value.unshift(item); savedResultJobId.value = job.id; toggle(item); ElMessage.success('成片已加入素材库，并已选入当前镜头') } catch (error) { ElMessage.error(error.message || '加入素材库失败') } }
 async function extractFrame(position) { if (!canExtractFrames.value || extractingPosition.value) return; extractingPosition.value = position; try { const asset = await omniVideoAPI.extractVideoFrame(activeJob.value.video_generation_id, position); const item = { ...asset, alias: asset.name, usage: position === 'first' ? 'first_frame' : 'last_frame' }; assets.value.unshift(item); toggle(item); ElMessage.success(position === 'first' ? '首帧已提取到素材库，并设为当前镜头首帧' : '尾帧已提取到素材库，并设为当前镜头尾帧') } catch (error) { ElMessage.error(error.message || '提取视频帧失败') } finally { extractingPosition.value = '' } }
