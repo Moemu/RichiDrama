@@ -8241,9 +8241,13 @@ async function startBatchImageGeneration() {
       await loadStoryboardMedia()
     }
     const boards = store.storyboards || []
+    if (boards.length === 0) {
+      ElMessage.warning({ message: '当前集还没有分镜，请先生成或新建分镜', grouping: true })
+      return
+    }
     const todo = boards.filter((sb) => !hasSbImage(sb))
     if (todo.length === 0) {
-      ElMessage.info('所有分镜均已有图片，无需重新生成')
+      ElMessage.info({ message: '当前集分镜均已有图片，无需重复生成', grouping: true })
       return
     }
     batchImageProgress.value = { current: 0, total: todo.length, failed: 0 }
@@ -8319,18 +8323,39 @@ async function startBatchVideoGeneration() {
       await loadStoryboardMedia()
     }
     const boards = store.storyboards || []
+    if (boards.length === 0) {
+      ElMessage.warning({ message: '当前集还没有分镜，请先生成或新建分镜', grouping: true })
+      return
+    }
+    let completedVideoCount = 0
+    let missingReferenceCount = 0
     // 只处理：有参考图（经典=分镜主图；全能=场景/角色/道具，不含经典主图）且 还没有已完成视频 的分镜
     const todo = boards.filter((sb) => {
       const vidList = sbVideos.value[sb.id] || []
-      if (vidList.some((v) => v.status === 'completed' && recordHasPlayableVideoUrl(v))) return false
-      if (isSbUniversalMode(sb.id)) {
-        if (!sbCanSubmitVideo(sb)) return false
-        return collectSbOmniReferenceAbsoluteUrls(sb).length > 0
+      if (vidList.some((v) => v.status === 'completed' && recordHasPlayableVideoUrl(v))) {
+        completedVideoCount += 1
+        return false
       }
-      return !!getSbFirstFrameUrl(sb)
+      if (isSbUniversalMode(sb.id)) {
+        const hasReference = sbCanSubmitVideo(sb) && collectSbOmniReferenceAbsoluteUrls(sb).length > 0
+        if (!hasReference) missingReferenceCount += 1
+        return hasReference
+      }
+      const hasReference = !!getSbFirstFrameUrl(sb)
+      if (!hasReference) missingReferenceCount += 1
+      return hasReference
     })
     if (todo.length === 0) {
-      ElMessage.info('没有需要生成视频的分镜（分镜缺少图片，或视频已全部生成）')
+      if (completedVideoCount === boards.length) {
+        ElMessage.info({ message: '当前集分镜均已有视频，无需重复生成', grouping: true })
+      } else if (completedVideoCount > 0) {
+        ElMessage.warning({
+          message: `没有可生成视频的分镜：${completedVideoCount} 镜已有视频，${missingReferenceCount} 镜缺少参考图`,
+          grouping: true,
+        })
+      } else {
+        ElMessage.warning({ message: '当前集分镜缺少可用参考图，请先生成或选择分镜图', grouping: true })
+      }
       return
     }
     batchVideoProgress.value = { current: 0, total: todo.length, failed: 0 }

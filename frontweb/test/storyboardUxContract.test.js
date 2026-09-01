@@ -8,6 +8,8 @@ const universalEditor = readFileSync(new URL('../src/components/UniversalSegment
 const filmCreate = readFileSync(new URL('../src/views/FilmCreate.vue', import.meta.url), 'utf8')
 const dragPreview = readFileSync(new URL('../src/utils/dragPreview.js', import.meta.url), 'utf8')
 const pointerDrag = readFileSync(new URL('../src/utils/assetPointerDrag.js', import.meta.url), 'utf8')
+const canvasEpisodeGenerate = readFileSync(new URL('../src/composables/useCanvasEpisodeGenerate.js', import.meta.url), 'utf8')
+const canvasWorkflowRunner = readFileSync(new URL('../src/composables/useCanvasWorkflowRunner.js', import.meta.url), 'utf8')
 
 test('storyboard navigation uses real video, including retained source after post-processing failure', () => {
   assert.match(freeCreate, /<video v-if="shot\.video_url"/)
@@ -63,6 +65,22 @@ test('an empty episode shows one explicit empty state instead of a phantom first
   assert.match(freeCreate, /finally \{ workspaceReady\.value = true \}/)
 })
 
+test('batch media actions distinguish empty, completed and missing-reference states', () => {
+  assert.match(canvasEpisodeGenerate, /if \(!boards\.length\) \{\s*ElMessage\.warning\(\{ message: '当前集还没有分镜，请先生成或新建分镜', grouping: true \}\)/)
+  assert.match(canvasEpisodeGenerate, /if \(!imageBoards\.length\) \{\s*ElMessage\.info\(\{ message: '当前集只有全能模式分镜，无需生图，请直接生视频', grouping: true \}\)/)
+  assert.match(canvasEpisodeGenerate, /当前集经典模式分镜均已有图片，无需重复生成/)
+  assert.match(canvasEpisodeGenerate, /当前集分镜均已有视频，无需重复生成/)
+  assert.match(canvasEpisodeGenerate, /missingPromptCount = missingImages\.length - todo\.length/)
+  assert.match(canvasEpisodeGenerate, /缺少图片提示词，将跳过/)
+  assert.match(canvasEpisodeGenerate, /missingInputCount = incomplete\.length - todo\.length/)
+  assert.match(canvasEpisodeGenerate, /缺少生成输入，将跳过/)
+  assert.match(canvasWorkflowRunner, /export function canRunVideoStep/)
+  assert.match(filmCreate, /if \(boards\.length === 0\) \{\s*ElMessage\.warning\(\{ message: '当前集还没有分镜，请先生成或新建分镜', grouping: true \}\)/)
+  assert.match(filmCreate, /completedVideoCount === boards\.length/)
+  assert.match(filmCreate, /当前集分镜缺少可用参考图，请先生成或选择分镜图/)
+  assert.match(filmCreate, /没有可生成视频的分镜：\$\{completedVideoCount\} 镜已有视频，\$\{missingReferenceCount\} 镜缺少参考图/)
+})
+
 test('clicking a completed history record previews it without changing the adopted version', () => {
   assert.match(freeCreate, /function selectHistoryJob\(job\) \{ playOnSelection\.value = true; selectedHistoryJobId\.value = job\.id \}/)
   assert.match(freeCreate, /return selected \|\| adopted \|\| bound \|\| shotHistory\.value\[0\] \|\| null/)
@@ -116,6 +134,8 @@ test('asset drag shows an exact text-boundary caret and rejects whitespace-only 
   assert.match(pointerDrag, /Math\.hypot\([\s\S]*< 6/)
   assert.match(pointerDrag, /ASSET_POINTER_MOVE/)
   assert.match(pointerDrag, /ASSET_POINTER_DROP/)
+  assert.match(pointerDrag, /event\.preventDefault\(\)/)
+  assert.match(pointerDrag, /setPointerCapture/)
   assert.match(promptEditor, /window\.addEventListener\(ASSET_POINTER_MOVE/)
   assert.match(promptEditor, /insertAsset\(detail\.asset, \{ offset: point\.offset \}\)/)
   assert.match(filmCreate, /setTransparentDragPreview\(e\)/)
@@ -144,6 +164,12 @@ test('在长提示词中插入素材只重绘一次并保持编辑器滚动位�
   assert.match(promptEditor, /function focusEditorAtOffset\(offset, scrollPosition\)/)
   assert.match(promptEditor, /el\.focus\(\{ preventScroll: true \}\)/)
   assert.match(promptEditor, /el\.scrollTop = scrollPosition\?\.top \|\| 0/)
+})
+
+test('@ 素材筛选随光标位置立即更新', () => {
+  assert.match(promptEditor, /const lastCaretOffset = ref\(0\)/)
+  assert.match(promptEditor, /const cursor = lastCaretOffset\.value/)
+  assert.match(promptEditor, /lastCaretOffset\.value = caretOffset\(\)/)
 })
 
 test('billing adjustment explanation is explicitly optional', () => {

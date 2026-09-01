@@ -1,32 +1,225 @@
 <template>
-  <section class="tool-asset-selector">
-    <div class="selector-heading"><b>{{ label }}</b><el-radio-group v-model="source" size="small"><el-radio-button value="library">素材库</el-radio-button><el-radio-button value="upload">本地上传</el-radio-button></el-radio-group></div>
-    <template v-if="source === 'library'"><div class="asset-grid"><button v-for="asset in filteredAssets" :key="asset.id" type="button" :class="{ active: modelValue === asset.id }" @click="select(asset)"><img v-if="asset.type === 'image'" :src="assetUrl(asset)" alt="" /><video v-else-if="asset.type === 'video'" :src="assetUrl(asset)" muted preload="metadata" /><span v-else>♫</span><small>{{ asset.alias || asset.name }}</small></button></div><p v-if="!filteredAssets.length" class="empty">素材库暂无可用素材，可切换到“本地上传”。</p></template>
-    <template v-else><el-button :loading="uploading" @click="fileInput?.click()">选择本地{{ acceptedLabel }}</el-button><input ref="fileInput" hidden type="file" :accept="accept" @change="upload" /><p class="upload-note">上传后会自动进入素材库并选中，后续可在其他工具复用。</p></template>
-    <p v-if="selectedAsset" class="selected">已选：{{ selectedAsset.alias || selectedAsset.name }}</p>
+  <section class="tool-asset-selector" :aria-label="label">
+    <div class="selector-heading">
+      <div>
+        <b>{{ source === 'library' ? label : '上传到素材库' }}</b>
+        <small>{{ source === 'library' ? libraryHint : uploadHint }}</small>
+      </div>
+      <el-radio-group v-model="source" class="source-tabs" aria-label="素材来源">
+        <el-radio-button value="library">从项目素材库导入</el-radio-button>
+        <el-radio-button value="upload">本地上传</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <template v-if="source === 'library'">
+      <el-input v-model="search" clearable name="asset_search" autocomplete="off" placeholder="搜索素材名称" aria-label="搜索素材" />
+      <div v-if="filteredAssets.length" class="asset-grid">
+        <article
+          v-for="asset in filteredAssets"
+          :key="asset.id"
+          role="button"
+          tabindex="0"
+          :class="{ active: isSelected(asset.id), draggable: promptDraggable }"
+          :aria-pressed="String(isSelected(asset.id))"
+          :aria-label="`${isSelected(asset.id) ? '取消选择' : '选择'}素材 ${asset.alias || asset.name}`"
+          :title="promptDraggable ? `${asset.alias || asset.name}：点击选用，或拖入提示词` : `${asset.alias || asset.name}：点击选用`"
+          @pointerdown="promptDraggable && beginAssetPointerDrag($event, asset)"
+          @dragstart.prevent
+          @click="selectGuarded(asset)"
+          @keydown.enter.prevent="select(asset)"
+          @keydown.space.prevent="select(asset)"
+        >
+          <span class="asset-preview">
+            <img v-if="asset.type === 'image'" :src="assetUrl(asset)" :alt="asset.alias || asset.name || '图片素材'" width="160" height="96" loading="lazy" draggable="false" />
+            <video v-else-if="asset.type === 'video'" :src="assetUrl(asset)" muted preload="metadata" :aria-label="asset.alias || asset.name || '视频素材'" draggable="false" />
+            <span v-else class="audio-preview" aria-hidden="true">♫</span>
+            <span v-if="isSelected(asset.id)" class="selected-mark" aria-hidden="true">✓</span>
+          </span>
+          <span class="asset-copy"><b>{{ asset.alias || asset.name }}</b><small>{{ asset.drama_id ? '项目素材' : '个人素材' }} · {{ typeLabel(asset.type) }}</small></span>
+        </article>
+      </div>
+      <p v-else class="empty">{{ loading ? '正在读取素材…' : '暂无可用素材。可切换到“本地上传”。' }}</p>
+    </template>
+
+    <template v-else>
+      <button class="upload-dropzone" type="button" :disabled="uploading" @click="fileInput?.click()">
+        <span aria-hidden="true">＋</span>
+        <b>{{ uploading ? '正在上传…' : `上传${acceptedLabel}` }}</b>
+        <small>{{ uploadHint }}</small>
+      </button>
+      <input ref="fileInput" hidden type="file" :accept="accept" :aria-label="`上传${acceptedLabel}`" @change="upload" />
+    </template>
+
+    <div v-if="selectedAssets.length" class="selected-summary" role="status" aria-live="polite">
+      <span>已选 {{ selectedAssets.length }} 项</span>
+      <button type="button" @click="clear">清空</button>
+    </div>
   </section>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { omniVideoAPI } from '@/api/omniVideo'
+import { beginAssetPointerDrag, shouldSuppressAssetClick } from '@/utils/assetPointerDrag'
 
-const props = defineProps({ modelValue: { type: Number, default: null }, types: { type: Array, default: () => ['image', 'video'] }, label: { type: String, default: '参考素材' } })
-const emit = defineEmits(['update:modelValue', 'selected'])
-const source = ref('library'), assets = ref([]), uploading = ref(false), fileInput = ref(null)
-const filteredAssets = computed(() => assets.value.filter((asset) => props.types.includes(asset.type)))
-const selectedAsset = computed(() => assets.value.find((asset) => asset.id === props.modelValue) || null)
-const accept = computed(() => props.types.includes('video') && props.types.includes('image') ? 'image/*,video/*' : props.types.includes('video') ? 'video/*' : 'image/*')
-const acceptedLabel = computed(() => props.types.includes('video') && props.types.includes('image') ? '图片或视频' : props.types.includes('video') ? '视频' : '图片')
-const assetUrl = (asset) => asset?.local_path ? `/static/${asset.local_path}` : asset?.url || ''
+const props = defineProps({
+  modelValue: { type: [Number, Array], default: null },
+  types: { type: Array, default: () => ['image', 'video'] },
+  label: { type: String, default: '参考素材' },
+  multiple: { type: Boolean, default: false },
+  dramaId: { type: Number, default: null },
+  maxSelections: { type: Number, default: 50 },
+  promptDraggable: { type: Boolean, default: false },
+})
+const emit = defineEmits(['update:modelValue', 'selected', 'selection-change', 'assets-loaded'])
+const source = ref('library'), assets = ref([]), search = ref(''), uploading = ref(false), loading = ref(false), fileInput = ref(null)
+let loadRevision = 0
+const filteredAssets = computed(() => {
+  const keyword = search.value.trim().toLowerCase()
+  return assets.value.filter((asset) => props.types.includes(asset.type) && (!keyword || `${asset.alias || ''} ${asset.name || ''}`.toLowerCase().includes(keyword)))
+})
+const selectedIds = computed(() => props.multiple
+  ? (Array.isArray(props.modelValue) ? props.modelValue.map(Number) : [])
+  : (Number(props.modelValue) > 0 ? [Number(props.modelValue)] : []))
+const selectedAssets = computed(() => selectedIds.value.map((id) => assets.value.find((asset) => Number(asset.id) === id)).filter(Boolean))
+const libraryHint = computed(() => props.dramaId ? '当前项目素材和个人素材' : '可引用项目素材和个人素材')
+const uploadHint = computed(() => props.dramaId
+  ? '文件会保存到当前项目素材库。上传后可立即引用。'
+  : '文件会保存到个人素材库。上传后可立即引用。')
+const accept = computed(() => props.types.map((type) => type === 'image' ? 'image/*' : type === 'video' ? 'video/*' : type === 'audio' ? 'audio/*' : '').filter(Boolean).join(','))
+const acceptedLabel = computed(() => props.types.map(typeLabel).join('、'))
+const assetUrl = (asset) => asset?.local_path ? `/static/${String(asset.local_path).replace(/^\/+/, '')}` : asset?.url || ''
+const typeLabel = (type) => ({ image: '图片', video: '视频', audio: '音频' }[type] || '素材')
+const isSelected = (id) => selectedIds.value.includes(Number(id))
 
-async function load() { try { const result = await omniVideoAPI.assets({ scope: 'global', page_size: 100 }); assets.value = result.items || [] } catch (error) { ElMessage.error(error.message || '素材库加载失败') } }
-function select(asset) { emit('update:modelValue', asset.id); emit('selected', asset) }
-async function upload(event) { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; uploading.value = true; try { const result = await omniVideoAPI.upload(file, { name: file.name }); const asset = result.asset; if (!asset) throw new Error('上传未返回素材'); assets.value.unshift(asset); source.value = 'library'; select(asset); ElMessage.success('素材已上传并选中') } catch (error) { ElMessage.error(error.message || '素材上传失败') } finally { uploading.value = false } }
+async function load() {
+  const revision = ++loadRevision
+  loading.value = true
+  try {
+    const requests = Number(props.dramaId) > 0
+      ? [loadScope({ scope: 'project', drama_id: Number(props.dramaId) }), loadScope({ scope: 'global' })]
+      : [loadScope({ scope: 'all' })]
+    const results = await Promise.allSettled(requests)
+    if (revision !== loadRevision) return
+    const available = results.filter((result) => result.status === 'fulfilled').flatMap((result) => result.value.items || [])
+    if (!available.length && results.every((result) => result.status === 'rejected')) throw results[0].reason
+    if (results.some((result) => result.status === 'rejected')) ElMessage.warning('部分素材库加载失败，已显示可用素材')
+    const unique = new Map(available.map((asset) => [Number(asset.id), asset]))
+    assets.value = [...unique.values()]
+    emit('assets-loaded', assets.value)
+    emitSelection()
+  } catch (error) { ElMessage.error(error.message || '素材库加载失败') }
+  finally { if (revision === loadRevision) loading.value = false }
+}
+async function loadScope(params) {
+  const first = await omniVideoAPI.assets({ ...params, page: 1, page_size: 100 })
+  const items = [...(first.items || [])]
+  const total = Number(first.total || items.length)
+  const pageCount = Math.ceil(total / 100)
+  for (let page = 2; items.length < total && page <= pageCount; page += 1) {
+    const result = await omniVideoAPI.assets({ ...params, page, page_size: 100 })
+    const pageItems = result.items || []
+    items.push(...pageItems)
+    if (!pageItems.length) break
+  }
+  return { items }
+}
+function emitSelection() { emit('selection-change', selectedAssets.value) }
+function selectGuarded(asset) { if (!shouldSuppressAssetClick()) select(asset) }
+function select(asset) {
+  if (props.multiple) {
+    if (!isSelected(asset.id) && selectedIds.value.length >= props.maxSelections) return ElMessage.warning(`最多选择 ${props.maxSelections} 项素材`)
+    const next = isSelected(asset.id) ? selectedIds.value.filter((id) => id !== Number(asset.id)) : [...selectedIds.value, Number(asset.id)]
+    emit('update:modelValue', next)
+    queueMicrotask(() => emit('selection-change', next.map((id) => assets.value.find((item) => Number(item.id) === id)).filter(Boolean)))
+  } else {
+    const next = isSelected(asset.id) ? null : Number(asset.id)
+    emit('update:modelValue', next)
+    emit('selected', next ? asset : null)
+    emit('selection-change', next ? [asset] : [])
+  }
+}
+function clear() {
+  emit('update:modelValue', props.multiple ? [] : null)
+  emit('selected', null)
+  emit('selection-change', [])
+}
+async function upload(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  uploading.value = true
+  try {
+    const result = await omniVideoAPI.upload(file, { name: file.name, drama_id: Number(props.dramaId) || undefined })
+    const asset = result.asset
+    if (!asset) throw new Error('上传未返回素材')
+    assets.value = [asset, ...assets.value.filter((item) => Number(item.id) !== Number(asset.id))]
+    emit('assets-loaded', assets.value)
+    source.value = 'library'
+    select(asset)
+    ElMessage.success('已上传到素材库并自动选中')
+  } catch (error) { ElMessage.error(error.message || '素材上传失败') }
+  finally { uploading.value = false }
+}
+watch(() => props.dramaId, load)
 onMounted(load)
 </script>
 
 <style scoped>
-.tool-asset-selector{display:grid;gap:8px}.selector-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.selector-heading b{font-size:12px}.asset-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;max-height:160px;overflow:auto}.asset-grid button{min-width:0;padding:4px;border:1px solid var(--border-color);border-radius:5px;background:var(--bg-raised);color:var(--text-regular);text-align:left;cursor:pointer}.asset-grid button:hover{background:var(--bg-hover);color:var(--text-primary)}.asset-grid button.active{border-color:var(--text-primary);box-shadow:inset 2px 0 0 var(--text-primary)}.asset-grid img,.asset-grid video,.asset-grid span{display:grid;place-items:center;width:100%;height:52px;object-fit:cover;background:var(--bg-hover);color:var(--text-muted)}.asset-grid small{display:block;padding-top:4px;overflow:hidden;color:var(--text-muted);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.empty,.upload-note,.selected{margin:0;color:var(--text-muted);font-size:11px;line-height:1.45}.selected{color:var(--text-primary);font-weight:600}
+.tool-asset-selector{display:grid;gap:10px;min-width:0}.selector-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.selector-heading>div{display:grid;gap:3px;min-width:0}.selector-heading b{font-size:13px}.selector-heading small,.empty{color:var(--text-muted);font-size:11px;line-height:1.45}.asset-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;max-height:250px;padding-right:3px;overflow:auto;overscroll-behavior:contain}.asset-grid>button{display:grid;gap:6px;min-width:0;padding:5px;border:1px solid var(--border-subtle);border-radius:10px;background:var(--bg-raised);color:var(--text-regular);text-align:left;cursor:pointer;transition:border-color .16s ease,background-color .16s ease,transform .16s ease}.asset-grid>button:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border-color));background:var(--bg-hover);transform:translateY(-1px)}.asset-grid>button:focus-visible,.upload-dropzone:focus-visible,.selected-summary button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.asset-grid>button.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--bg-raised));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 38%,transparent)}.asset-preview{position:relative;display:grid;place-items:center;overflow:hidden;border-radius:7px;background:var(--bg-hover);aspect-ratio:5/3}.asset-preview img,.asset-preview video,.audio-preview{width:100%;height:100%;object-fit:cover}.audio-preview{display:grid;place-items:center;color:var(--accent);font-size:24px}.selected-mark{position:absolute;top:5px;right:5px;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700}.asset-copy{display:grid;gap:2px;min-width:0}.asset-copy b,.asset-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.asset-copy b{font-size:11px}.asset-copy small{color:var(--text-muted);font-size:10px}.empty{margin:0;padding:18px;border:1px dashed var(--border-color);border-radius:10px;text-align:center}.upload-dropzone{display:grid;place-items:center;gap:5px;min-height:126px;padding:18px;border:1px dashed color-mix(in srgb,var(--accent) 45%,var(--border-color));border-radius:12px;background:color-mix(in srgb,var(--accent) 6%,var(--bg-raised));color:var(--text-primary);cursor:pointer}.upload-dropzone:hover{background:color-mix(in srgb,var(--accent) 11%,var(--bg-raised))}.upload-dropzone small{color:var(--text-muted);font-weight:400}.upload-dropzone>span{color:var(--accent);font-size:28px}.selected-summary{display:flex;align-items:center;justify-content:space-between;padding:7px 9px;border-radius:8px;background:color-mix(in srgb,var(--accent) 8%,var(--bg-raised));color:var(--text-regular);font-size:11px}.selected-summary button{border:0;background:transparent;color:var(--accent);cursor:pointer}@media(max-width:520px){.selector-heading{align-items:stretch;flex-direction:column}.asset-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(prefers-reduced-motion:reduce){.asset-grid>button{transition:none}.asset-grid>button:hover{transform:none}}
+</style>
+
+<style scoped>
+.tool-asset-selector { container-type: inline-size; }
+.asset-grid > article {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  color: var(--text-regular);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .16s ease, background-color .16s ease, transform .16s ease;
+}
+.asset-grid > article:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-color));
+  background: var(--bg-hover);
+  transform: translateY(-1px);
+}
+.asset-grid > article.draggable { cursor: grab; }
+.asset-grid > article.draggable:active { cursor: grabbing; }
+.asset-grid > article:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.asset-grid > article.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.source-tabs { display: grid !important; grid-template-columns: minmax(0, 1.65fr) minmax(120px, .85fr); width: 100%; }
+.selector-heading { display: grid; grid-template-columns: minmax(150px, .7fr) minmax(320px, 1.3fr); align-items: end; }
+.source-tabs :deep(.el-radio-button) { width: 100%; }
+.source-tabs :deep(.el-radio-button__inner) {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 16px;
+  font-size: 13px;
+  font-weight: 650;
+}
+@media(prefers-reduced-motion:reduce) {
+  .asset-grid > article { transition: none; }
+  .asset-grid > article:hover { transform: none; }
+}
+@media(max-width:620px) {
+  .selector-heading { grid-template-columns: 1fr; }
+}
+@container (max-width: 620px) {
+  .selector-heading { grid-template-columns: 1fr; align-items: stretch; }
+  .source-tabs { grid-template-columns: minmax(0, 1.65fr) minmax(108px, .85fr); }
+}
 </style>
