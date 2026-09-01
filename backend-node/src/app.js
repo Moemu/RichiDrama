@@ -94,12 +94,23 @@ function createApp() {
   require('./services/providerPriceService').startHourlySync(db, log);
   require('./services/assetSd2Service').resumePendingCertifications(db, log, config);
   require('./services/omniVideoService').startSd2WaitingGenerationRecovery(db, log);
+  const paymentRecovery = require('./services/paymentService').createPaymentService(db, config, log);
+  const reconcilePayments = () => paymentRecovery.recover(50).catch((error) => log.warn('payment recovery sweep failed', { error: error.message }));
+  reconcilePayments();
+  const paymentTimer = setInterval(reconcilePayments, 60 * 1000);
+  if (typeof paymentTimer.unref === 'function') paymentTimer.unref();
   const taskService = require('./services/taskService');
   taskService.failOrphanedAsyncTasksOnStartup(db, log);
 
   const app = express();
   const webDist = process.env.WEB_DIST_PATH || path.join(process.cwd(), '..', 'frontweb', 'dist');
-  app.use(express.json({ limit: '10mb' }));
+  // WeChat Pay signs the exact JSON bytes. Preserve them before parsing.
+  app.use(express.json({
+    limit: '10mb',
+    verify(req, _res, buffer) {
+      if (req.originalUrl?.includes('/payments/callbacks/wechat')) req.rawBody = Buffer.from(buffer);
+    },
+  }));
   app.use(express.urlencoded({ extended: true }));
 
   const allowedOrigins = Array.isArray(config.server.cors_origins) ? config.server.cors_origins.filter(Boolean) : [];

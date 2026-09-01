@@ -31,9 +31,14 @@ function setupRouter(cfg, db, log) {
   const auth = authRoutes(db);
   const billing = billingRoutes(db);
   const admin = adminRoutes(db, log);
+  const paymentService = require('../services/paymentService').createPaymentService(db, cfg, log);
+  const payments = require('./payments')(paymentService, log);
   // Public signup/login endpoints; all workspace data derives identity from JWT.
   r.post('/auth/login', auth.login);
   r.post('/auth/register', auth.register);
+  // Provider callbacks are public but cryptographically authenticated.
+  r.post('/payments/callbacks/alipay', payments.alipayCallback);
+  r.post('/payments/callbacks/wechat', payments.wechatCallback);
   r.use(requireAuth(db));
   // Preserve the authenticated payer through nested and asynchronous service
   // calls, so every text-model invocation can participate in billing.
@@ -104,6 +109,12 @@ function setupRouter(cfg, db, log) {
     try { response.success(res, require('../services/providerPriceService').acknowledgeNotice(db, req.auth.id, req.params.id)); }
     catch (error) { response.badRequest(res, error.message); }
   });
+  r.get('/payments/options', payments.options);
+  r.post('/payments/orders', payments.create);
+  r.get('/payments/orders', payments.list);
+  r.get('/payments/orders/:id', payments.detail);
+  r.post('/payments/orders/:id/sync', payments.sync);
+  r.post('/payments/orders/:id/close', payments.close);
   // Authorization lifecycle is service-owned. Clients may quote a price, but
   // cannot settle or release a provider call themselves.
   r.get('/models/available', (req, res) => {
@@ -154,6 +165,9 @@ function setupRouter(cfg, db, log) {
   adminRouter.get('/notices', admin.notices);
   adminRouter.post('/notices/:id/archive', admin.archiveNotice);
   adminRouter.get('/transactions', admin.transactions);
+  adminRouter.get('/payment-orders', payments.adminList);
+  adminRouter.get('/payment-orders/:id', payments.adminDetail);
+  adminRouter.post('/payment-orders/:id/sync', payments.adminSync);
   adminRouter.get('/usage', admin.usage);
   adminRouter.get('/usage-summary', admin.usageSummary);
   adminRouter.get('/project-usage', admin.projectUsage);

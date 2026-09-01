@@ -79,7 +79,8 @@ function applyEnvOverrides(cfg) {
     obj[finalKey] = parseEnvValue(rawVal);
     // Startup diagnostics must never disclose credentials or tokens. The
     // key/path still makes it clear that the override took effect.
-    const sensitive = /(?:secret|password|token|api[_-]?key|access[_-]?key)/i.test(envKey) || /(?:secret|password|token|api[_-]?key|access[_-]?key)/i.test(relPath.join('_'));
+    const sensitivePattern = /(?:secret|password|token|api.*key|access.*key|private.*key|certificate|\bpem\b)/i;
+    const sensitive = sensitivePattern.test(envKey) || sensitivePattern.test(relPath.join('_'));
     changed.push(`${envKey} -> ${relPath.join('.')} = ${sensitive ? '<redacted>' : rawVal}`);
   }
   return changed;

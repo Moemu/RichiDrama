@@ -11,6 +11,31 @@ server:
   read_timeout: 600
   write_timeout: 600
   insecure_tls: true
+# ToC payments are opt-in. Supply all credentials with CFG_PAYMENTS__...
+# environment variables. Never commit merchant keys to this file.
+payments:
+  enabled: false
+  public_base_url: ''
+  order_expire_minutes: 15
+  min_amount_fen: 100
+  max_amount_fen: 500000
+  preset_amounts_fen: [1000, 5000, 10000, 50000]
+  alipay:
+    enabled: false
+    endpoint: https://openapi.alipay.com/gateway.do
+    app_id: ''
+    app_private_key: ''
+    alipay_public_key: ''
+    seller_id: ''
+    key_type: PKCS8
+  wechat:
+    enabled: false
+    app_id: ''
+    mch_id: ''
+    merchant_serial_no: ''
+    merchant_private_key: ''
+    api_v3_key: ''
+    platform_public_key: ''
 database:
   type: sqlite
   path: ./data/drama_generator.db

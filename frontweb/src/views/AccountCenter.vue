@@ -8,7 +8,7 @@
         <el-button v-if="isAdmin" type="primary" @click="$router.push('/admin')">后台管理</el-button>
       </div>
     </header>
-    <nav class="account-tabs" aria-label="账户工作区"><button v-for="tab in [{v:'overview',label:'概览'},{v:'billing',label:'账单记录'},{v:'models',label:'可用模型'},{v:'security',label:'账户安全'}]" :key="tab.v" type="button" :class="{ active: accountTab === tab.v }" @click="accountTab = tab.v">{{ tab.label }}</button></nav>
+    <nav class="account-tabs" aria-label="账户工作区"><button v-for="tab in [{v:'overview',label:'概览'},{v:'recharge',label:'充值'},{v:'billing',label:'账单记录'},{v:'models',label:'可用模型'},{v:'security',label:'账户安全'}]" :key="tab.v" type="button" :class="{ active: accountTab === tab.v }" @click="accountTab = tab.v">{{ tab.label }}</button></nav>
 
     <div v-show="accountTab === 'overview'" class="account-view overview-view">
       <section class="cards">
@@ -23,15 +23,36 @@
         <button type="button" @click="accountTab = 'security'"><span>账户安全</span><b>登录资料</b><small>修改密码和用户名</small></button>
       </section>
     </div>
+    <div v-show="accountTab === 'recharge'" class="account-view recharge-view">
+      <section v-if="paymentOptions.blocked_reason" class="panel recharge-blocked"><h2>企业共享额度</h2><p>{{ paymentOptions.blocked_reason }}</p><small>请联系企业管理员调整共享额度。</small></section>
+      <template v-else>
+        <section class="recharge-checkout">
+          <div class="recharge-heading"><div><p class="eyebrow">个人账户充值</p><h2>选择充值金额</h2></div><strong>{{ rechargeCredits }}<small> 积分</small></strong></div>
+          <el-alert v-if="!paymentOptions.enabled" title="充值功能暂未开放" description="支付配置完成后，可以在此使用支付宝或微信扫码充值。" type="info" :closable="false" show-icon />
+          <div class="amount-presets" aria-label="充值金额"><button v-for="amount in paymentOptions.preset_amounts_yuan || []" :key="amount" type="button" :class="{active: rechargeAmount === amount}" @click="rechargeAmount = amount">¥{{ Number(amount) }}</button></div>
+          <label class="custom-amount"><span>自定义金额</span><el-input v-model="rechargeAmount" inputmode="decimal" placeholder="1.00–5000.00"><template #prepend>¥</template></el-input><small>1 元兑换 100 积分。金额最多保留两位小数。</small></label>
+          <div class="payment-channels"><button v-for="channel in paymentOptions.channels || []" :key="channel.id" type="button" :disabled="!channel.enabled" :class="{active: rechargeChannel === channel.id}" @click="rechargeChannel = channel.id"><b>{{ channel.id === 'alipay' ? '支付宝' : '微信支付' }}</b><small>{{ channel.enabled ? '扫码支付' : '暂未开放' }}</small></button></div>
+          <el-button type="primary" size="large" :disabled="!canCreatePayment" :loading="creatingPayment" @click="createPayment">生成支付二维码</el-button>
+        </section>
+        <section class="panel payment-history"><div class="panel-title"><div><h2>充值订单</h2><p>支付成功后，积分会自动到账。</p></div><el-button text @click="loadPaymentOrders">刷新</el-button></div>
+          <div class="billing-table-scroll"><el-table :data="paymentOrders" empty-text="暂无充值订单"><el-table-column label="时间" min-width="170"><template #default="{row}">{{ formatDate(row.created_at) }}</template></el-table-column><el-table-column label="渠道" width="100"><template #default="{row}">{{ row.channel === 'alipay' ? '支付宝' : '微信' }}</template></el-table-column><el-table-column prop="amount_yuan" label="金额（元）" width="110"/><el-table-column prop="credits" label="积分" width="110"/><el-table-column label="状态" width="120"><template #default="{row}"><el-tag :type="paymentStatus(row.status).type">{{ paymentStatus(row.status).label }}</el-tag></template></el-table-column><el-table-column label="操作" width="110" fixed="right"><template #default="{row}"><el-button v-if="row.status === 'pending'" link type="primary" @click="openPayment(row)">继续支付</el-button></template></el-table-column></el-table></div>
+        </section>
+      </template>
+    </div>
     <div v-show="accountTab === 'models'" class="account-view"><section class="panel"><h2>平台可用模型</h2><el-tag v-for="m in models" :key="`${m.service_type}-${m.model}`" class="tag">{{ m.service_type }} · {{ m.model }}</el-tag><p v-if="!models.length" class="muted">管理员尚未配置可计费模型。</p></section></div>
     <div v-show="accountTab === 'security'" class="account-view security-view"><section class="panel"><h2>修改密码</h2><el-form inline><el-form-item label="当前密码"><el-input v-model="password.old_password" type="password" show-password /></el-form-item><el-form-item label="新密码"><el-input v-model="password.new_password" type="password" show-password /></el-form-item><el-button type="primary" @click="changePassword">更新密码</el-button></el-form></section><section class="panel"><h2>修改用户名</h2><el-form inline><el-form-item label="用户名"><el-input v-model="username" maxlength="64" /></el-form-item><el-button type="primary" @click="changeUsername">保存用户名</el-button></el-form><p class="muted">1–64 个字符，不限内容；保存后会刷新当前登录会话。</p></section><section class="panel"><h2>修改显示名</h2><el-form inline><el-form-item label="显示名"><el-input v-model="displayName" maxlength="64" placeholder="留空则展示用户名" /></el-form-item><el-button type="primary" @click="changeDisplayName">保存显示名</el-button></el-form><p class="muted">展示在界面上的昵称，最长 64 个字符；保存后会刷新当前登录会话。</p></section></div>
     <div v-show="accountTab === 'billing'" class="account-view"><section class="panel bills"><div class="panel-title"><div><h2>账单记录</h2><p>“冻结”只占用可用额度；只有“已结算”才会计入累计消费。</p></div></div><div class="billing-table-scroll"><BillingTransactionTable :rows="transactions" :total="transactionPage.total" :page="transactionPage.page" :page-size="transactionPage.page_size" @page-change="loadTransactions" /></div></section></div>
+    <el-dialog v-model="paymentDialog" width="min(92vw, 440px)" :close-on-click-modal="false" title="扫码完成支付" @closed="stopPaymentPolling">
+      <div v-if="activePayment" class="payment-dialog"><p>{{ activePayment.channel === 'alipay' ? '请使用支付宝扫码' : '请使用微信扫码' }}</p><img v-if="paymentQr" :src="paymentQr" alt="支付二维码"/><strong>¥{{ activePayment.amount_yuan }}</strong><span>预计到账 {{ activePayment.credits }} 积分</span><small v-if="activePayment.status === 'pending'">二维码剩余 {{ countdownText }}</small><el-result v-else-if="activePayment.status === 'paid'" icon="success" title="充值成功" sub-title="积分已经到账"/><el-alert v-else :title="paymentStatus(activePayment.status).label" type="warning" :closable="false"/></div>
+      <template #footer><el-button v-if="activePayment?.status === 'pending'" @click="closePayment">关闭订单</el-button><el-button type="primary" @click="paymentDialog = false">完成</el-button></template>
+    </el-dialog>
   </main>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
+import QRCode from 'qrcode'
 import { accountAPI } from '@/api/account'
 import BillingTransactionTable from '@/components/BillingTransactionTable.vue'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
@@ -45,6 +66,53 @@ const password = reactive({ old_password: '', new_password: '' })
 const username = ref(JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').username || '')
 const displayName = ref(JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').display_name || '')
 const accountTab = ref('overview')
+const paymentOptions = ref({ channels: [], preset_amounts_yuan: [] })
+const paymentOrders = ref([])
+const rechargeAmount = ref('50.00')
+const rechargeChannel = ref('alipay')
+const creatingPayment = ref(false)
+const paymentDialog = ref(false)
+const activePayment = ref(null)
+const paymentQr = ref('')
+const paymentTick = ref(Date.now())
+let paymentPollTimer = null
+let paymentSyncCounter = 0
+const rechargeCredits = computed(() => {
+  const amount = Number(rechargeAmount.value)
+  return Number.isFinite(amount) && amount > 0 ? new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(amount * 100) : 0
+})
+const canCreatePayment = computed(() => paymentOptions.value.enabled && paymentOptions.value.personal_recharge_allowed && paymentOptions.value.channels?.some((item) => item.id === rechargeChannel.value && item.enabled) && /^\d+(?:\.\d{1,2})?$/.test(rechargeAmount.value))
+const countdownText = computed(() => {
+  const seconds = Math.max(0, Math.ceil((Date.parse(activePayment.value?.expires_at || 0) - paymentTick.value) / 1000))
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+})
+const PAYMENT_STATUS = { pending:{label:'等待支付',type:'warning'},paid:{label:'已到账',type:'success'},closed:{label:'已关闭',type:'info'},expired:{label:'已过期',type:'info'},review_required:{label:'需要核查',type:'danger'},failed:{label:'下单失败',type:'danger'} }
+function paymentStatus(status) { return PAYMENT_STATUS[status] || { label: status, type: 'info' } }
+function formatDate(value) { return value ? new Intl.DateTimeFormat('zh-CN', { timeZone:'Asia/Shanghai', dateStyle:'short', timeStyle:'medium' }).format(new Date(value)) : '—' }
+
+async function loadAccount() { account.value = await accountAPI.me() }
+async function loadPaymentOrders() { const result = await accountAPI.paymentOrders({ page: 1, page_size: 20 }); paymentOrders.value = result.items || [] }
+function stopPaymentPolling() { if (paymentPollTimer) window.clearInterval(paymentPollTimer); paymentPollTimer = null; paymentSyncCounter = 0 }
+async function updateActivePayment(sync = false) {
+  if (!activePayment.value?.id) return
+  try {
+    activePayment.value = sync ? await accountAPI.syncPaymentOrder(activePayment.value.id) : await accountAPI.paymentOrder(activePayment.value.id)
+    paymentTick.value = Date.now()
+    if (activePayment.value.status === 'paid') {
+      stopPaymentPolling(); await Promise.all([loadAccount(), loadPaymentOrders(), loadTransactions()]); window.dispatchEvent(new Event('lmd:balance-changed')); ElMessage.success('充值积分已到账')
+    } else if (activePayment.value.status !== 'pending') stopPaymentPolling()
+  } catch (_) {}
+}
+function startPaymentPolling() { stopPaymentPolling(); paymentPollTimer = window.setInterval(() => { paymentTick.value = Date.now(); paymentSyncCounter += 1; updateActivePayment(paymentSyncCounter % 5 === 0) }, 3000) }
+async function showPayment(order) { activePayment.value = order; paymentQr.value = order.code_url ? await QRCode.toDataURL(order.code_url, { width: 280, margin: 1 }) : ''; paymentDialog.value = true; startPaymentPolling() }
+async function createPayment() {
+  creatingPayment.value = true
+  try { const clientId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`; const order = await accountAPI.createPaymentOrder({ channel: rechargeChannel.value, amount_yuan: rechargeAmount.value, client_request_id: clientId }); await loadPaymentOrders(); await showPayment(order) }
+  catch (error) { ElMessage.error(error.message || '支付订单创建失败') }
+  finally { creatingPayment.value = false }
+}
+async function openPayment(row) { try { await showPayment(await accountAPI.paymentOrder(row.id)) } catch (error) { ElMessage.error(error.message || '订单读取失败') } }
+async function closePayment() { try { activePayment.value = await accountAPI.closePaymentOrder(activePayment.value.id); stopPaymentPolling(); await loadPaymentOrders() } catch (error) { ElMessage.error(error.message || '订单关闭失败') } }
 
 async function changePassword() {
   try { await accountAPI.changePassword(password); password.old_password = ''; password.new_password = ''; ElMessage.success('密码已更新') }
@@ -70,12 +138,14 @@ async function loadTransactions(page = transactionPage.page) {
 }
 
 onMounted(async () => {
-  const [accountResult, modelResult] = await Promise.allSettled([accountAPI.me(), accountAPI.models(), loadTransactions()])
+  const [accountResult, modelResult, paymentOptionsResult] = await Promise.allSettled([accountAPI.me(), accountAPI.models(), accountAPI.paymentOptions(), loadTransactions(), loadPaymentOrders()])
   if (accountResult.status === 'fulfilled') account.value = accountResult.value
   else ElMessage.error(accountResult.reason?.message || '账户信息加载失败，请刷新重试')
   if (modelResult.status === 'fulfilled') models.value = modelResult.value
   else ElMessage.error(modelResult.reason?.message || '可用模型加载失败，请稍后重试')
+  if (paymentOptionsResult.status === 'fulfilled') { paymentOptions.value = paymentOptionsResult.value; const first = paymentOptions.value.channels?.find((item) => item.enabled); if (first) rechargeChannel.value = first.id; if (paymentOptions.value.preset_amounts_yuan?.[1]) rechargeAmount.value = paymentOptions.value.preset_amounts_yuan[1] }
 })
+onBeforeUnmount(stopPaymentPolling)
 </script>
 
 <style scoped>
@@ -132,4 +202,6 @@ onMounted(async () => {
 .account-view .panel{border-radius:0;border-inline:0;background:transparent;box-shadow:none}.security-view{gap:2.5rem}.security-view .panel{padding:0}.bills{padding-inline:0}.billing-table-scroll{padding-bottom:.5rem}
 @media (prefers-reduced-motion:no-preference){.account-header,.account-tabs,.account-view{animation:account-enter var(--motion-normal,220ms) var(--motion-ease) both}.account-tabs{animation-delay:40ms}.account-view{animation-delay:80ms}.overview-links button{transition:color var(--motion-fast) var(--motion-ease),transform var(--motion-fast) var(--motion-ease)}.overview-links button:hover,.overview-links button:focus-visible{transform:translateY(-2px)}}@keyframes account-enter{from{opacity:0;transform:translateY(.5rem)}to{opacity:1;transform:none}}
 @media(max-width:45rem){.page{max-width:100%;padding:1.25rem}.account-header{align-items:flex-start}.account-intro{font-size:.84rem}.overview-links{grid-template-columns:1fr}.overview-links button,.overview-links button:not(:first-child){padding:1rem 0;border-right:0;border-bottom:1px solid var(--border-subtle)}.overview-links button:last-child{border-bottom:0}}
+.recharge-view{display:grid;grid-template-columns:minmax(21rem,.8fr) minmax(30rem,1.2fr);gap:2rem;align-items:start}.recharge-checkout{display:grid;gap:1.25rem;padding:clamp(1.4rem,3vw,2.4rem);border:1px solid var(--border-subtle);background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 9%,var(--bg-surface)),var(--bg-surface))}.recharge-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem}.recharge-heading h2{margin:0;font-size:clamp(1.5rem,2.5vw,2.2rem)}.recharge-heading strong{font-size:1.7rem;font-variant-numeric:tabular-nums;color:var(--accent)}.recharge-heading strong small{font-size:.75rem;color:var(--text-muted)}.amount-presets{display:grid;grid-template-columns:repeat(4,1fr);gap:.55rem}.amount-presets button,.payment-channels button{border:1px solid var(--border-subtle);background:var(--bg-surface);color:var(--text-primary);cursor:pointer}.amount-presets button{min-height:3.2rem;border-radius:var(--radius-sm);font-size:1rem}.amount-presets button.active,.payment-channels button.active{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--bg-surface))}.custom-amount{display:grid;gap:.45rem}.custom-amount>span{font-size:.84rem;font-weight:650}.custom-amount small{color:var(--text-muted);font-size:.75rem}.payment-channels{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}.payment-channels button{display:grid;gap:.2rem;min-height:4rem;padding:.75rem;border-radius:var(--radius-sm);text-align:left}.payment-channels button:disabled{opacity:.5;cursor:not-allowed}.payment-channels small{color:var(--text-muted)}.payment-history{min-width:0;margin:0;padding:0}.payment-history .panel-title{display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:1rem}.recharge-blocked{max-width:42rem;margin:0}.recharge-blocked p,.recharge-blocked small{color:var(--text-muted)}.payment-dialog{display:grid;justify-items:center;gap:.65rem;text-align:center}.payment-dialog>p{margin:0;color:var(--text-muted)}.payment-dialog>img{width:min(17.5rem,75vw);height:auto;padding:.5rem;background:#fff;border-radius:.5rem}.payment-dialog>strong{font-size:1.8rem}.payment-dialog>span,.payment-dialog>small{color:var(--text-muted)}
+@media(max-width:62rem){.recharge-view{grid-template-columns:1fr}.payment-history{padding-top:1rem}}@media(max-width:45rem){.amount-presets{grid-template-columns:repeat(2,1fr)}.payment-channels{grid-template-columns:1fr}.recharge-checkout{padding:1.15rem}.recharge-heading{align-items:flex-start;flex-direction:column}.recharge-view{gap:1rem}}
 </style>
