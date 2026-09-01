@@ -25,7 +25,11 @@
 
 preview 使用隔离数据库。它不会修改生产余额。
 
-preview 默认复用生产环境配置。因此不要在 preview 使用生产支付二维码。
+preview 优先读取 `/data/minidrama-config/.preview.env`。
+
+旧服务器没有该文件时，会回退到 `minidrama.oss.env`。回退期间必须保持支付关闭。
+
+不要在 preview 使用生产支付密钥或生产支付二维码。
 
 真实支付前，必须取得明确授权。
 
@@ -171,7 +175,13 @@ CFG_PAYMENTS__ENABLED=true
 
 preview 由内部 PR 自动部署。
 
+沙箱密钥写入 Git 忽略的 `.preview.env`。不要写入 `preview.yaml`。
+
+`preview.yaml` 只保存无密钥的应用行为覆盖。`.preview.env` 保存运行密钥。
+
 详细部署规则见 [PR 预览和安全发布](../../../deploy/PR_PREVIEWS.md)。
+
+HTTPS 双入口调查见 [Preview 支付 HTTPS 调查](PREVIEW_HTTPS.md)。
 
 preview 第一轮只做模拟和保护性测试。
 

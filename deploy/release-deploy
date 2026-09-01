@@ -6,7 +6,7 @@ require_root
 validate_sha "${1:-}"
 SHA="$1"
 acquire_lock
-ENV_FILE="$(require_env_file)"
+ENV_FILE="$(require_env_file prod)"
 
 SOURCE_DIR="$(prepare_source "$SHA")"
 IMAGE="$(build_image "$SHA" "$SOURCE_DIR")"

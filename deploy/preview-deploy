@@ -80,11 +80,10 @@ MEDIA_ARGS=()
 
 install_preview_ingress "$SOURCE_DIR/deploy/nginx-preview-vhost.conf"
 
-# The preview application is production-identical by construction: it joins
-# the SAME docker network as production, reads the SAME environment file and
-# therefore talks to the SAME storage backend. The only differences are the
-# per-PR dataset, the pr-<N> network alias and the profile marker.
-ENV_FILE="$(require_env_file)"
+# The preview application joins the same Docker network as production. A
+# dedicated .preview.env can isolate credentials and integrations. Until that
+# file exists, resolve_env_file keeps the legacy minidrama.oss.env fallback.
+ENV_FILE="$(require_env_file preview)"
 ENV_ARGS=(--env-file "$ENV_FILE")
 
 docker run -d --name "$APP_CONTAINER" \

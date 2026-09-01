@@ -26,10 +26,12 @@ test('preview deployment is production-identical except dataset and title', () =
   );
   // Previews are HTTP-only: no certificate machinery may return.
   assert.doesNotMatch(source + library + vhost, /certbot|letsencrypt|TLS_PROXY_NETWORK|TLS_NGINX_CONTAINER|listen 443/);
-  // Production-identical behaviour includes the production environment file —
-  // the same storage backend, the same credentials, the same integrations.
+  // Preview selects a profile-specific ignored environment file. The resolver
+  // keeps the legacy server path as a compatibility fallback.
   assert.match(source, /--env-file "\$ENV_FILE"/);
-  assert.match(source, /require_env_file/);
+  assert.match(source, /require_env_file preview/);
+  assert.match(library, /\/data\/minidrama-config\/\.\$\{profile\}\.env/);
+  assert.match(library, /\/data\/minidrama-config\/minidrama\.oss\.env/);
   assert.match(source, /MINIDRAMA_PROFILE=preview/);
   assert.doesNotMatch(source, /MINIDRAMA_STORAGE_TYPE|static_missing_mode|remote_read_base/);
   // The retired security-theatre machinery must stay retired.
@@ -102,6 +104,7 @@ test('production release uses an immutable archive and rollback container', () =
   const library = read('deploy/lib.sh');
   const dockerfile = read('Dockerfile');
   assert.match(source, /prepare_source "\$SHA"/);
+  assert.match(source, /require_env_file prod/);
   assert.match(source, /verify_migrations/);
   assert.match(source, /wait_container_ready.*90/);
   assert.match(source, /--network "\$PROD_PROXY_NETWORK" --network-alias minidrama-app/);
