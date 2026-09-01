@@ -63,7 +63,7 @@
               一键换Key
             </el-button>
           </div>
-          <p class="default-tip">每种服务类型仅有一个默认配置：文本用于生成故事；文本生成图片用于角色/场景/道具图；分镜图片生成用于分镜图（支持参考图）；视频用于生成视频；语音合成 TTS 用于分镜配音；即梦2角色认证用于创作页 SD2 认证（网关 Token）；SD2 资产库用于官方 ModelArk 私有资产（在未配置即梦2角色认证时供 SD2 认证使用）。</p>
+          <p class="default-tip">每种服务类型仅有一个默认配置。素材库上传优先使用 Richbest v3。仅在远端写入前允许回退旧服务。</p>
           <el-table
             v-loading="loading"
             :data="list"
@@ -72,7 +72,7 @@
             @selection-change="onSelectionChange"
           >
             <el-table-column v-if="!vendorLock.enabled" type="selection" width="46" />
-            <el-table-column prop="name" label="名称" min-width="130" />
+            <el-table-column prop="name" label="名称" min-width="130"><template #default="{ row }">{{ configDisplayName(row) }}</template></el-table-column>
             <el-table-column prop="provider" label="提供商" width="96" />
             <el-table-column prop="base_url" label="Base URL" min-width="170" show-overflow-tooltip />
             <el-table-column prop="default_model" label="默认模型" min-width="130" show-overflow-tooltip>
@@ -205,8 +205,10 @@
     <!-- 添加/编辑 -->
     <el-dialog
       v-model="dialogVisible"
+      class="config-editor-dialog"
       :title="vendorLock.enabled ? '修改 API Key / 默认模型' : (editingId ? '编辑配置' : '添加配置')"
-      width="520px"
+      width="min(640px, calc(100vw - 32px))"
+      append-to-body
       :close-on-click-modal="false"
       @closed="resetForm"
     >
@@ -266,7 +268,7 @@
                     <b>分镜图片生成</b>：生成分镜图片，支持传入角色参考图<br>
                     <b>视频生成</b>：根据分镜图生成视频片段<br>
                     <b>语音合成 TTS</b>：为分镜对白自动合成语音（点分镜配音按钮时使用）<br>
-                    <b>即梦2角色认证</b>：将角色主图登记到即梦业务素材库（SD2 认证），仅填网关 URL 与 Token
+                    <b>素材库上传</b>：将用户选择的图片、视频或音频上传为 Seedance 可复用素材。一个角色可使用多份独立素材
                   </div>
                 </template>
                 <el-icon class="tip-icon"><QuestionFilled /></el-icon>
@@ -280,7 +282,7 @@
             <el-option label="视频生成" value="video" />
             <el-option label="视频后处理（超分 / 插帧，AI MediaKit）" value="video_postprocess" />
             <el-option label="语音合成 TTS" value="tts" />
-            <el-option label="即梦2角色认证" value="jimeng2_character_auth" />
+            <el-option label="素材库上传" value="jimeng2_character_auth" />
           </el-select>
         </el-form-item>
         <el-form-item prop="provider">
@@ -340,7 +342,14 @@
         </el-form-item>
 
         <!-- 接口规范帮助 Dialog -->
-        <el-dialog v-model="showProtocolHelp" title="接口规范说明" width="700px" top="5vh">
+        <el-dialog
+          v-model="showProtocolHelp"
+          class="config-protocol-dialog"
+          title="接口规范说明"
+          width="min(700px, calc(100vw - 32px))"
+          append-to-body
+          top="2vh"
+        >
           <div class="protocol-help">
             <div class="ph-section-title">🖼 图片 / 分镜图 协议</div>
             <el-collapse accordion>
@@ -510,11 +519,14 @@ input_reference = (图片文件，可选)</pre>
         </el-form-item>
         <el-form-item prop="base_url">
           <template #label>
-            <span class="form-label-tip">{{ form.service_type === 'jimeng2_character_auth' ? '网关 URL' : 'Base URL' }}
+            <span class="form-label-tip">{{ form.service_type === 'jimeng2_character_auth' && form.provider !== 'richbest_asset_v3' ? '网关 URL' : 'Base URL' }}
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
                 <template #content>
                   <div class="cfg-tip-content">
-                    <template v-if="form.service_type === 'jimeng2_character_auth'">
+                    <template v-if="form.service_type === 'jimeng2_character_auth' && form.provider === 'richbest_asset_v3'">
+                      Richbest API 的<b>根地址</b>。正式地址为 <code>https://api.richbest.cn</code>。
+                    </template>
+                    <template v-else-if="form.service_type === 'jimeng2_character_auth'">
                       即梦业务素材库网关的<b>根地址</b>（不含 <code>/api/business/v1</code> 路径）。须与素材库实际部署一致。
                     </template>
                     <template v-else>
@@ -529,16 +541,19 @@ input_reference = (图片文件，可选)</pre>
           </template>
           <el-input
             v-model="form.base_url"
-            :placeholder="form.service_type === 'jimeng2_character_auth' ? '如 https://your-gateway.com' : '选择预设厂商后自动填充，可修改'"
+            :placeholder="form.provider === 'richbest_asset_v3' ? 'https://api.richbest.cn' : (form.service_type === 'jimeng2_character_auth' ? '如 https://your-gateway.com' : '选择预设厂商后自动填充，可修改')"
           />
         </el-form-item>
         <el-form-item prop="api_key">
           <template #label>
-            <span class="form-label-tip">{{ form.service_type === 'jimeng2_character_auth' ? 'Token' : 'API Key' }}
+            <span class="form-label-tip">{{ form.service_type === 'jimeng2_character_auth' && form.provider !== 'richbest_asset_v3' ? 'Token' : 'API Key' }}
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
                 <template #content>
                   <div class="cfg-tip-content">
-                    <template v-if="form.service_type === 'jimeng2_character_auth'">
+                    <template v-if="form.service_type === 'jimeng2_character_auth' && form.provider === 'richbest_asset_v3'">
+                      瑞池签发的 <code>vap_live_...</code> 业务 API Key。系统只在后端使用此密钥。
+                    </template>
+                    <template v-else-if="form.service_type === 'jimeng2_character_auth'">
                       素材库要求的 <code>Authorization: Bearer …</code> Token，由网关或即梦侧签发。
                     </template>
                     <template v-else>
@@ -557,11 +572,11 @@ input_reference = (图片文件，可选)</pre>
             type="password"
             :placeholder="editingId
               ? '已保存（脱敏显示，保持不变无需修改；输入新值即可覆盖）'
-              : (form.service_type === 'jimeng2_character_auth' ? 'Bearer Token' : (form.provider === 'jimeng_ai_api' ? '即梦 Session，多个用英文逗号分隔' : 'API 密钥'))"
+              : (form.provider === 'richbest_asset_v3' ? 'vap_live_...' : (form.service_type === 'jimeng2_character_auth' ? 'Bearer Token' : (form.provider === 'jimeng_ai_api' ? '即梦 Session，多个用英文逗号分隔' : 'API 密钥')))"
             show-password
           />
         </el-form-item>
-        <el-form-item v-if="form.service_type === 'jimeng2_character_auth'">
+        <el-form-item v-if="form.service_type === 'jimeng2_character_auth' && form.provider === 'jimeng_material_api'">
           <template #label><span class="form-label-tip">素材列表</span></template>
           <div class="jimeng2-assets-actions">
             <el-button type="primary" plain :loading="jimeng2AssetsLoading" @click="openJimeng2MaterialAssetsDialog">
@@ -577,13 +592,22 @@ input_reference = (图片文件，可选)</pre>
           </div>
         </el-form-item>
         <el-alert
-          v-if="form.service_type === 'jimeng2_character_auth'"
+          v-if="form.service_type === 'jimeng2_character_auth' && form.provider === 'richbest_asset_v3'"
           type="info"
           :closable="false"
           show-icon
           style="margin-bottom: 12px"
-          title="用于创作页「角色生成 → SD2认证」"
-          description="保存后，系统从此处读取网关与 Token 调用 POST /api/business/v1/assets 登记角色图；可用「列出素材」核对素材状态。角色主图需为外网可访问的 http(s) 地址（图床或本服务 storage.base_url）。"
+          title="用于素材库「上传到素材库」"
+          description="系统从本地持久化角色主图执行上传、登记和后台状态恢复。业务 API Key 只在后端使用。"
+        />
+        <el-alert
+          v-else-if="form.service_type === 'jimeng2_character_auth'"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 12px"
+          title="旧角色素材服务"
+          description="系统保留此配置用于兼容历史记录和安全回退。"
         />
         <template v-if="form.service_type === 'video' && form.api_protocol === 'kling_omni'">
           <el-form-item>
@@ -793,7 +817,7 @@ input_reference = (图片文件，可选)</pre>
           <div class="ep-preview-header">
             <span>📌 系统将使用以下接口地址</span>
             <span v-if="endpointPreviewInfo.isGemini" class="ep-auto-badge ep-badge-gemini">Gemini 固定模式</span>
-            <span v-else-if="endpointPreviewInfo.isJimeng2Auth" class="ep-auto-badge">即梦2角色认证</span>
+            <span v-else-if="endpointPreviewInfo.isJimeng2Auth" class="ep-auto-badge">素材库上传</span>
             <span v-else-if="endpointPreviewInfo.isAuto && form.service_type !== 'text'" class="ep-auto-badge">自动推断</span>
           </div>
           <div class="ep-row">
@@ -807,7 +831,7 @@ input_reference = (图片文件，可选)</pre>
           <p v-if="endpointPreviewInfo.isGemini" class="ep-tip ep-tip-warn">
             ⚠️ Gemini 端点由系统根据模型名固定生成，上方「提交端点」和「查询端点」字段对 Gemini 无效，填了也不生效。
           </p>
-          <p v-else-if="endpointPreviewInfo.isJimeng2Auth" class="ep-tip">角色「SD2认证」将调用上述地址注册素材（POST 创建、GET 查询状态）。</p>
+          <p v-else-if="endpointPreviewInfo.isJimeng2Auth" class="ep-tip">素材库上传会按单个本地素材处理。它支持图片、视频和音频，并查询远端处理状态。</p>
           <p v-else class="ep-tip">以上为系统推断的实际调用地址（可手动填写上方端点字段来覆盖）</p>
         </div>
 
@@ -1339,7 +1363,7 @@ function onServiceTypeChange() {
   }
   if (st === 'jimeng2_character_auth') {
     if (!form.value.provider || form.value.provider === CUSTOM_PROVIDER_SENTINEL) {
-      form.value.provider = 'jimeng_material_api'
+      form.value.provider = 'richbest_asset_v3'
     }
     const p = form.value.provider
     const pcfg = (providerConfigs.jimeng2_character_auth || []).find((x) => x.id === p)
@@ -1352,7 +1376,7 @@ function onServiceTypeChange() {
       form.value.api_protocol = ''
     }
     if (!editingId.value && !form.value.name?.trim()) {
-      form.value.name = '即梦2角色认证'
+      form.value.name = 'Richbest 素材库上传'
     }
     return
   }
@@ -1388,7 +1412,7 @@ const rules = computed(() => ({
         const st = form.value.service_type
         if (st === 'jimeng2_character_auth') {
           if (v != null && String(v).trim()) return cb()
-          return cb(new Error('请填写 Token'))
+          return cb(new Error(form.value.provider === 'richbest_asset_v3' ? '请填写业务 API Key' : '请填写 Token'))
         }
         const proto = form.value.api_protocol
         const ak = (form.value.kling_access_key || '').trim()
@@ -1508,6 +1532,7 @@ const providerConfigs = {
     { id: 'minimax', name: 'MiniMax T2A', models: ['speech-02-hd', 'speech-02-turbo'] },
   ],
   jimeng2_character_auth: [
+    { id: 'richbest_asset_v3', name: 'Richbest 多类型素材 API v3（推荐）', models: ['-'] },
     { id: 'jimeng_material_api', name: '即梦业务素材 API（/api/business/v1）', models: ['-'] },
   ],
 }
@@ -1538,6 +1563,7 @@ const providerProtocolMap = {
   agnes: 'openai',
   jimeng_ai_api: 'jimeng_ai_api',
   jimeng_material_api: '',
+  richbest_asset_v3: '',
   volcengine_mediakit: '',
 }
 
@@ -1561,6 +1587,7 @@ function getBaseUrlForProvider(provider) {
   if (p === 'ffir') return 'https://ffir.cn'
   if (p === 'jimeng_ai_api') return 'http://127.0.0.1:8000'
   if (p === 'jimeng_material_api') return 'https://silvamux.tingyutech.com'
+  if (p === 'richbest_asset_v3') return 'https://api.richbest.cn'
   if (p === 'xai' || p === 'grok') return 'https://api.x.ai'
   if (p === 'agnes') return 'https://apihub.agnes-ai.com/v1'
   return 'https://api.chatfire.site/v1'
@@ -1645,9 +1672,10 @@ const endpointPreviewInfo = computed(() => {
   if (service_type === 'jimeng2_character_auth') {
     const root = base || '(请填写网关 URL)'
     const hasReal = !root.startsWith('(')
+    const richbest = p === 'richbest_asset_v3'
     return {
-      submit: `${root}/api/business/v1/assets`,
-      query: hasReal ? `${root}/api/business/v1/assets/{assetId}` : null,
+      submit: richbest ? `${root}/api/asset/upload-file → /api/asset/create` : `${root}/api/business/v1/assets`,
+      query: hasReal ? (richbest ? `${root}/api/asset/get?assetId={assetId}` : `${root}/api/business/v1/assets/{assetId}`) : null,
       isAuto: true,
       isJimeng2Auth: true,
     }
@@ -1801,7 +1829,8 @@ function onProviderChange(providerId) {
     form.value.deepseek_reasoning_effort = 'high'
   }
   // 自动填充接口规范
-  form.value.api_protocol = providerProtocolMap[providerId] || (st === 'text' || st === 'video_postprocess' ? '' : 'openai')
+  form.value.api_protocol = providerProtocolMap[providerId]
+    || (st === 'text' || st === 'video_postprocess' || st === 'jimeng2_character_auth' ? '' : 'openai')
   if (st === 'video' && providerId === 'jimeng_ai_api') {
     form.value.endpoint = ''
     form.value.query_endpoint = ''
@@ -1858,10 +1887,15 @@ function serviceTypeLabel(t) {
     video: '视频',
     video_postprocess: '视频后处理（超分 / 插帧）',
     tts: '语音合成 TTS',
-    jimeng2_character_auth: '即梦2角色认证',
+    jimeng2_character_auth: '素材库上传',
     model_ark_asset: 'SD2 资产库',
   }
   return map[t] || t
+}
+
+function configDisplayName(row) {
+  if (row?.provider === 'richbest_asset_v3' && row?.name === 'Richbest 角色素材登记') return 'Richbest 素材库上传'
+  return row?.name || '未命名配置'
 }
 
 function onRowEdit(row) {
@@ -2183,7 +2217,7 @@ function loadMoreJimeng2MaterialAssets() {
 
 async function openTest(row) {
   if (row.service_type === 'jimeng2_character_auth') {
-    ElMessage.info('即梦2角色认证无需在此联调；保存后请在创作页「角色生成」中点击「SD2认证」验证。')
+    ElMessage.info('保存后请在媒体素材库点击「上传到素材库」验证。系统会先校验业务 API Key。')
     return
   }
   if (row.service_type === 'model_ark_asset') {
@@ -2445,6 +2479,27 @@ onMounted(() => {
   color: var(--el-color-primary, #409eff) !important;
   font-style: italic;
 }
+.config-editor-dialog.el-dialog,
+.config-protocol-dialog.el-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 32px);
+  margin: 16px auto;
+  overflow: hidden;
+}
+.config-editor-dialog .el-dialog__header,
+.config-editor-dialog .el-dialog__footer,
+.config-protocol-dialog .el-dialog__header,
+.config-protocol-dialog .el-dialog__footer {
+  flex: 0 0 auto;
+}
+.config-editor-dialog .el-dialog__body,
+.config-protocol-dialog .el-dialog__body {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 </style>
 
 <style scoped>
@@ -2482,7 +2537,7 @@ onMounted(() => {
 /* 过渡动画 */
 .fade-slide-enter-active,
 .fade-slide-leave-active {
-  transition: all 0.2s ease;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 .fade-slide-enter-from,
 .fade-slide-leave-to {

@@ -614,6 +614,7 @@ function containWorkbenchScroll(event) {
   if ((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) event.preventDefault()
 }
 function sd2Status(asset) { return String(asset?.seedance2_asset?.status || 'none').toLowerCase() }
+function sd2Pending(asset) { return ['queued', 'uploading', 'registering', 'processing', 'reconciling'].includes(sd2Status(asset)) }
 function sd2StatusLabel(asset) { return ({ none: '未认证', processing: '认证中', active: '可用', invalid: '已失效', failed: '认证失败' })[sd2Status(asset)] || '认证状态未知' }
 function sd2ActionLabel(asset) {
   const status = sd2Status(asset)
@@ -1024,7 +1025,7 @@ function setPromptReferences(value) {
 }
 function showCertificationError(error) { ElMessage.error(error?.message || 'SD2 认证失败，请检查资产库配置后重试') }
 async function refreshCertificationUntilSettled(asset) {
-  for (let attempt = 0; attempt < 30 && sd2Status(asset) === 'processing'; attempt++) {
+  for (let attempt = 0; attempt < 30 && sd2Pending(asset); attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 2000))
     const out = await omniVideoAPI.refreshAssetCertification(asset.id)
     if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
@@ -1038,7 +1039,7 @@ async function setRealPerson(asset, value) {
     if (value && asset.type === 'image') {
       const out = await omniVideoAPI.certifyAsset(asset.id)
       if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
-      if (sd2Status(asset) === 'processing') void refreshCertificationUntilSettled(asset).catch(showCertificationError)
+      if (sd2Pending(asset)) void refreshCertificationUntilSettled(asset).catch(showCertificationError)
     }
   } catch (error) {
     asset.requires_sd2_identity = !value
@@ -1079,7 +1080,7 @@ async function certify(asset) {
       ? await omniVideoAPI.refreshAssetCertification(asset.id)
       : await omniVideoAPI.certifyAsset(asset.id)
     if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
-    if (sd2Status(asset) === 'processing') void refreshCertificationUntilSettled(asset).catch(showCertificationError)
+    if (sd2Pending(asset)) void refreshCertificationUntilSettled(asset).catch(showCertificationError)
     ElMessage.success(`「${assetDisplayName(asset)}」SD2 认证状态：${sd2StatusLabel(asset)}`)
   } catch (error) {
     showCertificationError(error)

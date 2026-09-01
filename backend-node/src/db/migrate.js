@@ -542,6 +542,67 @@ function ensureAllColumns(database) {
     { name: 'deleted_at',   type: 'TEXT' },
   ]);
 
+  // --- external provider asset groups and bindings ---
+  // These tables are additive. Existing seedance2_asset JSON remains the
+  // compatibility projection used by old clients and generation jobs.
+  try {
+    database.exec(`CREATE TABLE IF NOT EXISTS external_asset_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL DEFAULT 0,
+      ai_config_id INTEGER NOT NULL,
+      provider TEXT NOT NULL,
+      remote_group_id TEXT NOT NULL,
+      name TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(tenant_id, ai_config_id, provider)
+    )`);
+    database.exec(`CREATE TABLE IF NOT EXISTS external_asset_bindings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL DEFAULT 0,
+      owner_user_id INTEGER,
+      local_asset_id INTEGER,
+      resource_type TEXT NOT NULL,
+      resource_id INTEGER NOT NULL,
+      ai_config_id INTEGER NOT NULL,
+      provider TEXT NOT NULL,
+      remote_group_id TEXT,
+      remote_asset_id TEXT,
+      upload_id TEXT,
+      object_key TEXT,
+      asset_type TEXT NOT NULL DEFAULT 'Image',
+      source_fingerprint TEXT NOT NULL,
+      source_image_url TEXT,
+      source_local_path TEXT,
+      attempt_no INTEGER NOT NULL DEFAULT 1,
+      source_name TEXT,
+      status TEXT NOT NULL DEFAULT 'processing',
+      stage TEXT NOT NULL DEFAULT 'queued',
+      error_code TEXT,
+      error_message TEXT,
+      provider_request_id TEXT,
+      upload_duration_ms INTEGER,
+      create_duration_ms INTEGER,
+      settlement_duration_ms INTEGER,
+      payload_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      active_at TEXT,
+      stale_at TEXT,
+      UNIQUE(ai_config_id, resource_type, resource_id, source_fingerprint, attempt_no)
+    )`);
+    database.exec('CREATE INDEX IF NOT EXISTS idx_external_asset_bindings_pending ON external_asset_bindings(provider, status, stage, updated_at)');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_external_asset_bindings_resource ON external_asset_bindings(resource_type, resource_id, updated_at DESC)');
+  } catch (_) {}
+  ensureColumns(database, 'external_asset_bindings', [
+    { name: 'attempt_no', type: 'INTEGER NOT NULL DEFAULT 1' },
+    { name: 'source_image_url', type: 'TEXT' },
+    { name: 'source_local_path', type: 'TEXT' },
+    { name: 'upload_duration_ms', type: 'INTEGER' },
+    { name: 'create_duration_ms', type: 'INTEGER' },
+    { name: 'settlement_duration_ms', type: 'INTEGER' },
+  ]);
+
   // --- billing project attribution snapshots ---
   ensureColumns(database, 'billing_transactions', [
     { name: 'drama_id', type: 'INTEGER' },

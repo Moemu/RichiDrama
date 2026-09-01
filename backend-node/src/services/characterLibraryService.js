@@ -8,6 +8,7 @@ const promptI18n = require('./promptI18n');
 const { mergeCfgStyleWithDrama } = require('../utils/dramaStyleMerge');
 const jimengMaterialHubService = require('./jimengMaterialHubService');
 const modelArkAssetConfigService = require('./modelArkAssetConfigService');
+const richbestAssetV3Service = require('./richbestAssetV3Service');
 const uploadService = require('./uploadService');
 const seedance2AssetGuards = require('../utils/seedance2AssetGuards');
 const {
@@ -993,12 +994,23 @@ async function registerCharacterViaModelArk(db, log, cfg, characterId, arkCtx, p
 
 /**
  * 注册角色主图为 Seedance 2.0 可用 asset 引用。
- * 优先即梦2角色认证（hub）；否则使用已保存的 ModelArk 官方资产库配置。
+ * 优先使用 Richbest v3。仅当远端素材尚未开始写入时，才回退旧 Hub/ModelArk。
  */
 async function registerCharacterJimengMaterialAsset(db, log, cfg, characterId, userId) {
+  const richbest = richbestAssetV3Service.buildContext(db, userId);
+  let richbestFallbackError = null;
+  if (richbest.ready) {
+    const result = await richbestAssetV3Service.registerCharacter(db, log, cfg, characterId, userId);
+    if (result.ok || !result.fallback_allowed) return result;
+    richbestFallbackError = result.error || 'Richbest 素材登记预检失败';
+    log.warn('Richbest asset preflight failed; falling back before asset upload', {
+      character_id: Number(characterId),
+      error: richbestFallbackError,
+    });
+  }
   const route = resolveSd2RegisterProvider(cfg, db, log, userId);
   if (!route.provider) {
-    return { ok: false, error: sd2ConfigMissingError(route.hubCtx, route.arkCtx) };
+    return { ok: false, error: richbestFallbackError || sd2ConfigMissingError(route.hubCtx, route.arkCtx) };
   }
   const prep = await prepareCharacterRegisterImage(db, log, cfg, characterId);
   if (!prep.ok) return prep;
@@ -1012,6 +1024,9 @@ async function refreshCharacterJimengMaterialAsset(db, log, cfg, characterId, us
   const charRow = db.prepare('SELECT id, seedance2_asset FROM characters WHERE id = ? AND deleted_at IS NULL').get(Number(characterId));
   if (!charRow) return { ok: false, error: 'character not found' };
   const prev = readSeedance2AssetJson(charRow.seedance2_asset);
+  if (String(prev?.sd2_provider || '').toLowerCase() === richbestAssetV3Service.PROVIDER) {
+    return richbestAssetV3Service.refreshCharacter(db, log, cfg, characterId, userId);
+  }
   const assetId = prev?.hub_asset_id;
   if (!assetId) {
     return { ok: false, error: '暂未取得素材 id，请先完成 SD2 认证' };

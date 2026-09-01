@@ -15,6 +15,10 @@ module.exports = function billingRoutes(db) {
       response.success(res, billing.pagedTransactions(db, { ...req.query, ...scope }));
     },
     quote: (req, res) => { try { response.success(res, billing.quote(db, req.auth, req.body || {})); } catch (e) { response.badRequest(res, e.message); } },
+    resourceImageQuote: (req, res) => {
+      try { response.success(res, require('../services/imageBillingService').quoteResourceImages(db, req.auth, req.body || {})); }
+      catch (e) { response.badRequest(res, e.message); }
+    },
     authorize: (req, res) => { try { response.created(res, billing.createAuthorization(db, req.auth, req.body || {})); } catch (e) { response.badRequest(res, e.message); } },
     settle: (req, res) => { try { response.success(res, billing.settleAuthorization(db, req.auth, req.params.id, req.body || {})); } catch (e) { response.badRequest(res, e.message); } },
     void: (req, res) => { try { response.success(res, billing.voidAuthorization(db, req.auth, req.params.id, req.body?.reason)); } catch (e) { response.badRequest(res, e.message); } },

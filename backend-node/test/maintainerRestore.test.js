@@ -13,7 +13,7 @@ const configs = require('../src/services/aiConfigService');
 const dramas = require('../src/services/dramaService');
 const taskService = require('../src/services/taskService');
 const tenants = require('../src/services/tenantService');
-const { createResourceImageBilling } = require('../src/services/imageBillingService');
+const { createResourceImageBilling, quoteResourceImages } = require('../src/services/imageBillingService');
 
 const log = { info() {}, warn() {}, error() {} };
 
@@ -82,6 +82,16 @@ test('request-scoped tasks and resource image billing inherit the current owner 
     });
     billing.adjustBalance(db, admin.id, admin.id, 100, 'resource image test');
     const project = dramas.createDrama(db, log, { title: 'resource billing project', owner_user_id: admin.id });
+
+    const batchQuote = quoteResourceImages(db, admin, {
+      model: 'resource-image-model', count: 3, image_input_count: 1,
+    });
+    assert.equal(batchQuote.amount_micro, 320000);
+    assert.equal(batchQuote.amount, 32);
+    assert.deepEqual(batchQuote.groups.map((item) => [item.count, item.has_image_input, item.amount]), [
+      [2, false, 24],
+      [1, true, 8],
+    ]);
 
     billingContext.run({ actor: admin, tenant_id: tenant.id }, () => {
       const task = taskService.createTaskFromContext(db, log, 'image_generation', 'character_1');

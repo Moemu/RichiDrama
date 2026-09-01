@@ -215,7 +215,7 @@ const selectedConfigGroups = computed(() => {
   }
   return [...groups.entries()].map(([service_type, configs]) => ({ service_type, configs }))
 })
-function serviceLabel(type) { return ({ text: '文本', image: '图片', storyboard_image: '分镜图片', video: '视频', video_postprocess: '视频后处理', tts: '语音', jimeng2_character_auth: '角色认证', model_ark_asset: '素材认证' })[type] || type }
+function serviceLabel(type) { return ({ text: '文本', image: '图片', storyboard_image: '分镜图片', video: '视频', video_postprocess: '视频后处理', tts: '语音', jimeng2_character_auth: '素材库上传', model_ark_asset: '素材认证' })[type] || type }
 function sourceKindLabel(type) { return ({ tool_run: 'AI 工具箱', omni_video: '全能创作', video_generation: '主工作流视频', image_generation: '主工作流图片', other: '其他历史' })[String(type || '').toLowerCase()] || '其他历史' }
 function ensureTenantDefaults() { const selected = new Set(tenantForm.ai_config_ids); for (const group of selectedConfigGroups.value) { if (!selected.has(tenantForm.default_config_ids[group.service_type])) tenantForm.default_config_ids[group.service_type] = group.configs[0].id } for (const type of Object.keys(tenantForm.default_config_ids)) { if (!selectedConfigGroups.value.some((group) => group.service_type === type)) delete tenantForm.default_config_ids[type] } }
 function billingUserLabel(user) { return `${user.display_name || user.username}（${user.username} · ${user.role === 'admin' ? '管理员' : '普通用户'}）` }

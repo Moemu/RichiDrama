@@ -44,10 +44,12 @@ function markStaleOnCharacterMainImageDrift(db, log, prevRow, nextPatch) {
     const imgHit = !!(certImg && nextImg && certImg === nextImg);
     if (lpHit || imgHit) {
       const now = new Date().toISOString();
+      const restoredStatus = asset.stale_previous_status || 'active';
       const merged = {
         ...asset,
-        status: 'active',
+        status: restoredStatus,
         stale_reason: null,
+        stale_previous_status: null,
         updated_at: now,
         restored_from_stale_at: now,
       };
@@ -57,17 +59,26 @@ function markStaleOnCharacterMainImageDrift(db, log, prevRow, nextPatch) {
           now,
           Number(prevRow.id)
         );
+        if (asset.sd2_provider === 'richbest_asset_v3') {
+          db.prepare(`UPDATE external_asset_bindings SET status=?,stage=?,stale_at=NULL,updated_at=?
+            WHERE provider='richbest_asset_v3' AND resource_type='character' AND resource_id=?
+              AND source_fingerprint=?`)
+            .run(restoredStatus, restoredStatus, now, Number(prevRow.id), String(asset.source_fingerprint || ''));
+        }
       } catch (_) {}
       return;
     }
     return;
   }
 
-  if (status !== 'active') return;
+  const richbestPending = asset.sd2_provider === 'richbest_asset_v3'
+    && ['queued', 'uploading', 'registering', 'processing', 'reconciling'].includes(status);
+  if (status !== 'active' && !richbestPending) return;
   const now = new Date().toISOString();
   const merged = {
     ...asset,
     status: 'stale',
+    stale_previous_status: status,
     stale_reason: 'character_main_image_changed',
     updated_at: now,
   };
@@ -76,6 +87,14 @@ function markStaleOnCharacterMainImageDrift(db, log, prevRow, nextPatch) {
     now,
     Number(prevRow.id)
   );
+  try {
+    if (asset.sd2_provider === 'richbest_asset_v3') {
+      db.prepare(`UPDATE external_asset_bindings SET status='stale',stage='stale',stale_at=?,updated_at=?
+        WHERE provider='richbest_asset_v3' AND resource_type='character' AND resource_id=?
+          AND source_fingerprint=?`)
+        .run(now, now, Number(prevRow.id), String(asset.source_fingerprint || ''));
+    }
+  } catch (_) {}
   log?.info?.('[SD2认证] 角色主图已变更，状态标记为 stale', {
     character_id: prevRow.id,
   });

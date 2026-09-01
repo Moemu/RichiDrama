@@ -16,7 +16,7 @@ test('自由创作只渲染一个提示词编辑器', async () => {
   assert.match(source, /@keydown\.down\.prevent="selectRelative\(1\)"/)
 })
 
-test('维护者工作流恢复一键入口、资源模型和分镜实时刷新', async () => {
+test('维护者工作流保留一键入口、缺图报价和分镜实时刷新', async () => {
   const [film, freeCreate, characters, scenes, props] = await Promise.all([
     readSource('../src/views/FilmCreate.vue'),
     readSource('../src/views/FreeCreate.vue'),
@@ -27,10 +27,15 @@ test('维护者工作流恢复一键入口、资源模型和分镜实时刷新',
 
   assert.match(film, /const showLegacyPipeline = ref\(true\)/)
   assert.match(film, /const pipelinePanelExpanded = ref\(false\)/)
-  assert.match(film, /v-model="resourceImageModel"/)
-  assert.match(film, /onGenerateCharacterImage\(char, resourceImageModel \|\| undefined\)/)
-  assert.match(film, /onGenerateSceneImage\(scene, sceneUseQuadGrid, resourceImageModel \|\| undefined\)/)
-  assert.match(film, /onGeneratePropImage\(prop, propUseQuadGrid, resourceImageModel \|\| undefined\)/)
+  assert.doesNotMatch(film, /v-model="resourceImageModel"/)
+  assert.match(film, /批量上传至素材库/)
+  assert.match(film, /v-model="showResourceBatchImageDialog"/)
+  assert.match(film, /v-model="resourceBatchImageModel"/)
+  assert.match(film, /预计消耗 \{\{ resourceBatchImageQuote\.amount \}\} 积分/)
+  assert.match(film, /accountAPI\.quoteResourceImages/)
+  assert.match(film, /onGenerateCharacterImage\(item, model\)/)
+  assert.match(film, /onGenerateSceneImage\(item, sceneUseQuadGrid\.value, model\)/)
+  assert.match(film, /onGeneratePropImage\(item, propUseQuadGrid\.value, model\)/)
   assert.match(film, /AI 生成分镜/)
   assert.match(film, /每段\(秒\)/)
   assert.match(film, /\.storyboard-stage-active \.workflow-shell\{[^}]*overflow:clip!important/)
@@ -113,16 +118,37 @@ test('镜头素材仅移出本镜，项目素材归档与全局解除引用分�
   assert.match(apiSource, /forceDetachAsset\(id\)/)
 })
 
-test('角色资源卡提供音色绑定、更换与试听入口', async () => {
+test('角色资源卡和编辑器按图片、内容与底部操作分层', async () => {
   const source = await readSource('../src/views/FilmCreate.vue')
 
+  const cardBranch = source.match(/<template v-else-if="resourceCatalogType === 'character'">(.+?)<\/template>/)?.[1] || ''
+  assert.match(cardBranch, /class="character-card-edit"[\s\S]*>编辑<\/el-button>/)
+  assert.match(cardBranch, /class="character-card-delete"[\s\S]*type="danger"[\s\S]*>删除<\/el-button>/)
+  assert.doesNotMatch(cardBranch, /素材库|生成图|绑定音色|更换音色|试听/)
+  assert.match(source, /class="resource-hosting-status"/)
+  assert.match(source, /resourceHostingStatusClass\(item\)/)
+  assert.match(source, /class="ref-image-remove" aria-label="移除参考图"/)
+  assert.match(source, /@click\.stop="removeEditCharacterReferenceImage">×<\/button>/)
+  assert.match(source, /@click="onEditCharacterGenerateImage">生成角色图/)
+  assert.match(source, /\.ref-image-meta\{[^}]*flex-direction:column[^}]*align-items:flex-start/)
+  assert.match(source, /class="character-field-actions"[\s\S]*extractEditCharacterDescription/)
+  assert.match(source, /class="character-field-actions"[\s\S]*doGenerateCharacterPrompt/)
+  assert.match(source, /label="音色参考"[\s\S]*class="character-inline-control"/)
+  assert.match(source, /\.character-inline-control\{[^}]*align-items:flex-end[^}]*justify-content:space-between/)
+  assert.match(source, /class="character-editor-footer"/)
+  assert.match(source, /@opened="resetCharacterEditorScroll"/)
+  assert.match(source, /function resetCharacterEditorScroll\(\)[\s\S]*\.character-editor-dialog \.el-dialog__body/)
+  assert.match(source, /@click="onEditCharacterSd2Action">\{\{ sd2ActionLabel\(editCharacterForm\) \}\}/)
+  assert.match(source, /失败原因/)
   assert.match(source, /绑定音色/)
   assert.match(source, /音色已绑定/)
   assert.match(source, /更换音色/)
   assert.match(source, /试听/)
-  assert.match(source, /onSd2VoicePrimaryAction\(item\)/)
-  assert.match(source, /onSd2VoiceReplace\(item\)/)
-  assert.match(source, /playSd2Voice\(item\)/)
+  assert.match(source, /onSd2VoicePrimaryAction\(editCharacterForm\.value\)/)
+  assert.match(source, /onSd2VoiceReplace\(editCharacterForm\.value\)/)
+  assert.match(source, /\.resource-browser-select\{[^}]*background:transparent;box-shadow:none\}/)
+  assert.match(source, /\.resource-browser-card-actions\.character-card-actions\{justify-content:space-between/)
+  assert.match(source, /\.character-card-actions \.character-card-delete\{border-color:[^}]*background:[^}]*color:/)
 })
 
 test('统一资源浏览器的卡片操作会换行，资源页可纵向滚动', async () => {
@@ -294,6 +320,11 @@ test('workbench and media library expose the premium entry surfaces', async () =
   assert.doesNotMatch(tools, /class="tool-grid"/)
   assert.match(library, /class="page-header library-header"/)
   assert.match(library, /素材 · \{\{ total \}\} 项/)
+  assert.match(library, /<b>上传到素材库<\/b>/)
+  assert.match(library, /角色可使用多份图片。普通图片、视频和音频也可独立上传/)
+  assert.match(library, /omniVideoAPI\.refreshAssetCertification/)
+  assert.match(library, /class="media-preview-dialog"/)
+  assert.match(library, /\.media-preview-dialog \.el-dialog__body\)[^}]*overflow-y: auto/)
   assert.doesNotMatch(library, /ASSET ATLAS|SELECT A CAPABILITY|RICH MEDIA · AI STUDIO/)
   assert.match(library, /Asset room: a full-height library rail/)
 })
@@ -431,6 +462,27 @@ test('项目分组从专属 AI／SD2 页面维护默认配置，价目保存不�
   assert.doesNotMatch(source, /v-model="tenantForm\.name" :disabled="!!tenantForm\.id"/)
   assert.match(aiConfig, /const tenantId = computed/)
   assert.match(aiConfig, /tenant_id: tenantId\.value/)
+})
+
+test('AI 配置编辑弹窗脱离父弹窗裁切并保持表单区域可滚动', async () => {
+  const source = await readSource('../src/components/AIConfigContent.vue')
+
+  assert.match(source, /class="config-editor-dialog"/)
+  assert.match(source, /width="min\(640px, calc\(100vw - 32px\)\)"/)
+  assert.match(source, /class="config-editor-dialog"[\s\S]*?append-to-body/)
+  assert.match(source, /\.config-editor-dialog\.el-dialog[\s\S]*?max-height: calc\(100dvh - 32px\)/)
+  assert.match(source, /\.config-editor-dialog \.el-dialog__body[\s\S]*?overflow-y: auto/)
+  assert.match(source, /\.config-editor-dialog \.el-dialog__footer[\s\S]*?flex: 0 0 auto/)
+})
+
+test('Richbest 配置使用官方素材库语义并保留兼容服务类型', async () => {
+  const source = await readSource('../src/components/AIConfigContent.vue')
+  assert.match(source, /<el-option label="素材库上传" value="jimeng2_character_auth" \/>/)
+  assert.match(source, /图片、视频或音频/)
+  assert.match(source, /一个角色可使用多份独立素材/)
+  assert.match(source, /configDisplayName\(row\)/)
+  assert.match(source, /Richbest 素材库上传/)
+  assert.doesNotMatch(source, /label="角色素材登记"/)
 })
 
 test('运营工作台把纵向滚动交给页面，表格只承接横向滚动', async () => {

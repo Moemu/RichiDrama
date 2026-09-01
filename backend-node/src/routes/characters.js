@@ -303,7 +303,7 @@ function routes(db, cfg, log, uploadService) {
           if (out.error === 'character not found') return response.notFound(res, '角色不存在');
           return response.badRequest(res, out.error);
         }
-        response.success(res, { message: 'SD2 素材认证已更新', seedance2_asset: out.seedance2_asset });
+        response.success(res, { message: '角色主图上传状态已更新', seedance2_asset: out.seedance2_asset });
       } catch (err) {
         log.error('characters sd2-certify', { error: err.message });
         response.internalError(res, err.message);
@@ -316,7 +316,7 @@ function routes(db, cfg, log, uploadService) {
           if (out.error === 'character not found') return response.notFound(res, '角色不存在');
           return response.badRequest(res, out.error);
         }
-        response.success(res, { message: '认证状态已刷新', seedance2_asset: out.seedance2_asset });
+        response.success(res, { message: '角色素材状态已刷新', seedance2_asset: out.seedance2_asset });
       } catch (err) {
         log.error('characters sd2-certify-refresh', { error: err.message });
         response.internalError(res, err.message);

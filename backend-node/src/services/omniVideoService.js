@@ -380,12 +380,17 @@ function hasActiveSd2Certification(asset) {
     && String(asset.seedance2_asset.asset_url || '').startsWith('asset://'));
 }
 
+function isPendingSd2Certification(asset) {
+  return ['queued', 'uploading', 'registering', 'processing', 'reconciling']
+    .includes(String(asset?.seedance2_asset?.status || '').toLowerCase());
+}
+
 function sd2IdentityState(assets, capability) {
   if (!isSeedanceCapability(capability)) return { pending: [], invalid: [] };
   const declared = assets.filter((asset) => asset.type === 'image' && asset.send_to_model && asset.requires_sd2_identity);
   return {
-    pending: declared.filter((asset) => String(asset.seedance2_asset?.status || '').toLowerCase() === 'processing'),
-    invalid: declared.filter((asset) => !hasActiveSd2Certification(asset) && String(asset.seedance2_asset?.status || '').toLowerCase() !== 'processing'),
+    pending: declared.filter(isPendingSd2Certification),
+    invalid: declared.filter((asset) => !hasActiveSd2Certification(asset) && !isPendingSd2Certification(asset)),
   };
 }
 
@@ -397,16 +402,16 @@ function enforceSd2IdentityAssets(assets, capability, log) {
   if (invalid.length) {
     const names = invalid.map((asset) => asset.alias).join('、');
     if (log && typeof log.warn === 'function') log.warn('[SD2] rejected request with inactive declared-real-person assets', { assets: names });
-    throw new Error(`以下含真人素材尚未完成或已失效 SD2 认证，请刷新或重新认证后再生成：${names}`);
+    throw new Error(`以下含真人 SD2 角色素材尚未完成登记或已失效，请刷新或重新登记后再生成：${names}`);
   }
 }
 
 function applySd2CertifiedAssetReferences(assets, capability) {
   if (!isSeedanceCapability(capability)) return;
   for (const asset of assets) {
-    if (asset.type === 'image' && asset.send_to_model && hasActiveSd2Certification(asset)) {
+    if (['image', 'video', 'audio'].includes(asset.type) && asset.send_to_model && hasActiveSd2Certification(asset)) {
       asset.model_url = asset.seedance2_asset.asset_url;
-      asset.strategy = 'sd2_certified_asset';
+      asset.strategy = 'sd2_library_asset';
     }
   }
 }

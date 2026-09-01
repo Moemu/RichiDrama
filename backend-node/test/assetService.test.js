@@ -289,13 +289,27 @@ test('Seedance rejects declared real-person material without an active certifica
   assert.doesNotThrow(() => enforceSd2IdentityAssets(active, capability, log));
   applySd2CertifiedAssetReferences(active, capability);
   assert.equal(active[0].model_url, 'asset://active-1');
-  assert.equal(active[0].strategy, 'sd2_certified_asset');
+  assert.equal(active[0].strategy, 'sd2_library_asset');
 });
 
-test('Seedance treats a declared real-person certification in processing as a wait state, not a generation rejection', () => {
-  const state = sd2IdentityState([{ type: 'image', alias: '演员参考', send_to_model: true, requires_sd2_identity: true, seedance2_asset: { status: 'processing' } }], { model: 'seedance-2.0', supports: {} });
-  assert.equal(state.pending.length, 1);
-  assert.equal(state.invalid.length, 0);
+test('Seedance treats every Richbest in-progress stage as a wait state', () => {
+  for (const status of ['queued', 'uploading', 'registering', 'processing', 'reconciling']) {
+    const state = sd2IdentityState([{ type: 'image', alias: '演员参考', send_to_model: true, requires_sd2_identity: true, seedance2_asset: { status } }], { model: 'seedance-2.0', supports: {} });
+    assert.equal(state.pending.length, 1, status);
+    assert.equal(state.invalid.length, 0, status);
+  }
+});
+
+test('Seedance uses active remote library references for every supported media type', () => {
+  const assets = ['image', 'video', 'audio'].map((type, index) => ({
+    type,
+    send_to_model: true,
+    model_url: `/static/source-${index}`,
+    seedance2_asset: { status: 'active', asset_url: `asset://library-${index}` },
+  }));
+  applySd2CertifiedAssetReferences(assets, { model: 'doubao-seedance-2-0', provider: 'volcengine' });
+  assert.deepEqual(assets.map((item) => item.model_url), ['asset://library-0', 'asset://library-1', 'asset://library-2']);
+  assert.ok(assets.every((item) => item.strategy === 'sd2_library_asset'));
 });
 
 test('omni job API snapshot masks local and remote source URLs', () => {

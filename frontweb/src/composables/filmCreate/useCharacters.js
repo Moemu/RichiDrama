@@ -165,6 +165,9 @@ export function useCharacters(deps) {
       image_url: char.image_url || '',
       local_path: char.local_path || '',
       ref_image: char.ref_image || '',
+      extra_images: char.extra_images || '',
+      seedance2_asset: char.seedance2_asset ? { ...char.seedance2_asset } : null,
+      seedance2_voice_asset: char.seedance2_voice_asset ? { ...char.seedance2_voice_asset } : null,
       identity_anchors: char.identity_anchors || '',
       stages: char.stages ? (typeof char.stages === 'string' ? char.stages : JSON.stringify(char.stages, null, 2)) : '',
     }
@@ -646,20 +649,20 @@ export function useCharacters(deps) {
     try {
       await characterAPI.sd2Certify(char.id)
       await loadDrama()
-      ElMessage.success('SD2 认证请求已提交')
+       ElMessage.success('角色主图上传请求已提交')
     } catch (e) {
       const msg = e?.message || ''
       if (/已存在|已认证|already/i.test(msg)) {
         try {
           await characterAPI.sd2CertifyRefresh(char.id)
           await loadDrama()
-          ElMessage.success('SD2 认证状态已刷新')
+          ElMessage.success('角色素材状态已刷新')
           return
         } catch (_) {
           // fall through
         }
       }
-      ElMessage.error(msg || 'SD2 认证失败')
+      ElMessage.error(msg || '角色主图上传失败')
     } finally {
       sd2CertifyingId.value = null
     }
@@ -671,7 +674,7 @@ export function useCharacters(deps) {
     try {
       await characterAPI.sd2CertifyRefresh(char.id)
       await loadDrama()
-      ElMessage.success('SD2 认证状态已刷新')
+      ElMessage.success('角色素材状态已刷新')
     } catch (e) {
       ElMessage.error(e?.message || '刷新失败')
     } finally {
@@ -681,10 +684,18 @@ export function useCharacters(deps) {
 
   function sd2ActionLabel(char) {
     const status = String(char?.seedance2_asset?.status || '').toLowerCase()
-    if (status === 'active') return '查看认证'
-    if (status === 'processing') return '刷新认证'
-    if (status === 'failed') return '重新认证'
-    return 'sd2认证'
+    if (status === 'active') return '查看素材'
+    if (['queued', 'uploading', 'registering', 'processing', 'reconciling'].includes(status)) return '刷新状态'
+    if (['failed', 'stale', 'invalid'].includes(status)) return '重新上传'
+    return '上传到素材库'
+  }
+
+  function sd2StatusLabel(char) {
+    const status = String(char?.seedance2_asset?.status || '').toLowerCase()
+    return ({
+      queued: '等待登记', uploading: '上传中', registering: '登记中', processing: '处理中',
+      reconciling: '核对中', active: '素材可用', failed: '登记失败', stale: '需重新登记', invalid: '登记失效',
+    })[status] || status || '未登记'
   }
 
   async function onSd2PrimaryAction(char) {
@@ -693,7 +704,7 @@ export function useCharacters(deps) {
       openCharSd2CertDialog(char)
       return
     }
-    if (status === 'processing') {
+    if (['queued', 'uploading', 'registering', 'processing', 'reconciling'].includes(status)) {
       await onSd2CertifyRefresh(char)
       return
     }
@@ -856,6 +867,7 @@ export function useCharacters(deps) {
     onSd2CertifyCharacter,
     onSd2CertifyRefresh,
     sd2ActionLabel,
+    sd2StatusLabel,
     onSd2PrimaryAction,
     openCharSd2CertDialog,
     onSd2VoicePrimaryAction,

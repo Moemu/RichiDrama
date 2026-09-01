@@ -180,10 +180,22 @@ function markResourceStale(db, kind, previous, next) {
 async function certify(db, log, cfg, id, userId) {
   const asset = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!asset) return { ok: false, error: '素材不存在' };
-  if (asset.type !== 'image') return { ok: false, error: '仅图片素材支持 SD2 认证' };
   const linked = mappedResource(asset);
   if (linked?.kind === 'character') {
     return require('./characterLibraryService').registerCharacterJimengMaterialAsset(db, log, cfg, linked.id, userId);
+  }
+  const richbest = require('./richbestAssetV3Service');
+  let richbestFallbackError = null;
+  let richbestReady = false;
+  try { richbestReady = richbest.buildContext(db, userId).ready; }
+  catch (_) { richbestReady = false; }
+  if (richbestReady) {
+    const out = await richbest.registerAsset(db, log, cfg, id, userId);
+    if (out.ok || out.fallback_allowed !== true) return out;
+    richbestFallbackError = out.error;
+  }
+  if (asset.type !== 'image') {
+    return { ok: false, error: richbestFallbackError || '请先配置“素材库上传”，再上传视频或音频素材' };
   }
   if (linked) {
     const out = await certifyResource(db, log, cfg, linked.kind, linked.id, userId);
@@ -197,6 +209,9 @@ async function refresh(db, log, cfg, id, userId) {
   if (!asset) return { ok: false, error: '素材不存在' };
   const linked = mappedResource(asset);
   if (linked?.kind === 'character') return require('./characterLibraryService').refreshCharacterJimengMaterialAsset(db, log, cfg, linked.id, userId);
+  if (parse(asset.seedance2_asset)?.sd2_provider === 'richbest_asset_v3') {
+    return require('./richbestAssetV3Service').refreshAsset(db, log, cfg, id, userId);
+  }
   if (linked) {
     const out = await refreshResource(db, log, cfg, linked.kind, linked.id, userId);
     if (!out.ok) return out;
@@ -277,8 +292,15 @@ function resumePendingCertifications(db, log, cfg, options = {}) {
           }
           continue;
         }
-        if (status !== 'processing' || !cert?.hub_asset_id) continue;
-        try { await (options.refreshResource || refreshResource)(db, log, cfg, kind, row.id, ownerUserId); }
+        if (!['uploading', 'registering', 'processing', 'reconciling'].includes(status)) continue;
+        if (status === 'processing' && !cert?.hub_asset_id) continue;
+        try {
+          if (kind === 'asset' && cert?.sd2_provider === 'richbest_asset_v3') {
+            await (options.refreshAsset || require('./richbestAssetV3Service').refreshAsset)(db, log, cfg, row.id, ownerUserId);
+          } else {
+            await (options.refreshResource || refreshResource)(db, log, cfg, kind, row.id, ownerUserId);
+          }
+        }
         catch (error) { log.warn('SD2 restart recovery refresh failed', { table, id: row.id, error: error.message }); }
       }
     }
@@ -289,7 +311,7 @@ function resumePendingCertifications(db, log, cfg, options = {}) {
         FROM characters c LEFT JOIN dramas d ON d.id=c.drama_id
         WHERE c.deleted_at IS NULL AND c.seedance2_asset IS NOT NULL`).all();
       for (const row of characters) {
-        if (String(parse(row.seedance2_asset)?.status || '').toLowerCase() === 'processing') {
+        if (['queued', 'uploading', 'registering', 'processing', 'reconciling'].includes(String(parse(row.seedance2_asset)?.status || '').toLowerCase())) {
           await (options.refreshCharacter || require('./characterLibraryService').refreshCharacterJimengMaterialAsset)(db, log, cfg, row.id, row.owner_user_id || null);
         }
       }
