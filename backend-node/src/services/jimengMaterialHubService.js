@@ -14,6 +14,7 @@ function loadAiJimeng2AuthRow(db, userId) {
       const bound = db.prepare(`SELECT c.id, c.name, c.base_url, c.api_key FROM tenant_sd2_config_bindings b
         JOIN ai_service_configs c ON c.id=b.ai_config_id
         WHERE b.tenant_id=? AND b.is_active=1 AND c.deleted_at IS NULL AND c.is_active=1 AND c.service_type=?
+          AND COALESCE(c.provider, '') <> 'richbest_asset_v3'
         ORDER BY c.is_default DESC, c.priority DESC, c.id ASC LIMIT 1`).get(tenant.id, 'jimeng2_character_auth');
       if (bound) return bound;
     }
@@ -21,6 +22,7 @@ function loadAiJimeng2AuthRow(db, userId) {
       .prepare(
         `SELECT id, name, base_url, api_key FROM ai_service_configs
          WHERE deleted_at IS NULL AND service_type = ? AND is_active = 1
+           AND COALESCE(provider, '') <> 'richbest_asset_v3'
          ORDER BY is_default DESC, priority DESC, id ASC LIMIT 1`
       )
       .get('jimeng2_character_auth');

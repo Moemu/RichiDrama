@@ -93,7 +93,7 @@
         </div>
         <div class="media-info">
           <span class="media-name" :title="item.name" @dblclick.stop="renameItem(item)">{{ item.name || '未命名' }}</span>
-          <div class="media-meta-row"><span class="media-meta">{{ formatSize(item.size) }}</span><span v-if="item.type === 'image' && item.requires_sd2_identity" class="identity-state">含真人</span></div>
+          <div class="media-meta-row"><span class="media-meta">{{ formatSize(item.size) }}</span><span class="media-state-list"><span v-if="item.type === 'image' && item.requires_sd2_identity" class="identity-state">含真人</span><span v-if="sd2Status(item) !== 'none'" class="identity-state" :class="sd2Status(item)">素材库 · {{ sd2Label(item) }}</span></span></div>
           <div v-if="item.tags?.length" class="media-tags"><el-tag v-for="tag in item.tags.slice(0, 3)" :key="tag" size="small" effect="plain">{{ tag }}</el-tag></div>
         </div>
       </div>
@@ -127,7 +127,7 @@
     </div>
 
     <!-- 预览弹窗 -->
-    <el-dialog v-model="showPreview" title="素材预览" width="800px" destroy-on-close>
+    <el-dialog v-model="showPreview" class="media-preview-dialog" title="素材预览" width="min(800px, calc(100vw - 32px))" append-to-body destroy-on-close>
       <div class="preview-content">
         <video
           v-if="previewItem?.type === 'video'"
@@ -146,6 +146,18 @@
         <div class="meta-row"><span>大小：</span>{{ formatSize(previewItem?.size) }}</div>
         <div class="meta-row"><span>创建时间：</span>{{ previewItem?.created_at }}</div>
         <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔，例如：人物, 夜景" @change="saveTags" /></div>
+        <section v-if="previewItem" class="remote-library-row">
+          <div><b>上传到素材库</b><small>系统按单个素材上传。角色可使用多份图片。普通图片、视频和音频也可独立上传。</small></div>
+          <span class="remote-library-status" :class="sd2Status(previewItem)">{{ sd2Label(previewItem) }}</span>
+          <el-button
+            size="small"
+            type="primary"
+            plain
+            :loading="libraryUploadingId === previewItem.id"
+            @click="uploadToRemoteLibrary(previewItem)"
+          >{{ libraryActionLabel(previewItem) }}</el-button>
+          <p v-if="previewItem?.seedance2_asset?.error" class="remote-library-error">{{ previewItem.seedance2_asset.error }}</p>
+        </section>
         <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人</el-checkbox><span v-if="previewItem?.requires_sd2_identity">{{ sd2Label(previewItem) }}，系统自动准备，生成会自动等待。</span><span v-else>未勾选即为不含真人</span></div>
         <section v-if="previewItem" class="asset-lineage">
           <div class="asset-lineage-title"><span>版本与来源</span><el-button text size="small" :loading="lineageLoading" @click="loadLineage(previewItem.id)">刷新</el-button></div>
@@ -194,6 +206,7 @@ const previewItem = ref(null)
 const editableTags = ref('')
 const trimStart = ref(0), trimEnd = ref(5), trimming = ref(false)
 const lineage = ref(null), lineageLoading = ref(false)
+const libraryUploadingId = ref(null)
 const uploadInput = ref(null)
 const failedUploads = ref([])
 const uploadPercent = computed(() => uploadProgress.value.total
@@ -437,7 +450,30 @@ async function renameItem(item) {
 }
 
 function sd2Status(item) { return String(item?.seedance2_asset?.status || 'none').toLowerCase() }
-function sd2Label(item) { return ({ active: '认证可用', processing: '认证中', stale: '需刷新', failed: '认证失败', none: '未认证' })[sd2Status(item)] || '未认证' }
+function sd2Label(item) { return ({ active: '可用', queued: '等待上传', uploading: '上传中', registering: '创建中', processing: '处理中', reconciling: '核对中', stale: '需重新上传', failed: '上传失败', none: '未上传' })[sd2Status(item)] || '未上传' }
+function libraryActionLabel(item) {
+  const status = sd2Status(item)
+  if (['queued', 'uploading', 'registering', 'processing', 'reconciling', 'active'].includes(status)) return '刷新状态'
+  if (status === 'stale' || status === 'failed') return '重新上传'
+  return '上传到素材库'
+}
+async function uploadToRemoteLibrary(item) {
+  if (!item?.id || libraryUploadingId.value) return
+  libraryUploadingId.value = item.id
+  try {
+    const status = sd2Status(item)
+    const shouldRefresh = ['queued', 'uploading', 'registering', 'processing', 'reconciling', 'active'].includes(status)
+    const out = shouldRefresh
+      ? await omniVideoAPI.refreshAssetCertification(item.id)
+      : await omniVideoAPI.certifyAsset(item.id)
+    if (out?.seedance2_asset) item.seedance2_asset = out.seedance2_asset
+    ElMessage.success(`素材库状态：${sd2Label(item)}`)
+  } catch (error) {
+    ElMessage.error(error.message || '上传到素材库失败')
+  } finally {
+    libraryUploadingId.value = null
+  }
+}
 async function setIdentity(item, value) {
   const previous = !!item.requires_sd2_identity
   item.requires_sd2_identity = !!value
@@ -651,12 +687,25 @@ onMounted(loadMedia)
 }
 
 .media-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 4px; }
+.media-state-list { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; }
 .identity-state { padding: 2px 5px; border-radius: 4px; font-size: 10px; white-space: nowrap; background: var(--bg-hover); color: var(--text-muted); }
 .identity-state.active { background: var(--bg-active); color: var(--text-primary); }
 .identity-state.processing { background: var(--bg-raised); color: var(--text-regular); }
 .identity-state.stale,.identity-state.failed { background: var(--bg-elevated); color: var(--text-muted); }
 .trim-controls { display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap; }
 .sd2-preview-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
+.remote-library-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px 12px; margin-top: 14px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-raised); }
+.remote-library-row > div { min-width: 0; }
+.remote-library-row b { display: block; color: var(--text-primary); }
+.remote-library-row small { display: block; margin-top: 4px; color: var(--text-muted); line-height: 1.5; }
+.remote-library-status { white-space: nowrap; color: var(--text-muted); }
+.remote-library-status.active { color: var(--success-color, #67c23a); }
+.remote-library-status.failed,.remote-library-status.stale,.remote-library-error { color: var(--danger-color, #f56c6c); }
+.remote-library-error { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+@media (max-width: 720px) { .remote-library-row { grid-template-columns: 1fr auto; } .remote-library-row > div { grid-column: 1 / -1; } }
+:global(.media-preview-dialog.el-dialog) { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); margin: 16px auto; overflow: hidden; }
+:global(.media-preview-dialog .el-dialog__header),:global(.media-preview-dialog .el-dialog__footer) { flex: 0 0 auto; }
+:global(.media-preview-dialog .el-dialog__body) { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
 .empty-media {
   grid-column: 1 / -1;

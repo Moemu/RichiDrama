@@ -3337,7 +3337,9 @@ function storageRelativeFromPublicUrl(urlStr) {
 function buildSd2ActiveAssetUrlLookup(db, dramaId) {
   const urlToAsset = new Map();
   const relPathToAsset = new Map();
-  if (!db || !dramaId) return { urlToAsset, relPathToAsset };
+  const blockedUrls = new Set();
+  const blockedRelPaths = new Set();
+  if (!db || !dramaId) return { urlToAsset, relPathToAsset, blockedUrls, blockedRelPaths };
   const rows = [];
   for (const table of ['characters', 'scenes', 'props']) {
     try {
@@ -3346,7 +3348,16 @@ function buildSd2ActiveAssetUrlLookup(db, dramaId) {
   }
   for (const row of rows) {
     const asset = parseJsonColumnForVideo(row.seedance2_asset);
-    if (!asset || String(asset.status || '').toLowerCase() !== 'active') continue;
+    if (!asset) continue;
+    const status = String(asset.status || '').toLowerCase();
+    if (String(asset.sd2_provider || '').toLowerCase() === 'richbest_asset_v3' && status !== 'active') {
+      const img = String(row.image_url || '').trim();
+      const lp = normalizeStorageRelativePath(row.local_path || '');
+      if (img) { blockedUrls.add(img); blockedUrls.add(img.split('?')[0]); }
+      if (lp) blockedRelPaths.add(lp);
+      continue;
+    }
+    if (status !== 'active') continue;
     const uri = normalizeMaterialHubAssetUrlForVideo(asset.hub_asset_id || asset.asset_url);
     if (!uri) continue;
     const certImg = String(asset.certified_image_url || '').trim();
@@ -3364,17 +3375,19 @@ function buildSd2ActiveAssetUrlLookup(db, dramaId) {
     const lp = normalizeStorageRelativePath(row.local_path || '');
     if (lp) relPathToAsset.set(lp, uri);
   }
-  return { urlToAsset, relPathToAsset };
+  return { urlToAsset, relPathToAsset, blockedUrls, blockedRelPaths };
 }
 
 function rewriteOneImageUrlForSd2(original, lookup) {
   const s = String(original || '').trim();
   if (!s || s.startsWith('asset://') || s.startsWith('data:')) return { next: s, changed: false };
   const tries = [s, s.split('?')[0]];
+  if (tries.some((value) => lookup.blockedUrls?.has(value))) return { next: s, changed: false, blocked: true };
   for (const t of tries) {
     if (lookup.urlToAsset.has(t)) return { next: lookup.urlToAsset.get(t), changed: true };
   }
   const rel = storageRelativeFromPublicUrl(s);
+  if (rel && lookup.blockedRelPaths?.has(rel)) return { next: s, changed: false, blocked: true };
   if (rel && lookup.relPathToAsset.has(rel)) {
     return { next: lookup.relPathToAsset.get(rel), changed: true };
   }
@@ -3405,10 +3418,12 @@ function collectActiveCharacterVoiceRefs(db, dramaId) {
 function applySeedance2CertifiedAssetUrlsToVideoOpts(db, log, opts) {
   const out = { ...opts };
   const lookup = buildSd2ActiveAssetUrlLookup(db, opts.drama_id);
-  if (lookup.urlToAsset.size === 0 && lookup.relPathToAsset.size === 0) return out;
+  if (lookup.urlToAsset.size === 0 && lookup.relPathToAsset.size === 0
+    && lookup.blockedUrls.size === 0 && lookup.blockedRelPaths.size === 0) return out;
   const changes = [];
   const patch = (field, val) => {
     const r = rewriteOneImageUrlForSd2(val, lookup);
+    if (r.blocked) throw new Error('角色素材尚未完成登记或已失效，禁止回退使用原始角色图片');
     if (r.changed) changes.push(field);
     return r.next;
   };
@@ -4338,5 +4353,6 @@ module.exports = {
   isSeedance2FamilyModel,
   normalizeVolcengineDuration,
   buildSd2ActiveAssetUrlLookup,
+  applySeedance2CertifiedAssetUrlsToVideoOpts,
   callVolcengineOmniVideoApi,
 };

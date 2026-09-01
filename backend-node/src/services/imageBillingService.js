@@ -63,4 +63,58 @@ function createResourceImageBilling(db, { model, dramaId, sourceId, image_url, r
   };
 }
 
-module.exports = { createResourceImageBilling, imagePricingContext };
+function quoteResourceImages(db, user, input = {}) {
+  const model = String(input.model || '').trim();
+  const count = Number(input.count);
+  const imageInputCount = Number(input.image_input_count || 0);
+  if (!model) throw new Error('请选择图像模型');
+  if (!Number.isSafeInteger(count) || count <= 0 || count > 500) throw new Error('生成数量必须是 1 到 500 的整数');
+  if (!Number.isSafeInteger(imageInputCount) || imageInputCount < 0 || imageInputCount > count) throw new Error('参考图数量无效');
+
+  const tenantId = require('./tenantService').tenantForUser(db, user.id)?.id || null;
+  const target = require('./aiConfigService').resolveBillingTarget(
+    db,
+    'image',
+    model,
+    null,
+    tenantId ? { tenant_id: tenantId } : {}
+  );
+  if (!target.billing_key) throw new Error(`模型 ${model} 没有可用的计费标识`);
+
+  const billing = require('./billingService');
+  const groups = [];
+  const plainCount = count - imageInputCount;
+  if (plainCount > 0) {
+    groups.push(billing.quote(db, user, {
+      service_type: 'image',
+      model: target.billing_key,
+      usage: { image: plainCount },
+      pricing_context: { has_image_input: false },
+    }));
+  }
+  if (imageInputCount > 0) {
+    groups.push(billing.quote(db, user, {
+      service_type: 'image',
+      model: target.billing_key,
+      usage: { image: imageInputCount },
+      pricing_context: { has_image_input: true },
+    }));
+  }
+  const amountMicro = groups.reduce((sum, quote) => sum + Number(quote.amount_micro || 0), 0);
+  return {
+    model,
+    billing_model: target.billing_key,
+    count,
+    image_input_count: imageInputCount,
+    amount_micro: amountMicro,
+    amount: amountMicro / 10000,
+    groups: groups.map((quote) => ({
+      count: Number(quote.usage?.image || 0),
+      has_image_input: Boolean(quote.pricing_context?.has_image_input),
+      amount_micro: quote.amount_micro,
+      amount: quote.amount,
+    })),
+  };
+}
+
+module.exports = { createResourceImageBilling, imagePricingContext, quoteResourceImages };

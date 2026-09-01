@@ -4,6 +4,7 @@ export const accountAPI = {
   me: () => request.get('/billing/me'),
   transactions: (params) => request.get('/billing/transactions', { params }),
   usage: (params) => request.get('/billing/usage', { params }),
+  quoteResourceImages: (data) => request.post('/billing/resource-image-quotes', data),
   models: () => request.get('/models/available'),
   changePassword: (data) => request.post('/auth/change-password', data),
   changeUsername: (data) => request.patch('/auth/username', data),

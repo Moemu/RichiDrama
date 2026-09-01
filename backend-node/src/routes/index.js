@@ -98,6 +98,7 @@ function setupRouter(cfg, db, log) {
   r.get('/billing/usage', billing.usage);
   r.get('/billing/transactions', billing.transactions);
   r.post('/billing/quotes', billing.quote);
+  r.post('/billing/resource-image-quotes', billing.resourceImageQuote);
   r.get('/notices/active', (req, res) => response.success(res, require('../services/providerPriceService').activeNotices(db, req.auth.id)));
   r.post('/notices/:id/acknowledge', (req, res) => {
     try { response.success(res, require('../services/providerPriceService').acknowledgeNotice(db, req.auth.id, req.params.id)); }

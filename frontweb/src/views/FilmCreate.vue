@@ -385,19 +385,7 @@
               <button v-for="filter in resourceCatalogFilters" :key="filter.key" type="button" :class="{ active: resourceCatalogFilter === filter.key }" :aria-pressed="resourceCatalogFilter === filter.key" @click="resourceCatalogFilter = filter.key">{{ filter.label }}</button>
             </div>
             <div class="resource-browser-actions">
-              <el-select
-                v-if="resourceCatalogType !== 'media'"
-                v-model="resourceImageModel"
-                size="small"
-                filterable
-                clearable
-                placeholder="图像模型·默认"
-                style="width: 190px"
-                title="生成角色/场景/道具图使用的模型;留空按 AI 配置的默认图片模型"
-              >
-                <el-option label="默认(按AI配置)" value="" />
-                <el-option v-for="m in resourceImageModels" :key="m" :label="m" :value="m" />
-              </el-select>
+              <el-button v-if="resourceCatalogType !== 'media' && resourceCatalogItems.length" size="small" :loading="resourceBatchUploading === resourceCatalogType" @click="batchUploadResourcesToMaterialLibrary(resourceCatalogType)">批量上传至素材库</el-button>
               <el-button v-if="resourceCatalogType === 'character'" size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button>
               <el-button v-if="resourceCatalogType === 'scene'" size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button>
               <el-button v-if="resourceCatalogType === 'prop'" size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button>
@@ -411,14 +399,16 @@
           </header>
           <p class="resource-browser-summary" role="status">显示 {{ filteredResourceCatalogItems.length }} / {{ resourceCatalogItems.length }} 个{{ resourceCatalogMeta.label }}{{ resourceCatalogSelectedCount ? `，已选择 ${resourceCatalogSelectedCount} 个` : '' }}</p>
           <div v-if="filteredResourceCatalogItems.length" class="resource-browser-grid">
-            <article v-for="item in filteredResourceCatalogItems" :key="item.id" class="resource-browser-card" :class="{ selected: isUnifiedResourceSelected(resourceCatalogType, item.id) }">
+            <article v-for="item in filteredResourceCatalogItems" :key="item.id" class="resource-browser-card" :class="{ selected: isUnifiedResourceSelected(resourceCatalogType, item.id), 'is-character': resourceCatalogType === 'character' }">
               <el-checkbox class="resource-browser-select" :model-value="isUnifiedResourceSelected(resourceCatalogType, item.id)" :aria-label="`选择${resourceCatalogMeta.label} ${resourceCatalogItemName(item)}`" @click.stop @change="toggleUnifiedResourceSelection(resourceCatalogType, item.id)" />
+              <span v-if="resourceCatalogType === 'character'" class="resource-hosting-status" :class="resourceHostingStatusClass(item)" :title="item.seedance2_asset?.error || `素材库托管：${sd2StatusLabel(item)}`">{{ sd2StatusLabel(item) }}</span>
               <img v-if="resourceCatalogHasImage(item)" :src="resourceCatalogImageUrl(item)" :alt="resourceCatalogItemName(item)" width="160" height="112" loading="lazy" />
               <span v-else class="resource-browser-placeholder" aria-hidden="true">{{ resourceCatalogMeta.label }}</span>
               <div class="resource-browser-card-copy"><b>{{ resourceCatalogItemName(item) }}</b><small>{{ resourceCatalogItemDescription(item) }}</small></div>
-              <div class="resource-browser-card-actions">
+              <div class="resource-browser-card-actions" :class="{ 'character-card-actions': resourceCatalogType === 'character' }">
                 <template v-if="resourceCatalogType === 'media'"><el-button size="small" text @click="renameResourceMedia(item)">重命名</el-button><el-button size="small" type="warning" text @click="deleteResourceMedia(item)">归档</el-button></template>
-                <template v-else><el-button size="small" text @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker(resourceCatalogType, item)">素材库</el-button><template v-if="resourceCatalogType === 'character'"><el-button size="small" type="primary" text :loading="sd2VoiceUploadingId === item.id" @click="onSd2VoicePrimaryAction(item)">{{ item.seedance2_voice_asset?.status === 'active' ? '音色已绑定' : '绑定音色' }}</el-button><el-button v-if="item.seedance2_voice_asset?.status === 'active'" size="small" text @click="onSd2VoiceReplace(item)">更换音色</el-button><el-button v-if="item.seedance2_voice_asset?.url" size="small" text @click="playSd2Voice(item)">试听</el-button></template><el-button size="small" type="primary" text :loading="resourceCatalogGenerating(item)" @click="generateResourceCatalogItem(item)">生成图</el-button><el-button size="small" type="danger" text @click="deleteResourceCatalogItem(item)">删除</el-button></template>
+                <template v-else-if="resourceCatalogType === 'character'"><el-button class="character-card-edit" size="small" @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button class="character-card-delete" size="small" type="danger" plain @click="deleteResourceCatalogItem(item)">删除</el-button></template>
+                <template v-else><el-button size="small" text @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker(resourceCatalogType, item)">素材库</el-button><el-button size="small" type="primary" text :loading="resourceCatalogGenerating(item)" @click="generateResourceCatalogItem(item)">生成图</el-button><el-button size="small" type="danger" text @click="deleteResourceCatalogItem(item)">删除</el-button></template>
               </div>
             </article>
           </div>
@@ -428,19 +418,19 @@
           <article class="resource-center-group">
             <header><b>角色</b><span>{{ characters.length }}</span></header>
             <div class="resource-center-actions"><el-button size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button><el-button size="small" @click="openAddCharacter">添加角色</el-button><el-button v-if="characters.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'character'" @click="onGenerateMissingResourceImages('character')">生成缺图</el-button><el-button v-if="characters.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.character.size" @click="batchDeleteUnifiedResources('character')">批量删除{{ unifiedResourceSelection.character.size ? `（${unifiedResourceSelection.character.size}）` : '' }}</el-button></div>
-            <div v-if="characters.length" class="resource-center-list"><div v-for="char in characters" :key="char.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('character', char.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('character', char.id)" :aria-label="`选择角色 ${char.name || char.id}`" @click.stop @change="toggleUnifiedResourceSelection('character', char.id)" /><img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" alt="" /><span v-else class="resource-center-placeholder">角色</span><div><b>{{ char.name }}</b><small>{{ char.appearance || char.description || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editCharacter(char)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('character', char)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `char-${char.id}`" @click="onUploadResourceClick('character', char.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char, resourceImageModel || undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteCharacter(char)">删除</el-button></div></div></div>
+            <div v-if="characters.length" class="resource-center-list"><div v-for="char in characters" :key="char.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('character', char.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('character', char.id)" :aria-label="`选择角色 ${char.name || char.id}`" @click.stop @change="toggleUnifiedResourceSelection('character', char.id)" /><img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" alt="" /><span v-else class="resource-center-placeholder">角色</span><div><b>{{ char.name }}</b><small>{{ char.appearance || char.description || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editCharacter(char)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('character', char)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `char-${char.id}`" @click="onUploadResourceClick('character', char.id)">上传图</el-button><el-button size="small" type="primary" text :loading="sd2CertifyingId === char.id" @click="onSd2PrimaryAction(char)">{{ sd2ActionLabel(char) }}</el-button><el-button size="small" type="primary" text :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char, undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteCharacter(char)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从剧本提取角色，或手动添加。</p>
           </article>
           <article class="resource-center-group">
             <header><b>场景</b><span>{{ scenes.length }}</span></header>
             <div class="resource-center-actions"><el-button size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button><el-button size="small" @click="openAddScene">添加场景</el-button><el-button v-if="scenes.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'scene'" @click="onGenerateMissingResourceImages('scene')">生成缺图</el-button><el-button v-if="scenes.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.scene.size" @click="batchDeleteUnifiedResources('scene')">批量删除{{ unifiedResourceSelection.scene.size ? `（${unifiedResourceSelection.scene.size}）` : '' }}</el-button></div>
-            <div v-if="scenes.length" class="resource-center-list"><div v-for="scene in scenes" :key="scene.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('scene', scene.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('scene', scene.id)" :aria-label="`选择场景 ${scene.location || scene.id}`" @click.stop @change="toggleUnifiedResourceSelection('scene', scene.id)" /><img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" alt="" /><span v-else class="resource-center-placeholder">场景</span><div><b>{{ scene.location }}</b><small>{{ scene.description || scene.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editScene(scene)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('scene', scene)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `scene-${scene.id}`" @click="onUploadResourceClick('scene', scene.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid, resourceImageModel || undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteScene(scene)">删除</el-button></div></div></div>
+            <div v-if="scenes.length" class="resource-center-list"><div v-for="scene in scenes" :key="scene.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('scene', scene.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('scene', scene.id)" :aria-label="`选择场景 ${scene.location || scene.id}`" @click.stop @change="toggleUnifiedResourceSelection('scene', scene.id)" /><img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" alt="" /><span v-else class="resource-center-placeholder">场景</span><div><b>{{ scene.location }}</b><small>{{ scene.description || scene.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editScene(scene)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('scene', scene)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `scene-${scene.id}`" @click="onUploadResourceClick('scene', scene.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid, undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteScene(scene)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从当前剧本提取场景。</p>
           </article>
           <article class="resource-center-group">
             <header><b>道具</b><span>{{ props.length }}</span></header>
             <div class="resource-center-actions"><el-button size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button><el-button size="small" @click="showAddProp = true">添加道具</el-button><el-button v-if="props.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'prop'" @click="onGenerateMissingResourceImages('prop')">生成缺图</el-button><el-button v-if="props.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.prop.size" @click="batchDeleteUnifiedResources('prop')">批量删除{{ unifiedResourceSelection.prop.size ? `（${unifiedResourceSelection.prop.size}）` : '' }}</el-button></div>
-            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('prop', prop.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('prop', prop.id)" :aria-label="`选择道具 ${prop.name || prop.id}`" @click.stop @change="toggleUnifiedResourceSelection('prop', prop.id)" /><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editProp(prop)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('prop', prop)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `prop-${prop.id}`" @click="onUploadResourceClick('prop', prop.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid, resourceImageModel || undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteProp(prop)">删除</el-button></div></div></div>
+            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('prop', prop.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('prop', prop.id)" :aria-label="`选择道具 ${prop.name || prop.id}`" @click.stop @change="toggleUnifiedResourceSelection('prop', prop.id)" /><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editProp(prop)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('prop', prop)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `prop-${prop.id}`" @click="onUploadResourceClick('prop', prop.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid, undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteProp(prop)">删除</el-button></div></div></div>
             <p v-else class="resource-center-empty">从当前剧本提取道具。</p>
           </article>
         </div>
@@ -451,6 +441,33 @@
           <p v-else class="resource-center-empty">还没有上传媒体素材。</p>
         </div>
       </section>
+
+      <el-dialog v-model="showResourceBatchImageDialog" title="生成缺图" class="resource-batch-image-dialog" width="min(520px, calc(100vw - 32px))" append-to-body>
+        <div class="resource-batch-image-summary">
+          <b>{{ resourceBatchImageMeta.label }}缺图</b>
+          <span>将为 {{ resourceBatchMissingItems.length }} 个{{ resourceBatchImageMeta.label }}生成图片。</span>
+        </div>
+        <el-form label-position="top">
+          <el-form-item label="图像模型" required>
+            <el-select v-model="resourceBatchImageModel" filterable placeholder="选择图像模型" style="width:100%">
+              <el-option v-for="model in resourceImageModels" :key="model" :label="model" :value="model" />
+            </el-select>
+            <small v-if="!resourceImageModels.length" class="resource-batch-image-hint">请先在 AI 配置中启用图像模型。</small>
+          </el-form-item>
+        </el-form>
+        <div class="resource-batch-image-quote" :class="{ error: resourceBatchImageQuoteError }" role="status">
+          <span v-if="resourceBatchImageQuoteLoading">正在计算积分…</span>
+          <template v-else-if="resourceBatchImageQuote">
+            <b>预计消耗 {{ resourceBatchImageQuote.amount }} 积分</b>
+            <small>共 {{ resourceBatchImageQuote.count }} 张，其中 {{ resourceBatchImageQuote.image_input_count }} 张使用参考图。</small>
+          </template>
+          <span v-else>{{ resourceBatchImageQuoteError || '选择模型后显示积分预估。' }}</span>
+        </div>
+        <template #footer>
+          <el-button @click="showResourceBatchImageDialog = false">取消</el-button>
+          <el-button type="primary" :disabled="!resourceBatchImageModel || !resourceBatchImageQuote || Boolean(resourceBatchImageQuoteError)" @click="submitGenerateMissingResourceImages">确认生成</el-button>
+        </template>
+      </el-dialog>
 
       <el-dialog v-model="showPropAssetPicker" :title="`为「${resourceAssetPickerTarget?.name || resourceAssetPickerTarget?.location || '资源'}」选择图片素材`" width="720px">
         <div v-if="propAssetPickerImages.length" class="resource-media-grid prop-asset-picker-grid">
@@ -972,7 +989,7 @@
                     <el-tooltip placement="top" :show-after="280" :show-arrow="false" popper-class="sb-universal-tooltip-popper">
                       <template #content>
                         <div class="sb-universal-tooltip">
-                          全能生视频链路（<strong>AI 配置 · 视频</strong> 中选接口规范：<code>kling_omni</code> 可灵 Omni，或 <code>volcengine_omni</code> 火山即梦 Seedance 2.0 多图参考；模型如 <code>kling-video-o1</code>、<code>doubao-seedance-2-0-260128</code> 等以控制台为准）：此处为提交主提示词；只要本框有内容，生视频时<strong>只</strong>发送这段，不会拼接下方「视频提示词」里的动作/对话/旁白。参考图来自「素材库」勾选的素材（点上方「素材编排」打开：上传/媒体素材 + 本镜场景/角色/道具图统一在一个资源库，点击选用、↑↓ 调整顺序、拖到本框直接引用）；请用 <strong>@图片1</strong>、<strong>@图片2</strong>…（<strong>@图片N 后建议加半角空格</strong>）对应素材顺序，勿用 @姓名 指图。人物一致性素材请勾选「含真人」并完成 SD2 认证。若参考图是<strong>四宫格/多视角拼图</strong>，仅借空间与氛围，须在文案中写明<strong>单镜头完整画幅、禁止分屏宫格</strong>，避免成片模仿拼图布局。全能提示词下拉中「生成」会按<strong>本条分镜总时长</strong>与本集剧本、镜序、邻镜信息，自动决定子分镜数 M（第2行「由以下M个分镜…」），第4行起为「分镜1：T1秒:」…多行，且各段秒数之和等于本镜时长；第3行仍为环境/参考图约束；「生成」与「润色」均为<strong>流式输出</strong>到本框；「润色」在此基础上增强。若本框留空，则退回仅用「视频提示词」。
+                          全能生视频链路（<strong>AI 配置 · 视频</strong> 中选接口规范：<code>kling_omni</code> 可灵 Omni，或 <code>volcengine_omni</code> 火山即梦 Seedance 2.0 多图参考；模型如 <code>kling-video-o1</code>、<code>doubao-seedance-2-0-260128</code> 等以控制台为准）：此处为提交主提示词；只要本框有内容，生视频时<strong>只</strong>发送这段，不会拼接下方「视频提示词」里的动作/对话/旁白。参考图来自「素材库」勾选的素材（点上方「素材编排」打开：上传/媒体素材 + 本镜场景/角色/道具图统一在一个资源库，点击选用、↑↓ 调整顺序、拖到本框直接引用）；请用 <strong>@图片1</strong>、<strong>@图片2</strong>…（<strong>@图片N 后建议加半角空格</strong>）对应素材顺序，勿用 @姓名 指图。人物一致性素材请勾选「含真人」，并将每份参考图分别上传到素材库。若参考图是<strong>四宫格/多视角拼图</strong>，仅借空间与氛围，须在文案中写明<strong>单镜头完整画幅、禁止分屏宫格</strong>，避免成片模仿拼图布局。全能提示词下拉中「生成」会按<strong>本条分镜总时长</strong>与本集剧本、镜序、邻镜信息，自动决定子分镜数 M（第2行「由以下M个分镜…」），第4行起为「分镜1：T1秒:」…多行，且各段秒数之和等于本镜时长；第3行仍为环境/参考图约束；「生成」与「润色」均为<strong>流式输出</strong>到本框；「润色」在此基础上增强。若本框留空，则退回仅用「视频提示词」。
                         </div>
                       </template>
                       <el-icon class="sb-universal-hint-icon" tabindex="0" role="img" aria-label="片段说明">
@@ -1614,7 +1631,7 @@
     <input ref="addPropAddRefFileInput" type="file" accept="image/*" style="display:none" @change="onRefImageFileChange2('addProp', $event)" />
 
     <!-- 添加/编辑角色弹窗 -->
-    <el-dialog v-model="showEditCharacter" :title="editCharacterForm?.id ? '编辑角色' : '添加角色'" width="75%" @close="onCloseCharDialog">
+    <el-dialog v-model="showEditCharacter" :title="editCharacterForm?.id ? '编辑角色' : '添加角色'" class="character-editor-dialog" width="min(920px, calc(100vw - 32px))" append-to-body @opened="resetCharacterEditorScroll" @close="onCloseCharDialog">
       <el-form v-if="editCharacterForm" label-width="90px">
         <!-- 参考图上传区（新增/编辑均显示） -->
         <el-form-item label="参考图">
@@ -1631,19 +1648,12 @@
                 :src="assetImageUrl(editCharacterForm)"
                 class="ref-preview-img" style="opacity:0.5" />
               <div v-else class="ref-upload-hint"><span class="ref-upload-icon">🖼</span><span>点击或拖入参考图</span></div>
+              <button v-if="addCharRefImage || editCharacterForm.ref_image" type="button" class="ref-image-remove" aria-label="移除参考图" @click.stop="removeEditCharacterReferenceImage">×</button>
             </div>
-            <div v-if="addCharRefImage" class="ref-actions">
-              <el-button type="primary" size="small" :loading="extractingCharAppearance" @click="doExtractFromRef('character')">提取特征描述</el-button>
-              <el-button size="small" @click="addCharRefImage = null">移除</el-button>
+            <div class="ref-image-meta">
+              <div class="ref-upload-tip">支持 jpg/png/gif/webp，单张不超过 {{ MAX_IMAGE_SIZE_MB }}MB</div>
+              <el-button v-if="editCharacterForm.id" size="small" type="primary" plain :loading="generatingCharIds.has(editCharacterForm.id)" @click="onEditCharacterGenerateImage">生成角色图</el-button>
             </div>
-            <div v-else-if="editCharacterForm.ref_image" class="ref-actions">
-              <el-button type="primary" size="small" :loading="extractingCharAppearance" @click="doExtractCharFromImage">从参考图提取描述</el-button>
-              <el-button size="small" @click="clearCharRefImage">移除参考图</el-button>
-            </div>
-            <div v-else-if="editCharacterForm.id && (editCharacterForm.image_url || editCharacterForm.local_path) && !editCharacterForm.appearance" class="ref-actions">
-              <el-button size="small" :loading="extractingCharAppearance" @click="doExtractCharFromImage">从主图提取描述</el-button>
-            </div>
-            <div class="ref-upload-tip">支持 jpg/png/gif/webp，单张不超过 {{ MAX_IMAGE_SIZE_MB }}MB</div>
           </div>
         </el-form-item>
         <el-form-item label="名称" required>
@@ -1657,24 +1667,32 @@
           </el-select>
         </el-form-item>
         <el-form-item label="外貌描述">
-          <el-input v-model="editCharacterForm.appearance" type="textarea" :autosize="{ minRows: 4, maxRows: 10 }" placeholder="用于 AI 生成图像的外貌描述，尽量详细" />
+          <div class="character-field-stack">
+            <el-input v-model="editCharacterForm.appearance" type="textarea" :autosize="{ minRows: 4, maxRows: 10 }" placeholder="用于 AI 生成图像的外貌描述，尽量详细" />
+            <div class="character-field-actions">
+              <el-button v-if="characterDescriptionSourceLabel" size="small" :loading="extractingCharAppearance" @click="extractEditCharacterDescription">{{ characterDescriptionSourceLabel }}</el-button>
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="简介">
           <el-input v-model="editCharacterForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="角色背景简介，供剧本生成参考" />
+        </el-form-item>
+        <el-form-item v-if="editCharacterForm.id" label="音色参考">
+          <div class="character-inline-control">
+            <small class="character-field-help">音色仅用于支持该能力的视频模型。</small>
+            <div class="character-field-actions">
+              <el-button size="small" :loading="sd2VoiceUploadingId === editCharacterForm.id" @click="onEditCharacterVoiceAction">{{ editCharacterForm.seedance2_voice_asset?.status === 'active' ? '音色已绑定' : '绑定音色' }}</el-button>
+              <el-button v-if="editCharacterForm.seedance2_voice_asset?.status === 'active'" size="small" @click="onEditCharacterVoiceReplace">更换音色</el-button>
+              <el-button v-if="editCharacterForm.seedance2_voice_asset?.url" size="small" @click="playSd2Voice(editCharacterForm)">试听</el-button>
+            </div>
+          </div>
         </el-form-item>
         <el-form-item v-if="editCharacterForm.id">
           <template #label>
             <span style="font-size:12px;line-height:1.4;white-space:normal;word-break:break-all;display:inline-block;width:90px">图生提示词</span>
           </template>
           <div style="width:100%">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-              <span style="font-size:12px;color:#909399">AI 润色后的最终提示词，生成四视图图片时直接使用；可手动修改</span>
-              <el-button
-                size="small"
-                :loading="editCharacterPromptGenerating"
-                @click="doGenerateCharacterPrompt"
-              >重新生成提示词</el-button>
-            </div>
+            <div class="character-field-help">AI 润色后的最终提示词，生成四视图图片时直接使用；可手动修改</div>
             <el-input
               v-model="editCharacterForm.polished_prompt"
               type="textarea"
@@ -1683,20 +1701,15 @@
               :disabled="editCharacterPromptGenerating"
               style="font-size:12px"
             />
+            <div class="character-field-actions">
+              <el-button size="small" :loading="editCharacterPromptGenerating" @click="doGenerateCharacterPrompt">重新生成提示词</el-button>
+            </div>
           </div>
         </el-form-item>
         <!-- P0-2: 视觉锚点（identity_anchors） -->
         <el-form-item v-if="editCharacterForm.id" label="视觉锚点">
           <div style="width:100%">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-              <span style="font-size:12px;color:#909399">AI 从外貌描述提炼的6层视觉特征，用于保持生成图片角色一致性</span>
-              <el-button
-                size="small"
-                :loading="extractingAnchors"
-                :disabled="!editCharacterForm.appearance"
-                @click="extractIdentityAnchors"
-              >提炼视觉锚点</el-button>
-            </div>
+            <div class="character-field-help">AI 从外貌描述提炼的6层视觉特征，用于保持生成图片角色一致性</div>
             <el-input
               v-if="editCharacterForm.identity_anchors"
               :value="typeof editCharacterForm.identity_anchors === 'string'
@@ -1709,6 +1722,9 @@
               placeholder="点击「提炼视觉锚点」生成"
             />
             <div v-else style="font-size:12px;color:#c0c4cc;padding:4px 0">暂无锚点，点击「提炼视觉锚点」自动提炼</div>
+            <div class="character-field-actions">
+              <el-button size="small" :loading="extractingAnchors" :disabled="!editCharacterForm.appearance" @click="extractIdentityAnchors">提炼视觉锚点</el-button>
+            </div>
           </div>
         </el-form-item>
         <!-- P1-3: 多阶段造型（stages） -->
@@ -1728,14 +1744,19 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showEditCharacter = false">取消</el-button>
-        <el-button type="primary" :loading="editCharacterSaving" :disabled="!editCharacterForm?.name?.trim()" @click="submitEditCharacter">{{ editCharacterForm?.id ? '保存' : '添加' }}</el-button>
+        <div class="character-editor-footer">
+          <el-button v-if="editCharacterForm?.id" type="primary" plain :loading="sd2CertifyingId === editCharacterForm.id" @click="onEditCharacterSd2Action">{{ sd2ActionLabel(editCharacterForm) }}</el-button>
+          <div class="character-editor-footer-main">
+            <el-button @click="showEditCharacter = false">取消</el-button>
+            <el-button type="primary" :loading="editCharacterSaving" :disabled="!editCharacterForm?.name?.trim()" @click="submitEditCharacter">{{ editCharacterForm?.id ? '保存' : '添加' }}</el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
 
     <el-dialog
       v-model="showCharSd2Cert"
-      title="SD2 认证详情"
+      title="角色素材详情"
       width="min(720px, 92vw)"
       destroy-on-close
       class="sd2-cert-dialog"
@@ -1751,11 +1772,17 @@
           <el-descriptions-item label="状态">
             <span class="sd2-cert-value">{{ charSd2CertPayload.status || '—' }}</span>
           </el-descriptions-item>
-          <el-descriptions-item label="注册图片 URL">
-            <span class="sd2-cert-value">{{ charSd2CertPayload.source_image_url || '—' }}</span>
+          <el-descriptions-item v-if="charSd2CertPayload.stage" label="处理阶段">
+            <span class="sd2-cert-value">{{ charSd2CertPayload.stage }}</span>
           </el-descriptions-item>
-          <el-descriptions-item v-if="charSd2CertPayload.sd2_provider" label="认证提供方">
+          <el-descriptions-item label="登记图片 URL">
+            <span class="sd2-cert-value">{{ charSd2CertPayload.certified_image_url || charSd2CertPayload.source_image_url || '—' }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="charSd2CertPayload.sd2_provider" label="登记提供方">
             <span class="sd2-cert-value">{{ charSd2CertPayload.sd2_provider }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="charSd2CertPayload.error" label="失败原因">
+            <span class="sd2-cert-value">{{ charSd2CertPayload.error }}</span>
           </el-descriptions-item>
         </el-descriptions>
       </template>
@@ -2581,6 +2608,7 @@ import { taskAPI } from '@/api/task'
 import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
 import { omniVideoAPI } from '@/api/omniVideo'
+import { accountAPI } from '@/api/account'
 import { storyboardsAPI as rawStoryboardsAPI } from '@/api/storyboards'
 import { uploadAPI } from '@/api/upload'
 import { characterLibraryAPI } from '@/api/characterLibrary'
@@ -2807,6 +2835,19 @@ const resourceCatalogItems = computed(() => ({
   prop: props.value,
   media: universalLibraryAssets.value,
 }[resourceCatalogType.value] || []))
+const resourceBatchImageMeta = computed(() => ({
+  character: { label: '角色' },
+  scene: { label: '场景' },
+  prop: { label: '道具' },
+}[resourceBatchImageType.value] || { label: '资源' }))
+const resourceBatchMissingItems = computed(() => {
+  const items = resourceBatchImageType.value === 'character'
+    ? characters.value
+    : resourceBatchImageType.value === 'scene'
+      ? scenes.value
+      : props.value
+  return items.filter((item) => !hasAssetImage(item))
+})
 const resourceCatalogSelectedCount = computed(() => unifiedResourceSelection[resourceCatalogType.value]?.size || 0)
 function resourceCatalogItemName(item) {
   if (resourceCatalogType.value === 'scene') return item?.location || item?.name || '未命名场景'
@@ -2864,7 +2905,13 @@ const workflowStage = ref(normalizeWorkflowStage(route.query.stage))
 const freeCreateRef = ref(null)
 // 资源阶段生成角色/场景/道具图使用的图像模型(留空走 AI 配置默认)
 const resourceImageModels = useModelOptions('image')
-const resourceImageModel = ref('')
+const showResourceBatchImageDialog = ref(false)
+const resourceBatchImageType = ref('character')
+const resourceBatchImageModel = ref('')
+const resourceBatchImageQuote = ref(null)
+const resourceBatchImageQuoteError = ref('')
+const resourceBatchImageQuoteLoading = ref(false)
+let resourceBatchImageQuoteSequence = 0
 // 一键全流程入口：在「剧本管理」阶段展示 10 步流水线面板
 // (提取角色/场景/道具 → 分镜 → 三类资源图 → 分镜图 → 视频 → 合成)，
 // 每步自动跳过已有产物，支持暂停/恢复。
@@ -3031,7 +3078,7 @@ const {
   editCharLibrarySaving, addingCharToLibraryId, addingCharToMaterialId, addingCharFromLibraryId,
   charRoleLabel, onGenerateCharacters: onGenerateCharactersRaw, openAddCharacter, stopCharacterPromptPoll, editCharacter,
   saveCharRefImageIfAny, submitEditCharacter, doGenerateCharacterPrompt, doExtractCharFromImage,
-  extractIdentityAnchors, clearCharRefImage, onCloseCharDialog, onDeleteCharacter, onGenerateCharacterImage, onSd2CertifyCharacter, onSd2CertifyRefresh, sd2ActionLabel, onSd2PrimaryAction, openCharSd2CertDialog,
+  extractIdentityAnchors, clearCharRefImage, onCloseCharDialog, onDeleteCharacter, onGenerateCharacterImage, onSd2CertifyCharacter, onSd2CertifyRefresh, sd2ActionLabel, sd2StatusLabel, onSd2PrimaryAction, openCharSd2CertDialog,
   onSd2VoicePrimaryAction, onSd2VoiceReplace, sd2VoiceActionLabel, playSd2Voice,
   loadCharLibraryList, debouncedLoadCharLibrary, loadDramaAllCharList, debouncedLoadDramaAllCharList,
   onCharLibraryDialogOpen, onCharLibraryTabChange, isCharAddToEpisodeLoading,
@@ -3294,6 +3341,7 @@ const resourceAssetPickerTarget = ref(null)
 const resourceAssetPickerType = ref(null)
 const propAssetPickerImages = computed(() => universalLibraryAssets.value.filter((asset) => asset.type === 'image' && asset.local_path))
 const resourceBatchGenerating = ref(null)
+const resourceBatchUploading = ref(null)
 const dragOverResourceKey = ref(null) // 'char-1' | 'prop-2' | 'scene-3'
 const dragOverSbId = ref(null)
 // 公共库弹窗状态已移至各 composable
@@ -5453,14 +5501,53 @@ async function bindAssetToResource(asset) {
   }
 }
 
-async function onGenerateMissingResourceImages(type) {
+function hasResourceQuoteReference(item) {
+  return Boolean(String(item?.ref_image || '').trim())
+}
+
+async function refreshResourceBatchImageQuote() {
+  const sequence = ++resourceBatchImageQuoteSequence
+  resourceBatchImageQuote.value = null
+  resourceBatchImageQuoteError.value = ''
+  if (!showResourceBatchImageDialog.value || !resourceBatchImageModel.value || !resourceBatchMissingItems.value.length) return
+  resourceBatchImageQuoteLoading.value = true
+  try {
+    const items = resourceBatchMissingItems.value
+    const quote = await accountAPI.quoteResourceImages({
+      model: resourceBatchImageModel.value,
+      count: items.length,
+      image_input_count: items.filter(hasResourceQuoteReference).length,
+    })
+    if (sequence !== resourceBatchImageQuoteSequence) return
+    resourceBatchImageQuote.value = quote?.data ?? quote
+  } catch (error) {
+    if (sequence !== resourceBatchImageQuoteSequence) return
+    resourceBatchImageQuoteError.value = error?.message || '无法计算积分，请检查模型价目。'
+  } finally {
+    if (sequence === resourceBatchImageQuoteSequence) resourceBatchImageQuoteLoading.value = false
+  }
+}
+
+function onGenerateMissingResourceImages(type) {
   const items = type === 'character' ? characters.value : type === 'scene' ? scenes.value : props.value
   const missing = items.filter((item) => !hasAssetImage(item))
   if (!missing.length) return ElMessage.info('当前资源都已有图片')
+  resourceBatchImageType.value = type
+  if (!resourceBatchImageModel.value || !resourceImageModels.value.includes(resourceBatchImageModel.value)) {
+    resourceBatchImageModel.value = resourceImageModels.value[0] || ''
+  }
+  showResourceBatchImageDialog.value = true
+}
+
+async function submitGenerateMissingResourceImages() {
+  const type = resourceBatchImageType.value
+  const missing = [...resourceBatchMissingItems.value]
+  const model = resourceBatchImageModel.value
+  if (!missing.length || !model || !resourceBatchImageQuote.value || resourceBatchImageQuoteError.value) return
+  showResourceBatchImageDialog.value = false
   resourceBatchGenerating.value = type
   try {
     for (const item of missing) {
-      const model = resourceImageModel.value || undefined
       if (type === 'character') await onGenerateCharacterImage(item, model)
       else if (type === 'scene') await onGenerateSceneImage(item, sceneUseQuadGrid.value, model)
       else await onGeneratePropImage(item, propUseQuadGrid.value, model)
@@ -5470,10 +5557,58 @@ async function onGenerateMissingResourceImages(type) {
   }
 }
 
+watch(
+  [showResourceBatchImageDialog, resourceBatchImageModel, () => resourceBatchMissingItems.value.map((item) => `${item.id}:${item.ref_image || ''}`).join('|')],
+  refreshResourceBatchImageQuote
+)
+
+watch(resourceImageModels, (models) => {
+  if (showResourceBatchImageDialog.value && !resourceBatchImageModel.value && models[0]) resourceBatchImageModel.value = models[0]
+})
+
+function resourceHostingStatusClass(item) {
+  const status = String(item?.seedance2_asset?.status || 'none').toLowerCase()
+  if (status === 'active') return 'is-active'
+  if (['failed', 'stale', 'invalid'].includes(status)) return 'is-error'
+  if (['queued', 'uploading', 'registering', 'processing', 'reconciling'].includes(status)) return 'is-processing'
+  return 'is-empty'
+}
+
+async function batchUploadResourcesToMaterialLibrary(type) {
+  const items = type === 'character' ? characters.value : type === 'scene' ? scenes.value : props.value
+  const waiting = new Set(['queued', 'uploading', 'registering', 'processing', 'reconciling', 'active'])
+  const targets = items.filter((item) => hasAssetImage(item) && !waiting.has(String(item?.seedance2_asset?.status || '').toLowerCase()))
+  if (!targets.length) return ElMessage.info('没有需要上传的图片素材')
+  resourceBatchUploading.value = type
+  let succeeded = 0
+  try {
+    for (const item of targets) {
+      try {
+        if (type === 'character') await characterAPI.sd2Certify(item.id)
+        else if (type === 'scene') await sceneAPI.certifySd2(item.id)
+        else await propAPI.certifySd2(item.id)
+        succeeded += 1
+      } catch (_) {
+        // 继续处理其他资源，结束时统一显示结果。
+      }
+    }
+    await loadDrama()
+    const failed = targets.length - succeeded
+    if (failed) ElMessage.warning(`已提交 ${succeeded} 项，${failed} 项失败`)
+    else ElMessage.success(`已提交 ${succeeded} 项到素材库`)
+  } finally {
+    resourceBatchUploading.value = null
+  }
+}
+
 function openResourceEditor(type, item) {
   if (type === 'character') editCharacter(item)
   else if (type === 'scene') editScene(item)
   else if (type === 'prop') editProp(item)
+}
+
+function resetCharacterEditorScroll() {
+  document.querySelector('.character-editor-dialog .el-dialog__body')?.scrollTo({ top: 0 })
 }
 
 function resourceCatalogGenerating(item) {
@@ -5487,10 +5622,9 @@ function resourceCatalogGenerating(item) {
 }
 
 async function generateResourceCatalogItem(item) {
-  const model = resourceImageModel.value || undefined
-  if (resourceCatalogType.value === 'character') return onGenerateCharacterImage(item, model)
-  if (resourceCatalogType.value === 'scene') return onGenerateSceneImage(item, sceneUseQuadGrid.value, model)
-  return onGeneratePropImage(item, propUseQuadGrid.value, model)
+  if (resourceCatalogType.value === 'character') return onGenerateCharacterImage(item, undefined)
+  if (resourceCatalogType.value === 'scene') return onGenerateSceneImage(item, sceneUseQuadGrid.value, undefined)
+  return onGeneratePropImage(item, propUseQuadGrid.value, undefined)
 }
 
 async function deleteResourceCatalogItem(item) {
@@ -5522,6 +5656,67 @@ function findResource(type, id) {
     : (store.scenes ?? [])
   return list.find((x) => Number(x.id) === Number(id)) || null
 }
+
+function syncEditCharacterRuntimeState() {
+  const form = editCharacterForm.value
+  if (!form?.id) return
+  const current = findResource('character', form.id)
+  if (!current) return
+  form.image_url = current.image_url || ''
+  form.local_path = current.local_path || ''
+  form.extra_images = current.extra_images || ''
+  form.seedance2_asset = current.seedance2_asset ? { ...current.seedance2_asset } : null
+  form.seedance2_voice_asset = current.seedance2_voice_asset ? { ...current.seedance2_voice_asset } : null
+}
+
+async function onEditCharacterGenerateImage() {
+  if (!editCharacterForm.value?.id) return
+  await onGenerateCharacterImage(editCharacterForm.value, undefined)
+  syncEditCharacterRuntimeState()
+}
+
+const characterDescriptionSourceLabel = computed(() => {
+  const form = editCharacterForm.value
+  if (!form) return ''
+  if (addCharRefImage.value || form.ref_image) return '从参考图提取描述'
+  if (form.id && (form.image_url || form.local_path)) return '从主图提取描述'
+  return ''
+})
+
+async function extractEditCharacterDescription() {
+  if (addCharRefImage.value) return doExtractFromRef('character')
+  return doExtractCharFromImage()
+}
+
+async function removeEditCharacterReferenceImage() {
+  if (addCharRefImage.value) {
+    addCharRefImage.value = null
+    return
+  }
+  await clearCharRefImage()
+}
+
+async function onEditCharacterSd2Action() {
+  if (!editCharacterForm.value?.id) return
+  await onSd2PrimaryAction(editCharacterForm.value)
+  syncEditCharacterRuntimeState()
+}
+
+async function onEditCharacterVoiceAction() {
+  if (!editCharacterForm.value?.id) return
+  await onSd2VoicePrimaryAction(editCharacterForm.value)
+  syncEditCharacterRuntimeState()
+}
+
+async function onEditCharacterVoiceReplace() {
+  if (!editCharacterForm.value?.id) return
+  await onSd2VoiceReplace(editCharacterForm.value)
+  syncEditCharacterRuntimeState()
+}
+
+watch(() => store.characters, () => {
+  if (showEditCharacter.value) syncEditCharacterRuntimeState()
+})
 
 async function doUploadResourceImage(type, id, file) {
   if (!file || !type || id == null) return
@@ -6170,7 +6365,7 @@ function sbOmniFramePickerActive(sbId, position, id) {
 
 function sbOmniSd2Status(asset) { return String(asset?.seedance2_asset?.status || 'none').toLowerCase() }
 function sbOmniSd2StatusLabel(asset) {
-  return ({ none: '未认证', processing: '认证中', active: '可用', invalid: '已失效', failed: '认证失败' })[sbOmniSd2Status(asset)] || '状态未知'
+  return ({ none: '未登记', queued: '等待登记', uploading: '上传中', registering: '登记中', processing: '处理中', reconciling: '核对中', active: '可用', stale: '需重新登记', invalid: '已失效', failed: '登记失败' })[sbOmniSd2Status(asset)] || '状态未知'
 }
 const OMNI_USAGE_OPTIONS = {
   image: [
@@ -6446,7 +6641,7 @@ async function onSbOmniAssetCertify(sb, asset) {
   if (!asset || asset.type !== 'image') return
   sbOmniCertifyingIds.value.add(asset.id)
   try {
-    const out = ['processing', 'active'].includes(sbOmniSd2Status(asset))
+    const out = ['queued', 'uploading', 'registering', 'processing', 'reconciling', 'active'].includes(sbOmniSd2Status(asset))
       ? await omniVideoAPI.refreshAssetCertification(asset.id)
       : await omniVideoAPI.certifyAsset(asset.id)
     if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
@@ -6732,7 +6927,7 @@ function sd2ResourceStatus(item) {
 function sd2ResourceActionLabel(item) {
   const status = sd2ResourceStatus(item)
   if (status === 'active') return '已认证'
-  if (status === 'processing' || status === 'pending') return '刷新认证'
+  if (['queued', 'uploading', 'registering', 'processing', 'reconciling', 'pending'].includes(status)) return '刷新认证'
   if (status === 'stale' || status === 'failed' || status === 'invalid') return '重新认证'
   return 'SD2认证'
 }
@@ -6745,7 +6940,7 @@ async function onSd2ResourceAction(kind, item) {
   sd2ResourceCertifying.value = `${kind}-${item.id}`
   try {
     const api = kind === 'scene' ? sceneAPI : propAPI
-    const res = (status === 'processing' || status === 'pending') ? await api.refreshSd2(item.id) : await api.certifySd2(item.id)
+    const res = ['queued', 'uploading', 'registering', 'processing', 'reconciling', 'pending'].includes(status) ? await api.refreshSd2(item.id) : await api.certifySd2(item.id)
     const cert = res?.seedance2_asset || res?.data?.seedance2_asset
     if (cert) item.seedance2_asset = cert
     ElMessage.success(cert?.status === 'active' ? 'SD2 认证已完成' : '认证任务已提交，可稍后刷新状态')
@@ -12007,7 +12202,30 @@ html.light .frame-layout-anchor {
 .resource-center-item-actions{display:flex;align-items:center;gap:2px;white-space:nowrap}.resource-center-item-actions .el-button{margin:0}.prop-asset-picker-grid{max-height:440px;overflow:auto;padding:2px}.prop-asset-picker-card{padding:0;cursor:pointer;text-align:left;font:inherit}.prop-asset-picker-card:hover{border-color:var(--el-color-primary)}
 .resource-media-card{position:relative}.resource-media-delete{position:absolute!important;top:5px;right:5px;z-index:2;margin:0!important;min-width:24px!important;width:24px;height:24px;padding:0!important;background:#b84242!important;color:#fff!important;border-color:#f29a9a!important;font-weight:800}.resources-stage-active .resource-media-delete{display:grid!important;place-items:center}
 .resource-center-item{position:relative}.resource-select{position:absolute;top:8px;left:8px;z-index:3;padding:2px;border-radius:4px;background:color-mix(in srgb,var(--bg-surface) 82%,transparent)}.resource-center-item.selected{box-shadow:inset 0 0 0 2px var(--accent),0 0 0 1px color-mix(in srgb,var(--accent) 36%,transparent)}.resource-media-card.selected{border:2px solid var(--accent)!important;box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 48%,transparent)}.resource-media-select{position:absolute;top:6px;left:6px;z-index:3;padding:2px;border-radius:4px;background:color-mix(in srgb,var(--bg-surface) 82%,transparent)}
-.resource-center-grid,.resource-media-library{display:none}.resource-browser-tabs{display:flex;gap:8px;overflow:auto;padding-bottom:2px}.resource-browser-tabs button{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:0 13px;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-surface);color:var(--text-regular);font:inherit;cursor:pointer;white-space:nowrap}.resource-browser-tabs button:hover,.resource-browser-tabs button:focus-visible{border-color:var(--accent);outline:2px solid color-mix(in srgb,var(--accent) 32%,transparent);outline-offset:2px}.resource-browser-tabs button.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--bg-surface));color:var(--accent)}.resource-browser-tabs span{display:grid;place-items:center;min-width:22px;height:22px;border-radius:99px;background:var(--bg-hover);color:var(--text-muted);font-size:12px}.resource-browser{display:flex;flex-direction:column;min-height:0;margin-top:14px;padding:14px;border:1px solid var(--border-subtle);border-radius:10px;background:var(--bg-raised)}.resource-browser-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.resource-browser-search{flex:1 1 230px;max-width:340px}.resource-browser-filters{display:flex;gap:4px;padding:3px;border-radius:8px;background:var(--bg-hover)}.resource-browser-filters button{min-height:30px;padding:0 9px;border:0;border-radius:6px;background:transparent;color:var(--text-muted);font:inherit;font-size:13px;cursor:pointer}.resource-browser-filters button:hover,.resource-browser-filters button:focus-visible{color:var(--text-primary);outline:2px solid color-mix(in srgb,var(--accent) 34%,transparent);outline-offset:1px}.resource-browser-filters button.active{background:var(--bg-raised);color:var(--text-primary);box-shadow:var(--shadow-sm)}.resource-browser-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:auto}.resource-browser-summary{margin:12px 0 10px;color:var(--text-muted);font-size:13px}.resource-browser-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:10px;min-height:0;overflow:auto;padding:2px}.resource-browser-card{position:relative;display:grid;grid-template-rows:112px auto auto;align-content:start;min-width:0;overflow:hidden;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-surface)}.resource-browser-card.selected{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 50%,transparent)}.resource-browser-card>img,.resource-browser-placeholder{width:100%;height:112px;object-fit:cover;background:var(--bg-hover)}.resource-browser-placeholder{display:grid;place-items:center;color:var(--text-muted);font-size:13px}.resource-browser-select{position:absolute;top:7px;left:7px;z-index:1;padding:2px;border-radius:4px;background:color-mix(in srgb,var(--bg-surface) 82%,transparent)}.resource-browser-card-copy{min-width:0;padding:9px 10px 6px}.resource-browser-card-copy b,.resource-browser-card-copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-browser-card-copy b{color:var(--text-primary);font-size:14px}.resource-browser-card-copy small{margin-top:4px;color:var(--text-muted);font-size:12px}.resource-browser-card-actions{display:flex;flex-wrap:wrap;align-content:flex-start;gap:4px;min-width:0;padding:0 6px 8px}.resource-browser-card-actions .el-button{min-height:26px;margin:0;padding-inline:5px}.resource-browser-empty{display:grid;place-items:center;min-height:220px;text-align:center;color:var(--text-muted)}.resource-browser-empty b{color:var(--text-primary)}.resource-browser-empty p{margin:7px 0 0;font-size:14px}@media(max-width:900px){.resource-browser-toolbar{align-items:stretch}.resource-browser-search{max-width:none}.resource-browser-actions{margin-left:0}.resource-browser-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
+.resource-center-grid,.resource-media-library{display:none}.resource-browser-tabs{display:flex;gap:8px;overflow:auto;padding-bottom:2px}.resource-browser-tabs button{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:0 13px;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-surface);color:var(--text-regular);font:inherit;cursor:pointer;white-space:nowrap}.resource-browser-tabs button:hover,.resource-browser-tabs button:focus-visible{border-color:var(--accent);outline:2px solid color-mix(in srgb,var(--accent) 32%,transparent);outline-offset:2px}.resource-browser-tabs button.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--bg-surface));color:var(--accent)}.resource-browser-tabs span{display:grid;place-items:center;min-width:22px;height:22px;border-radius:99px;background:var(--bg-hover);color:var(--text-muted);font-size:12px}.resource-browser{display:flex;flex-direction:column;min-height:0;margin-top:14px;padding:14px;border:1px solid var(--border-subtle);border-radius:10px;background:var(--bg-raised)}.resource-browser-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.resource-browser-search{flex:1 1 230px;max-width:340px}.resource-browser-filters{display:flex;gap:4px;padding:3px;border-radius:8px;background:var(--bg-hover)}.resource-browser-filters button{min-height:30px;padding:0 9px;border:0;border-radius:6px;background:transparent;color:var(--text-muted);font:inherit;font-size:13px;cursor:pointer}.resource-browser-filters button:hover,.resource-browser-filters button:focus-visible{color:var(--text-primary);outline:2px solid color-mix(in srgb,var(--accent) 34%,transparent);outline-offset:1px}.resource-browser-filters button.active{background:var(--bg-raised);color:var(--text-primary);box-shadow:var(--shadow-sm)}.resource-browser-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:auto}.resource-browser-summary{margin:12px 0 10px;color:var(--text-muted);font-size:13px}.resource-browser-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:10px;min-height:0;overflow:auto;padding:2px}.resource-browser-card{position:relative;display:grid;grid-template-rows:112px auto auto;align-content:start;min-width:0;overflow:hidden;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-surface)}.resource-browser-card.is-character{grid-template-rows:112px 1fr auto;min-height:216px;font-family:"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;font-weight:400}.resource-browser-card.selected{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 50%,transparent)}.resource-browser-card>img,.resource-browser-placeholder{width:100%;height:112px;object-fit:cover;background:var(--bg-hover)}.resource-browser-placeholder{display:grid;place-items:center;color:var(--text-muted);font-size:13px}.resource-browser-select{position:absolute;top:8px;left:8px;z-index:1;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}.resource-browser-select :deep(.el-checkbox__input){filter:none}.resource-browser-select :deep(.el-checkbox__inner){box-shadow:none}.resource-browser-card-copy{min-width:0;padding:10px 11px 7px}.resource-browser-card-copy b,.resource-browser-card-copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-browser-card-copy b{color:var(--text-primary);font-size:15px;font-weight:600;line-height:1.4}.resource-browser-card-copy small{margin-top:4px;color:var(--text-muted);font-size:13px;font-weight:400;line-height:1.5}.resource-sd2-status{display:block;max-width:100%;margin-top:5px;color:var(--accent);font-size:12px;font-weight:400;line-height:1.45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-browser-card-actions{display:flex;flex-wrap:wrap;align-content:flex-start;gap:4px;min-width:0;padding:0 6px 8px}.resource-browser-card-actions .el-button{min-height:26px;margin:0;padding-inline:5px}.resource-browser-card-actions.character-card-actions{justify-content:space-between;align-items:center;flex-wrap:nowrap;padding:4px 8px 9px}.character-card-actions .el-button{min-height:30px;padding-inline:7px;font-family:"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;font-size:13px;font-weight:400}.character-card-actions .character-card-delete{color:var(--el-color-danger)!important}.resource-browser-empty{display:grid;place-items:center;min-height:220px;text-align:center;color:var(--text-muted)}.resource-browser-empty b{color:var(--text-primary)}.resource-browser-empty p{margin:7px 0 0;font-size:14px}@media(max-width:900px){.resource-browser-toolbar{align-items:stretch}.resource-browser-search{max-width:none}.resource-browser-actions{margin-left:0}.resource-browser-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
+
+.character-editor-asset-actions{display:grid;gap:12px;width:100%;padding:14px;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-raised)}
+.character-editor-asset-copy{display:grid;gap:4px}.character-editor-asset-copy b{color:var(--text-primary);font-size:14px;font-weight:600}.character-editor-asset-copy small{color:var(--text-muted);font-size:12px;line-height:1.5}.character-editor-asset-copy .character-editor-asset-status{color:var(--accent)}
+.character-editor-asset-buttons{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.character-editor-asset-buttons .el-button{margin:0}
+:global(.character-editor-dialog.el-dialog){display:flex;flex-direction:column;max-height:calc(100dvh - 32px);margin:16px auto!important;overflow:hidden}
+:global(.character-editor-dialog .el-dialog__body){min-height:0;overflow-y:auto;overscroll-behavior:contain}
+:global(.character-editor-dialog .el-dialog__footer){flex:0 0 auto}
+
+.resource-browser-card.is-character,.character-card-actions .el-button{font-family:var(--font-sans);font-weight:500}
+.resource-browser-card .resource-hosting-status{position:absolute;top:8px;right:8px;z-index:2;max-width:92px;padding:4px 8px;border:1px solid color-mix(in srgb,var(--border-color) 76%,transparent);border-radius:999px;background:color-mix(in srgb,var(--bg-page) 84%,transparent);box-shadow:0 2px 8px rgba(0,0,0,.18);color:var(--text-muted);font-size:11px;font-weight:500;line-height:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;backdrop-filter:blur(8px)}
+.resource-hosting-status.is-active{border-color:color-mix(in srgb,#42c986 55%,transparent);color:#7de2ad}.resource-hosting-status.is-processing{border-color:color-mix(in srgb,var(--accent) 55%,transparent);color:#b7a6ff}.resource-hosting-status.is-error{border-color:color-mix(in srgb,var(--el-color-danger) 58%,transparent);color:#ff9c9c}
+.character-card-actions .character-card-edit{border-color:color-mix(in srgb,var(--accent) 38%,var(--border-color));background:color-mix(in srgb,var(--accent) 13%,var(--bg-raised));color:var(--text-primary)}
+.character-card-actions .character-card-edit:hover,.character-card-actions .character-card-edit:focus-visible{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 22%,var(--bg-raised));color:#fff}
+.character-card-actions .character-card-delete{border-color:color-mix(in srgb,var(--el-color-danger) 52%,var(--border-color))!important;background:color-mix(in srgb,var(--el-color-danger) 12%,var(--bg-raised))!important;color:#ff8e8e!important}.character-card-actions .character-card-delete:hover,.character-card-actions .character-card-delete:focus-visible{border-color:var(--el-color-danger)!important;background:color-mix(in srgb,var(--el-color-danger) 22%,var(--bg-raised))!important;color:#ffd4d4!important}
+
+.ref-image-box{position:relative}.ref-image-remove{position:absolute;top:6px;right:6px;display:grid;place-items:center;width:24px;height:24px;padding:0;border:1px solid rgba(255,255,255,.42);border-radius:999px;background:rgba(8,12,22,.78);color:#fff;font:600 17px/1 var(--font-sans);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.28)}.ref-image-remove:hover,.ref-image-remove:focus-visible{background:var(--el-color-danger);outline:2px solid color-mix(in srgb,var(--el-color-danger) 45%,transparent);outline-offset:2px}
+.ref-image-meta{display:flex;min-width:220px;flex:1;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:10px}.ref-image-meta .ref-upload-tip{margin:0;max-width:330px}
+.character-field-stack{display:grid;width:100%;gap:8px}.character-field-help{display:block;color:var(--text-muted);font-size:12px;line-height:1.5}.character-field-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap}.character-field-actions .el-button{margin:0}
+.character-inline-control{display:flex;width:100%;align-items:flex-end;justify-content:space-between;gap:12px}.character-inline-control .character-field-help{margin:0;padding-bottom:5px}.character-inline-control .character-field-actions{flex:0 0 auto;flex-wrap:nowrap}
+.character-editor-footer{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px}.character-editor-footer-main{display:flex;align-items:center;gap:10px}.character-editor-footer-main .el-button{margin:0}
+
+.resource-batch-image-summary{display:grid;gap:5px;margin-bottom:18px;padding:14px;border:1px solid var(--border-subtle);border-radius:9px;background:var(--bg-raised)}.resource-batch-image-summary b{color:var(--text-primary);font-size:15px}.resource-batch-image-summary span,.resource-batch-image-hint{color:var(--text-muted);font-size:12px;line-height:1.5}.resource-batch-image-quote{display:grid;gap:5px;min-height:72px;padding:14px;border:1px solid color-mix(in srgb,var(--accent) 38%,var(--border-color));border-radius:9px;background:color-mix(in srgb,var(--accent) 9%,var(--bg-raised));color:var(--text-regular)}.resource-batch-image-quote b{color:var(--text-primary);font-size:16px}.resource-batch-image-quote small{color:var(--text-muted);font-size:12px}.resource-batch-image-quote.error{border-color:color-mix(in srgb,var(--el-color-danger) 48%,var(--border-color));color:#ff9c9c}
+:global(.resource-batch-image-dialog.el-dialog){max-height:calc(100dvh - 32px);margin:16px auto!important;overflow:hidden}
 .workflow-next-action{border-color:var(--border-color);background:var(--bg-raised);color:var(--text-regular)}
 .merge-readiness,.merge-readiness.ready{border-color:var(--border-color);background:var(--bg-hover);color:var(--text-regular)}
 .sb-ctrl-bar--dragover{box-shadow:inset 0 3px 0 var(--accent)!important;background:var(--bg-hover)!important}
