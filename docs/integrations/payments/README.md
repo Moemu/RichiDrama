@@ -184,6 +184,7 @@ Validation 必须完成以下工作：
 - 前端 production build。
 - 空数据库迁移双跑。
 - Docker 镜像构建。
+- preview 支付迁移、页面标题和支付 API smoke。
 
 Validation 成功后，批准 `preview` environment 部署。
 
@@ -217,6 +218,14 @@ Validation 成功后，批准 `preview` environment 部署。
 不要向 preview 写入生产支付密钥。
 
 不要在本轮扫描或支付二维码。
+
+服务器内部 smoke 使用隔离数据库中的管理员身份。
+
+登录令牌只存在于 smoke 进程内。
+
+支付关闭时，smoke 还会检查安全拒绝和公共回调路由。
+
+支付开启时，smoke 会跳过所有写入接口。
 
 ## 7. 真实渠道验收
 
