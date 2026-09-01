@@ -1,92 +1,265 @@
 <template>
-  <main class="media-tool">
+  <main class="media-tool" :class="`is-${media}`">
+    <a class="skip-link" href="#media-tool-input">跳到创作输入</a>
     <header class="media-header">
-      <div class="title-wrap"><span>{{ media === 'image' ? '▣' : '▶' }}</span><div><h1>{{ media === 'image' ? '图片生成' : '视频生成' }}</h1><p>{{ media === 'image' ? '定义角色、场景与关键画面。' : '以镜头为单位生成、复核并进入全能创作。' }}</p></div></div>
-      <div class="header-meta"><el-button text @click="router.push('/ai-tools')">← AI 工具箱</el-button><p>独立生成记录 · 可导入素材库</p></div>
-      <AccountBalanceBadge />
+      <div class="title-wrap">
+        <span aria-hidden="true">{{ media === 'image' ? '▣' : '▶' }}</span>
+        <div><p>AI 工具 · 单项输出</p><h1>{{ media === 'image' ? '单图生成' : '单视频生成' }}</h1><small>{{ media === 'image' ? '用文字和参考素材完成图片。' : '选择项目素材，完成一个可复用的视频成片。' }}</small></div>
+      </div>
+      <div class="header-actions">
+        <router-link to="/ai-tools">返回 AI 工具箱</router-link>
+        <AccountBalanceBadge />
+      </div>
     </header>
+
     <section class="media-layout">
-      <aside class="control-panel">
-        <h2><i>01</i> 创作输入</h2>
-        <label>创作模式<el-select v-model="mode"><el-option v-for="item in modes" :key="item.value" :label="item.label" :value="item.value" /></el-select></label>
-        <label>计费归属项目<el-select v-model="dramaId" filterable placeholder="请选择项目"><el-option v-for="project in projects" :key="project.id" :label="project.title" :value="project.id" /></el-select></label>
-        <p class="mode-info"><b>{{ selectedMode.hint }}</b><span>{{ selectedMode.rule }}</span></p>
-        <label>提示词<el-input v-model="prompt" type="textarea" :autosize="{ minRows: 10, maxRows: 22 }" placeholder="描述主体、动作、场景、镜头和风格…" /></label>
-        <label v-if="media === 'image'">模型<el-select v-model="model" clearable placeholder="默认（当前默认模型）"><el-option v-for="item in imageModelOptions" :key="item" :label="item" :value="item" /></el-select></label>
-        <GenerationSettings v-else v-model="videoSettings" :max-duration="15" />
-        <template v-if="mode === 'first_last'"><ToolAssetSelector v-model="firstFrameAssetId" :types="['image']" label="首帧来源" @selected="applyFirstFrame" /><ToolAssetSelector v-model="lastFrameAssetId" :types="['image']" label="尾帧来源" @selected="applyLastFrame" /></template>
-        <ToolAssetSelector v-else-if="mode !== 'text'" v-model="selectedAssetId" :types="media === 'image' ? ['image'] : ['image', 'video']" label="参考素材来源" @selected="applySelectedAsset" />
-        <label>公开素材链接（可选）<el-input v-model="reference" :placeholder="selectedMode.rule" /></label>
-        <small>{{ media === 'image' ? '参考素材可来自素材库或公开链接。' : '单镜头最长 15 秒；模型能力决定可用参考类型。' }}</small>
-        <el-button type="primary" :loading="running" :disabled="!prompt.trim()" @click="submit">{{ running ? '正在提交任务…' : `生成${media === 'image' ? '图片' : '视频'}` }}</el-button>
+      <aside id="media-tool-input" class="control-panel" aria-label="创作输入与生成设置">
+        <section class="input-section project-section">
+          <div class="section-heading"><span>01</span><div><h2>选择项目</h2><p>项目只用于计费和素材归属，不会创建短剧工作流。</p></div></div>
+          <label class="field-label">计费归属项目
+            <el-select v-model="dramaId" filterable placeholder="选择项目后读取项目素材" aria-label="计费归属项目">
+              <el-option v-for="project in projects" :key="project.id" :label="project.title" :value="project.id" />
+            </el-select>
+          </label>
+          <p class="project-note" :class="{ ready: dramaId }"><span aria-hidden="true">{{ dramaId ? '✓' : '!' }}</span>{{ dramaId ? '上传的新素材会进入当前项目素材库。' : '先选择项目，才能提交生成任务。' }}</p>
+        </section>
+
+        <section class="input-section">
+          <div class="section-heading"><span>02</span><div><h2>定义{{ media === 'image' ? '图片' : '视频' }}</h2><p>先选生成方式，再填写{{ media === 'image' ? '画面' : '镜头' }}提示词。</p></div></div>
+          <div class="mode-grid" role="radiogroup" aria-label="创作模式">
+            <button v-for="item in modes" :key="item.value" type="button" role="radio" :aria-checked="String(mode === item.value)" :class="{ active: mode === item.value }" :disabled="!modeAvailable(item.value)" @click="mode = item.value">
+              <b>{{ item.label }}</b><small>{{ modeAvailable(item.value) ? item.hint : '当前模型不支持' }}</small>
+            </button>
+          </div>
+          <label class="field-label">提示词
+            <el-input v-model="prompt" type="textarea" :autosize="{ minRows: 6, maxRows: 14 }" name="generation_prompt" autocomplete="off" placeholder="描述主体、动作、场景、运镜和画面风格…" />
+          </label>
+        </section>
+
+        <section v-if="!['text', 'batch'].includes(mode)" class="input-section asset-section">
+          <div class="section-heading"><span>03</span><div><h2>引用素材</h2><p>{{ selectedMode.rule }}</p></div></div>
+          <template v-if="mode === 'first_last'">
+            <div class="frame-selectors">
+              <ToolAssetSelector v-model="firstFrameAssetId" :drama-id="Number(dramaId) || null" :types="['image']" label="首帧（必选）" @selected="applyFirstFrame" />
+              <ToolAssetSelector v-model="lastFrameAssetId" :drama-id="Number(dramaId) || null" :types="['image']" label="尾帧（可选）" @selected="applyLastFrame" />
+            </div>
+          </template>
+          <ToolAssetSelector v-else-if="mode === 'multi'" v-model="selectedAssetIds" multiple :max-selections="assetLimit" :drama-id="Number(dramaId) || null" :types="media === 'image' ? ['image'] : ['image', 'video', 'audio']" label="参考素材" @selection-change="applyMultiAssets" />
+          <ToolAssetSelector v-else v-model="selectedAssetId" :drama-id="Number(dramaId) || null" :types="['image']" label="起始参考图" @selected="applySelectedAsset" />
+          <details class="external-reference">
+            <summary>使用公开素材链接</summary>
+            <label class="field-label">公开链接
+              <el-input v-model="reference" type="url" inputmode="url" name="public_reference_url" autocomplete="off" :placeholder="mode === 'first_last' ? '首帧 URL, 尾帧 URL' : '多个链接用英文逗号分隔…'" />
+            </label>
+          </details>
+        </section>
+
+        <section class="input-section settings-section">
+          <div class="section-heading"><span>{{ ['text', 'batch'].includes(mode) ? '03' : '04' }}</span><div><h2>生成规格</h2><p>模型会限制可用时长、分辨率和素材类型。</p></div></div>
+          <label v-if="media === 'image'" class="field-label">模型
+            <el-select v-model="model" clearable placeholder="使用当前默认模型"><el-option v-for="item in imageModelOptions" :key="item" :label="item" :value="item" /></el-select>
+          </label>
+          <GenerationSettings v-else v-model="videoSettings" :max-duration="15" />
+        </section>
+
+        <footer class="submit-bar">
+          <p :class="{ ready: canSubmit }" role="status" aria-live="polite"><span aria-hidden="true">{{ canSubmit ? '✓' : '•' }}</span>{{ submitHint }}</p>
+          <el-button type="primary" size="large" :loading="running" :disabled="!canSubmit" @click="submit">{{ running ? '正在提交…' : `生成${media === 'image' ? '图片' : '视频'}` }}</el-button>
+        </footer>
       </aside>
-      <section class="preview-stage">
-        <div class="stage-heading"><div><p>结果预览</p><h2>当前生成结果</h2></div><span class="status-key">● 完成　● 处理中　● 失败</span></div>
-        <div v-if="featured" class="featured">
-          <img v-if="media === 'image' && featured.image_url" :src="featured.image_url" />
-          <video v-else-if="media === 'video' && (featured.local_path || featured.video_url)" :src="mediaUrl(featured)" controls />
-          <div v-else class="empty-result"><GenerationFailureDetails v-if="featured.status === 'failed'" :job="featured" /><template v-else><b>{{ statusText(featured.status) }}</b><small>任务已保存，结果会在这里显示。</small></template></div>
-          <footer><span>{{ statusText(featured.status) }}</span><b>{{ featured.prompt || '尚未填写提示词' }}</b><small>{{ formatDate(featured.updated_at) }}</small></footer>
-        </div>
-        <div v-else class="empty-result"><strong>{{ media === 'image' ? '▣' : '▶' }}</strong><b>结果会显示在这里</b><small>提交后，任务状态、成片与失败原因都会持续保留。</small></div>
-        <div v-if="featured?.status === 'completed'" class="result-actions">
-          <el-button :loading="importing" @click="importAsset">导入素材库</el-button>
-          <el-button v-if="media === 'video'" type="primary" :loading="importing" @click="continueOmni">带入全能创作</el-button>
-        </div>
+
+      <section class="preview-workspace" aria-label="生成结果与历史">
+        <section class="preview-stage">
+          <div class="stage-heading">
+            <div><p>结果预览</p><h2>{{ featured ? `生成记录 #${displayId(featured)}` : '等待首次生成' }}</h2></div>
+            <span class="status-pill" :class="featured?.status || 'draft'" role="status" aria-live="polite">{{ featured ? statusText(featured.status) : '尚未生成' }}</span>
+          </div>
+          <div v-if="featured" class="featured">
+            <img v-if="media === 'image' && featured.image_url" :src="featured.image_url" :alt="featured.prompt || '生成图片'" width="1280" height="720" />
+            <video v-else-if="media === 'video' && (featured.local_path || featured.video_url)" :src="mediaUrl(featured)" controls playsinline />
+            <div v-else class="empty-result"><GenerationFailureDetails v-if="featured.status === 'failed'" :job="featured" /><template v-else><span class="processing-mark" aria-hidden="true">{{ activeStatuses.has(featured.status) ? '◌' : '▶' }}</span><b>{{ statusText(featured.status) }}</b><small>{{ featured.task_message || '任务已保存，结果会自动更新。' }}</small></template></div>
+            <footer><span>{{ statusText(featured.status) }}</span><b>{{ featured.prompt || '未填写提示词' }}</b><small>{{ formatDate(featured.updated_at || featured.created_at) }}</small></footer>
+          </div>
+          <div v-else class="empty-result"><span class="empty-play" aria-hidden="true">▶</span><b>成片会显示在这里</b><small>左侧完成项目、提示词、素材和模型设置后即可生成。</small></div>
+          <div v-if="featured?.status === 'completed'" class="result-actions">
+            <el-button :loading="importing" @click="importAsset">保存到素材库</el-button>
+            <el-button v-if="media === 'video'" type="primary" :loading="importing" @click="continueOmni">带入多镜头创作</el-button>
+          </div>
+        </section>
+
+        <aside class="generation-history" aria-label="生成历史">
+          <div class="history-heading"><div><h2>最近生成</h2><p>选择记录可查看成片或失败原因。</p></div><el-button text :loading="historyLoading" @click="load">刷新</el-button></div>
+          <div v-if="items.length" class="history-list">
+            <button v-for="item in items" :key="historyKey(item)" type="button" class="history-card" :class="{ active: historyKey(featured) === historyKey(item) }" @click="featured = item">
+              <span class="history-preview"><img v-if="media === 'image' && item.image_url" :src="item.image_url" alt="" width="144" height="90" loading="lazy" /><video v-else-if="media === 'video' && (item.local_path || item.video_url)" :src="mediaUrl(item)" muted preload="metadata" /><span v-else aria-hidden="true">●</span></span>
+              <span class="history-copy"><b>{{ statusText(item.status) }} · #{{ displayId(item) }}</b><small>{{ item.prompt || '未命名生成' }}</small><em>{{ formatDate(item.updated_at || item.created_at) }}</em></span>
+            </button>
+          </div>
+          <p v-else class="history-empty">还没有生成记录。首次提交后，任务会保存在这里。</p>
+        </aside>
       </section>
-      <aside class="generation-history">
-        <div class="history-heading"><h2><i>02</i> 生成历史</h2><el-button text @click="load">刷新</el-button></div>
-        <button v-for="item in items" :key="item.id" class="history-card" :class="{ active: featured?.id === item.id }" @click="featured = item">
-          <img v-if="media === 'image' && item.image_url" :src="item.image_url" />
-          <video v-else-if="media === 'video' && (item.local_path || item.video_url)" :src="mediaUrl(item)" muted preload="metadata" />
-          <span v-else>●</span><div><b>{{ statusText(item.status) }} · #{{ item.id }}</b><small>{{ item.prompt || '未命名生成' }}</small><em>{{ formatDate(item.updated_at) }}</em></div>
-        </button>
-        <p v-if="!items.length" class="history-empty">暂无生成记录</p>
-      </aside>
     </section>
   </main>
 </template>
+
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 import { imagesAPI } from '@/api/images'
-import { videosAPI } from '@/api/videos'
 import { dramaAPI } from '@/api/drama'
+import { omniVideoAPI } from '@/api/omniVideo'
+import { videosAPI } from '@/api/videos'
 import ToolAssetSelector from '@/components/ToolAssetSelector.vue'
 import GenerationSettings from '@/components/GenerationSettings.vue'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import GenerationFailureDetails from '@/components/GenerationFailureDetails.vue'
 import { formatChinaDateTime } from '@/utils/time'
 import { useModelOptions } from '@/composables/useModelOptions'
+
 const props = defineProps({ media: { type: String, required: true } })
-const router = useRouter(), prompt = ref(''), model = ref(''), reference = ref(''), selectedAssetId = ref(null), firstFrameAssetId = ref(null), lastFrameAssetId = ref(null), firstFrameAssetUrl = ref(''), lastFrameAssetUrl = ref(''), videoSettings = ref({ video_model: 'auto', duration: 15, resolution: '720p', aspect_ratio: '16:9' }), running = ref(false), importing = ref(false), items = ref([]), mode = ref('text'), featured = ref(null), projects = ref([]), dramaId = ref(null)
+const router = useRouter()
+const prompt = ref(''), model = ref(''), reference = ref(''), selectedAssetId = ref(null), selectedAsset = ref(null), selectedAssetIds = ref([]), selectedAssets = ref([]), firstFrameAssetId = ref(null), lastFrameAssetId = ref(null), firstFrameAsset = ref(null), lastFrameAsset = ref(null)
+const videoSettings = ref({ video_model: '', duration: 15, resolution: '720p', aspect_ratio: '16:9', upscale_resolution: null, target_fps: null })
+const running = ref(false), importing = ref(false), historyLoading = ref(false), items = ref([]), mode = ref('text'), featured = ref(null), projects = ref([]), capabilities = ref([]), dramaId = ref(null)
 const imageModelOptions = useModelOptions('image')
+const activeStatuses = new Set(['pending', 'processing', 'sd2_waiting', 'upscale_pending', 'upscaling', 'interpolation_pending', 'interpolating', 'persisting', 'billing_reconciliation'])
+let pollTimer = null
+
 const modes = computed(() => props.media === 'image' ? [
-  { label:'文生图', value:'text', hint:'从文字开始构图', rule:'不需要参考素材' }, { label:'单图生图', value:'image', hint:'基于一张图再创作', rule:'填写一张参考素材 URL' }, { label:'多参考生图', value:'multi', hint:'融合多个参考元素', rule:'用英文逗号分隔多个 URL' }, { label:'组生组图', value:'batch', hint:'共享风格批量出图', rule:'用提示词逐项创建' },
+  { label: '文生图', value: 'text', hint: '只使用提示词', rule: '不需要参考素材。' },
+  { label: '单图参考', value: 'image', hint: '保持主体或构图', rule: '选择一张项目图片。' },
+  { label: '多图参考', value: 'multi', hint: '融合多个元素', rule: '可选择多张项目图片。' },
+  { label: '组生组图', value: 'batch', hint: '共享风格批量出图', rule: '只使用提示词创建。' },
 ] : [
-  { label:'文生视频', value:'text', hint:'仅用提示词生成镜头', rule:'不需要参考素材' }, { label:'图生视频', value:'image', hint:'由一张图片驱动镜头', rule:'填写一张图片 URL' }, { label:'首尾帧生视频', value:'first_last', hint:'锁定镜头起点与终点', rule:'填写“首帧 URL, 尾帧 URL”' }, { label:'多参考生视频', value:'multi', hint:'编排多种参考素材', rule:'用英文逗号分隔参考 URL' },
+  { label: '文生视频', value: 'text', hint: '只使用提示词', rule: '不需要参考素材。' },
+  { label: '图生视频', value: 'image', hint: '从一张图片起镜', rule: '选择一张图片作为起始参考。' },
+  { label: '首尾帧', value: 'first_last', hint: '控制起点与终点', rule: '首帧必选，尾帧可选。' },
+  { label: '多参考', value: 'multi', hint: '组合图片、视频、音频', rule: '可选择多个项目或个人素材。' },
 ])
 const selectedMode = computed(() => modes.value.find((item) => item.value === mode.value) || modes.value[0])
-const statusText = (status) => ({ pending:'排队中', processing:'生成中', completed:'已完成', failed:'生成失败' }[status] || status || '草稿')
-const mediaUrl = (item) => item?.local_path ? `/static/${item.local_path}` : item?.video_url || ''
-const applySelectedAsset = (asset) => { reference.value = asset?.local_path || asset?.url || '' }
-const applyFirstFrame = (asset) => { firstFrameAssetUrl.value = asset?.local_path || asset?.url || '' }
-const applyLastFrame = (asset) => { lastFrameAssetUrl.value = asset?.local_path || asset?.url || '' }
+const currentCapability = computed(() => capabilities.value.find((item) => item.model === videoSettings.value.video_model) || null)
+const assetLimit = computed(() => props.media === 'image' ? 9 : Number(currentCapability.value?.limits?.total_reference?.max || 15))
+const externalRefs = computed(() => reference.value.split(',').map((item) => item.trim()).filter(Boolean))
+const hasRequiredAssets = computed(() => {
+  if (mode.value === 'text' || mode.value === 'batch') return true
+  if (mode.value === 'image') return !!selectedAsset.value || externalRefs.value.length > 0
+  if (mode.value === 'first_last') return !!firstFrameAsset.value || externalRefs.value.length > 0
+  return selectedAssets.value.length > 0 || externalRefs.value.length > 0
+})
+const hasModel = computed(() => props.media === 'image' || (!!videoSettings.value.video_model && videoSettings.value.video_model !== 'auto'))
+const canSubmit = computed(() => !!prompt.value.trim() && Number(dramaId.value) > 0 && hasRequiredAssets.value && hasModel.value && modeAvailable(mode.value) && !running.value)
+const submitHint = computed(() => {
+  if (!Number(dramaId.value)) return '请选择计费归属项目'
+  if (!prompt.value.trim()) return `请填写${props.media === 'image' ? '图片' : '视频'}提示词`
+  if (!hasRequiredAssets.value) return selectedMode.value.rule
+  if (!hasModel.value) return '请选择可用的视频模型'
+  if (!modeAvailable(mode.value)) return '当前模型不支持首尾帧模式，请切换模型或模式'
+  return `已就绪 · ${['text', 'batch'].includes(mode.value) ? '不发送参考素材' : `${requestAssets().length} 项参考素材`}`
+})
+const statusText = (status) => ({ pending: '排队中', processing: '生成中', sd2_waiting: '素材准备中', upscale_pending: '等待超分', upscaling: '超分中', interpolation_pending: '等待插帧', interpolating: '插帧中', persisting: '保存成片', billing_reconciliation: '等待对账', completed: '已完成', failed: '生成失败', retryable: '可重试' }[status] || status || '草稿')
+const mediaUrl = (item) => item?.local_path ? `/static/${String(item.local_path).replace(/^\/+/, '')}` : item?.video_url || ''
+const assetUrl = (asset) => asset?.local_path || asset?.url || ''
+const applySelectedAsset = (asset) => { selectedAsset.value = asset || null }
+const applyMultiAssets = (assets) => { selectedAssets.value = assets || [] }
+const applyFirstFrame = (asset) => { firstFrameAsset.value = asset || null }
+const applyLastFrame = (asset) => { lastFrameAsset.value = asset || null }
 const formatDate = (value) => formatChinaDateTime(value)
-async function load() { const out = props.media === 'image' ? await imagesAPI.list({ page_size:30, drama_id:0 }) : await videosAPI.list({ page_size:30, drama_id:0 }); items.value = out.items || out || []; featured.value = items.value.find((item) => item.id === featured.value?.id) || featured.value || items.value[0] || null }
-async function submit() { if (running.value) return; if (!prompt.value.trim()) return ElMessage.warning('请输入提示词'); if (!Number(dramaId.value)) return ElMessage.warning('请选择计费归属项目'); running.value = true; try { const refs = reference.value.split(',').map((item) => item.trim()).filter(Boolean); if (props.media === 'image') await imagesAPI.create({ drama_id:Number(dramaId.value), prompt:prompt.value, model:model.value || undefined, image_url:reference.value || undefined, reference_images:mode.value === 'multi' ? refs : undefined }); else { const settings = videoSettings.value || {}; const body = { drama_id:Number(dramaId.value), prompt:prompt.value, model:settings.video_model && settings.video_model !== 'auto' ? settings.video_model : undefined, duration:settings.duration, resolution:settings.resolution, aspect_ratio:settings.aspect_ratio }; if (mode.value === 'image') body.image_url = refs[0]; if (mode.value === 'multi') body.reference_image_urls = refs; if (mode.value === 'first_last') { const first = firstFrameAssetUrl.value || refs[0], last = lastFrameAssetUrl.value || refs[1]; if (!first || !last) throw new Error('请选择或填写首帧与尾帧素材'); body.first_frame_url = first; body.last_frame_url = last } await videosAPI.create(body) } ElMessage.success('任务已提交，记录已保存'); await load() } catch (error) { ElMessage.error(error.message) } finally { running.value = false } }
-async function importAsset() { importing.value = true; try { const path = props.media === 'image' ? `/assets/import/image/${featured.value.id}` : `/assets/import/video/${featured.value.id}`; const asset = await request.post(path); ElMessage.success('已导入素材库'); return asset } catch (error) { ElMessage.error(error.message); return null } finally { importing.value = false } }
-async function continueOmni() { const asset = await importAsset(); if (asset?.id) router.push({ path:'/free-create', query:{ asset_id:asset.id } }) }
-watch(() => props.media, () => { featured.value = null; load() }); onMounted(async () => { const data = await dramaAPI.list({ page_size: 100 }); projects.value = data?.items || data || []; load() })
+const historyKey = (item) => item ? `${item.history_kind || props.media}:${item.id}` : ''
+const displayId = (item) => item?.video_generation_id || item?.id || ''
+
+function requestAssets() {
+  const fromAsset = (asset, usage, index) => ({ asset_id: asset.id, alias: asset.reference_alias || asset.alias || asset.name || `素材${index + 1}`, type: asset.type, usage, role: usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })
+  if (mode.value === 'text' || mode.value === 'batch') return []
+  if (mode.value === 'image') {
+    const assets = selectedAsset.value ? [fromAsset(selectedAsset.value, 'primary', 0)] : []
+    return [...assets, ...externalRefs.value.slice(0, 1).map((url, index) => ({ url, type: 'image', alias: `外部参考图${index + 1}`, usage: 'primary', role: 'primary', ordinal: assets.length + index + 1 }))]
+  }
+  if (mode.value === 'first_last') {
+    const assets = []
+    if (firstFrameAsset.value) assets.push(fromAsset(firstFrameAsset.value, 'first_frame', assets.length))
+    else if (externalRefs.value[0]) assets.push({ url: externalRefs.value[0], type: 'image', alias: '外部首帧', usage: 'first_frame', role: 'reference', ordinal: 1 })
+    if (lastFrameAsset.value) assets.push(fromAsset(lastFrameAsset.value, 'last_frame', assets.length))
+    else if (externalRefs.value[1]) assets.push({ url: externalRefs.value[1], type: 'image', alias: '外部尾帧', usage: 'last_frame', role: 'reference', ordinal: assets.length + 1 })
+    return assets
+  }
+  const assets = selectedAssets.value.map((asset, index) => fromAsset(asset, asset.type === 'video' ? 'motion' : asset.type === 'audio' ? 'ambience' : 'reference', index))
+  return [...assets, ...externalRefs.value.map((url, index) => ({ url, type: 'image', alias: `外部参考图${index + 1}`, usage: 'reference', role: 'reference', ordinal: assets.length + index + 1 }))]
+}
+function modeAvailable(value) { return props.media === 'image' || value !== 'first_last' || !currentCapability.value || !!currentCapability.value.supports?.first_last_frame }
+function clearPoll() { window.clearTimeout(pollTimer); pollTimer = null }
+function schedulePoll() {
+  clearPoll()
+  if (props.media === 'video' && items.value.some((item) => activeStatuses.has(item.status))) pollTimer = window.setTimeout(() => load(true), 4000)
+}
+async function load(silent = false) {
+  if (!silent) historyLoading.value = true
+  try {
+    if (props.media === 'image') {
+      const out = await imagesAPI.list({ page_size: 30, drama_id: 0 })
+      items.value = (out.items || out || []).slice(0, 30)
+    } else {
+      const [omniResult, legacyResult] = await Promise.allSettled([
+        omniVideoAPI.list(),
+        videosAPI.list({ page_size: 30, drama_id: 0 }),
+      ])
+      const omniItems = omniResult.status === 'fulfilled' ? (omniResult.value.items || omniResult.value || []).map((item) => ({ ...item, history_kind: 'omni' })) : []
+      const omniGenerationIds = new Set(omniItems.map((item) => Number(item.video_generation_id)).filter(Boolean))
+      const legacyItems = legacyResult.status === 'fulfilled' ? (legacyResult.value.items || legacyResult.value || []).filter((item) => !omniGenerationIds.has(Number(item.id))).map((item) => ({ ...item, history_kind: 'legacy', video_generation_id: item.id })) : []
+      if (!omniItems.length && !legacyItems.length && omniResult.status === 'rejected' && legacyResult.status === 'rejected') throw omniResult.reason
+      items.value = [...omniItems, ...legacyItems].sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)).slice(0, 30)
+    }
+    const selectedKey = historyKey(featured.value)
+    featured.value = items.value.find((item) => historyKey(item) === selectedKey) || items.value[0] || null
+  } catch (error) { if (!silent) ElMessage.error(error.message || '生成记录加载失败') }
+  finally { historyLoading.value = false; schedulePoll() }
+}
+async function submit() {
+  if (!canSubmit.value) return
+  running.value = true
+  try {
+    if (props.media === 'image') {
+      const refs = requestAssets().map((asset) => asset.asset_id ? assetUrl(selectedAssets.value.find((item) => Number(item.id) === Number(asset.asset_id)) || selectedAsset.value) : asset.url).filter(Boolean)
+      await imagesAPI.create({ drama_id: Number(dramaId.value), prompt: prompt.value.trim(), model: model.value || undefined, image_url: mode.value === 'image' ? refs[0] : undefined, reference_images: mode.value === 'multi' ? refs : undefined })
+    } else {
+      const settings = videoSettings.value || {}
+      await omniVideoAPI.create({ drama_id: Number(dramaId.value), prompt: prompt.value.trim(), asset_selection_policy: 'all_selected', creation_mode: mode.value === 'first_last' ? 'first_last_frame' : 'multi_reference', model: settings.video_model, duration: settings.duration, resolution: settings.resolution || '720p', aspect_ratio: settings.aspect_ratio || '16:9', upscale_resolution: settings.upscale_resolution || null, target_fps: settings.target_fps || null, audio_strategy: 'reference_only', assets: requestAssets() })
+    }
+    ElMessage.success('任务已提交，结果会自动刷新')
+    await load(true)
+  } catch (error) { ElMessage.error(error.message || '任务提交失败') }
+  finally { running.value = false }
+}
+async function importAsset() {
+  importing.value = true
+  try {
+    const generationId = props.media === 'video' ? featured.value?.video_generation_id || featured.value?.id : featured.value?.id
+    const path = props.media === 'image' ? `/assets/import/image/${generationId}` : `/assets/import/video/${generationId}`
+    const asset = await request.post(path)
+    ElMessage.success('已保存到素材库')
+    return asset
+  } catch (error) { ElMessage.error(error.message || '保存素材失败'); return null }
+  finally { importing.value = false }
+}
+async function continueOmni() { const asset = await importAsset(); if (asset?.id) router.push({ path: '/free-create', query: { asset_id: asset.id } }) }
+function clearReferences() { selectedAssetId.value = null; selectedAsset.value = null; selectedAssetIds.value = []; selectedAssets.value = []; firstFrameAssetId.value = null; lastFrameAssetId.value = null; firstFrameAsset.value = null; lastFrameAsset.value = null; reference.value = '' }
+
+watch(() => props.media, () => { featured.value = null; mode.value = 'text'; clearReferences(); load() })
+watch(dramaId, clearReferences)
+watch(mode, clearReferences)
+watch(() => videoSettings.value.video_model, () => { if (!modeAvailable(mode.value)) mode.value = 'multi' })
+onMounted(async () => {
+  const [data, modelCapabilities] = await Promise.all([dramaAPI.list({ page_size: 100 }), props.media === 'video' ? omniVideoAPI.capabilities().catch(() => []) : Promise.resolve([])])
+  projects.value = data?.items || data || []
+  capabilities.value = Array.isArray(modelCapabilities) ? modelCapabilities : []
+  await load()
+})
+onBeforeUnmount(clearPoll)
 </script>
+
 <style scoped>
-/* 与 ToolWorkbench 同一套工作台基线：同底色、同面板、同控件观感。 */
-.media-tool{min-height:100vh;padding:22px 28px;background:var(--bg-page);background-image:radial-gradient(46% 42% at 8% -8%,color-mix(in srgb,var(--accent) 20%,transparent),transparent 72%),radial-gradient(36% 34% at 96% 14%,color-mix(in srgb,var(--accent-teal) 10%,transparent),transparent 70%);color:var(--text-primary)}.media-header,.media-layout{max-width:1380px;margin-left:auto;margin-right:auto}.media-header{display:flex;justify-content:space-between;align-items:end;gap:16px;padding-bottom:20px;border-bottom:1px solid var(--border-subtle)}.header-meta{display:flex;flex-direction:column;align-items:end;gap:2px;margin-left:auto}.header-meta p{margin:0}.media-header p,.control-panel small,.history-empty{margin:4px 0 0;color:var(--text-muted);font-size:12px}.title-wrap{display:flex;gap:12px;align-items:center}.title-wrap>span{display:grid;place-items:center;width:36px;height:36px;background:linear-gradient(145deg,var(--accent),#6f61df);color:#fff;border-radius:10px;box-shadow:0 10px 22px color-mix(in srgb,var(--accent) 24%,transparent)}.title-wrap h1,.stage-heading h2{margin:0;font-size:22px;letter-spacing:-.02em}.media-layout{display:grid;grid-template-columns:300px minmax(420px,1fr) 280px;gap:14px;margin-top:18px}.control-panel,.preview-stage,.generation-history{border:1px solid var(--border-subtle);border-radius:16px;background:color-mix(in srgb,var(--bg-surface) 94%,transparent);box-shadow:var(--shadow-sm);padding:18px}.control-panel{display:grid;align-content:start;gap:13px}.control-panel h2,.history-heading h2{margin:0;font-size:14px}.control-panel h2 i,.history-heading i{display:inline-grid;place-items:center;width:23px;height:23px;margin-right:8px;border-radius:6px;background:color-mix(in srgb,var(--accent) 18%,var(--bg-elevated));color:var(--text-primary);font-size:10px;font-style:normal}.control-panel label{display:grid;gap:6px;font-size:12px;color:var(--text-regular)}.control-panel :deep(.el-input__wrapper),.control-panel :deep(.el-select__wrapper),.control-panel :deep(.el-textarea__inner){background:color-mix(in srgb,var(--bg-page) 34%,transparent);box-shadow:0 0 0 1px var(--border-subtle) inset!important}.control-panel :deep(.el-input__wrapper:hover),.control-panel :deep(.el-select__wrapper:hover),.control-panel :deep(.el-textarea__inner:hover){box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 60%,var(--border-color)) inset!important}.mode-info{display:grid;gap:4px;margin:0;padding:10px;border-left:2px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent) 7%,var(--bg-raised));font-size:12px}.mode-info span{color:var(--text-muted)}.control-panel :deep(.el-button--primary),.result-actions :deep(.el-button--primary){--el-button-bg-color:var(--accent);--el-button-border-color:var(--accent);--el-button-text-color:var(--accent-contrast,#fff);--el-button-hover-bg-color:var(--accent-hover,var(--accent));--el-button-hover-border-color:var(--accent-hover,var(--accent))}.preview-stage{min-height:610px;display:flex;flex-direction:column}.stage-heading,.history-heading{display:flex;justify-content:space-between;align-items:center}.stage-heading p{margin:0 0 3px;color:var(--text-faint);font-size:10px;letter-spacing:.1em}.status-key{color:var(--text-muted);font-size:10px}.featured,.empty-result{position:relative;flex:1;min-height:400px;margin-top:14px;border:1px solid var(--border-subtle);border-radius:12px;background:#0a0f16;display:flex;align-items:center;justify-content:center;overflow:hidden}.featured img,.featured video{width:100%;height:100%;object-fit:contain}.featured footer{position:absolute;right:0;bottom:0;left:0;display:grid;gap:3px;padding:12px;background:rgba(8,12,18,.92);color:var(--text-primary);font-size:12px}.featured footer span{width:max-content;padding:2px 6px;background:var(--bg-elevated);border-radius:4px;font-size:10px}.featured footer small{color:var(--text-muted)}.empty-result{flex-direction:column;gap:9px;background:color-mix(in srgb,var(--bg-page) 55%,transparent);color:var(--text-muted);text-align:center}.empty-result strong{font-size:42px;color:var(--accent)}.result-actions{display:flex;gap:8px;margin-top:12px}.generation-history{display:grid;align-content:start;gap:8px;max-height:calc(100vh - 128px);overflow:auto}.history-card{display:grid;grid-template-columns:72px 1fr;gap:8px;padding:7px;border:1px solid var(--border-subtle);border-radius:10px;background:var(--bg-surface);text-align:left;cursor:pointer;transition:border-color .16s ease,transform .16s ease}.history-card.active,.history-card:hover{border-color:color-mix(in srgb,var(--accent) 60%,var(--border-color));transform:translateX(2px)}.history-card.active{box-shadow:inset 3px 0 0 var(--accent)}.history-card img,.history-card video,.history-card>span{width:72px;height:58px;object-fit:cover;background:var(--bg-elevated);color:var(--text-primary);display:grid;place-items:center;border-radius:6px}.history-card b,.history-card small,.history-card em{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-card b{font-size:11px;color:var(--text-primary)}.history-card small,.history-card em{margin-top:3px;color:var(--text-muted);font-size:10px;font-style:normal}@media(max-width:1050px){.media-layout{grid-template-columns:280px minmax(360px,1fr)}.generation-history{grid-column:1/-1;grid-template-columns:repeat(3,1fr);max-height:240px}.history-heading{grid-column:1/-1}}@media(max-width:760px){.media-tool{padding:16px}.media-header{align-items:flex-start;flex-direction:column}.header-meta{align-items:flex-start;margin-left:0}.media-layout{grid-template-columns:1fr}.preview-stage{min-height:460px}.generation-history{grid-column:auto;grid-template-columns:1fr;max-height:300px}.history-heading{grid-column:auto}}
-/* 全屏工作台布局：只让左右栏内部滚动。 */
-.empty-result :deep(.generation-failure-details){width:min(100%,560px);padding:20px;text-align:left}
-.media-tool { display:grid; grid-template-rows:auto minmax(0,1fr); width:100%; height:100vh; height:100dvh; min-height:0; padding:1.4rem 1.8rem; overflow:hidden; }
-.media-layout { width:100%; max-width:1500px; min-height:0; margin-top:1rem; grid-template-columns:19rem minmax(28rem,1fr) 18rem; grid-template-rows:minmax(0,1fr); }.control-panel,.preview-stage,.generation-history { min-height:0; }.control-panel,.generation-history { overflow-y:auto; overscroll-behavior:contain; }.preview-stage { min-height:0; }.featured,.empty-result { min-height:0; }
-@media(max-width:1050px){.media-layout{grid-template-columns:18rem minmax(0,1fr);overflow-y:auto}.generation-history{max-height:15rem}}@media(max-width:760px){.media-tool{height:100dvh;overflow:hidden}.media-layout{grid-template-columns:1fr}.preview-stage{min-height:28rem}}
+.media-tool{min-height:100vh;padding:24px 30px 36px;background:var(--bg-page);background-image:radial-gradient(48% 38% at 10% -8%,color-mix(in srgb,var(--accent) 18%,transparent),transparent 72%),radial-gradient(34% 32% at 96% 8%,color-mix(in srgb,var(--accent-teal) 9%,transparent),transparent 70%);color:var(--text-primary)}.skip-link{position:fixed;top:8px;left:8px;z-index:100;transform:translateY(-150%);padding:8px 12px;border-radius:8px;background:var(--accent);color:#fff}.skip-link:focus{transform:translateY(0)}.media-header,.media-layout{width:100%;max-width:1500px;margin-inline:auto}.media-header{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:0 2px 20px;border-bottom:1px solid var(--border-subtle)}.title-wrap{display:flex;align-items:center;gap:14px;min-width:0}.title-wrap>span{display:grid;place-items:center;flex:0 0 auto;width:44px;height:44px;border-radius:13px;background:linear-gradient(145deg,var(--accent),#6f61df);box-shadow:0 10px 24px color-mix(in srgb,var(--accent) 26%,transparent);color:#fff}.title-wrap p,.stage-heading p{margin:0 0 4px;color:var(--accent);font-size:10px;font-weight:700;letter-spacing:.12em}.title-wrap h1,.stage-heading h2{margin:0;line-height:1.15;text-wrap:balance}.title-wrap h1{font-size:25px}.title-wrap small{display:block;margin-top:5px;color:var(--text-muted)}.header-actions{display:flex;align-items:center;gap:14px}.header-actions>a{color:var(--text-regular);text-decoration:none}.header-actions>a:hover{color:var(--text-primary)}.header-actions>a:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:4px}.media-layout{display:grid;grid-template-columns:minmax(380px,430px) minmax(0,1fr);gap:18px;align-items:start;margin-top:18px}.control-panel,.preview-stage,.generation-history{min-width:0;border:1px solid var(--border-subtle);border-radius:16px;background:color-mix(in srgb,var(--bg-surface) 95%,transparent);box-shadow:var(--shadow-sm)}.control-panel{display:grid;gap:0;overflow:hidden}.input-section{display:grid;gap:13px;padding:18px;border-bottom:1px solid var(--border-subtle)}.section-heading{display:flex;align-items:flex-start;gap:10px}.section-heading>span{display:grid;place-items:center;flex:0 0 auto;width:26px;height:26px;border-radius:7px;background:color-mix(in srgb,var(--accent) 16%,var(--bg-elevated));color:var(--accent);font-size:10px;font-weight:700}.section-heading h2,.history-heading h2{margin:0;font-size:14px}.section-heading p,.history-heading p{margin:3px 0 0;color:var(--text-muted);font-size:11px;line-height:1.45}.field-label{display:grid;gap:7px;color:var(--text-regular);font-size:12px;font-weight:600}.project-note{display:flex;align-items:center;gap:7px;margin:0;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--status-warning,#d89b36) 10%,var(--bg-raised));color:var(--text-regular);font-size:11px}.project-note.ready{background:color-mix(in srgb,var(--status-success,#43a66f) 10%,var(--bg-raised))}.mode-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.mode-grid button{display:grid;gap:3px;min-height:58px;padding:10px;border:1px solid var(--border-subtle);border-radius:10px;background:var(--bg-raised);color:var(--text-regular);text-align:left;cursor:pointer;transition:border-color .16s ease,background-color .16s ease,transform .16s ease}.mode-grid button:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border-color));transform:translateY(-1px)}.mode-grid button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.mode-grid button.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 11%,var(--bg-raised));box-shadow:inset 3px 0 0 var(--accent)}.mode-grid b{font-size:12px}.mode-grid small{color:var(--text-muted);font-size:10px;line-height:1.35}.control-panel :deep(.el-input__wrapper),.control-panel :deep(.el-select__wrapper),.control-panel :deep(.el-textarea__inner){background:color-mix(in srgb,var(--bg-page) 32%,transparent);box-shadow:0 0 0 1px var(--border-subtle) inset!important}.control-panel :deep(.el-input__wrapper:hover),.control-panel :deep(.el-select__wrapper:hover),.control-panel :deep(.el-textarea__inner:hover){box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 60%,var(--border-color)) inset!important}.frame-selectors{display:grid;gap:16px}.external-reference{border-top:1px solid var(--border-subtle);padding-top:10px}.external-reference summary{width:max-content;color:var(--text-muted);font-size:11px;cursor:pointer}.external-reference[open] summary{margin-bottom:10px;color:var(--text-regular)}.submit-bar{position:sticky;bottom:0;z-index:2;display:grid;gap:10px;padding:15px 18px;background:color-mix(in srgb,var(--bg-surface) 96%,transparent);backdrop-filter:blur(12px)}.submit-bar p{display:flex;align-items:center;gap:6px;margin:0;color:var(--text-muted);font-size:11px}.submit-bar p.ready{color:var(--status-success,#43a66f)}.submit-bar :deep(.el-button){width:100%;min-height:44px}.preview-workspace{display:grid;gap:14px;min-width:0}.preview-stage{display:flex;min-height:600px;padding:20px;flex-direction:column}.stage-heading,.history-heading{display:flex;align-items:center;justify-content:space-between;gap:14px}.stage-heading h2{font-size:21px}.status-pill{flex:0 0 auto;padding:5px 9px;border-radius:999px;background:var(--bg-elevated);color:var(--text-muted);font-size:11px}.status-pill.completed{background:color-mix(in srgb,var(--status-success,#43a66f) 14%,var(--bg-elevated));color:var(--status-success,#43a66f)}.status-pill.failed,.status-pill.retryable{background:color-mix(in srgb,var(--status-danger,#e45a67) 14%,var(--bg-elevated));color:var(--status-danger,#e45a67)}.status-pill.processing,.status-pill.sd2_waiting,.status-pill.upscaling,.status-pill.interpolating,.status-pill.persisting{background:color-mix(in srgb,var(--accent) 14%,var(--bg-elevated));color:var(--accent)}.featured,.empty-result{position:relative;display:flex;align-items:center;justify-content:center;flex:1;min-height:460px;margin-top:15px;overflow:hidden;border:1px solid var(--border-subtle);border-radius:13px;background:#080d14}.featured>img,.featured>video{width:100%;height:100%;object-fit:contain}.featured>footer{position:absolute;right:0;bottom:0;left:0;display:grid;gap:4px;padding:13px 15px;background:linear-gradient(transparent,rgba(5,9,15,.96));color:#fff}.featured>footer span{width:max-content;padding:3px 7px;border-radius:5px;background:rgba(255,255,255,.14);font-size:10px}.featured>footer b{max-width:72ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.featured>footer small{color:rgba(255,255,255,.66);font-size:10px}.empty-result{flex-direction:column;gap:9px;background:color-mix(in srgb,var(--bg-page) 55%,transparent);color:var(--text-muted);text-align:center}.empty-play,.processing-mark{color:var(--accent);font-size:44px}.empty-result b{color:var(--text-regular)}.empty-result small{max-width:48ch;line-height:1.5}.result-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.generation-history{padding:16px}.history-list{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-top:12px}.history-card{display:grid;grid-template-columns:76px minmax(0,1fr);gap:9px;min-width:0;padding:6px;border:1px solid var(--border-subtle);border-radius:10px;background:var(--bg-raised);color:var(--text-regular);text-align:left;cursor:pointer;transition:border-color .16s ease,background-color .16s ease}.history-card:hover,.history-card.active{border-color:color-mix(in srgb,var(--accent) 58%,var(--border-color));background:color-mix(in srgb,var(--accent) 7%,var(--bg-raised))}.history-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.history-preview{display:grid;place-items:center;overflow:hidden;border-radius:7px;background:var(--bg-hover);aspect-ratio:4/3;color:var(--accent)}.history-preview img,.history-preview video{width:100%;height:100%;object-fit:cover}.history-copy{display:grid;align-content:center;min-width:0}.history-copy b,.history-copy small,.history-copy em{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-copy b{font-size:11px}.history-copy small,.history-copy em{margin-top:3px;color:var(--text-muted);font-size:10px;font-style:normal}.history-empty{margin:12px 0 0;padding:22px;border:1px dashed var(--border-color);border-radius:10px;color:var(--text-muted);font-size:11px;text-align:center}@media(max-width:1180px){.media-layout{grid-template-columns:minmax(350px,400px) minmax(0,1fr)}.history-list{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:900px){.media-tool{padding:18px}.media-layout{grid-template-columns:1fr}.preview-workspace{grid-row:1}.control-panel{grid-row:2}.preview-stage{min-height:520px}.history-list{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:620px){.media-tool{padding:14px}.media-header{align-items:flex-start;flex-direction:column}.header-actions{width:100%;justify-content:space-between}.mode-grid,.history-list{grid-template-columns:1fr}.preview-stage{min-height:430px;padding:14px}.featured,.empty-result{min-height:330px}.title-wrap h1{font-size:22px}}
+.mode-grid button:disabled{cursor:not-allowed;opacity:.48;transform:none}.mode-grid button:disabled:hover{border-color:var(--border-subtle);transform:none}
+@media(prefers-reduced-motion:reduce){.mode-grid button,.history-card{transition:none}.mode-grid button:hover{transform:none}}
 </style>

@@ -346,8 +346,34 @@ test('专项工具页沿用中文工作台标签和产品主色', async () => {
     assert.match(workbench, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   }
   assert.doesNotMatch(workbench, /AI RUN STUDIO|INPUT DECK|RUN ARCHIVE|OUTPUT STAGE/)
-  assert.match(media, /<p>结果预览<\/p>/)
+  assert.match(media, /<h1>\{\{ media === 'image' \? '单图生成' : '单视频生成' \}\}<\/h1>/)
+  assert.match(media, /<h2>引用素材<\/h2>/)
+  assert.match(media, /<h2>最近生成<\/h2>/)
   assert.doesNotMatch(media, /OUTPUT PREVIEW/)
+})
+
+test('单视频工具使用项目素材和全能视频任务', async () => {
+  const [media, selector] = await Promise.all([
+    readSource('../src/views/ToolMediaGeneration.vue'),
+    readSource('../src/components/ToolAssetSelector.vue'),
+  ])
+
+  assert.match(media, /项目只用于计费和素材归属，不会创建短剧工作流/)
+  assert.match(media, /omniVideoAPI\.create\(\{/)
+  assert.match(media, /asset_selection_policy: 'all_selected'/)
+  assert.match(media, /creation_mode: mode\.value === 'first_last' \? 'first_last_frame' : 'multi_reference'/)
+  assert.match(media, /\['image', 'video', 'audio'\]/)
+  assert.match(media, /window\.setTimeout\(\(\) => load\(true\), 4000\)/)
+  assert.match(media, /videosAPI\.list\(\{ page_size: 30, drama_id: 0 \}\)/)
+  assert.match(media, /history_kind: 'legacy'/)
+  assert.match(media, /label: '组生组图', value: 'batch'/)
+  assert.match(selector, /scope: 'project', drama_id: Number\(props\.dramaId\)/)
+  assert.match(selector, /scope: 'global'/)
+  assert.match(selector, /drama_id: Number\(props\.dramaId\) \|\| undefined/)
+  assert.match(selector, /multiple/)
+  assert.match(selector, /Promise\.allSettled\(requests\)/)
+  assert.match(media, /historyKey\(featured\) === historyKey\(item\)/)
+  assert.match((await readSource('../src/views/ToolWorkbench.vue')), /row-gap:1rem;[\s\S]*height:100%;[\s\S]*overflow:hidden/)
 })
 
 test('每次工具与自由全能生成都要求并传递唯一的计费归属项目', async () => {
