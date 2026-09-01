@@ -524,6 +524,33 @@ test('账户和运营页面使用工作台层级而非传统驾驶舱卡片墙',
   assert.doesNotMatch(admin, /AI 漫剧运营驾驶舱/)
 })
 
+test('共享额度账单提供受控消费明细和资金流水双视图', async () => {
+  const [account, api] = await Promise.all([
+    readSource('../src/views/AccountCenter.vue'),
+    readSource('../src/api/account.js'),
+  ])
+
+  assert.match(account, /消费明细/)
+  assert.match(account, /资金流水/)
+  assert.match(account, /isOrganizationAdmin/)
+  assert.match(account, /usageFilters\.user_id/)
+  assert.match(account, /formatChinaDateTime\(row\.created_at\)/)
+  assert.match(account, /row\.display_name \|\| row\.username/)
+  assert.match(account, /row\.project_title_snapshot/)
+  assert.match(api, /usageMembers: \(\) => request\.get\('\/billing\/usage-members'\)/)
+})
+
+test('账户安全表单使用收缩安全布局并把冻结说明放入额度卡片', async () => {
+  const account = await readSource('../src/views/AccountCenter.vue')
+
+  assert.doesNotMatch(account, /账单怎么看/)
+  assert.match(account, /完成后按实际用量结算，失败则自动释放/)
+  assert.match(account, /class="panel security-card security-card--password"/)
+  assert.match(account, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
+  assert.match(account, /security-form-fields--password/)
+  assert.doesNotMatch(account, /<el-form inline>/)
+})
+
 test('工作区在缩放时让舞台优先收缩，运营导航提供图标语义', async () => {
   const [base, workspaces, admin, free, film] = await Promise.all([
     readSource('../src/styles/base.css'),

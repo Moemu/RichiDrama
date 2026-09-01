@@ -96,6 +96,7 @@ function setupRouter(cfg, db, log) {
   // ---------- billing (self-service) ----------
   r.get('/billing/me', billing.me);
   r.get('/billing/usage', billing.usage);
+  r.get('/billing/usage-members', billing.usageMembers);
   r.get('/billing/transactions', billing.transactions);
   r.post('/billing/quotes', billing.quote);
   r.post('/billing/resource-image-quotes', billing.resourceImageQuote);

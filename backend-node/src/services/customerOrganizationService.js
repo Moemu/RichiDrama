@@ -96,4 +96,21 @@ function replaceMembers(db, organizationId, members) {
   return organizationDetail(db, organization.id);
 }
 
-module.exports = { hasTable, membershipForUser, account, listOrganizations, organizationDetail, saveOrganization, replaceMembers };
+function usageMembers(db, organizationId) {
+  const id = Number(organizationId);
+  if (!Number.isSafeInteger(id) || id <= 0) return [];
+  return db.prepare(`SELECT u.id,u.username,u.display_name,u.is_active,
+      CASE WHEN current_member.user_id IS NULL THEN 0 ELSE 1 END AS is_current
+    FROM users u
+    JOIN (
+      SELECT user_id FROM customer_organization_memberships WHERE organization_id=?
+      UNION
+      SELECT user_id FROM billing_usage_logs WHERE organization_id=?
+    ) consumer ON consumer.user_id=u.id
+    LEFT JOIN customer_organization_memberships current_member
+      ON current_member.organization_id=? AND current_member.user_id=u.id
+    ORDER BY is_current DESC,COALESCE(NULLIF(u.display_name,''),u.username),u.id`).all(id, id, id)
+    .map((row) => ({ ...row, is_active: !!row.is_active, is_current: !!row.is_current }));
+}
+
+module.exports = { hasTable, membershipForUser, account, listOrganizations, organizationDetail, saveOrganization, replaceMembers, usageMembers };
