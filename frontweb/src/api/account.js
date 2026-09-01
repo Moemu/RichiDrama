@@ -61,6 +61,9 @@ export const adminAPI = {
   adoptProductionSource: (id, data) => request.post(`/admin/production/${id}/adopt-source`, data),
   retryProductionArchive: (id, data) => request.post(`/admin/production/${id}/retry-archive`, data),
   mediaArchives: (params) => request.get('/admin/media-archives', { params }),
+  richbestRebindCandidates: (params) => request.get('/admin/richbest-asset-rebind-candidates', { params }),
+  createRichbestRebind: (data) => request.post('/admin/richbest-asset-rebinds', data),
+  richbestRebind: (id) => request.get(`/admin/richbest-asset-rebinds/${id}`),
   reconciliations: (params) => request.get('/admin/billing-reconciliations', { params }),
   audit: (params) => request.get('/admin/audit-logs', { params }),
 }

@@ -93,6 +93,7 @@ function createApp() {
   require('./services/operationsReportService').startDailyReporting(db, log);
   require('./services/providerPriceService').startHourlySync(db, log);
   require('./services/assetSd2Service').resumePendingCertifications(db, log, config);
+  require('./services/richbestAssetRebindService').startRecovery(db, log, config);
   require('./services/omniVideoService').startSd2WaitingGenerationRecovery(db, log);
   const taskService = require('./services/taskService');
   taskService.failOrphanedAsyncTasksOnStartup(db, log);

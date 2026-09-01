@@ -559,7 +559,7 @@ async function registerCharacter(db, log, cfg, characterId, userId, options = {}
   }
   markOtherBindingsStale(db, ctx, character.id, fingerprint);
   let binding = findBinding(db, ctx, character.id, fingerprint);
-  if (!binding || binding.status === 'failed') {
+  if (!binding || ['failed', 'stale'].includes(String(binding.status).toLowerCase())) {
     binding = createBinding(db, ctx, character, mapped?.id, fingerprint, sourceName);
   }
   if (binding.status === 'active') return { ok: true, seedance2_asset: saveProjection(db, log, character.id, binding), reused: true };
@@ -733,7 +733,7 @@ async function registerAsset(db, log, cfg, assetId, userId, options = {}) {
   const sourceName = `rb-asset-${asset.id}-${fingerprint.slice(0, 12)}`.slice(0, 64);
   markOtherAssetBindingsStale(db, ctx, asset.id, fingerprint);
   let binding = findAssetBinding(db, ctx, asset.id, fingerprint);
-  if (!binding || binding.status === 'failed') {
+  if (!binding || ['failed', 'stale'].includes(String(binding.status).toLowerCase())) {
     binding = createAssetBinding(db, ctx, asset, fingerprint, sourceName, assetType);
   }
   if (binding.status === 'active') {
@@ -849,6 +849,27 @@ async function refreshAsset(db, log, cfg, assetId, userId, options = {}) {
   return result;
 }
 
+function prepareRebind(db, log, bindingId, reason) {
+  const binding = db.prepare('SELECT * FROM external_asset_bindings WHERE id=? AND provider=?')
+    .get(Number(bindingId), PROVIDER);
+  if (!binding) throw new Error('Richbest 素材绑定不存在');
+  const status = String(binding.status || '').toLowerCase();
+  if (status === 'active') {
+    const now = new Date().toISOString();
+    const stale = updateBinding(db, binding.id, {
+      status: 'stale',
+      stage: 'stale',
+      stale_at: now,
+      error_code: 'admin_rebind_requested',
+      error_message: String(reason || '管理员要求重新绑定').slice(0, 2000),
+    });
+    saveBindingProjection(db, log, stale);
+    return stale;
+  }
+  if (status === 'stale' && binding.error_code === 'admin_rebind_requested') return binding;
+  throw new Error(`绑定状态 ${binding.status || 'unknown'} 不能强制重绑`);
+}
+
 module.exports = {
   PROVIDER,
   PENDING_STATUSES,
@@ -873,4 +894,5 @@ module.exports = {
   assetTypeFor,
   mimeFor,
   validateLocalAsset,
+  prepareRebind,
 };
