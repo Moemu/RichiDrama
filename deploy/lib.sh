@@ -63,37 +63,21 @@ require_container_network() {
 validate_production_ingress() {
   require_container_network "$HTTP_NGINX_CONTAINER" "$PROD_PROXY_NETWORK"
   docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
-    default=/etc/nginx/conf.d/default.conf
-    stale=/etc/nginx/conf.d/minidrama.conf
-    disabled=/etc/nginx/minidrama.conf.disabled
-    grep -Eq "server_name[[:space:]]+drama\\.richbest\\.cn;" "$default"
-    grep -Eq "proxy_pass[[:space:]]+http://minidrama-app:5679" "$default"
-    if [ -f "$stale" ]; then
-      mv "$stale" "$disabled"
-      if ! nginx -t; then
-        mv "$disabled" "$stale"
-        exit 1
-      fi
-    fi
-    count="$(nginx -T 2>&1 | grep -Ec "server_name[[:space:]]+drama\\.richbest\\.cn;")"
+    active="$(nginx -T 2>&1)"
+    printf "%s\n" "$active" | grep -Eq "server_name[[:space:]]+drama\\.richbest\\.cn;"
+    printf "%s\n" "$active" | grep -Eq "proxy_pass[[:space:]]+http://minidrama-app:5679"
+    count="$(printf "%s\n" "$active" | grep -Ec "server_name[[:space:]]+drama\\.richbest\\.cn;")"
     [ "$count" -eq 1 ]
     getent hosts minidrama-app >/dev/null
     nginx -t
   ' || fail 'Production Nginx ingress validation failed.'
 }
 
-# Read-only variant for preview deploys: same guarantees, but it never moves
-# production configuration — migrating legacy files is release-deploy work.
+# Preview deploys apply the same read-only checks to the complete active Nginx
+# configuration. The RichiDrama vhost can live in any included conf.d file.
 validate_production_ingress_readonly() {
   require_container_network "$HTTP_NGINX_CONTAINER" "$PROD_PROXY_NETWORK"
-  docker exec "$HTTP_NGINX_CONTAINER" sh -eu -c '
-    grep -Eq "server_name[[:space:]]+drama\\.richbest\\.cn;" /etc/nginx/conf.d/default.conf
-    grep -Eq "proxy_pass[[:space:]]+http://minidrama-app:5679" /etc/nginx/conf.d/default.conf
-    count="$(nginx -T 2>&1 | grep -Ec "server_name[[:space:]]+drama\\.richbest\\.cn;")"
-    [ "$count" -eq 1 ]
-    getent hosts minidrama-app >/dev/null
-    nginx -t
-  ' || fail 'Production Nginx ingress validation failed.'
+  validate_production_ingress
 }
 
 prepare_source() {

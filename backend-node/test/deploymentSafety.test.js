@@ -45,7 +45,8 @@ test('preview deployment is production-identical except dataset and title', () =
   // Preview deploys only inspect production ingress; they never migrate it.
   assert.match(source, /acquire_lock\nvalidate_production_ingress_readonly/);
   assert.match(library, /validate_production_ingress\(\)/);
-  assert.match(library, /mv "\$stale" "\$disabled"/);
+  assert.match(library, /active=.*nginx -T/);
+  assert.doesNotMatch(library, /mv "\$stale" "\$disabled"/);
   // Candidate images must be pruned on every successful preview.
   assert.match(source, /prune_release_images/);
   // Media tree fidelity: an OverlayFS union view mounts the real production
@@ -108,6 +109,9 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(source, /validate_production_ingress/);
   assert.doesNotMatch(source, /sync_production_nginx/);
   assert.match(library, /count=.*server_name/);
+  assert.match(library, /active=.*nginx -T/);
+  assert.doesNotMatch(library, /grep -Eq .*server_name.*default\.conf/);
+  assert.doesNotMatch(library, /mv "\$stale"/);
   assert.match(library, /getent hosts minidrama-app/);
   assert.match(source, /rollback_now/);
   assert.match(library, /local image="\$1" sha="\$2" data_dir="\$3"\s+local name="minidrama-preflight-/);
