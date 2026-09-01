@@ -4,6 +4,13 @@ import { readFile } from 'node:fs/promises'
 
 const readSource = (relativePath) => readFile(new URL(relativePath, import.meta.url), 'utf8')
 
+test('自由创作导入防重复提交状态所需的 Vue API', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+
+  assert.match(source, /import \{[^}]*\breactive\b[^}]*\} from 'vue'/)
+  assert.match(source, /const retryingJobIds = reactive\(new Set\(\)\)/)
+})
+
 test('自由创作只渲染一个提示词编辑器', async () => {
   const source = await readSource('../src/views/FreeCreate.vue')
   const editorTags = source.match(/<OmniAssetPromptEditor\b/g) || []
