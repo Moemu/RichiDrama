@@ -17,6 +17,12 @@ export function beginAssetPointerDrag(event, asset) {
   if (typeof window === 'undefined' || event.button !== 0 || !asset) return false
   if (event.target?.closest?.('button, input, select, textarea, a')) return false
 
+  // 图片和视频会启动浏览器原生拖拽。它会中断 pointermove/pointerup，
+  // 导致编辑器看不到最终释放位置。
+  event.preventDefault()
+  const captureTarget = event.currentTarget
+  try { captureTarget?.setPointerCapture?.(event.pointerId) } catch (_) {}
+
   const startX = event.clientX
   const startY = event.clientY
   let active = false
@@ -26,6 +32,9 @@ export function beginAssetPointerDrag(event, asset) {
     window.removeEventListener('pointerup', up)
     window.removeEventListener('pointercancel', cancel)
     document.documentElement.classList.remove('asset-pointer-dragging')
+    try {
+      if (captureTarget?.hasPointerCapture?.(event.pointerId)) captureTarget.releasePointerCapture(event.pointerId)
+    } catch (_) {}
   }
   const finish = (endEvent, dropped) => {
     cleanup()

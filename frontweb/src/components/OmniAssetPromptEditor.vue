@@ -10,7 +10,7 @@
       role="textbox"
       aria-multiline="true"
       aria-label="镜头提示词"
-      data-placeholder="描述你要生成的视频；输入 @ 引用素材，或直接把左侧素材拖入此处"
+      :data-placeholder="placeholder"
       @input="onInput"
       @keyup="onCursorChange"
       @click="onCursorChange"
@@ -57,6 +57,7 @@ const props = defineProps({
   chosenIds: { type: Set, default: () => new Set() },
   /** 结构化引用：素材 ID + 文本位置。重名素材不再仅靠文件名猜测。 */
   referenceDocument: { type: Object, default: () => ({ refs: [] }) },
+  placeholder: { type: String, default: '描述你要生成的视频；输入 @ 引用素材，或直接把左侧素材拖入此处' },
 })
 const emit = defineEmits(['update:modelValue', 'pick', 'references'])
 const editorRef = ref(null)

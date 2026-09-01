@@ -134,6 +134,8 @@ test('asset drag shows an exact text-boundary caret and rejects whitespace-only 
   assert.match(pointerDrag, /Math\.hypot\([\s\S]*< 6/)
   assert.match(pointerDrag, /ASSET_POINTER_MOVE/)
   assert.match(pointerDrag, /ASSET_POINTER_DROP/)
+  assert.match(pointerDrag, /event\.preventDefault\(\)/)
+  assert.match(pointerDrag, /setPointerCapture/)
   assert.match(promptEditor, /window\.addEventListener\(ASSET_POINTER_MOVE/)
   assert.match(promptEditor, /insertAsset\(detail\.asset, \{ offset: point\.offset \}\)/)
   assert.match(filmCreate, /setTransparentDragPreview\(e\)/)
