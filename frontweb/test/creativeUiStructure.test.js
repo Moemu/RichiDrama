@@ -377,6 +377,20 @@ test('generation settings keep configured model identifiers unchanged', async ()
   assert.doesNotMatch(source, /Seedance .*标准版|可灵视频模型|万相视频模型|混元视频模型/)
 })
 
+test('generation settings use model capabilities to filter source resolutions', async () => {
+  const [source, config] = await Promise.all([
+    readSource('../src/components/GenerationSettings.vue'),
+    readSource('../src/components/AIConfigContent.vue'),
+  ])
+  assert.match(source, /selectedVideoCapability/)
+  assert.match(source, /limits\?\.resolutions/)
+  assert.match(source, /resolutionOptions = computed/)
+  assert.match(source, /当前模型不支持/)
+  assert.match(source, /需要 1080p 成片时可启用 AI 超分/)
+  assert.match(config, /models 可按模型 ID 覆盖/)
+  assert.doesNotMatch(config, /duration_seconds/)
+})
+
 test('运营页面始终提供返回主页入口', async () => {
   const [consoleSource, reportsSource] = await Promise.all([
     readSource('../src/views/AdminConsole.vue'),

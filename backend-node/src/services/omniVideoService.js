@@ -40,6 +40,7 @@ function quote(db, body, payer) {
   const tenantOptions = tenantId ? { tenant_id: tenantId } : {};
   const capability = capabilityService.resolve(db, model, [], tenantOptions);
   if (!capability.model || capability.model !== model) throw new Error('所选视频模型不可用');
+  capabilityService.validateResolution(capability, body.resolution || '480p');
   const aiConfigs = require('./aiConfigService');
   const billing = require('./billingService');
   const billingTarget = aiConfigs.resolveBillingTarget(db, 'video', capability.model, capability.config_id, tenantOptions);
@@ -90,6 +91,7 @@ function create(db, log, body, billingUser) {
   const assets = prioritizePromptReferenceAssets(input.map((entry, ordinal) => resolveAsset(db, entry, ordinal, body.owner_user_id)), body.prompt_document, prompt);
   const capability = capabilityService.resolve(db, body.model, assets, tenantOptions);
   if (!capability.model) throw new Error('请先在 AI 配置中启用视频模型');
+  capabilityService.validateResolution(capability, body.resolution);
   validateShotAssetLimits(assets, capability);
   body.duration = Math.min(maxDurationForModel(capability.model), Math.max(4, Math.round(Number(body.duration) || 15)));
   const creationMode = body.creation_mode || body.settings?.creation_mode || 'multi_reference';

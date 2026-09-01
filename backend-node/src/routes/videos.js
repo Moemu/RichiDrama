@@ -46,6 +46,11 @@ function routes(db, log) {
         const videoConfig = require('../services/aiConfigService').listConfigs(db, body.service_type || 'video', aiOptions)[0];
         const modelForBilling = String(body.model || videoConfig?.default_model || videoConfig?.model?.[0] || '').trim();
         if (!modelForBilling) return response.badRequest(res, '请选择视频模型后再生成');
+        const capabilityService = require('../services/videoModelCapabilities');
+        const capability = capabilityService.resolve(db, modelForBilling, [], aiOptions);
+        if (!capability.model || capability.model !== modelForBilling) return response.badRequest(res, '所选视频模型不可用');
+        try { capabilityService.validateResolution(capability, policy.resolution); }
+        catch (error) { return response.badRequest(res, error.message); }
         const billingTarget = require('../services/aiConfigService').resolveBillingTarget(db, body.service_type || 'video', modelForBilling, body.ai_config_id, aiOptions);
         const configForBilling = require('../services/aiConfigService').getConfig(db, billingTarget.config_id) || videoConfig;
         let settings = {}; try { settings = JSON.parse(configForBilling?.settings || '{}'); } catch (_) {}

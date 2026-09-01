@@ -3,7 +3,7 @@
     <UiChoiceField v-if="showTextModel" label="文本模型" :model-value="value.text_model || 'auto'" :options="textModelOptions" @update:model-value="set('text_model', $event)" />
     <UiChoiceField label="视频模型" :model-value="value.video_model || ''" :options="videoModelOptions" :invalid="videoModelInvalid" :error="videoModelError" @update:model-value="set('video_model', $event)" />
     <UiChoiceField class="duration-setting" label="时长（秒）" :model-value="duration" :options="durationOptions.map((second) => ({ label: `${second} 秒`, value: second }))" @update:model-value="set('duration', $event)" />
-    <UiChoiceField label="分辨率" :model-value="value.resolution || '720p'" :options="resolutionOptions" @update:model-value="set('resolution', $event)" />
+    <UiChoiceField label="分辨率" :model-value="value.resolution || '720p'" :options="resolutionOptions" :invalid="resolutionInvalid" :error="resolutionError" @update:model-value="set('resolution', $event)" />
     <UiChoiceField label="AI 超分（新镜头默认 1080p）" :model-value="value.upscale_resolution || ''" :options="upscaleOptions" @update:model-value="set('upscale_resolution', $event || null)" />
     <UiChoiceField label="智能插帧（按需）" :model-value="value.target_fps || ''" :options="fpsOptions" @update:model-value="set('target_fps', $event || null)" />
     <UiChoiceField label="宽高比" :model-value="value.aspect_ratio || '16:9'" :options="aspectRatioOptions" @update:model-value="set('aspect_ratio', $event)" />
@@ -39,7 +39,19 @@ const duration = computed(() => Math.min(props.maxDuration, Math.max(4, Number(v
 const durationOptions = computed(() => Array.from({ length: Math.max(0, props.maxDuration - 3) }, (_, index) => index + 4))
 const textModelOptions = computed(() => [{ label: '自动选择', description: '使用当前默认文本模型', value: 'auto' }, ...textModels.value.map((item) => ({ label: displayModelName(item), value: item }))])
 const videoModelOptions = computed(() => videoModels.value.map((item) => ({ label: displayModelName(item.model), description: item.is_default ? '默认模型' : '', value: item.model })))
-const resolutionOptions = [{ label: '480p', value: '480p' }, { label: '720p', value: '720p' }, { label: '1080p', value: '1080p' }]
+const allResolutionOptions = [{ label: '480p', value: '480p' }, { label: '720p', value: '720p' }, { label: '1080p', value: '1080p' }]
+const selectedVideoCapability = computed(() => videoModels.value.find((item) => item.model === value.value.video_model) || null)
+const allowedResolutions = computed(() => {
+  const configured = selectedVideoCapability.value?.limits?.resolutions
+  return Array.isArray(configured) && configured.length
+    ? configured.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    : allResolutionOptions.map((item) => item.value)
+})
+const resolutionOptions = computed(() => allResolutionOptions.filter((item) => allowedResolutions.value.includes(item.value)))
+const resolutionInvalid = computed(() => !!selectedVideoCapability.value && !allowedResolutions.value.includes(String(value.value.resolution || '720p').toLowerCase()))
+const resolutionError = computed(() => resolutionInvalid.value
+  ? `当前模型不支持 ${value.value.resolution} 原片。请选择 ${allowedResolutions.value.join(' 或 ')}${allowedResolutions.value.includes('720p') ? '；需要 1080p 成片时可启用 AI 超分' : ''}。`
+  : '')
 const fpsOptions = [{ label: '不插帧', description: '保持原始帧率', value: '' }, { label: '60 fps', value: 60 }, { label: '120 fps', value: 120 }]
 const aspectRatioOptions = ['16:9', '9:16', '1:1', '3:4', '4:3', '3:2', '2:3', '21:9'].map((item) => ({ label: item, value: item }))
 const upscaleOptions = computed(() => {
@@ -58,6 +70,16 @@ function displayModelName(model) {
 }
 function set(key, next) {
   const nextValue = { ...value.value, [key]: key === 'duration' ? Math.min(props.maxDuration, Math.max(4, Number(next) || 15)) : next }
+  if (key === 'video_model') {
+    const capability = videoModels.value.find((item) => item.model === next)
+    const configured = capability?.limits?.resolutions
+    const allowed = Array.isArray(configured) && configured.length ? configured.map((item) => String(item).toLowerCase()) : allResolutionOptions.map((item) => item.value)
+    const current = String(nextValue.resolution || '720p').toLowerCase()
+    if (!allowed.includes(current)) {
+      nextValue.resolution = allowed.includes('720p') ? '720p' : allowed[0]
+      if (current === '1080p' && nextValue.resolution === '720p') nextValue.upscale_resolution = '1080p'
+    }
+  }
   if (key === 'resolution') {
     const allowed = next === '480p' ? ['720p', '1080p'] : next === '720p' ? ['1080p'] : []
     if (!allowed.includes(nextValue.upscale_resolution)) nextValue.upscale_resolution = null
