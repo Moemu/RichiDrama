@@ -437,6 +437,7 @@ async function doUploadLibImg(event, form, api, reloadFn) {
 
 // 共享：AI 生成图片
 async function doGenerateLibImg(form, prompt, api, reloadFn) {
+  if (form.imgGenerating) return
   if (!prompt?.trim()) { ElMessage.warning('请先填写名称或描述'); return }
   form.imgGenerating = true
   try {

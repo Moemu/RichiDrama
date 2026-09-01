@@ -111,6 +111,7 @@ export function useCharacters(deps) {
       return
     }
     const meta = buildExtractTaskMeta(store, dramaId.value, epId, GEN_RESOURCE.EXTRACT_CHARACTERS, '提取角色')
+    if (genStore.isRunning(meta)) return
     genStore.markRunning(meta)
     try {
       const outline =
@@ -344,6 +345,7 @@ export function useCharacters(deps) {
     char.errorMsg = ''
     char.error_msg = ''
     const meta = buildCharImageMeta(char)
+    if (generatingCharIds.has(char.id) || genStore.isRunning(meta)) return
     generatingCharIds.add(char.id)
     genStore.markRunning(meta)
     try {

@@ -96,6 +96,7 @@ export function useScenes(deps) {
     if (!currentEpisodeId.value) return
     const epId = currentEpisodeId.value
     const meta = buildExtractTaskMeta(store, dramaId.value, epId, GEN_RESOURCE.EXTRACT_SCENES, '提取场景')
+    if (genStore.isRunning(meta)) return
     genStore.markRunning(meta)
     try {
       const res = await dramaAPI.extractBackgrounds(epId, {
@@ -318,6 +319,7 @@ export function useScenes(deps) {
     scene.errorMsg = ''
     scene.error_msg = ''
     const meta = buildSceneImageMeta(scene)
+    if (generatingSceneIds.has(scene.id) || genStore.isRunning(meta)) return
     generatingSceneIds.add(scene.id)
     genStore.markRunning(meta)
     try {

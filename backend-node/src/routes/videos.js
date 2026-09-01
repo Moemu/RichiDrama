@@ -36,6 +36,10 @@ function routes(db, log) {
           const own = db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id);
           if (!own) return response.notFound(res, '项目不存在');
         }
+        if (body.storyboard_id && require('../services/generationSubmissionGuard').findActiveVideoForTarget(db, {
+          ownerUserId: req.auth.id,
+          storyboardId: body.storyboard_id,
+        })) return response.badRequest(res, '当前镜头已有视频生成任务，请等待任务结束后再生成');
         const billing = require('../services/billingService');
         const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id);
         const aiOptions = tenant ? { tenant_id: tenant.id } : {};
