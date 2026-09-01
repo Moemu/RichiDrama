@@ -7,6 +7,11 @@ const path = require('path');
 const { getDb, closeDb } = require('../src/db');
 const { runMigrationsAndEnsure } = require('../src/db/migrate');
 const omni = require('../src/services/omniVideoService');
+const auth = require('../src/services/authService');
+const aiConfigs = require('../src/services/aiConfigService');
+const tenants = require('../src/services/tenantService');
+const billing = require('../src/services/billingService');
+const videoService = require('../src/services/videoService');
 
 test('SD2 recovery marks an unrecoverable waiting job invalid instead of retrying forever', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'local-mini-drama-sd2-recovery-'));
@@ -29,6 +34,92 @@ test('SD2 recovery marks an unrecoverable waiting job invalid instead of retryin
     assert.equal(row.status, 'invalid');
     assert.match(row.error_msg, /缺少可恢复的请求快照/);
   } finally {
+    closeDb();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('SD2 waiting generation resumes after restart when an old snapshot has no idempotency key', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'local-mini-drama-sd2-resume-'));
+  const dbPath = path.join(root, 'test.db');
+  const originalProcess = videoService.processVideoGeneration;
+  let db;
+  try {
+    db = getDb({ path: dbPath, type: 'sqlite' });
+    runMigrationsAndEnsure(db);
+    const warnings = [];
+    const log = { info() {}, warn(...args) { warnings.push(args); }, error() {} };
+    const admin = auth.ensureBootstrapAdmin(db, log);
+    billing.adjustBalance(db, admin.id, admin.id, 10000, 'SD2 recovery test balance');
+    const tenant = tenants.tenantForUser(db, admin.id);
+    const model = 'doubao-seedance-2-0-mini-260615';
+    const config = aiConfigs.createConfig(db, log, {
+      service_type: 'video', provider: 'volcengine', api_protocol: 'volcengine_omni',
+      name: 'SD2 recovery test', base_url: 'https://example.invalid', api_key: 'test',
+      model: [model], default_model: model, is_default: true,
+      settings: JSON.stringify({ billing_reserve_output_tokens: 1000000 }), owner_tenant_id: tenant.id,
+    });
+    tenants.bindOwnedConfig(db, tenant.id, config, { is_default: true });
+    const now = new Date().toISOString();
+    const pendingCertification = JSON.stringify({ status: 'processing', stage: 'processing', hub_asset_id: 'asset-pending', asset_url: 'asset://asset-pending' });
+    const asset = db.prepare(`INSERT INTO assets
+      (owner_user_id, name, type, url, local_path, processing_status, requires_sd2_identity, seedance2_asset, created_at, updated_at)
+      VALUES (?, '真人参考图.png', 'image', '/static/library/identity.png', 'library/identity.png', 'ready', 1, ?, ?, ?)`)
+      .run(admin.id, pendingCertification, now, now);
+
+    const waiting = omni.create(db, log, {
+      model, prompt: '真人参考镜头', resolution: '480p', duration: 5,
+      owner_user_id: admin.id, tenant_id: tenant.id, idempotency_key: 'client-sd2-waiting-1',
+      assets: [{ asset_id: Number(asset.lastInsertRowid), alias: '真人参考图', type: 'image', role: 'reference', usage: 'reference' }],
+    }, admin);
+    assert.equal(waiting.status, 'sd2_waiting');
+    const storedJob = db.prepare('SELECT id, request_snapshot_json FROM omni_video_jobs WHERE video_generation_id=?').get(waiting.video_generation_id);
+    const storedSnapshot = JSON.parse(storedJob.request_snapshot_json);
+    assert.equal(storedSnapshot.idempotency_key, 'client-sd2-waiting-1');
+    assert.equal(omni.get(db, storedJob.id).request_snapshot.idempotency_key, undefined);
+
+    omni.resumeSd2WaitingGenerations(db, log);
+    const stillWaiting = db.prepare('SELECT status, billing_authorization_id FROM video_generations WHERE id=?').get(waiting.video_generation_id);
+    assert.equal(stillWaiting.status, 'sd2_waiting');
+    assert.equal(stillWaiting.billing_authorization_id, null);
+    assert.equal(warnings.some((entry) => String(entry[0]).includes('resume failed')), false);
+
+    // Emulate a record created by the older release, then make the remote
+    // certification active before restarting the backend.
+    delete storedSnapshot.idempotency_key;
+    db.prepare('UPDATE omni_video_jobs SET request_snapshot_json=? WHERE id=?').run(JSON.stringify(storedSnapshot), storedJob.id);
+    db.prepare('UPDATE assets SET seedance2_asset=?, updated_at=? WHERE id=?').run(
+      JSON.stringify({ status: 'active', stage: 'active', hub_asset_id: 'asset-active', asset_url: 'asset://asset-active' }),
+      new Date().toISOString(), Number(asset.lastInsertRowid),
+    );
+    closeDb();
+    db = getDb({ path: dbPath, type: 'sqlite' });
+
+    const processed = [];
+    videoService.processVideoGeneration = (_db, _log, generationId) => { processed.push(Number(generationId)); };
+    omni.resumeSd2WaitingGenerations(db, log);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const resumed = db.prepare('SELECT status, billing_authorization_id, error_msg FROM video_generations WHERE id=?').get(waiting.video_generation_id);
+    assert.equal(resumed.status, 'processing', JSON.stringify(warnings));
+    assert.ok(resumed.billing_authorization_id);
+    assert.equal(resumed.error_msg, null);
+    assert.deepEqual(processed, [waiting.video_generation_id]);
+    const authorization = db.prepare("SELECT idempotency_key FROM billing_transactions WHERE id=? AND type='authorization'").get(resumed.billing_authorization_id);
+    assert.equal(authorization.idempotency_key, `omni-video:sd2-resume:${waiting.video_generation_id}`);
+
+    billing.voidAuthorization(db, admin, resumed.billing_authorization_id, 'SD2 recovery retry test');
+    db.prepare("UPDATE video_generations SET status='retryable' WHERE id=?").run(waiting.video_generation_id);
+    const retried = omni.retry(db, log, storedJob.id, admin);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(retried.status, 'processing');
+    assert.notEqual(retried.video_generation_id, waiting.video_generation_id);
+    const retryGeneration = db.prepare('SELECT billing_authorization_id FROM video_generations WHERE id=?').get(retried.video_generation_id);
+    const retryAuthorization = db.prepare("SELECT idempotency_key FROM billing_transactions WHERE id=? AND type='authorization'").get(retryGeneration.billing_authorization_id);
+    assert.equal(retryAuthorization.idempotency_key, `omni-video:retry:${storedJob.id}`);
+    assert.deepEqual(processed, [waiting.video_generation_id, retried.video_generation_id]);
+  } finally {
+    videoService.processVideoGeneration = originalProcess;
     closeDb();
     fs.rmSync(root, { recursive: true, force: true });
   }

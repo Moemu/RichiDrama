@@ -11,6 +11,8 @@
       <b>产出链路：</b>{{ quote?.chain || localChain }}
       <span v-if="quoteLoading"> · 正在核算</span>
       <span v-else-if="quote"> · 预计 {{ formatPoints(quote.estimated_total_points) }} 积分</span>
+      <span v-else-if="quoteError"> · {{ quoteError }}</span>
+      <span v-else-if="includeGenerationQuote && !value.video_model"> · 选择视频模型后显示预计积分</span>
       <small>最终按本地成片实测时长、分辨率和帧率结算；未选择的阶段不预授权、不调用、不扣费。</small>
     </div>
   </section>
@@ -29,6 +31,9 @@ const props = defineProps({
   maxDuration: { type: Number, default: 60 },
   videoModelInvalid: { type: Boolean, default: false },
   videoModelError: { type: String, default: '' },
+  includeGenerationQuote: { type: Boolean, default: false },
+  hasVideoInput: { type: Boolean, default: false },
+  hasAudioInput: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue'])
 const textModels = ref([]), videoModels = ref([])
@@ -62,7 +67,7 @@ const upscaleOptions = computed(() => {
   return items
 })
 const localChain = computed(() => ['生成原片', value.value.upscale_resolution ? `AI 超分 ${value.value.upscale_resolution}` : '', value.value.target_fps ? `AI 插帧 ${value.value.target_fps}fps` : '', `本地规范 ${value.value.aspect_ratio || '16:9'}`, '最终成片'].filter(Boolean).join(' → '))
-const quote = ref(null), quoteLoading = ref(false)
+const quote = ref(null), quoteLoading = ref(false), quoteError = ref('')
 let quoteTimer = null, quoteRevision = 0
 function formatPoints(value) { return Number(value || 0).toFixed(4).replace(/\.?(?:0+)$/, '') }
 function displayModelName(model) {
@@ -88,25 +93,51 @@ function set(key, next) {
 }
 function scheduleQuote() {
   clearTimeout(quoteTimer)
+  const revision = ++quoteRevision
   const upscale = value.value.upscale_resolution || null
   const fps = value.value.target_fps || null
-  if (!upscale && !fps) {
-    quote.value = { chain: localChain.value, estimated_total_points: 0, stages: [] }
+  const includeGeneration = props.includeGenerationQuote && !!value.value.video_model
+  if (props.includeGenerationQuote && !includeGeneration) {
+    quote.value = null
+    quoteError.value = ''
     quoteLoading.value = false
     return
   }
-  const revision = ++quoteRevision
+  if (!includeGeneration && !upscale && !fps) {
+    quote.value = { chain: localChain.value, estimated_total_points: 0, stages: [] }
+    quoteError.value = ''
+    quoteLoading.value = false
+    return
+  }
+  quote.value = null
+  quoteError.value = ''
   quoteLoading.value = true
   quoteTimer = setTimeout(async () => {
     try {
-      const result = await videosAPI.postprocessQuote({ duration: duration.value, resolution: value.value.resolution || '720p', aspect_ratio: value.value.aspect_ratio || '16:9', upscale_resolution: upscale, target_fps: fps, source_fps: 30 })
-      if (revision === quoteRevision) quote.value = result
+      const requests = []
+      if (includeGeneration) requests.push(omniVideoAPI.quoteBilling({
+        model: value.value.video_model,
+        duration: duration.value,
+        resolution: value.value.resolution || '720p',
+        has_video_input: props.hasVideoInput,
+        has_audio: props.hasAudioInput,
+      }).then((result) => ({ kind: 'generation', points: Number(result?.amount || 0) })))
+      if (upscale || fps) requests.push(videosAPI.postprocessQuote({ duration: duration.value, resolution: value.value.resolution || '720p', aspect_ratio: value.value.aspect_ratio || '16:9', upscale_resolution: upscale, target_fps: fps, source_fps: 30 }).then((result) => ({ kind: 'postprocess', points: Number(result?.estimated_total_points || 0), stages: result?.stages || [] })))
+      const results = await Promise.all(requests)
+      if (revision === quoteRevision) quote.value = {
+        chain: localChain.value,
+        estimated_total_points: results.reduce((sum, item) => sum + item.points, 0),
+        stages: results.flatMap((item) => item.stages || []),
+      }
     } catch (_) {
-      if (revision === quoteRevision) quote.value = null
+      if (revision === quoteRevision) {
+        quote.value = null
+        quoteError.value = '预计积分暂不可用'
+      }
     } finally { if (revision === quoteRevision) quoteLoading.value = false }
   }, 250)
 }
-watch(() => [value.value.duration, value.value.resolution, value.value.aspect_ratio, value.value.upscale_resolution, value.value.target_fps], scheduleQuote, { immediate: true })
+watch(() => [value.value.video_model, value.value.duration, value.value.resolution, value.value.aspect_ratio, value.value.upscale_resolution, value.value.target_fps, props.includeGenerationQuote, props.hasVideoInput, props.hasAudioInput], scheduleQuote, { immediate: true })
 onBeforeUnmount(() => clearTimeout(quoteTimer))
 function configModels(configs) { return [...new Set((configs || []).filter((item) => item.is_active !== false).flatMap((item) => Array.isArray(item.model) ? item.model : item.model ? [item.model] : []).filter(Boolean))] }
 onMounted(async () => {

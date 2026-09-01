@@ -166,6 +166,12 @@ test('在长提示词中插入素材只重绘一次并保持编辑器滚动位�
   assert.match(promptEditor, /el\.scrollTop = scrollPosition\?\.top \|\| 0/)
 })
 
+test('@ 素材筛选随光标位置立即更新', () => {
+  assert.match(promptEditor, /const lastCaretOffset = ref\(0\)/)
+  assert.match(promptEditor, /const cursor = lastCaretOffset\.value/)
+  assert.match(promptEditor, /lastCaretOffset\.value = caretOffset\(\)/)
+})
+
 test('billing adjustment explanation is explicitly optional', () => {
   const admin = readFileSync(new URL('../src/views/AdminConsole.vue', import.meta.url), 'utf8')
   assert.match(admin, /情况说明（选填）/)

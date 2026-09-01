@@ -73,7 +73,7 @@
           <label v-if="media === 'image'" class="field-label">模型
             <el-select v-model="model" clearable placeholder="使用当前默认模型"><el-option v-for="item in imageModelOptions" :key="item" :label="item" :value="item" /></el-select>
           </label>
-          <GenerationSettings v-else v-model="videoSettings" :max-duration="15" />
+          <GenerationSettings v-else v-model="videoSettings" :max-duration="15" include-generation-quote :has-video-input="quoteHasVideoInput" :has-audio-input="quoteHasAudioInput" />
           </div>
 
           <footer class="submit-bar">
@@ -157,6 +157,8 @@ const selectedMode = computed(() => modes.value.find((item) => item.value === mo
 const currentCapability = computed(() => capabilities.value.find((item) => item.model === videoSettings.value.video_model) || null)
 const assetLimit = computed(() => props.media === 'image' ? 9 : Number(currentCapability.value?.limits?.total_reference?.max || 15))
 const chosenAssetIds = computed(() => new Set([selectedAssetId.value, firstFrameAssetId.value, lastFrameAssetId.value, ...selectedAssetIds.value].filter((id) => Number(id) > 0).map(Number)))
+const quoteHasVideoInput = computed(() => selectedAssets.value.some((asset) => asset?.type === 'video'))
+const quoteHasAudioInput = computed(() => selectedAssets.value.some((asset) => asset?.type === 'audio'))
 const externalRefs = computed(() => reference.value.split(',').map((item) => item.trim()).filter(Boolean))
 const hasRequiredAssets = computed(() => {
   if (mode.value === 'text' || mode.value === 'batch') return true
@@ -230,9 +232,9 @@ function modeAvailable(value) { return props.media === 'image' || value !== 'fir
 function clearPoll() { window.clearTimeout(pollTimer); pollTimer = null }
 function schedulePoll() {
   clearPoll()
-  if (props.media === 'video' && items.value.some((item) => activeStatuses.has(item.status))) pollTimer = window.setTimeout(() => load(true), 4000)
+  if (props.media === 'video' && (items.value.some((item) => activeStatuses.has(item.status)) || activeStatuses.has(featured.value?.status))) pollTimer = window.setTimeout(() => load(true), 4000)
 }
-async function load(silent = false) {
+async function load(silent = false, preferredFeatured = null) {
   if (!silent) historyLoading.value = true
   try {
     if (props.media === 'image') {
@@ -249,25 +251,33 @@ async function load(silent = false) {
       if (!omniItems.length && !legacyItems.length && omniResult.status === 'rejected' && legacyResult.status === 'rejected') throw omniResult.reason
       items.value = [...omniItems, ...legacyItems].sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)).slice(0, 30)
     }
-    const selectedKey = historyKey(featured.value)
-    featured.value = items.value.find((item) => historyKey(item) === selectedKey) || items.value[0] || null
+    const selectedKey = historyKey(preferredFeatured || featured.value)
+    const pendingFeatured = activeStatuses.has(featured.value?.status) ? featured.value : null
+    featured.value = items.value.find((item) => historyKey(item) === selectedKey) || preferredFeatured || pendingFeatured || items.value[0] || null
   } catch (error) { if (!silent) ElMessage.error(error.message || '生成记录加载失败') }
   finally { historyLoading.value = false; schedulePoll() }
 }
 async function submit() {
   if (!canSubmit.value) return
+  const previousFeatured = featured.value
+  featured.value = null
   running.value = true
   try {
+    let created = null
     if (props.media === 'image') {
       const refs = requestAssets().map((asset) => asset.asset_id ? assetUrl(selectedAssets.value.find((item) => Number(item.id) === Number(asset.asset_id)) || selectedAsset.value) : asset.url).filter(Boolean)
-      await imagesAPI.create({ drama_id: Number(dramaId.value), prompt: prompt.value.trim(), model: model.value || undefined, image_url: mode.value === 'image' ? refs[0] : undefined, reference_images: mode.value === 'multi' ? refs : undefined })
+      created = await imagesAPI.create({ drama_id: Number(dramaId.value), prompt: prompt.value.trim(), model: model.value || undefined, image_url: mode.value === 'image' ? refs[0] : undefined, reference_images: mode.value === 'multi' ? refs : undefined })
     } else {
       const settings = videoSettings.value || {}
-      await omniVideoAPI.create({ source_context: 'single_video_tool', prompt: prompt.value.trim(), prompt_document: promptDocument.value, asset_selection_policy: 'all_selected', creation_mode: mode.value === 'first_last' ? 'first_last_frame' : 'multi_reference', model: settings.video_model, duration: settings.duration, resolution: settings.resolution || '720p', aspect_ratio: settings.aspect_ratio || '16:9', upscale_resolution: settings.upscale_resolution || null, target_fps: settings.target_fps || null, audio_strategy: 'reference_only', assets: requestAssets() })
+      created = await omniVideoAPI.create({ source_context: 'single_video_tool', prompt: prompt.value.trim(), prompt_document: promptDocument.value, asset_selection_policy: 'all_selected', creation_mode: mode.value === 'first_last' ? 'first_last_frame' : 'multi_reference', model: settings.video_model, duration: settings.duration, resolution: settings.resolution || '720p', aspect_ratio: settings.aspect_ratio || '16:9', upscale_resolution: settings.upscale_resolution || null, target_fps: settings.target_fps || null, audio_strategy: 'reference_only', assets: requestAssets() })
     }
+    const submittedPreview = props.media === 'video'
+      ? { ...created, id: created?.omni_job_id || created?.id, history_kind: 'omni', prompt: prompt.value.trim(), model: created?.resolved_model, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+      : created
+    featured.value = submittedPreview
     ElMessage.success('任务已提交，结果会自动刷新')
-    await load(true)
-  } catch (error) { ElMessage.error(error.message || '任务提交失败') }
+    await load(true, submittedPreview)
+  } catch (error) { featured.value = previousFeatured; ElMessage.error(error.message || '任务提交失败') }
   finally { running.value = false }
 }
 async function importAsset() {
@@ -461,6 +471,20 @@ onBeforeUnmount(clearPoll)
 .preview-stage { min-height: 0; padding: 22px 24px; }
 .featured,
 .empty-result { min-height: 420px; }
+.featured {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: stretch;
+  justify-content: stretch;
+}
+.featured > img,
+.featured > video { min-width: 0; min-height: 0; }
+.featured > footer {
+  position: static;
+  width: 100%;
+  border-top: 1px solid rgba(255, 255, 255, .1);
+  background: #05090f;
+}
 .generation-history { padding: 0; overflow: hidden; }
 .history-toggle {
   display: flex;
