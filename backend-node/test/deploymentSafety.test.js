@@ -72,6 +72,8 @@ test('preview vhost authenticates and routes like production would', () => {
   const vhost = read('deploy/nginx-preview-vhost.conf');
   assert.match(source, /install_preview_ingress "\$SOURCE_DIR\/deploy\/nginx-preview-vhost\.conf"/);
   assert.match(library, /install_preview_ingress/);
+  assert.match(library, /docker cp "\$auth_dir\/htpasswd" "\$HTTP_NGINX_CONTAINER:\/etc\/nginx\/minidrama-preview\.htpasswd"/);
+  assert.match(library, /chmod 0644 \/etc\/nginx\/minidrama-preview\.htpasswd/);
   // The vhost enforces authentication at the shared ingress; every preview
   // application is reachable through the same mechanism as production.
   assert.match(vhost, /auth_basic "RichiDrama PR Preview"/);

@@ -288,6 +288,11 @@ install_preview_ingress() {
   local vhost_conf="$1" auth_dir="$PREVIEW_ROOT/auth"
   [[ -r "$auth_dir/htpasswd" ]] || fail 'Preview basic-auth file is missing.'
   require_running_container "$HTTP_NGINX_CONTAINER"
+  # The shared ingress container can be recreated by the Lens deployment.
+  # Restore the auth file with the vhost instead of relying on old container
+  # state.
+  docker cp "$auth_dir/htpasswd" "$HTTP_NGINX_CONTAINER:/etc/nginx/minidrama-preview.htpasswd"
+  docker exec "$HTTP_NGINX_CONTAINER" chmod 0644 /etc/nginx/minidrama-preview.htpasswd
   # Files dropped by earlier layouts must never survive: the ACME-era suffix
   # wildcard and the per-PR direct vhosts would outrank or duplicate the
   # current routing.
