@@ -2,6 +2,10 @@
 
 调查日期：2026-09-01。
 
+443 维护者的最新实施要求见
+[Avatar Proxy 微信支付回调需求](./AVATAR_PROXY_HTTPS_HANDOFF.md)。该方案复用
+`api.richbest.cn`，不增加 DNS 或证书。
+
 本调查只读取公网响应和仓库部署配置。没有修改生产服务器。
 
 ## 当前结果
