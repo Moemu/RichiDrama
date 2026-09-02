@@ -29,7 +29,7 @@ test('omni history list selects and returns the completed video poster path', ()
   const rows = list(db, { storyboard_id: 88 });
 
   assert.match(sql, /v\.poster_local_path/);
-  assert.deepEqual(params, [88, 88]);
+  assert.deepEqual(params, [88]);
   assert.equal(rows[0].poster_local_path, 'projects/demo/videos/posters/vg_26.jpg');
   assert.equal(rows[0].video_url, '/static/projects/demo/videos/vg_26.mp4');
   assert.equal(rows[0].is_current, true);

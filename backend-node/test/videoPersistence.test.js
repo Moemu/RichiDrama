@@ -17,11 +17,11 @@ test('video list exposes a durable local poster path without mounting video byte
   assert.equal(item.poster_local_path, 'videos/posters/a.jpg');
 });
 
-test('an explicit storyboard ID does not inherit media from a reused storyboard number', () => {
+test('stable storyboard identity restores replaced history without leaking into a copied shot', () => {
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE storyboards (
-      id INTEGER PRIMARY KEY, episode_id INTEGER, storyboard_number INTEGER, deleted_at TEXT
+      id INTEGER PRIMARY KEY, episode_id INTEGER, storyboard_number INTEGER, storyboard_uid TEXT, position INTEGER, deleted_at TEXT
     );
     CREATE TABLE video_generations (
       id INTEGER PRIMARY KEY, storyboard_id INTEGER, drama_id INTEGER, provider TEXT,
@@ -30,24 +30,23 @@ test('an explicit storyboard ID does not inherit media from a reused storyboard 
       created_at TEXT, updated_at TEXT, completed_at TEXT, deleted_at TEXT
     );
   `);
-  db.prepare('INSERT INTO storyboards VALUES (?, ?, ?, ?)').run(10, 1, 2, '2026-09-01T00:00:00.000Z');
-  db.prepare('INSERT INTO storyboards VALUES (?, ?, ?, NULL)').run(20, 1, 2);
+  db.prepare('INSERT INTO storyboards VALUES (?, ?, ?, ?, ?, ?)').run(10, 1, 2, 'logical-shot-2', 1, '2026-09-01T00:00:00.000Z');
+  db.prepare('INSERT INTO storyboards VALUES (?, ?, ?, ?, ?, NULL)').run(20, 1, 2, 'logical-shot-2', 1);
+  db.prepare('INSERT INTO storyboards VALUES (?, ?, ?, ?, ?, NULL)').run(30, 1, 2, 'copied-shot', 1);
   db.prepare(`INSERT INTO video_generations (
     id, storyboard_id, video_url, local_path, status, created_at
   ) VALUES (?, ?, ?, ?, 'completed', ?)`).run(
     1, 10, '/static/videos/old-shot.mp4', 'videos/old-shot.mp4', '2026-09-01T00:00:00.000Z'
   );
 
-  const exact = list(db, {
+  const restored = list(db, {
     storyboard_id: 20,
-    episode_id: 1,
-    storyboard_number: 2,
     page_size: 20,
   });
-  assert.deepEqual(exact.items, []);
+  assert.deepEqual(restored.items.map((item) => item.id), [1]);
 
-  const legacy = list(db, { episode_id: 1, storyboard_number: 2, page_size: 20 });
-  assert.deepEqual(legacy.items.map((item) => item.id), [1]);
+  const copied = list(db, { storyboard_id: 30, page_size: 20 });
+  assert.deepEqual(copied.items, []);
 });
 
 test('homepage defaults use the configured product media resources rather than any user videos', () => {

@@ -579,15 +579,19 @@ function list(db, query = {}) {
     LEFT JOIN storyboards s ON s.id = v.storyboard_id AND s.deleted_at IS NULL`;
   const params = [];
   const filters = ['j.hidden_at IS NULL'];
+  let currentStoryboard = null;
   if (query.owner_user_id) { filters.push('j.owner_user_id = ?'); params.push(Number(query.owner_user_id)); }
   if (String(query.tool_only || '') === '1' || String(query.tool_only || '').toLowerCase() === 'true') {
     filters.push('COALESCE(v.drama_id, 0) = 0 AND j.sequence_id IS NULL AND j.shot_id IS NULL AND COALESCE(j.storyboard_id, v.storyboard_id) IS NULL');
   }
   if (Number.isInteger(storyboardId) && storyboardId > 0) {
-    // Older jobs predate omni_video_jobs.storyboard_id; recover them through
-    // their video generation so existing project history remains visible.
-    filters.push('(j.storyboard_id = ? OR (j.storyboard_id IS NULL AND v.storyboard_id = ?))');
-    params.push(storyboardId, storyboardId);
+    const storyboardIds = require('./storyboardIdentityService').historyStoryboardIds(db, storyboardId);
+    const placeholders = storyboardIds.map(() => '?').join(', ');
+    // Older jobs predate omni_video_jobs.storyboard_id. COALESCE keeps those
+    // jobs visible through their durable video generation relation.
+    filters.push(`COALESCE(j.storyboard_id, v.storyboard_id) IN (${placeholders})`);
+    params.push(...storyboardIds);
+    try { currentStoryboard = db.prepare('SELECT active_video_generation_id, local_path FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(storyboardId); } catch (_) {}
   } else if (Number.isInteger(shotId) && shotId > 0) {
     filters.push('j.shot_id = ?');
     params.push(shotId);
@@ -596,9 +600,14 @@ function list(db, query = {}) {
   sql += ' ORDER BY j.id DESC LIMIT 100';
   return db.prepare(sql).all(...params).map((item) => ({
     ...item,
-    is_current: item.active_video_generation_id != null
-      ? Number(item.active_video_generation_id) === Number(item.video_generation_id)
-      : Boolean(item.storyboard_local_path && item.local_path && item.storyboard_local_path === item.local_path),
+    is_current: currentStoryboard
+      ? (currentStoryboard.active_video_generation_id != null
+        ? Number(currentStoryboard.active_video_generation_id) === Number(item.video_generation_id)
+        : Boolean(currentStoryboard.local_path && item.local_path && currentStoryboard.local_path === item.local_path))
+      : (item.active_video_generation_id != null
+        ? Number(item.active_video_generation_id) === Number(item.video_generation_id)
+        : Boolean(item.storyboard_local_path && item.local_path && item.storyboard_local_path === item.local_path)),
+    target_storyboard_id: currentStoryboard ? storyboardId : undefined,
     video_url: videoService.publicVideoUrl(item.video_url, item.local_path),
     postprocess_chain: `${require('./videoPostprocessPolicy').describe(item)} → 本地规范 ${item.aspect_ratio || '原画幅'}`,
     request_snapshot: safeSnapshot(parse(item.request_snapshot_json)),
@@ -700,15 +709,18 @@ function adoptSourceVideo(db, log, omniJobId, actor, options = {}) {
   return get(db, job.omni_job_id);
 }
 
-function adoptCompletedVersion(db, omniJobId, actor) {
+function adoptCompletedVersion(db, omniJobId, actor, targetStoryboardId = null) {
   const job = assertOwnedJob(db, omniJobId, actor);
   if (!job.storyboard_id || job.status !== 'completed' || !job.local_path) throw new Error('只有已完成并已本地归档的分镜历史版本可设为当前成片');
+  const targetId = Number(targetStoryboardId || job.storyboard_id);
+  const allowedIds = require('./storyboardIdentityService').historyStoryboardIds(db, targetId);
+  if (!allowedIds.includes(Number(job.storyboard_id))) throw new Error('该历史版本不属于当前分镜');
   const now = new Date().toISOString();
   const videoUrl = `/static/${String(job.local_path).replace(/^\/+/, '')}`;
   const result = db.prepare(`UPDATE storyboards SET active_video_generation_id=?, video_url=?, local_path=?, status='completed',
-    error_msg=NULL, updated_at=? WHERE id=? AND deleted_at IS NULL`).run(job.video_generation_id, videoUrl, job.local_path, now, job.storyboard_id);
+    error_msg=NULL, updated_at=? WHERE id=? AND deleted_at IS NULL`).run(job.video_generation_id, videoUrl, job.local_path, now, targetId);
   if (!result.changes) throw new Error('分镜不存在或已删除');
-  return get(db, job.omni_job_id);
+  return { ...get(db, job.omni_job_id), is_current: true, target_storyboard_id: targetId };
 }
 function retry(db, log, id, billingUser) {
   const job = assertOwnedJob(db, id, billingUser);

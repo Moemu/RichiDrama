@@ -19,7 +19,7 @@ export const omniVideoAPI = {
   hide(id) { return request.delete(`/omni-video-jobs/${id}`) },
   retryPostprocess(id, stage) { return request.post(`/omni-video-jobs/${id}/retry-postprocess`, { stage }) },
   adoptSource(id) { return request.post(`/omni-video-jobs/${id}/adopt-source`) },
-  adopt(id) { return request.post(`/omni-video-jobs/${id}/adopt`) },
+  adopt(id, body = {}) { return request.post(`/omni-video-jobs/${id}/adopt`, body) },
   extractFrame(id, position) { return request.post(`/omni-video-jobs/${id}/extract-frame`, { position }) },
   extractVideoFrame(id, position) { return request.post(`/video-generations/${id}/extract-frame`, { position }) },
   list(params) { return request.get('/omni-video-jobs', { params: params || {} }) },

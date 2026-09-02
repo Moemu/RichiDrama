@@ -111,6 +111,11 @@ function createStoryboard(db, log, req) {
     );
   })();
   log.info('Storyboard created', { id: info.lastInsertRowid, episode_id: episodeId });
+  try {
+    const identity = require('./storyboardIdentityService');
+    const createdNumber = db.prepare('SELECT storyboard_number FROM storyboards WHERE id = ?').get(info.lastInsertRowid)?.storyboard_number;
+    identity.ensureIdentity(db, info.lastInsertRowid, Math.max(0, Number(createdNumber || 1) - 1));
+  } catch (_) {}
   try { require('./generationSettingsService').initializeStoryboardFromMaster(db, info.lastInsertRowid, inheritedGenerationSettings); } catch (_) {}
   return getStoryboardById(db, info.lastInsertRowid);
 }
@@ -230,9 +235,11 @@ function getStoryboardById(db, id) {
   } catch (_) {}
   return {
     id: r.id,
+    storyboard_uid: r.storyboard_uid ?? null,
     episode_id: r.episode_id,
     scene_id: r.scene_id,
     storyboard_number: r.storyboard_number,
+    position: r.position ?? r.sort_order ?? Math.max(0, Number(r.storyboard_number || 1) - 1),
     title: r.title,
     description: r.description,
     location: r.location,
@@ -343,15 +350,21 @@ function insertBeforeStoryboard(db, log, targetId) {
   let inheritedGenerationSettings = null;
   try { inheritedGenerationSettings = require('./generationSettingsService').getEpisodeSettings(db, target.episode_id)?.defaults || null; } catch (_) {}
 
-  db.prepare(
-    'UPDATE storyboards SET storyboard_number = storyboard_number + 1, updated_at = ? WHERE episode_id = ? AND storyboard_number >= ? AND deleted_at IS NULL'
-  ).run(new Date().toISOString(), target.episode_id, target.storyboard_number);
-
   const now = new Date().toISOString();
-  const info = db.prepare(
-    `INSERT INTO storyboards (episode_id, storyboard_number, segment_index, segment_title, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'pending', ?, ?)`
-  ).run(target.episode_id, target.storyboard_number, target.segment_index ?? null, target.segment_title ?? null, now, now);
+  const identity = require('./storyboardIdentityService');
+  const info = db.transaction(() => {
+    const order = identity.orderedActiveRows(db, target.episode_id);
+    const created = db.prepare(
+      `INSERT INTO storyboards (episode_id, storyboard_number, segment_index, segment_title, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'pending', ?, ?)`
+    ).run(target.episode_id, target.storyboard_number, target.segment_index ?? null, target.segment_title ?? null, now, now);
+    const newId = Number(created.lastInsertRowid);
+    identity.ensureIdentity(db, newId);
+    const targetIndex = order.indexOf(Number(target.id));
+    order.splice(targetIndex >= 0 ? targetIndex : order.length, 0, newId);
+    identity.reindexEpisode(db, target.episode_id, order, now);
+    return created;
+  })();
 
   try { require('./generationSettingsService').initializeStoryboardFromMaster(db, info.lastInsertRowid, inheritedGenerationSettings); } catch (_) {}
 
@@ -405,6 +418,8 @@ function copyStoryboard(db, log, sourceId) {
       `INSERT INTO storyboards (${insertColumns.join(', ')}) VALUES (${placeholders})`
     ).run(...values);
     const newId = Number(info.lastInsertRowid);
+    const identity = require('./storyboardIdentityService');
+    identity.ensureIdentity(db, newId);
 
     const orderBy = availableColumns.has('sort_order')
       ? 'sort_order ASC, storyboard_number ASC, id ASC'
@@ -414,10 +429,7 @@ function copyStoryboard(db, log, sourceId) {
     ).all(source.episode_id, newId).map((row) => Number(row.id));
     const sourceIndex = currentOrder.indexOf(Number(source.id));
     currentOrder.splice(sourceIndex >= 0 ? sourceIndex + 1 : currentOrder.length, 0, newId);
-    if (availableColumns.has('sort_order')) {
-      const updateSort = db.prepare('UPDATE storyboards SET sort_order = ?, updated_at = ? WHERE id = ?');
-      currentOrder.forEach((id, index) => updateSort.run(index, now, id));
-    }
+    identity.reindexEpisode(db, source.episode_id, currentOrder, now);
 
     try {
       const characterLinks = db.prepare('SELECT character_id FROM storyboard_characters WHERE storyboard_id = ?').all(source.id);

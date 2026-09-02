@@ -23,6 +23,8 @@ function createSchema(db) {
       scene_id INTEGER,
       storyboard_number INTEGER DEFAULT 0,
       sort_order INTEGER DEFAULT 0,
+      storyboard_uid TEXT,
+      position INTEGER,
       title TEXT,
       description TEXT,
       location TEXT,
@@ -64,9 +66,9 @@ function createSchema(db) {
 function insertOld(db, number, title, updatedAt = '2026-08-28T08:00:00.000Z') {
   return Number(db.prepare(
     `INSERT INTO storyboards
-      (episode_id, storyboard_number, title, status, created_at, updated_at)
-     VALUES (26, ?, ?, 'completed', ?, ?)`
-  ).run(number, title, updatedAt, updatedAt).lastInsertRowid);
+      (episode_id, storyboard_number, sort_order, storyboard_uid, position, title, status, created_at, updated_at)
+     VALUES (26, ?, ?, ?, ?, ?, 'completed', ?, ?)`
+  ).run(number, number - 1, `stable-${number}`, number - 1, title, updatedAt, updatedAt).lastInsertRowid);
 }
 
 function generated(number, title) {
@@ -134,7 +136,7 @@ test('provider failure during regeneration keeps old storyboards active', async 
   );
 });
 
-test('successful regeneration replaces all old storyboards in one transaction', () => {
+test('successful regeneration preserves matching storyboard identities and adds only new positions', () => {
   const db = new Database(':memory:');
   createSchema(db);
   const oldIds = [insertOld(db, 1, '旧一'), insertOld(db, 2, '旧二')];
@@ -155,7 +157,12 @@ test('successful regeneration replaces all old storyboards in one transaction', 
     db.prepare('SELECT title FROM storyboards WHERE episode_id = 26 AND deleted_at IS NULL ORDER BY storyboard_number').all().map((row) => row.title),
     ['新一', '新二', '新三']
   );
-  assert.equal(db.prepare(`SELECT COUNT(*) count FROM storyboards WHERE id IN (${oldIds.map(() => '?').join(',')}) AND deleted_at IS NOT NULL`).get(...oldIds).count, 2);
+  assert.equal(db.prepare(`SELECT COUNT(*) count FROM storyboards WHERE id IN (${oldIds.map(() => '?').join(',')}) AND deleted_at IS NULL`).get(...oldIds).count, 2);
+  assert.deepEqual(
+    db.prepare(`SELECT storyboard_uid FROM storyboards WHERE id IN (${oldIds.map(() => '?').join(',')}) ORDER BY id`).all(...oldIds).map((row) => row.storyboard_uid),
+    ['stable-1', 'stable-2']
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM storyboards WHERE episode_id = 26 AND deleted_at IS NULL').get().count, 3);
   assert.equal(db.prepare("SELECT updated_at FROM storyboards WHERE title = '历史分镜'").get().updated_at, historicalTime);
 });
 
@@ -167,7 +174,7 @@ test('failed insert rolls back the replacement and keeps every old storyboard ac
   const snapshot = getActiveStoryboardSnapshot(db, 26);
   db.exec(`
     CREATE TRIGGER reject_failed_storyboard
-    BEFORE INSERT ON storyboards
+    BEFORE UPDATE ON storyboards
     WHEN NEW.title = '触发失败'
     BEGIN
       SELECT RAISE(ABORT, 'test insert failure');

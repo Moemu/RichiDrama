@@ -40,7 +40,7 @@ module.exports = function routes(db, log, cfg) { return {
   hide(req, res) { try { response.success(res, omniVideoService.hide(db, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
   retryPostprocess(req, res) { try { response.created(res, omniVideoService.retryPostprocess(db, log, req.params.id, req.auth, req.body?.stage)); } catch (err) { response.badRequest(res, err.message); } },
   adoptSource(req, res) { try { response.success(res, omniVideoService.adoptSourceVideo(db, log, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
-  adopt(req, res) { try { response.success(res, omniVideoService.adoptCompletedVersion(db, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
+  adopt(req, res) { try { response.success(res, omniVideoService.adoptCompletedVersion(db, req.params.id, req.auth, req.body?.storyboard_id)); } catch (err) { response.badRequest(res, err.message); } },
   extractFrame(req, res) { try { response.created(res, require('../services/omniFrameService').extract(db, cfg, log, req.params.id, req.body?.position)); } catch (err) { response.badRequest(res, err.message); } },
   extractVideoFrame(req, res) { try { response.created(res, require('../services/omniFrameService').extractVideoGeneration(db, cfg, log, req.params.id, req.body?.position)); } catch (err) { response.badRequest(res, err.message); } },
   importRealPersonAsset(req, res) { try { response.created(res, omniVideoService.importRealPersonFailureAsset(db, log, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },

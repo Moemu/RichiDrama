@@ -83,8 +83,9 @@ function list(db, query) {
   // A copied or inserted shot can reuse a historical storyboard number. The
   // number fallback must not attach that historical shot's media to the new ID.
   if (query.storyboard_id) {
-    sql += ' AND storyboard_id = ?';
-    params.push(query.storyboard_id);
+    const ids = require('./storyboardIdentityService').historyStoryboardIds(db, query.storyboard_id);
+    sql += ` AND storyboard_id IN (${ids.map(() => '?').join(', ')})`;
+    params.push(...ids);
   // Legacy callers can still recover replaced storyboard history by episode +
   // storyboard number when they do not have a current storyboard ID.
   } else if (query.episode_id && query.storyboard_number != null) {

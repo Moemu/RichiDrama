@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { getDb } = require('./index.js');
 const { loadConfig } = require('../config/index.js');
+const { v4: uuidv4 } = require('uuid');
 
 function stripLeadingComments(sql) {
   return sql
@@ -241,6 +242,8 @@ function ensureAllColumns(database) {
     { name: 'last_frame_image_url', type: 'TEXT' },
     { name: 'last_frame_local_path', type: 'TEXT' },
     { name: 'sort_order',        type: 'INTEGER DEFAULT 0' },          // 分镜拖拽排序（0-based；与 storyboard_number 并行，排序优先）
+    { name: 'storyboard_uid',    type: 'TEXT' },                       // immutable logical storyboard identity
+    { name: 'position',          type: 'INTEGER' },                    // canonical 0-based order inside one episode
     { name: 'status',            type: 'TEXT DEFAULT \'draft\'' },
     { name: 'created_at',        type: 'TEXT' },
     { name: 'updated_at',        type: 'TEXT' },
@@ -767,6 +770,58 @@ function ensureAllColumns(database) {
   } catch (_) {}
 }
 
+function migrateStoryboardIdentityAndPosition(database) {
+  const exists = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='storyboards'").get();
+  if (!exists) return;
+  database.exec(`CREATE TABLE IF NOT EXISTS schema_migration_markers (
+    name TEXT PRIMARY KEY, applied_at TEXT NOT NULL, detail_json TEXT
+  )`);
+  const markerName = 'storyboard_identity_position_v1';
+  if (database.prepare('SELECT 1 FROM schema_migration_markers WHERE name = ?').get(markerName)) return;
+  const apply = database.transaction(() => {
+    const rows = database.prepare(`SELECT id, episode_id, storyboard_number, sort_order, created_at, deleted_at
+      FROM storyboards ORDER BY episode_id, storyboard_number, id`).all();
+    const byEpisode = new Map();
+    for (const row of rows) {
+      const episodeRows = byEpisode.get(Number(row.episode_id)) || [];
+      episodeRows.push(row);
+      byEpisode.set(Number(row.episode_id), episodeRows);
+    }
+    const updateActive = database.prepare('UPDATE storyboards SET storyboard_uid = ?, position = ?, sort_order = ?, storyboard_number = ? WHERE id = ?');
+    const updateHistorical = database.prepare('UPDATE storyboards SET storyboard_uid = ?, position = ? WHERE id = ?');
+    let activeCount = 0;
+    let historicalCount = 0;
+    for (const episodeRows of byEpisode.values()) {
+      const active = episodeRows.filter((row) => !row.deleted_at).sort((a, b) => {
+        const sortA = Number.isFinite(Number(a.sort_order)) ? Number(a.sort_order) : Number(a.storyboard_number || 0);
+        const sortB = Number.isFinite(Number(b.sort_order)) ? Number(b.sort_order) : Number(b.storyboard_number || 0);
+        return sortA - sortB || Number(a.storyboard_number || 0) - Number(b.storyboard_number || 0) || Number(a.id) - Number(b.id);
+      });
+      const canonicalByNumber = new Map();
+      active.forEach((row, index) => {
+        const uid = uuidv4();
+        updateActive.run(uid, index, index, index + 1, row.id);
+        canonicalByNumber.set(Number(row.storyboard_number), { id: Number(row.id), uid });
+        activeCount += 1;
+      });
+      const historicalUidByNumber = new Map();
+      for (const row of episodeRows.filter((item) => item.deleted_at)) {
+        const number = Number(row.storyboard_number);
+        const uid = canonicalByNumber.get(number)?.uid || historicalUidByNumber.get(number) || uuidv4();
+        historicalUidByNumber.set(number, uid);
+        updateHistorical.run(uid, Math.max(0, number - 1), row.id);
+        historicalCount += 1;
+      }
+    }
+    database.exec('CREATE INDEX IF NOT EXISTS idx_storyboards_uid ON storyboards(storyboard_uid)');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_storyboards_episode_position ON storyboards(episode_id, position, id)');
+    database.prepare('INSERT INTO schema_migration_markers (name, applied_at, detail_json) VALUES (?, ?, ?)')
+      .run(markerName, new Date().toISOString(), JSON.stringify({ active: activeCount, historical: historicalCount }));
+  });
+  apply();
+  console.log('Migrated storyboard identity and position.');
+}
+
 /** 对已打开的 database 执行迁移与兜底补列（供 app 启动时调用） */
 // SQLite cannot widen a CHECK constraint with ALTER COLUMN. Upgrade existing
 // ledgers once before migration 52 publishes the millisecond MediaKit meter.
@@ -804,6 +859,7 @@ function runMigrationsAndEnsure(database) {
   runMigrations(database);
   migrateBillingPrecision(database);
   ensureAllColumns(database);
+  migrateStoryboardIdentityAndPosition(database);
 }
 
 function main() {

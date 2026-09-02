@@ -79,10 +79,11 @@ function getDrama(db, dramaId, baseUrl) {
   ).all(drama.id);
   drama.episodes = episodes.map((e) => rowToEpisode(e));
   const { dedupeStoryboardRowsByNumber } = require('./episodeStoryboardService');
+  const storyboardOrder = require('./storyboardIdentityService').orderSql(db);
   for (const ep of drama.episodes) {
     const storyboards = dedupeStoryboardRowsByNumber(
       db.prepare(
-        'SELECT * FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY storyboard_number ASC, id ASC'
+        `SELECT * FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY ${storyboardOrder}`
       ).all(ep.id)
     );
     ep.storyboards = storyboards.map((s) => rowToStoryboard(s));
@@ -206,9 +207,10 @@ function listDramas(db, query) {
     d.episodes = episodes.map((e) => {
       const ep = rowToEpisode(e);
       const { dedupeStoryboardRowsByNumber } = require('./episodeStoryboardService');
+      const storyboardOrder = require('./storyboardIdentityService').orderSql(db);
       const storyboards = dedupeStoryboardRowsByNumber(
         db.prepare(
-          'SELECT * FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY storyboard_number ASC, id ASC'
+          `SELECT * FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY ${storyboardOrder}`
         ).all(ep.id)
       );
       ep.storyboards = storyboards.map((s) => rowToStoryboard(s));
@@ -372,9 +374,11 @@ function parseStoryboardCharacters(charactersStr) {
 function rowToStoryboard(r) {
   return {
     id: r.id,
+    storyboard_uid: r.storyboard_uid ?? null,
     episode_id: r.episode_id,
     scene_id: r.scene_id,
     storyboard_number: r.storyboard_number,
+    position: r.position ?? r.sort_order ?? Math.max(0, Number(r.storyboard_number || 1) - 1),
     title: r.title,
     description: r.description,
     location: r.location,
@@ -790,9 +794,12 @@ function getVideoUrlForStoryboard(db, storyboardId, baseUrl) {
   }
   
   // 2. 获取 video_generations 表中最新完成的记录
+  const historyIds = require('./storyboardIdentityService').historyStoryboardIds(db, storyboardId);
   const vg = db.prepare(
-    "SELECT video_url, local_path, completed_at, updated_at, created_at FROM video_generations WHERE storyboard_id = ? AND status = 'completed' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1"
-  ).get(storyboardId);
+    `SELECT video_url, local_path, completed_at, updated_at, created_at FROM video_generations
+     WHERE storyboard_id IN (${historyIds.map(() => '?').join(', ')}) AND status = 'completed' AND deleted_at IS NULL
+     ORDER BY created_at DESC LIMIT 1`
+  ).get(...historyIds);
 
   // 辅助函数：构造完整 URL，优先使用本地路径（避免远程URL过期导致无法合并）
   const buildUrl = (videoUrl, localPath) => {
@@ -839,7 +846,7 @@ function finalizeEpisode(db, log, episodeId, baseUrl, body = {}) {
   if (!ep) return null;
   const drama = db.prepare('SELECT title FROM dramas WHERE id = ? AND deleted_at IS NULL').get(ep.drama_id);
   const storyboards = db.prepare(
-    'SELECT id, storyboard_number, duration FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY storyboard_number ASC'
+    `SELECT id, storyboard_number, duration FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY ${require('./storyboardIdentityService').orderSql(db)}`
   ).all(episodeId);
   const videoMergeService = require('./videoMergeService');
   const scenes = [];

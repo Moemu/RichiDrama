@@ -367,7 +367,7 @@ function buildUniversalSegmentUserPromptBundle(db, sbId, reqBody, opts = {}) {
   try {
     const all = db
       .prepare(
-        'SELECT id, storyboard_number, segment_index, segment_title FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY storyboard_number ASC'
+        `SELECT id, storyboard_number, segment_index, segment_title FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY ${require('./storyboardIdentityService').orderSql(db)}`
       )
       .all(sb.episode_id);
     const ix = all.findIndex((r) => Number(r.id) === Number(sb.id));

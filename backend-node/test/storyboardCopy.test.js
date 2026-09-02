@@ -14,6 +14,8 @@ function createDb() {
       scene_id INTEGER,
       storyboard_number INTEGER,
       sort_order INTEGER DEFAULT 0,
+      storyboard_uid TEXT,
+      position INTEGER,
       title TEXT,
       description TEXT,
       dialogue TEXT,
@@ -77,6 +79,12 @@ test('copyStoryboard copies editable data after the source and excludes generate
   assert.equal(row.audio_local_path, null);
   assert.equal(row.status, 'pending');
   assert.equal(row.error_msg, null);
+  const sourceRow = db.prepare('SELECT storyboard_uid, position FROM storyboards WHERE id = 1').get();
+  assert.ok(sourceRow.storyboard_uid);
+  assert.ok(row.storyboard_uid);
+  assert.notEqual(row.storyboard_uid, sourceRow.storyboard_uid);
+  assert.equal(sourceRow.position, 0);
+  assert.equal(row.position, 1);
   assert.deepEqual(
     db.prepare('SELECT storyboard_number, sort_order, title FROM storyboards ORDER BY sort_order').all(),
     [

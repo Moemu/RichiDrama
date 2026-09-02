@@ -530,7 +530,7 @@ async function adoptVersion(job) {
   if (retryingJobIds.has(actionKey)) return
   retryingJobIds.add(actionKey)
   try {
-    const next = normalizeJob(await omniVideoAPI.adopt(job.id))
+    const next = normalizeJob(await omniVideoAPI.adopt(job.id, isProjectMode.value ? { storyboard_id: currentShot.value?.id } : {}))
     shotHistory.value.forEach((item) => { item.is_current = String(item.id) === String(next.id) })
     const index = shotHistory.value.findIndex((item) => String(item.id) === String(next.id))
     if (index >= 0) shotHistory.value[index] = next
