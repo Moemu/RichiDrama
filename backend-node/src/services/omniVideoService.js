@@ -1033,22 +1033,32 @@ function parse(value) { try { return value ? JSON.parse(value) : null; } catch (
 
 /**
  * 用户主动取消全能创作任务。
- * 仅当任务尚未提交厂商(provider_task_id 为空)时允许完全取消: 标记 failed(用户取消)、
- * 停止前端轮询并释放积分预授权。已提交厂商的任务无法中断, 如实返回不可取消,
- * 避免停止轮询后厂商照常出片扣费而用户侧看似"已取消"造成计费争议。
+ * 本地准备任务可直接取消。火山任务必须先确认仍为 queued，再调用厂商取消接口。
+ * running 任务不能中断，避免厂商照常出片扣费而用户侧看似“已取消”。
  */
-function cancelJob(db, log, jobId, user) {
+async function cancelJob(db, log, jobId, user) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(jobId));
   if (!job) throw new Error('全能视频任务不存在');
-  const generation = db.prepare('SELECT id, owner_user_id, status, provider_task_id, billing_authorization_id, task_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
+  const generation = db.prepare('SELECT id, owner_user_id, tenant_id, model, status, provider_task_id, billing_authorization_id, task_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
   if (!generation) throw new Error('视频生成记录不存在');
   if (Number(generation.owner_user_id) !== Number(user.id) && user.role !== 'admin') throw new Error('只能取消自己的任务');
   if (['completed', 'failed', 'invalid'].includes(generation.status)) throw new Error('任务已结束，无需取消');
   if (generation.provider_task_id && String(generation.provider_task_id).trim()) {
-    throw new Error('任务已提交到厂商执行，无法中断；将正常完成并按真实用量计费');
+    const videoClient = require('./videoClient');
+    const config = videoClient.getDefaultVideoConfig(db, generation.model, generation.tenant_id ? { tenant_id: generation.tenant_id } : {});
+    if (!config) throw new Error('找不到该任务的视频模型配置，不能安全取消');
+    const upstream = await videoClient.cancelVideoTask(config, log, String(generation.provider_task_id).trim());
+    if (!upstream.cancelled) {
+      if (upstream.reason === 'running') throw new Error('火山任务已经开始运行，厂商不支持中途停止；任务将继续并按真实用量计费');
+      if (upstream.reason === 'terminal') throw new Error('火山任务已经结束，系统正在同步最终状态，请稍后刷新');
+      if (upstream.reason === 'unsupported_provider') throw new Error('当前视频厂商不支持取消已提交任务');
+      throw new Error(`火山任务当前状态无法取消${upstream.provider_status ? `：${upstream.provider_status}` : ''}`);
+    }
   }
   const now = new Date().toISOString();
-  const message = '用户取消：任务尚未提交模型，已停止并释放预授权';
+  const message = generation.provider_task_id
+    ? '用户取消：火山排队任务已取消，已释放预授权'
+    : '用户取消：任务尚未提交模型，已停止并释放预授权';
   db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run('failed', message, now, generation.id);
   if (generation.task_id) {
     try { require('./taskService').updateTaskError(db, generation.task_id, message); } catch (_) {}
