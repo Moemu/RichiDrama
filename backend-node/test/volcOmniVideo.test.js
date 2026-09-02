@@ -12,6 +12,7 @@ test('Seedance image normalization uses provider dimension and byte limits', () 
   assert.equal(seedanceImageNeedsNormalization({ width: 6000, height: 6000, file_size: 30_000_000 }), false);
   assert.equal(seedanceImageNeedsNormalization({ width: 6001, height: 4000, file_size: 1 }), true);
   assert.equal(seedanceImageNeedsNormalization({ width: 4000, height: 4000, file_size: 30_000_001 }), true);
+  assert.equal(seedanceImageNeedsNormalization({ width: 4320, height: 7680, file_size: 30_684_720 }), true);
 });
 
 test('Seedance omni sends a valid text-only video request without reference material', async () => {

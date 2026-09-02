@@ -13,10 +13,14 @@ const tenants = require('../src/services/tenantService');
 const billing = require('../src/services/billingService');
 const videoService = require('../src/services/videoService');
 
-test('only Ark internal material-cache download timeouts enable failed-generation retry', () => {
+test('only safe provider material-fetch timeouts enable failed-generation retry', () => {
   const internalTimeout = 'Timeout while downloading url: https://ark-common-storage-prod-cn-beijing.tos-cn-beijing.volces.com/ark-async-gateway/cgt-test/2?x-tos-process=image%2Fformat%2Cjpg Request id: 021788';
+  const inputFetchTimeout = '火山 Seedance 全能创建失败: 400 - The parameter `content[1].image_url` specified in the request is not valid: timeout while fetching resource. Request id: 021788333812264a7468c13ae862cf181a1dbcac0db1f8247ce00';
   assert.equal(omni.isProviderInternalMaterialTimeout(internalTimeout), true);
+  assert.equal(omni.isProviderInputImageFetchTimeout(inputFetchTimeout), true);
   assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: internalTimeout }), true);
+  assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: inputFetchTimeout, provider_task_id: null }), true);
+  assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: inputFetchTimeout, provider_task_id: 'already-created' }), false);
   assert.equal(omni.canRetryGeneration({ status: 'retryable', error_msg: 'restart recovery' }), true);
   assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: 'failed to download input image https://customer.example/reference.png' }), false);
   assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: 'Timeout while downloading url: https://example.com/image.jpg' }), false);

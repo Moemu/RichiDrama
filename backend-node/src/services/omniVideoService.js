@@ -20,9 +20,23 @@ function isProviderInternalMaterialTimeout(errorMessage) {
     && /x-tos-process=image(?:%2f|\/)format/i.test(message);
 }
 
+// Ark rejects the create request before it returns a provider task ID when it
+// cannot fetch one of the submitted reference-image URLs. The immutable Omni
+// snapshot makes a new submission safe. Oversized images are normalized by
+// videoClient before the retry is sent.
+function isProviderInputImageFetchTimeout(errorMessage) {
+  const message = String(errorMessage || '');
+  return /content\[\d+\]\.image_url/i.test(message)
+    && /not valid/i.test(message)
+    && /timeout while fetching resource/i.test(message);
+}
+
 function canRetryGeneration(generation) {
   return generation?.status === 'retryable'
-    || (generation?.status === 'failed' && isProviderInternalMaterialTimeout(generation.error_msg));
+    || (generation?.status === 'failed' && (
+      isProviderInternalMaterialTimeout(generation.error_msg)
+      || (!generation.provider_task_id && isProviderInputImageFetchTimeout(generation.error_msg))
+    ));
 }
 
 // This produces only the local billing reservation. It never changes the
@@ -741,8 +755,8 @@ function adoptCompletedVersion(db, omniJobId, actor, targetStoryboardId = null) 
 }
 function retry(db, log, id, billingUser) {
   const job = assertOwnedJob(db, id, billingUser);
-  const generation = db.prepare('SELECT status, error_msg, drama_id, storyboard_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
-  if (!canRetryGeneration(generation)) throw new Error('该任务不是可安全重试的中断或模型内部素材读取超时任务');
+  const generation = db.prepare('SELECT status, error_msg, provider_task_id, drama_id, storyboard_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
+  if (!canRetryGeneration(generation)) throw new Error('该任务不是可安全重试的中断或参考素材读取超时任务');
   const snapshot = parse(job.request_snapshot_json);
   if (!(snapshot?.original_prompt || snapshot?.prompt) || !Array.isArray(snapshot.assets) || !snapshot.assets.length) throw new Error('该任务没有可重试的完整请求快照');
   return create(db, log, {
@@ -861,4 +875,4 @@ function cancelJob(db, log, jobId, user) {
   return get(db, jobId);
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, quote, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, locateRealPersonFailureAsset, importRealPersonFailureAsset, isProviderInternalMaterialTimeout, canRetryGeneration, SHOT_ASSET_LIMITS };
+module.exports = { create, quote, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, locateRealPersonFailureAsset, importRealPersonFailureAsset, isProviderInternalMaterialTimeout, isProviderInputImageFetchTimeout, canRetryGeneration, SHOT_ASSET_LIMITS };

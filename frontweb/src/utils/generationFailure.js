@@ -28,6 +28,7 @@ const RULES = [
   { test: /invalid audio url|audio url.+invalid|无效.+音频.+url/i, title: '音频链接无效', message: '火山不能读取当前音频链接。', action: '请重新上传音频，或使用可公开访问的链接。' },
   { test: /asset.+not found|素材.+不存在/i, title: '参考素材不存在', message: '任务引用的素材已删除，或当前账号不能访问它。', action: '请重新选择素材后再生成。' },
   { test: /timeout while downloading url:[\s\S]*ark-common-storage[^\s]*\/ark-async-gateway\/[\s\S]*x-tos-process=image(?:%2f|\/)format/i, title: '模型内部素材读取超时', message: '火山已接收任务，但读取内部临时素材时超时。原任务配置和素材快照已保留。', action: '请使用原配置重试。无需重新上传全部素材。' },
+  { test: /content\[\d+\]\.image_url[\s\S]*not valid[\s\S]*timeout while fetching resource/i, title: '参考图片获取超时', message: '火山创建任务时未能及时读取参考图片。原任务配置和素材快照已保留。', action: '请使用原配置重试。系统会为超限图片生成受控尺寸副本。' },
   { test: /resource.+download.+failed|failed to download|download.+(?:image|video|audio)|素材.+下载失败/i, title: '参考素材读取失败', message: '火山不能下载本次使用的参考素材。', action: '请重新上传素材，或检查素材链接后重试。' },
   { test: /not supported.+model|unsupported.+(?:parameter|model)|camera_fixed.+not supported|invalid parameter|InvalidParameter|参数.+不支持/i, title: '当前模型不支持此参数', message: '生成参数与所选模型或生成方式不匹配。', action: '请恢复默认参数，或选择支持此功能的模型。' },
   { test: /QuotaExceeded|rate.?limit|too many requests|qps|concurrency|限流|并发.+上限|配额.+超限/i, title: '当前任务较多', message: '火山的排队、并发或调用配额已达到上限。', action: '请稍后重试。重复提交不会加快处理。' },
