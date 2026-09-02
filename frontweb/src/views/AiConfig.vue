@@ -22,15 +22,19 @@
 </template>
 
 <script setup>
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import AIConfigContent from '@/components/AIConfigContent.vue'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
+import { safeRedirectPath } from '@/utils/routeRecovery'
 
+const route = useRoute()
 const router = useRouter()
 
 function goList() {
-  router.push({ name: 'list' })
+  const rawReturnTo = Array.isArray(route.query.return_to) ? route.query.return_to[0] : route.query.return_to
+  const returnTo = safeRedirectPath(rawReturnTo, '/')
+  router.push(returnTo.startsWith('/ai-config') ? '/' : returnTo)
 }
 </script>
 

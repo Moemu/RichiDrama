@@ -4,7 +4,7 @@
       <div><p class="eyebrow">账户与用量</p><h1>我的账户</h1><p class="account-intro">管理创作额度、账单和登录资料。</p></div>
       <div class="header-actions">
         <AccountBalanceBadge />
-        <el-button @click="$router.push('/')">返回创作台</el-button>
+        <el-button @click="returnToSource">返回创作台</el-button>
         <el-button v-if="isAdmin" type="primary" @click="$router.push('/admin')">后台管理</el-button>
       </div>
     </header>
@@ -89,13 +89,17 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { accountAPI } from '@/api/account'
 import BillingTransactionTable from '@/components/BillingTransactionTable.vue'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import { formatCredits, serviceLabel } from '@/utils/billingPresentation'
 import { formatChinaDateTime } from '@/utils/time'
+import { safeRedirectPath } from '@/utils/routeRecovery'
 
+const route = useRoute()
+const router = useRouter()
 const account = ref({})
 const transactions = ref([])
 const transactionPage = reactive({ page: 1, page_size: 20, total: 0 })
@@ -111,6 +115,12 @@ const username = ref(JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').u
 const displayName = ref(JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').display_name || '')
 const accountTab = ref('overview')
 const isOrganizationAdmin = computed(() => account.value.account_scope === 'organization' && account.value.organization_role === 'organization_admin')
+
+function returnToSource() {
+  const rawReturnTo = Array.isArray(route.query.return_to) ? route.query.return_to[0] : route.query.return_to
+  const returnTo = safeRedirectPath(rawReturnTo, '/')
+  router.push(returnTo.startsWith('/account') ? '/' : returnTo)
+}
 
 function memberLabel(member) {
   const identity = member.display_name ? `${member.display_name}（${member.username}）` : member.username

@@ -733,7 +733,7 @@ async function restoreCurrentShotMaster() {
   } catch (error) { ElMessage.error(error.message || '恢复首镜参数失败') }
 }
 function backToProject() {
-  if (isProjectMode.value && projectDramaId.value) router.push({ path: `/film/${projectDramaId.value}`, query: projectEpisodeId.value ? { episode_id: projectEpisodeId.value } : {} })
+  if (isProjectMode.value && projectDramaId.value) router.push({ path: `/film/${projectDramaId.value}`, query: projectEpisodeId.value ? { episode: projectEpisodeId.value } : {} })
   else router.push('/')
 }
 function openMediaLibrary() {

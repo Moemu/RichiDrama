@@ -3,7 +3,7 @@
     <a class="skip-link" href="#media-tool-input">跳到创作输入</a>
     <header class="tool-topbar">
       <div class="tool-topbar-inner">
-        <router-link class="brand" to="/film" aria-label="返回项目列表">
+        <router-link class="brand" to="/" aria-label="返回项目列表">
           <span class="brand-mark"><img src="/brand/richi-logo-color.png" alt="" /></span>
           <span class="brand-copy"><b>瑞池传媒短剧平台</b><small>创作工作台</small></span>
         </router-link>
