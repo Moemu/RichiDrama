@@ -3,9 +3,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { callVolcengineOmniVideoApi } = require('../src/services/videoClient');
+const sharp = require('sharp');
+const { callVolcengineOmniVideoApi, seedanceImageNeedsNormalization } = require('../src/services/videoClient');
 
 const log = { info() {}, warn() {}, error() {} };
+
+test('Seedance image normalization uses provider dimension and byte limits', () => {
+  assert.equal(seedanceImageNeedsNormalization({ width: 6000, height: 6000, file_size: 30_000_000 }), false);
+  assert.equal(seedanceImageNeedsNormalization({ width: 6001, height: 4000, file_size: 1 }), true);
+  assert.equal(seedanceImageNeedsNormalization({ width: 4000, height: 4000, file_size: 30_000_001 }), true);
+});
 
 test('Seedance omni sends a valid text-only video request without reference material', async () => {
   const originalFetch = global.fetch;
@@ -85,6 +92,43 @@ test('Seedance omni converts a library relative path to a data URL before sendin
     const reference = calls[0].body.content.find((item) => item.role === 'reference_image');
     assert.match(reference.image_url.url, /^data:image\/png;base64,/);
     assert.doesNotMatch(reference.image_url.url, /library\/images/);
+  } finally {
+    global.fetch = originalFetch;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Seedance omni replaces an oversized reference with a controlled JPEG copy', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'local-mini-drama-omni-large-'));
+  const relativePath = 'library/images/oversized.png';
+  const imagePath = path.join(root, ...relativePath.split('/'));
+  fs.mkdirSync(path.dirname(imagePath), { recursive: true });
+  await sharp({ create: { width: 6101, height: 3600, channels: 3, background: { r: 31, g: 63, b: 127 } } }).png().toFile(imagePath);
+
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return { ok: true, text: async () => JSON.stringify({ id: 'task-large-reference', status: 'processing' }) };
+  };
+  try {
+    await callVolcengineOmniVideoApi({
+      base_url: 'https://video.example.test', api_key: 'test-key', model: ['seedance-2.0'], default_model: 'seedance-2.0',
+    }, log, {
+      prompt: '超大产品参考图', model: 'seedance-2.0', duration: 5, aspect_ratio: '16:9',
+      reference_urls: [relativePath],
+      reference_image_inputs: [{ local_path: relativePath, width: 6101, height: 3600, file_size: fs.statSync(imagePath).size }],
+      storage_local_path: root, video_gen_id: 44,
+    });
+
+    assert.equal(calls.length, 1);
+    const referenceUrl = calls[0].body.content.find((item) => item.role === 'reference_image').image_url.url;
+    assert.match(referenceUrl, /^data:image\/jpeg;base64,/);
+    const output = Buffer.from(referenceUrl.slice(referenceUrl.indexOf(',') + 1), 'base64');
+    const metadata = await sharp(output).metadata();
+    assert.ok(metadata.width <= 4096);
+    assert.ok(metadata.height <= 4096);
+    assert.equal(metadata.format, 'jpeg');
   } finally {
     global.fetch = originalFetch;
     fs.rmSync(root, { recursive: true, force: true });

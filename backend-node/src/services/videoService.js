@@ -929,6 +929,28 @@ function startPendingVideoArchiveRetry(db, log) {
   return { runNow: run, stop: () => clearInterval(timer) };
 }
 
+function loadOmniReferenceImageInputs(db, videoGenId, referenceUrls = []) {
+  const omni = db.prepare('SELECT id FROM omni_video_jobs WHERE video_generation_id = ?').get(Number(videoGenId));
+  if (!omni) return null;
+  const imageRows = db.prepare(`SELECT j.ordinal, j.snapshot_json,
+    a.width asset_width, a.height asset_height, a.file_size asset_file_size,
+    a.local_path asset_local_path
+    FROM omni_video_job_assets j LEFT JOIN assets a ON a.id=j.asset_id
+    WHERE j.omni_job_id = ? AND j.media_type = 'image' AND j.send_to_model = 1
+    ORDER BY j.ordinal`).all(omni.id);
+  return imageRows.map((item, index) => {
+    let snapshot = {};
+    try { snapshot = JSON.parse(item.snapshot_json || '{}'); } catch (_) {}
+    return {
+      url: referenceUrls[index] || snapshot.model_url || snapshot.url || snapshot.local_path || null,
+      local_path: item.asset_local_path || snapshot.local_path || null,
+      width: Number(item.asset_width || snapshot.width) || null,
+      height: Number(item.asset_height || snapshot.height) || null,
+      file_size: Number(item.asset_file_size || snapshot.file_size) || null,
+    };
+  });
+}
+
 async function processVideoGeneration(db, log, videoGenId) {
   if (activeVideoPolls.has(videoGenId)) {
     log.info('Video generation already in progress, skip duplicate', { videoGenId });
@@ -964,11 +986,13 @@ async function processVideoGeneration(db, log, videoGenId) {
         if (!Array.isArray(reference_urls)) reference_urls = null;
       } catch (_) {}
     }
+    let referenceImageInputs = null;
     // 全能工作台的音频引用与图片一样从任务快照恢复，避免依赖角色专用音色字段。
     let voiceReferenceUrl = null;
     try {
       const omni = db.prepare('SELECT id FROM omni_video_jobs WHERE video_generation_id = ?').get(Number(videoGenId));
       if (omni) {
+        referenceImageInputs = loadOmniReferenceImageInputs(db, videoGenId, reference_urls || []);
         const audio = db.prepare(`SELECT snapshot_json FROM omni_video_job_assets
           WHERE omni_job_id = ? AND media_type = 'audio' AND send_to_model = 1 ORDER BY ordinal LIMIT 1`).get(omni.id);
         if (audio?.snapshot_json) {
@@ -1030,6 +1054,7 @@ async function processVideoGeneration(db, log, videoGenId) {
       first_frame_url: hasOmniRefs ? undefined : row.first_frame_url,
       last_frame_url: hasOmniRefs ? undefined : row.last_frame_url,
       reference_urls,
+      reference_image_inputs: referenceImageInputs,
       voice_reference_url: voiceReferenceUrl,
       files_base_url: filesBaseUrl,
       storage_local_path: storageLocalPath,
@@ -1111,6 +1136,7 @@ module.exports = {
   resumeProcessingVideoGenerations,
   reconcileUnarchivedCompletedVideos,
   resumePostprocessVideoGeneration,
+  loadOmniReferenceImageInputs,
   targetVideoPixelsForAspect,
   normalizeFinalVideoToContract,
   pruneSupersededVideoArtifacts,

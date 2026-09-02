@@ -405,6 +405,88 @@ async function resolveVolcOmniImageAsync(rawUrl, files_base_url, storage_local_p
   return resolveImageInputForOmniLocalBase64(raw, files_base_url, storage_local_path, log, video_gen_id);
 }
 
+const SEEDANCE_IMAGE_MAX_DIMENSION = 6000;
+const SEEDANCE_IMAGE_MAX_BYTES = 30_000_000;
+const SEEDANCE_IMAGE_TARGET_DIMENSION = 4096;
+const SEEDANCE_IMAGE_TARGET_BYTES = 12 * 1024 * 1024;
+
+function seedanceImageNeedsNormalization(input) {
+  if (!input || typeof input !== 'object') return false;
+  return Number(input.width) > SEEDANCE_IMAGE_MAX_DIMENSION
+    || Number(input.height) > SEEDANCE_IMAGE_MAX_DIMENSION
+    || Number(input.file_size) > SEEDANCE_IMAGE_MAX_BYTES;
+}
+
+function safeSeedanceLocalImagePath(storageLocalPath, localPath) {
+  if (!storageLocalPath || !localPath) return null;
+  const root = path.resolve(storageLocalPath);
+  const candidate = path.resolve(root, String(localPath).replace(/^[/\\]+/, ''));
+  if (candidate !== root && !candidate.startsWith(root + path.sep)) return null;
+  return fs.statSync(candidate, { throwIfNoEntry: false })?.isFile() ? candidate : null;
+}
+
+async function loadSeedanceImageBuffer(resolvedUrl, input, storageLocalPath) {
+  const localFile = safeSeedanceLocalImagePath(storageLocalPath, input?.local_path);
+  if (localFile) return fs.readFileSync(localFile);
+  const value = String(resolvedUrl || '').trim();
+  if (value.startsWith('data:image/')) {
+    const comma = value.indexOf(',');
+    if (comma < 0) throw new Error('图片 data URL 无效');
+    return Buffer.from(value.slice(comma + 1), 'base64');
+  }
+  if (!/^https?:\/\//i.test(value)) throw new Error('没有可读取的本地文件或公网地址');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(value, { signal: controller.signal });
+    if (!response.ok) throw new Error(`下载图片失败: HTTP ${response.status}`);
+    const declaredBytes = Number(response.headers?.get?.('content-length') || 0);
+    if (declaredBytes > 64 * 1024 * 1024) throw new Error('图片文件超过预处理下载上限');
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length) throw new Error('图片内容为空');
+    if (buffer.length > 64 * 1024 * 1024) throw new Error('图片文件超过预处理下载上限');
+    return buffer;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function normalizeSeedanceImageForModel(resolvedUrl, input, storageLocalPath, log, videoGenId, index) {
+  if (!seedanceImageNeedsNormalization(input) || String(resolvedUrl || '').startsWith('asset://')) return resolvedUrl;
+  if (!sharp) throw new Error(`参考图 ${index + 1} 超出 Seedance 输入限制，但图片处理组件不可用`);
+  try {
+    const source = await loadSeedanceImageBuffer(resolvedUrl, input, storageLocalPath);
+    const pipeline = sharp(source, { failOn: 'none', limitInputPixels: false })
+      .rotate()
+      .resize({ width: SEEDANCE_IMAGE_TARGET_DIMENSION, height: SEEDANCE_IMAGE_TARGET_DIMENSION, fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: { r: 255, g: 255, b: 255 } });
+    let output = await pipeline.clone().jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+    if (output.length > SEEDANCE_IMAGE_TARGET_BYTES) {
+      output = await pipeline.clone().jpeg({ quality: 72, mozjpeg: true }).toBuffer();
+    }
+    const metadata = await sharp(output).metadata();
+    if (!metadata.width || !metadata.height
+      || metadata.width > SEEDANCE_IMAGE_TARGET_DIMENSION
+      || metadata.height > SEEDANCE_IMAGE_TARGET_DIMENSION
+      || output.length > SEEDANCE_IMAGE_MAX_BYTES) {
+      throw new Error('受控尺寸副本仍不符合模型输入限制');
+    }
+    log.info('[VolcOmni] 超限参考图已生成受控尺寸副本', {
+      video_gen_id: videoGenId,
+      index,
+      source_width: Number(input?.width) || null,
+      source_height: Number(input?.height) || null,
+      source_bytes: Number(input?.file_size) || source.length,
+      output_width: metadata.width,
+      output_height: metadata.height,
+      output_bytes: output.length,
+    });
+    return `data:image/jpeg;base64,${output.toString('base64')}`;
+  } catch (error) {
+    throw new Error(`参考图 ${index + 1} 超出 Seedance 输入限制，生成受控尺寸副本失败: ${error.message}`);
+  }
+}
+
 /**
  * Agnes Video：仅接受公网 http(s) 图片 URL，本地/localhost 须先上传图床，禁止 base64。
  */
@@ -577,6 +659,7 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
   // requests keep their established nine-image transport limit.
   const maxRef = /seedance[-_]?2[-_]?5|2[-_]?5[-_]?260628/i.test(finalModel) ? 30 : 9;
   const urls = orderedUrls.slice(0, maxRef);
+  const referenceImageInputs = Array.isArray(opts.reference_image_inputs) ? opts.reference_image_inputs : [];
 
   const body = {
     model: finalModel,
@@ -605,6 +688,14 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
         i
       );
       if (!u) continue;
+      u = await normalizeSeedanceImageForModel(
+        u,
+        referenceImageInputs[i],
+        storage_local_path,
+        log,
+        video_gen_id,
+        i
+      );
       if (/localhost|127\.0\.0\.1/i.test(u) && storage_local_path && (files_base_url || '').match(/localhost|127\.0\.0\.1/i)) {
         const baseUrl = (files_base_url || '').replace(/\/$/, '');
         const afterStatic = u.split('/static/')[1] || (baseUrl ? u.replace(baseUrl + '/', '').replace(baseUrl, '') : null);
@@ -3751,6 +3842,7 @@ async function callVideoApi(db, log, opts) {
       watermark: opts.watermark,
       image_url: opts.image_url,
       reference_urls: opts.reference_urls,
+      reference_image_inputs: opts.reference_image_inputs,
       files_base_url: opts.files_base_url,
       storage_local_path: opts.storage_local_path,
       video_gen_id: opts.video_gen_id,
@@ -4355,4 +4447,6 @@ module.exports = {
   buildSd2ActiveAssetUrlLookup,
   applySeedance2CertifiedAssetUrlsToVideoOpts,
   callVolcengineOmniVideoApi,
+  seedanceImageNeedsNormalization,
+  normalizeSeedanceImageForModel,
 };

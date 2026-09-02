@@ -456,7 +456,7 @@ function applySd2CertifiedAssetReferences(assets, capability) {
 }
 // Keep retry snapshots server-side and complete, but never return raw file paths,
 // signed URLs, or provider asset URLs through the job APIs.
-function publicAsset(asset) { return { asset_id: asset.id, alias: asset.alias, type: asset.type, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, local_path: asset.local_path, url: asset.url, model_url: asset.model_url || null, seedance2_asset: asset.seedance2_asset || null, checksum: asset.checksum || null, send_to_model: !!asset.send_to_model, strategy: asset.strategy }; }
+function publicAsset(asset) { return { asset_id: asset.id, alias: asset.alias, type: asset.type, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, local_path: asset.local_path, url: asset.url, model_url: asset.model_url || null, width: Number(asset.width) || null, height: Number(asset.height) || null, file_size: Number(asset.file_size) || null, seedance2_asset: asset.seedance2_asset || null, checksum: asset.checksum || null, send_to_model: !!asset.send_to_model, strategy: asset.strategy }; }
 function safeAssetSummary(asset) {
   if (!asset) return null;
   return {
@@ -744,9 +744,9 @@ function retry(db, log, id, billingUser) {
   const generation = db.prepare('SELECT status, error_msg, drama_id, storyboard_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
   if (!canRetryGeneration(generation)) throw new Error('该任务不是可安全重试的中断或模型内部素材读取超时任务');
   const snapshot = parse(job.request_snapshot_json);
-  if (!snapshot?.prompt || !Array.isArray(snapshot.assets) || !snapshot.assets.length) throw new Error('该任务没有可重试的完整请求快照');
+  if (!(snapshot?.original_prompt || snapshot?.prompt) || !Array.isArray(snapshot.assets) || !snapshot.assets.length) throw new Error('该任务没有可重试的完整请求快照');
   return create(db, log, {
-    source_context: snapshot.source_context || undefined, prompt: snapshot.prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
+    source_context: snapshot.source_context || undefined, prompt: snapshot.original_prompt || snapshot.prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
     aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
     upscale_resolution: snapshot.upscale_resolution, target_fps: snapshot.target_fps,
     creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
