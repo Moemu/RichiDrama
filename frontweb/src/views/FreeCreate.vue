@@ -736,8 +736,6 @@ async function loadProjectVideos(storyboards) {
   const groups = await Promise.all((storyboards || []).map(async (storyboard) => {
     const result = await videosAPI.list({
       storyboard_id: storyboard.id,
-      episode_id: projectEpisodeId.value,
-      storyboard_number: storyboard.storyboard_number,
       page_size: 20,
     })
     return [Number(storyboard.id), bestPlayableVideo(result?.items)]
@@ -855,7 +853,7 @@ async function loadShotHistory(shot) {
   try {
     const [result, videoResult] = await Promise.all([
       omniVideoAPI.list(isProjectMode.value ? { storyboard_id: shotId } : { shot_id: shotId }),
-      isProjectMode.value ? videosAPI.list({ storyboard_id: shotId, episode_id: projectEpisodeId.value, storyboard_number: shot.storyboard_number, page_size: 100 }) : Promise.resolve({ items: [] }),
+      isProjectMode.value ? videosAPI.list({ storyboard_id: shotId, page_size: 100 }) : Promise.resolve({ items: [] }),
     ])
     if (Number(currentShot.value?.id) !== shotId) return
     const jobs = (result || []).map(normalizeJob)

@@ -79,18 +79,19 @@ function list(db, query) {
       WHERE sequence_id IS NOT NULL OR shot_id IS NOT NULL OR storyboard_id IS NOT NULL
     )`;
   }
-  // Re-generating an episode soft-deletes its former storyboard rows and
-  // creates replacements with new IDs. Match the previous rows by episode +
-  // storyboard number as well, so their completed videos remain visible in
-  // the replacement shot's history.
-  if (query.episode_id && query.storyboard_number != null) {
+  // An explicit storyboard ID identifies one current shot. Always prefer it.
+  // A copied or inserted shot can reuse a historical storyboard number. The
+  // number fallback must not attach that historical shot's media to the new ID.
+  if (query.storyboard_id) {
+    sql += ' AND storyboard_id = ?';
+    params.push(query.storyboard_id);
+  // Legacy callers can still recover replaced storyboard history by episode +
+  // storyboard number when they do not have a current storyboard ID.
+  } else if (query.episode_id && query.storyboard_number != null) {
     sql += ` AND storyboard_id IN (
       SELECT id FROM storyboards WHERE episode_id = ? AND storyboard_number = ?
     )`;
     params.push(query.episode_id, query.storyboard_number);
-  } else if (query.storyboard_id) {
-    sql += ' AND storyboard_id = ?';
-    params.push(query.storyboard_id);
   }
   // 与 Go 前端行为对齐：请求 status=processing 时，同时包含“刚结束”的记录（5 分钟内变为 completed/failed），
   // 这样轮询刷新后任务不会从列表消失，无需改 Vue

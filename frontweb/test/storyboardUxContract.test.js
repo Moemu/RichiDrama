@@ -19,7 +19,8 @@ test('storyboard navigation uses real video, including retained source after pos
   assert.match(freeCreate, /source_local_path/)
   assert.match(freeCreate, /function bestPlayableVideo/)
   assert.match(freeCreate, /currentShot\.value\.video_url = localVideoUrl\(playableVideo\)/)
-  assert.match(freeCreate, /storyboard_number: storyboard\.storyboard_number/)
+  assert.match(freeCreate, /videosAPI\.list\(\{\s*storyboard_id: storyboard\.id,\s*page_size: 20/)
+  assert.doesNotMatch(freeCreate, /storyboard_id: storyboard\.id,\s*episode_id:/)
   assert.doesNotMatch(freeCreate, /storyboard-placeholder\.svg|shotCover\(/)
 })
 
