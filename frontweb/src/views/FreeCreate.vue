@@ -214,7 +214,7 @@ import { findAssetMentions, promptAliasForAsset } from '@/utils/assetMentions'
 import GenerationSettings from '@/components/GenerationSettings.vue'
 import { clearPromptDraft, currentDraftUserId, readPromptDraft, shouldRestorePromptDraft, writePromptDraft } from '@/utils/promptDraft'
 import { formatChinaDateTime } from '@/utils/time'
-import { materialRoutingPreview } from '@/utils/mediaRoutingPreview'
+import { isSeedanceOmniReferenceModel, materialRoutingPreview } from '@/utils/mediaRoutingPreview'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import GenerationFailureDetails from '@/components/GenerationFailureDetails.vue'
 import { beginAssetPointerDrag, shouldSuppressAssetClick } from '@/utils/assetPointerDrag'
@@ -584,7 +584,12 @@ function assetRouteHint(asset) {
     const ordinal = chosenAssets.value.filter((item) => item.type === 'image').findIndex((item) => item.id === asset.id)
     return ordinal >= 0 && ordinal < nativeImageLimit.value ? '发送给模型：图片参考' : '不会发送：超出图片参考上限'
   }
-  if (asset.type === 'video') return supports.video_reference ? '发送给模型：原生视频参考' : '生成前处理：提取关键帧参考'
+  if (asset.type === 'video') {
+    if (supports.video_reference) return '发送给模型：原生视频参考'
+    return isSeedanceOmniReferenceModel(currentCapability.value?.model)
+      ? '平台降级：模型支持视频参考，当前适配层仅提取关键帧'
+      : '平台降级：当前适配层仅提取关键帧'
+  }
   if (asset.type === 'audio') return supports.audio_reference && audioStrategy.value !== 'post_mix' ? '发送给模型：音频参考' : '生成后处理：成片混音'
   return '按当前模型能力处理'
 }

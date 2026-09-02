@@ -51,19 +51,19 @@
           <ToolAssetSelector v-else-if="mode === 'image'" v-model="selectedAssetId" :drama-id="media === 'image' ? Number(dramaId) || null : null" :types="['image']" :prompt-draggable="media === 'video'" label="起始参考图" @selected="applySelectedAsset" @assets-loaded="mergeLibraryAssets" />
           <ToolAssetSelector v-else v-model="selectedAssetIds" multiple :max-selections="assetLimit" :drama-id="media === 'image' ? Number(dramaId) || null : null" :types="media === 'image' ? ['image'] : ['image', 'video', 'audio']" :prompt-draggable="media === 'video'" :label="mode === 'text' ? '可选素材（选用后自动切换多参考）' : '参考素材'" @selection-change="applyMultiAssets" @assets-loaded="mergeLibraryAssets" />
           <div v-if="media === 'video'" class="material-routing" aria-live="polite">
-            <div class="material-routing-heading"><b>当前模型素材限制</b><small>{{ currentCapability ? currentCapability.model : '请选择视频模型' }}</small></div>
+            <div class="material-routing-heading"><b>模型素材规格与平台接入</b><small>{{ currentCapability ? currentCapability.model : '请选择视频模型' }}</small></div>
             <div class="material-limit-grid">
               <span :class="{ exceeded: materialRouting.selected.total > materialRouting.limits.total }">总数 {{ materialRouting.selected.total }}/{{ materialRouting.limits.total }}</span>
               <span :class="{ exceeded: materialRouting.selected.image > materialRouting.limits.image }">图片 {{ materialRouting.selected.image }}/{{ materialRouting.limits.image }}</span>
               <span :class="{ exceeded: materialRouting.selected.video > materialRouting.limits.video }">视频 {{ materialRouting.selected.video }}/{{ materialRouting.limits.video }}</span>
               <span :class="{ exceeded: materialRouting.selected.audio > materialRouting.limits.audio }">音频 {{ materialRouting.selected.audio }}/{{ materialRouting.limits.audio }}</span>
             </div>
-            <p v-if="currentCapability && !currentCapability.supports?.video_reference" class="material-routing-warning">当前模型接入方式不发送视频本体。动作参考视频会在生成前提取 3 张关键帧；原视频的连续动作、节奏和运镜不会作为原生视频参考发送。</p>
+            <p v-if="currentCapability && !currentCapability.supports?.video_reference" class="material-routing-warning">{{ materialRoutingWarning }}</p>
             <ul v-if="materialRouting.entries.length" class="material-routing-list">
               <li v-for="(entry, index) in materialRouting.entries" :key="`${entry.alias}-${index}`"><b>{{ entry.alias }}</b><small>{{ entry.label }}</small></li>
             </ul>
             <p v-else class="material-routing-empty">选择素材后，这里会显示实际发送方式。</p>
-            <p v-if="materialRouting.entries.length" class="material-routing-result">预计实际发送：{{ materialRouting.sent.total }} 项；图片 {{ materialRouting.sent.image }}，视频 {{ materialRouting.sent.video }}，音频 {{ materialRouting.sent.audio }}。</p>
+            <p v-if="materialRouting.entries.length" class="material-routing-result">当前平台预计发送：{{ materialRouting.sent.total }} 项；图片 {{ materialRouting.sent.image }}，视频 {{ materialRouting.sent.video }}，音频 {{ materialRouting.sent.audio }}。</p>
           </div>
           <details class="external-reference">
             <summary>使用公开素材链接</summary>
@@ -147,7 +147,7 @@ import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import GenerationFailureDetails from '@/components/GenerationFailureDetails.vue'
 import { formatChinaDateTime } from '@/utils/time'
 import { useModelOptions } from '@/composables/useModelOptions'
-import { materialRoutingPreview } from '@/utils/mediaRoutingPreview'
+import { isSeedanceOmniReferenceModel, materialRoutingPreview } from '@/utils/mediaRoutingPreview'
 
 const props = defineProps({ media: { type: String, required: true } })
 const router = useRouter()
@@ -174,6 +174,9 @@ const currentCapability = computed(() => capabilities.value.find((item) => item.
 const assetLimit = computed(() => props.media === 'image' ? 9 : Number(currentCapability.value?.limits?.total_reference?.max || 15))
 const chosenAssetIds = computed(() => new Set([selectedAssetId.value, firstFrameAssetId.value, lastFrameAssetId.value, ...selectedAssetIds.value].filter((id) => Number(id) > 0).map(Number)))
 const materialRouting = computed(() => materialRoutingPreview(requestAssets(), currentCapability.value, { audioStrategy: 'reference_only' }))
+const materialRoutingWarning = computed(() => isSeedanceOmniReferenceModel(currentCapability.value?.model)
+  ? '模型能力：Seedance 2.0/2.5 支持图片、视频和音频全模态参考。平台接入：当前适配层尚未发送视频本体，临时提取 3 张关键帧。连续动作、节奏和运镜不会完整保留。'
+  : '平台接入：当前适配层尚未发送视频本体，临时提取 3 张关键帧。连续动作、节奏和运镜不会完整保留。')
 const quoteHasVideoInput = computed(() => materialRouting.value.sent.video > 0)
 const quoteHasAudioInput = computed(() => materialRouting.value.sent.audio > 0)
 const externalRefs = computed(() => reference.value.split(',').map((item) => item.trim()).filter(Boolean))

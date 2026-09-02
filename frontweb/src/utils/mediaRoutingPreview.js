@@ -1,5 +1,9 @@
 const FALLBACK_LIMITS = Object.freeze({ total: 15, image: 9, video: 3, audio: 3 })
 
+export function isSeedanceOmniReferenceModel(model) {
+  return /seedance[-_]?2[-_]?(?:0|5)/i.test(String(model || ''))
+}
+
 export function materialLimits(capability) {
   const limits = capability?.limits || {}
   return {
@@ -56,7 +60,7 @@ export function materialRoutingPreview(assets = [], capability = null, options =
         keyframes: extractsFrames ? keyframesPerVideo : 0,
         keyframesSent: framesSent,
         label: extractsFrames
-          ? `仅预处理：预计提取 ${keyframesPerVideo} 张关键帧${framesSent < keyframesPerVideo ? `，其中 ${framesSent} 张可发送` : ''}`
+          ? `平台降级：预计提取 ${keyframesPerVideo} 张关键帧${framesSent < keyframesPerVideo ? `，其中 ${framesSent} 张可发送` : ''}`
           : '不会发送：仅用于后期处理',
       })
       continue

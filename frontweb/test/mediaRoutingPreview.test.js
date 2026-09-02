@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { materialLimits, materialRoutingPreview } from '../src/utils/mediaRoutingPreview.js'
+import { isSeedanceOmniReferenceModel, materialLimits, materialRoutingPreview } from '../src/utils/mediaRoutingPreview.js'
 
 const seedanceImageFallback = {
   supports: { image_reference: { max: 30 }, video_reference: false, audio_reference: true },
@@ -19,7 +19,13 @@ test('unsupported source video is shown as keyframes and is excluded from video 
   assert.deepEqual(preview.sent, { total: 6, image: 6, video: 0, audio: 0 })
   assert.equal(preview.preprocessedVideos, 1)
   assert.equal(preview.entries[0].strategy, 'keyframe_or_post')
-  assert.match(preview.entries[0].label, /预计提取 3 张关键帧/)
+  assert.match(preview.entries[0].label, /平台降级：预计提取 3 张关键帧/)
+})
+
+test('Seedance 2.0 and 2.5 are identified as full-modal model families', () => {
+  assert.equal(isSeedanceOmniReferenceModel('doubao-seedance-2-0-260128'), true)
+  assert.equal(isSeedanceOmniReferenceModel('doubao-seedance-2-5-260628'), true)
+  assert.equal(isSeedanceOmniReferenceModel('doubao-seedance-1-5-pro-251215'), false)
 })
 
 test('native video capability keeps the source video in the provider request', () => {
