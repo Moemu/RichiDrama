@@ -36,6 +36,9 @@ payments:
     merchant_serial_no: ''
     merchant_private_key: ''
     api_v3_key: ''
+    wechatpay_public_key_id: ''
+    wechatpay_public_key: ''
+    # Deprecated compatibility field. Use wechatpay_public_key.
     platform_public_key: ''
 database:
   type: sqlite

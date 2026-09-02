@@ -127,13 +127,20 @@ CFG_PAYMENTS__WECHAT__NOTIFY_URL=https://api.richbest.cn/minidrama/payments/call
 CFG_PAYMENTS__WECHAT__MERCHANT_SERIAL_NO
 CFG_PAYMENTS__WECHAT__MERCHANT_PRIVATE_KEY
 CFG_PAYMENTS__WECHAT__API_V3_KEY
-CFG_PAYMENTS__WECHAT__PLATFORM_PUBLIC_KEY
+CFG_PAYMENTS__WECHAT__WECHATPAY_PUBLIC_KEY_ID
+CFG_PAYMENTS__WECHAT__WECHATPAY_PUBLIC_KEY
 CFG_PAYMENTS__WECHAT__ENABLED=true
 ```
 
-商户私钥和平台公钥可以使用 PEM 文本。
+商户私钥和微信支付公钥可以使用 PEM 文本。
 
 也可以使用 PEM 内容的 Base64 编码。
+
+商户证书序列号来自 `apiclient_cert.pem`。商户私钥来自配套的 `apiclient_key.pem`。
+
+微信支付公钥 ID 使用 `PUB_KEY_ID_...` 格式。微信响应和通知中的 `Wechatpay-Serial` 必须与该 ID 一致。
+
+`wechatpay_public_key` 是微信支付公钥，不是商户证书中的公钥。旧字段 `platform_public_key` 只保留读取兼容。
 
 ### 4.3 微信验收
 

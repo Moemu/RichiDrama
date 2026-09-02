@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const SENSITIVE_KEY = /(?:api[_-]?key|access[_-]?key|secret|authorization|cookie|password|token|signature|sign)/i;
+const SENSITIVE_KEY = /(?:api[_-]?key|access[_-]?key|private[_-]?key|public[_-]?key|certificate|secret|authorization|cookie|password|token|signature|sign)/i;
 const REDACTED = '<redacted>';
 
 function sanitize(value, key = '', depth = 0) {

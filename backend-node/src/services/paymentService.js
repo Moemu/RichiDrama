@@ -36,7 +36,11 @@ function channelReady(config, channel) {
   }
   if (channel === 'wechat') {
     const row = config.wechat || {};
-    return row.enabled === true && ['app_id', 'mch_id', 'merchant_serial_no', 'merchant_private_key', 'api_v3_key', 'platform_public_key'].every((key) => String(row[key] || '').trim());
+    const publicKey = row.wechatpay_public_key || row.platform_public_key;
+    return row.enabled === true
+      && ['app_id', 'mch_id', 'merchant_serial_no', 'merchant_private_key', 'api_v3_key', 'wechatpay_public_key_id']
+        .every((key) => String(row[key] || '').trim())
+      && Boolean(String(publicKey || '').trim());
   }
   return false;
 }

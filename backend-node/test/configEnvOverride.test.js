@@ -18,6 +18,7 @@ test('environment override diagnostics redact payment keys and certificates', ()
   const values = {
     CFG_PAYMENTS__ALIPAY__APP_PRIVATE_KEY: 'alipay-private-key-value',
     CFG_PAYMENTS__WECHAT__API_V3_KEY: 'wechat-api-v3-key-value',
+    CFG_PAYMENTS__WECHAT__WECHATPAY_PUBLIC_KEY: 'wechat-public-key-value',
     CFG_PAYMENTS__WECHAT__PLATFORM_CERTIFICATE: 'wechat-platform-certificate-value',
   };
   const prior = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));

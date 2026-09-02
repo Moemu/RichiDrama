@@ -25,7 +25,8 @@ test('Alipay notification requires a valid RSA2 signature', () => {
 test('WeChat notification verifies the raw body and decrypts AES-GCM resource', () => {
   const merchant = keyPair(); const platform = keyPair();
   const apiKey = '12345678901234567890123456789012';
-  const adapter = new WechatAdapter({ app_id: 'wx-app', mch_id: 'mch-1', merchant_serial_no: 'serial', merchant_private_key: merchant.privateKey, platform_public_key: platform.publicKey, api_v3_key: apiKey }, 'https://example.test/wechat');
+  const publicKeyId = 'PUB_KEY_ID_3000000001';
+  const adapter = new WechatAdapter({ app_id: 'wx-app', mch_id: 'mch-1', merchant_serial_no: 'serial', merchant_private_key: merchant.privateKey, wechatpay_public_key_id: publicKeyId, wechatpay_public_key: platform.publicKey, api_v3_key: apiKey }, 'https://example.test/wechat');
   const plaintext = JSON.stringify({ appid: 'wx-app', mchid: 'mch-1', out_trade_no: 'R456', transaction_id: 'WX456', trade_state: 'SUCCESS', amount: { total: 1000, currency: 'CNY' } });
   const resourceNonce = '123456789012'; const associated = 'transaction';
   const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(apiKey), Buffer.from(resourceNonce));
@@ -34,8 +35,26 @@ test('WeChat notification verifies the raw body and decrypts AES-GCM resource', 
   const body = { id: 'event-wx-1', resource: { nonce: resourceNonce, associated_data: associated, ciphertext } };
   const raw = JSON.stringify(body); const ts = Math.floor(Date.now() / 1000).toString(); const n = 'notify-nonce';
   const signature = crypto.sign('RSA-SHA256', Buffer.from(`${ts}\n${n}\n${raw}\n`), platform.privateKey).toString('base64');
-  const result = adapter.verifyNotification({ body, rawBody: Buffer.from(raw), headers: { 'wechatpay-timestamp': ts, 'wechatpay-nonce': n, 'wechatpay-signature': signature } });
+  const headers = { 'wechatpay-timestamp': ts, 'wechatpay-nonce': n, 'wechatpay-signature': signature, 'wechatpay-serial': publicKeyId };
+  const result = adapter.verifyNotification({ body, rawBody: Buffer.from(raw), headers });
   assert.equal(result.state, 'paid');
   assert.equal(result.amount_fen, 1000);
-  assert.throws(() => adapter.verifyNotification({ body, rawBody: Buffer.from(raw + ' '), headers: { 'wechatpay-timestamp': ts, 'wechatpay-nonce': n, 'wechatpay-signature': signature } }), /验签失败/);
+  assert.throws(() => adapter.verifyNotification({ body, rawBody: Buffer.from(raw + ' '), headers }), /验签失败/);
+  assert.throws(() => adapter.verifyNotification({ body, rawBody: Buffer.from(raw), headers: { ...headers, 'wechatpay-serial': 'PUB_KEY_ID_9999999999' } }), /验签失败/);
+});
+
+test('WeChat requests identify the configured verification public key', async () => {
+  const merchant = keyPair(); const platform = keyPair();
+  const publicKeyId = 'PUB_KEY_ID_3000000001';
+  const adapter = new WechatAdapter({ mch_id: 'mch-1', merchant_serial_no: 'merchant-serial', merchant_private_key: merchant.privateKey, wechatpay_public_key_id: publicKeyId, wechatpay_public_key: platform.publicKey }, 'https://example.test/wechat');
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async (_url, options) => {
+      assert.equal(options.headers['Wechatpay-Serial'], publicKeyId);
+      return { ok: true, status: 200, headers: new Map(), text: async () => '' };
+    };
+    await adapter.request('POST', '/v3/pay/transactions/out-trade-no/R1/close', { mchid: 'mch-1' });
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

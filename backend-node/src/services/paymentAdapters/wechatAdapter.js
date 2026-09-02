@@ -12,7 +12,8 @@ class WechatAdapter {
   }
 
   privateKey() { return secret(this.config.merchant_private_key); }
-  publicKey() { return secret(this.config.platform_public_key); }
+  publicKey() { return secret(this.config.wechatpay_public_key || this.config.platform_public_key); }
+  publicKeyId() { return String(this.config.wechatpay_public_key_id || '').trim(); }
 
   authorization(method, requestPath, body) {
     const ts = timestamp(); const n = nonce();
@@ -25,7 +26,8 @@ class WechatAdapter {
     const ts = String(headers['wechatpay-timestamp'] || '');
     const n = String(headers['wechatpay-nonce'] || '');
     const signature = String(headers['wechatpay-signature'] || '');
-    if (!ts || !n || !signature || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
+    const serial = String(headers['wechatpay-serial'] || '');
+    if (!ts || !n || !signature || !serial || serial !== this.publicKeyId() || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
     return crypto.verify('RSA-SHA256', Buffer.from(`${ts}\n${n}\n${rawBody}\n`), this.publicKey(), Buffer.from(signature, 'base64'));
   }
 
@@ -33,7 +35,12 @@ class WechatAdapter {
     const body = input == null ? '' : JSON.stringify(input);
     const response = await fetch(this.baseUrl + requestPath, {
       method,
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: this.authorization(method, requestPath, body) },
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: this.authorization(method, requestPath, body),
+        'Wechatpay-Serial': this.publicKeyId(),
+      },
       body: body || undefined,
     });
     const raw = await response.text();
