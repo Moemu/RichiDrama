@@ -50,6 +50,21 @@
           </template>
           <ToolAssetSelector v-else-if="mode === 'image'" v-model="selectedAssetId" :drama-id="media === 'image' ? Number(dramaId) || null : null" :types="['image']" :prompt-draggable="media === 'video'" label="起始参考图" @selected="applySelectedAsset" @assets-loaded="mergeLibraryAssets" />
           <ToolAssetSelector v-else v-model="selectedAssetIds" multiple :max-selections="assetLimit" :drama-id="media === 'image' ? Number(dramaId) || null : null" :types="media === 'image' ? ['image'] : ['image', 'video', 'audio']" :prompt-draggable="media === 'video'" :label="mode === 'text' ? '可选素材（选用后自动切换多参考）' : '参考素材'" @selection-change="applyMultiAssets" @assets-loaded="mergeLibraryAssets" />
+          <div v-if="media === 'video'" class="material-routing" aria-live="polite">
+            <div class="material-routing-heading"><b>当前模型素材限制</b><small>{{ currentCapability ? currentCapability.model : '请选择视频模型' }}</small></div>
+            <div class="material-limit-grid">
+              <span :class="{ exceeded: materialRouting.selected.total > materialRouting.limits.total }">总数 {{ materialRouting.selected.total }}/{{ materialRouting.limits.total }}</span>
+              <span :class="{ exceeded: materialRouting.selected.image > materialRouting.limits.image }">图片 {{ materialRouting.selected.image }}/{{ materialRouting.limits.image }}</span>
+              <span :class="{ exceeded: materialRouting.selected.video > materialRouting.limits.video }">视频 {{ materialRouting.selected.video }}/{{ materialRouting.limits.video }}</span>
+              <span :class="{ exceeded: materialRouting.selected.audio > materialRouting.limits.audio }">音频 {{ materialRouting.selected.audio }}/{{ materialRouting.limits.audio }}</span>
+            </div>
+            <p v-if="currentCapability && !currentCapability.supports?.video_reference" class="material-routing-warning">当前模型接入方式不发送视频本体。动作参考视频会在生成前提取 3 张关键帧；原视频的连续动作、节奏和运镜不会作为原生视频参考发送。</p>
+            <ul v-if="materialRouting.entries.length" class="material-routing-list">
+              <li v-for="(entry, index) in materialRouting.entries" :key="`${entry.alias}-${index}`"><b>{{ entry.alias }}</b><small>{{ entry.label }}</small></li>
+            </ul>
+            <p v-else class="material-routing-empty">选择素材后，这里会显示实际发送方式。</p>
+            <p v-if="materialRouting.entries.length" class="material-routing-result">预计实际发送：{{ materialRouting.sent.total }} 项；图片 {{ materialRouting.sent.image }}，视频 {{ materialRouting.sent.video }}，音频 {{ materialRouting.sent.audio }}。</p>
+          </div>
           <details class="external-reference">
             <summary>使用公开素材链接</summary>
             <label class="field-label">公开链接
@@ -132,6 +147,7 @@ import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import GenerationFailureDetails from '@/components/GenerationFailureDetails.vue'
 import { formatChinaDateTime } from '@/utils/time'
 import { useModelOptions } from '@/composables/useModelOptions'
+import { materialRoutingPreview } from '@/utils/mediaRoutingPreview'
 
 const props = defineProps({ media: { type: String, required: true } })
 const router = useRouter()
@@ -157,8 +173,9 @@ const selectedMode = computed(() => modes.value.find((item) => item.value === mo
 const currentCapability = computed(() => capabilities.value.find((item) => item.model === videoSettings.value.video_model) || null)
 const assetLimit = computed(() => props.media === 'image' ? 9 : Number(currentCapability.value?.limits?.total_reference?.max || 15))
 const chosenAssetIds = computed(() => new Set([selectedAssetId.value, firstFrameAssetId.value, lastFrameAssetId.value, ...selectedAssetIds.value].filter((id) => Number(id) > 0).map(Number)))
-const quoteHasVideoInput = computed(() => selectedAssets.value.some((asset) => asset?.type === 'video'))
-const quoteHasAudioInput = computed(() => selectedAssets.value.some((asset) => asset?.type === 'audio'))
+const materialRouting = computed(() => materialRoutingPreview(requestAssets(), currentCapability.value, { audioStrategy: 'reference_only' }))
+const quoteHasVideoInput = computed(() => materialRouting.value.sent.video > 0)
+const quoteHasAudioInput = computed(() => materialRouting.value.sent.audio > 0)
 const externalRefs = computed(() => reference.value.split(',').map((item) => item.trim()).filter(Boolean))
 const hasRequiredAssets = computed(() => {
   if (mode.value === 'text' || mode.value === 'batch') return true
@@ -167,14 +184,17 @@ const hasRequiredAssets = computed(() => {
   return selectedAssets.value.length > 0 || externalRefs.value.length > 0
 })
 const hasModel = computed(() => props.media === 'image' || (!!videoSettings.value.video_model && videoSettings.value.video_model !== 'auto'))
-const canSubmit = computed(() => !!prompt.value.trim() && (props.media === 'video' || Number(dramaId.value) > 0) && hasRequiredAssets.value && hasModel.value && modeAvailable(mode.value) && !running.value)
+const canSubmit = computed(() => !!prompt.value.trim() && (props.media === 'video' || Number(dramaId.value) > 0) && hasRequiredAssets.value && hasModel.value && modeAvailable(mode.value) && materialRouting.value.withinLimits && !running.value)
 const submitHint = computed(() => {
   if (props.media === 'image' && !Number(dramaId.value)) return '请选择计费归属项目'
   if (!prompt.value.trim()) return `请填写${props.media === 'image' ? '图片' : '视频'}提示词`
   if (!hasRequiredAssets.value) return selectedMode.value.rule
   if (!hasModel.value) return '请选择可用的视频模型'
   if (!modeAvailable(mode.value)) return '当前模型不支持首尾帧模式，请切换模型或模式'
-  return `已就绪 · ${['text', 'batch'].includes(mode.value) ? '不发送参考素材' : `${requestAssets().length} 项参考素材`}`
+  if (!materialRouting.value.withinLimits) return `素材数量超过限制：${materialRouting.value.exceeded.map((type) => ({ total: '总数', image: '图片', video: '视频', audio: '音频' })[type]).join('、')}`
+  if (['text', 'batch'].includes(mode.value)) return '已就绪 · 不发送参考素材'
+  const fallback = materialRouting.value.preprocessedVideos ? `；${materialRouting.value.preprocessedVideos} 个视频仅提取关键帧` : ''
+  return `已就绪 · 预计向模型发送 ${materialRouting.value.sent.total} 项${fallback}`
 })
 const statusText = (status) => ({ pending: '排队中', processing: '生成中', sd2_waiting: '素材准备中', upscale_pending: '等待超分', upscaling: '超分中', interpolation_pending: '等待插帧', interpolating: '插帧中', persisting: '保存成片', billing_reconciliation: '等待对账', completed: '已完成', failed: '生成失败', retryable: '可重试' }[status] || status || '草稿')
 const mediaUrl = (item) => item?.local_path ? `/static/${String(item.local_path).replace(/^\/+/, '')}` : item?.video_url || ''
@@ -455,6 +475,21 @@ onBeforeUnmount(clearPoll)
 .prompt-section :deep(.prompt-rich-editor) { min-height: 0; padding: 16px 18px; font-size: 14px; line-height: 1.75; }
 .prompt-section :deep(.el-textarea__inner) { min-height: 320px !important; padding: 16px 18px; line-height: 1.7; }
 .asset-section :deep(.asset-grid) { grid-template-columns: repeat(5, minmax(0, 1fr)); max-height: 330px; }
+.material-routing { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--border-subtle); border-radius: 12px; background: color-mix(in srgb, var(--bg-page) 38%, transparent); }
+.material-routing-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.material-routing-heading b { font-size: 12px; }
+.material-routing-heading small { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.material-limit-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.material-limit-grid span { padding: 6px 7px; border-radius: 7px; background: var(--bg-raised); color: var(--text-muted); font-size: 10px; text-align: center; }
+.material-limit-grid span.exceeded { background: color-mix(in srgb, var(--status-danger, #e45a67) 14%, var(--bg-raised)); color: var(--status-danger, #e45a67); }
+.material-routing-warning, .material-routing-result, .material-routing-empty { margin: 0; font-size: 10px; line-height: 1.55; }
+.material-routing-warning { padding: 8px 9px; border-left: 3px solid var(--status-warning, #d89b36); background: color-mix(in srgb, var(--status-warning, #d89b36) 9%, transparent); color: var(--text-regular); }
+.material-routing-list { display: grid; gap: 5px; max-height: 132px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.material-routing-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 6px 8px; border-radius: 7px; background: var(--bg-raised); }
+.material-routing-list b { min-width: 0; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.material-routing-list small { flex: 0 0 auto; color: var(--text-muted); font-size: 9px; }
+.material-routing-result { color: var(--accent-teal); }
+.material-routing-empty { color: var(--text-muted); }
 .frame-selectors { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .submit-bar {
   position: static;
@@ -523,6 +558,8 @@ onBeforeUnmount(clearPoll)
   .topbar-actions { gap: 8px; }
   .input-section { padding: 18px 16px; }
   .asset-section :deep(.asset-grid), .history-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .material-limit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .material-routing-list li { align-items: flex-start; flex-direction: column; }
   .submit-bar { align-items: stretch; flex-direction: column; padding: 16px; }
   .submit-bar :deep(.el-button) { width: 100%; }
 }
