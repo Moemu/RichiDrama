@@ -96,7 +96,15 @@
         </div>
         <section class="t0-generation-settings" aria-label="生成参数">
           <div class="t0-settings-heading"><b>生成参数</b><div v-if="isProjectMode" class="template-status"><el-tag size="small" :type="currentGenerationMode === 'custom' ? 'warning' : 'info'">{{ currentGenerationMode === 'master' ? '首镜母版' : currentGenerationMode === 'custom' ? '当前镜头覆盖' : '跟随首镜' }}</el-tag><el-button v-if="currentGenerationMode === 'custom'" text size="small" @click="restoreCurrentShotMaster">恢复跟随首镜</el-button></div><small>{{ currentGenerationMode === 'master' ? '调整后同步所有跟随镜头' : currentGenerationMode === 'custom' ? '本镜独立，不受首镜变化影响' : '默认采用第一个镜头参数，可单独覆盖' }}</small></div>
-          <GenerationSettings v-model="generationSettings" :max-duration="maxDuration" :video-model-invalid="videoModelState !== 'ready'" :video-model-error="videoModelFieldError" />
+          <GenerationSettings
+            v-model="generationSettings"
+            :max-duration="maxDuration"
+            :video-model-invalid="videoModelState !== 'ready'"
+            :video-model-error="videoModelFieldError"
+            include-generation-quote
+            :has-video-input="quoteHasVideoInput"
+            :has-audio-input="quoteHasAudioInput"
+          />
           <div class="parameters"><label>音频<el-select v-model="audioStrategy" size="small"><el-option label="音频参考" value="reference_only"/><el-option label="成片混音" value="post_mix"/></el-select></label></div>
         </section>
 
@@ -560,7 +568,9 @@ const generationProgressMessage = computed(() => generationStallMinutes.value ? 
 const estimatedPoints = ref(null), quotingEstimate = ref(false)
 const requestPreview = computed(() => ({ prompt: prompt.value, asset_selection_policy: 'prompt_references', creation_mode: creationMode.value, model: currentCapability.value?.model || model.value, aspect_ratio: aspectRatio.value, duration_seconds: normalizeDuration(duration.value), resolution: resolution.value, upscale_resolution: upscaleResolution.value, target_fps: targetFps.value, audio_strategy: audioStrategy.value, assets: requestAssets.value.map((asset, index) => ({ ordinal: index + 1, name: promptAssetFor(asset).alias, type: asset.type, usage: asset.usage, routing: assetRouteHint(asset) })) }))
 const requestMaterialRouting = computed(() => materialRoutingPreview(requestAssets.value, currentCapability.value, { audioStrategy: audioStrategy.value }))
-async function quoteCurrentRequest() { if (!currentCapability.value?.model) return; quotingEstimate.value = true; try { const quote = await omniVideoAPI.quoteBilling({ model: currentCapability.value.model, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', has_video_input: requestMaterialRouting.value.sent.video > 0, has_audio: requestMaterialRouting.value.sent.audio > 0 }); estimatedPoints.value = quote.amount } catch (_) { estimatedPoints.value = null } finally { quotingEstimate.value = false } }
+const quoteHasVideoInput = computed(() => requestMaterialRouting.value.sent.video > 0)
+const quoteHasAudioInput = computed(() => requestMaterialRouting.value.sent.audio > 0)
+async function quoteCurrentRequest() { if (!currentCapability.value?.model) return; quotingEstimate.value = true; try { const quote = await omniVideoAPI.quoteBilling({ model: currentCapability.value.model, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', has_video_input: quoteHasVideoInput.value, has_audio: quoteHasAudioInput.value }); estimatedPoints.value = quote.amount } catch (_) { estimatedPoints.value = null } finally { quotingEstimate.value = false } }
 
 async function suggestPolish() {
   if (!prompt.value.trim() || polishingPrompt.value) return

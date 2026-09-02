@@ -63,8 +63,10 @@ test('自由创作报价由后端按模型的有效计量单位计算', async ()
   assert.match(apiSource, /request\.post\('\/omni-video-jobs\/quote', body\)/)
   assert.match(quoteHandler, /model: currentCapability\.value\.model/)
   assert.match(quoteHandler, /duration: normalizeDuration\(duration\.value\)/)
-  assert.match(quoteHandler, /requestMaterialRouting\.value\.sent\.video > 0/)
-  assert.match(quoteHandler, /requestMaterialRouting\.value\.sent\.audio > 0/)
+  assert.match(source, /quoteHasVideoInput = computed\(\(\) => requestMaterialRouting\.value\.sent\.video > 0\)/)
+  assert.match(source, /quoteHasAudioInput = computed\(\(\) => requestMaterialRouting\.value\.sent\.audio > 0\)/)
+  assert.match(quoteHandler, /has_video_input: quoteHasVideoInput\.value/)
+  assert.match(quoteHandler, /has_audio: quoteHasAudioInput\.value/)
   assert.doesNotMatch(quoteHandler, /usage:\s*\{\s*second:/)
 })
 
@@ -481,6 +483,20 @@ test('generation settings refresh the full video quote when billable inputs chan
   assert.match(source, /value\.value\.video_model[\s\S]*value\.value\.duration[\s\S]*value\.value\.resolution/)
   assert.match(source, /props\.hasVideoInput[\s\S]*props\.hasAudioInput/)
   assert.match(source, /const revision = \+\+quoteRevision[\s\S]*if \(props\.includeGenerationQuote && !includeGeneration\)/)
+})
+
+test('project storyboard generation settings include the video generation quote', async () => {
+  const [filmCreate, freeCreate] = await Promise.all([
+    readSource('../src/views/FilmCreate.vue'),
+    readSource('../src/views/FreeCreate.vue'),
+  ])
+  const legacySettingsTags = filmCreate.match(/<GenerationSettings\b[\s\S]*?\/>/g) || []
+  assert.equal(legacySettingsTags.length, 3)
+  for (const tag of legacySettingsTags) assert.match(tag, /include-generation-quote/)
+  assert.match(filmCreate, /<FreeCreate[\s\S]*embedded/)
+  assert.match(freeCreate, /<GenerationSettings[\s\S]*include-generation-quote[\s\S]*:has-video-input="quoteHasVideoInput"[\s\S]*:has-audio-input="quoteHasAudioInput"/)
+  assert.match(freeCreate, /quoteHasVideoInput = computed\(\(\) => requestMaterialRouting\.value\.sent\.video > 0\)/)
+  assert.match(freeCreate, /quoteHasAudioInput = computed\(\(\) => requestMaterialRouting\.value\.sent\.audio > 0\)/)
 })
 
 test('运营页面始终提供返回主页入口', async () => {
