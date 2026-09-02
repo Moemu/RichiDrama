@@ -20,4 +20,5 @@ test('production detail uses a status-neutral material heading and structured ti
   assert.match(source, /class="production-timeline"/)
   assert.match(source, /class="timeline-stage-card"/)
   assert.match(source, /stageStatusLabel\(stage\.status\)/)
+  assert.match(source, /stage\.updated_at \? formatChinaDateTime\(stage\.updated_at\) : '未记录'/)
 })

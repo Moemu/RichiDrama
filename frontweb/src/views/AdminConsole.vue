@@ -144,7 +144,7 @@
                 <header><strong>{{ stageLabel(stage.key) }}</strong><span>{{ stageStatusLabel(stage.status) }}</span></header>
                 <p v-if="stage.message">{{ stage.message }}</p>
                 <dl>
-                  <div><dt>更新时间</dt><dd>{{ formatChinaDateTime(stage.updated_at) }}</dd></div>
+                  <div><dt>更新时间</dt><dd>{{ stage.updated_at ? formatChinaDateTime(stage.updated_at) : '未记录' }}</dd></div>
                   <div v-if="stage.elapsed_ms !== null"><dt>阶段耗时</dt><dd>{{ formatElapsed(stage.elapsed_ms) }}</dd></div>
                   <div v-if="stage.provider_task_id" class="timeline-provider-task"><dt>供应商任务</dt><dd :title="stage.provider_task_id">{{ stage.provider_task_id }}</dd></div>
                 </dl>
