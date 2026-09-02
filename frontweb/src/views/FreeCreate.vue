@@ -2,10 +2,10 @@
   <section class="omni-page" :class="{ 'project-storyboard-page': isProjectMode, embedded: embedded, 'is-reproduction': reproductionMode }" @wheel.capture="containWorkbenchScroll">
     <header v-if="!embedded" class="topbar">
       <div class="topbar-left">
-        <el-button text @click="backToProject"><el-icon><ArrowLeft /></el-icon>返回项目</el-button>
+        <el-button text @click="backToProject"><el-icon><ArrowLeft /></el-icon>{{ reproductionMode?.standalone ? '返回后台' : '返回项目' }}</el-button>
         <span class="divider"></span><span>{{ isProjectMode ? '项目剧集：' : '剧集：' }}</span><el-input v-if="sequence" v-model="sequence.name" size="small" class="sequence-name" :readonly="isProjectMode" @change="saveCurrentShot" />
       </div>
-      <div class="topbar-actions"><AccountBalanceBadge /><el-button text @click="openMediaLibrary">素材库</el-button><el-button text size="small" :disabled="!currentShot || reproductionMode" @click="copyCurrentShot">复制当前镜头</el-button><el-button type="primary" plain size="small" :disabled="reproductionMode" @click="saveCurrentShot">保存整集</el-button></div>
+      <div class="topbar-actions"><AccountBalanceBadge /><el-button text :disabled="reproductionMode" @click="openMediaLibrary">素材库</el-button><el-button type="primary" plain size="small" :disabled="reproductionMode" @click="saveCurrentShot">保存整集</el-button></div>
     </header>
 
     <nav class="mobile-workbench-tabs" aria-label="自由创作工作区">
@@ -19,10 +19,10 @@
     <section class="workbench" :class="`mobile-${mobileWorkspaceTab}`">
       <aside class="panel shot-panel" aria-label="镜头导航">
         <div class="shot-heading"><b>镜头列表</b><small>{{ shots.length }} 个 · 滚轮切镜</small></div>
-        <div class="shot-actions"><el-button size="small" type="primary" plain @click="addShot(false)">+ 尾部添加</el-button><el-button size="small" :disabled="!currentShot" @click="addShot(true)">当前镜头后添加</el-button><el-button class="copy-shot-button" size="small" :disabled="!currentShot" @click="copyCurrentShot">复制当前镜头</el-button></div>
+        <div class="shot-actions"><el-button size="small" type="primary" plain :disabled="reproductionMode" @click="addShot(false)">+ 尾部添加</el-button><el-button size="small" :disabled="!currentShot || reproductionMode" @click="addShot(true)">当前镜头后添加</el-button></div>
         <div ref="shotListRef" class="shot-list" tabindex="0" aria-label="镜头列表，可用上下方向键或滚轮切换镜头" @keydown.up.prevent="selectRelative(-1)" @keydown.down.prevent="selectRelative(1)" @wheel.prevent="onShotListWheel">
           <article v-for="(shot, index) in shots" :key="shot.id" class="shot-card" :class="{ active: shot.id === activeShotId, dragging: draggedShotId === shot.id }" :aria-current="shot.id === activeShotId ? 'true' : undefined" draggable="true" @dragstart="draggedShotId = shot.id" @dragend="draggedShotId = null" @dragover.prevent @drop="dropShot(shot.id)" @click="selectShot(shot)">
-            <div class="shot-title"><span class="drag-handle">⠿</span><span class="shot-number">{{ index + 1 }}</span><b :title="shot.title || '未命名镜头'">{{ shot.title || '未命名镜头' }}</b><span class="shot-controls"><el-button text size="small" :disabled="index === 0" aria-label="上移镜头" @click.stop="moveShot(index, -1)">↑</el-button><el-button text size="small" :disabled="index === shots.length - 1" aria-label="下移镜头" @click.stop="moveShot(index, 1)">↓</el-button><el-button text size="small" aria-label="重命名镜头" @click.stop="renameShot(shot)"><el-icon><Edit /></el-icon></el-button></span><el-button class="shot-delete" type="danger" plain size="small" :disabled="shots.length <= 1" :title="shots.length <= 1 ? '至少保留一个镜头；请先新增镜头再删除当前镜头' : '删除镜头'" aria-label="删除镜头" @click.stop="removeShot(shot)"><el-icon><Delete /></el-icon><span>删除</span></el-button></div>
+            <div class="shot-title"><span class="drag-handle">⠿</span><span class="shot-number">{{ index + 1 }}</span><b :title="shot.title || '未命名镜头'">{{ shot.title || '未命名镜头' }}</b><span class="shot-controls"><el-button text size="small" :disabled="reproductionMode" title="复制镜头" aria-label="复制镜头" @click.stop="copyShot(shot)"><el-icon><CopyDocument /></el-icon></el-button><el-button text size="small" :disabled="reproductionMode" title="重命名镜头" aria-label="重命名镜头" @click.stop="renameShot(shot)"><el-icon><Edit /></el-icon></el-button><el-button class="shot-delete" text size="small" :disabled="shots.length <= 1 || reproductionMode" :title="shots.length <= 1 ? '至少保留一个镜头；请先新增镜头再删除当前镜头' : '删除镜头'" aria-label="删除镜头" @click.stop="removeShot(shot)"><el-icon><Delete /></el-icon></el-button></span></div>
             <div class="shot-preview"><video v-if="shot.video_url" :src="shot.video_url" :poster="shot.poster_local_path ? `/static/${String(shot.poster_local_path).replace(/^\/+/, '')}` : undefined" muted playsinline preload="metadata" /><div v-else class="shot-video-placeholder" aria-label="尚未生成视频"><span class="shot-play">▶</span></div><span>{{ shot.settings?.duration || 15 }}s</span></div>
             <div class="shot-state" :class="shot.status"><i></i>{{ shotState(shot) }}</div>
           </article>
@@ -77,7 +77,7 @@
           </template>
         </div>
         <div class="creation-generate-dock" aria-label="当前镜头生成操作">
-          <div class="creation-generate-summary"><b>生成镜头 {{ activeShotIndex + 1 }}</b><small>本次将发送 {{ requestAssets.length }} 个素材 · {{ duration }} 秒</small></div>
+          <div class="creation-generate-summary"><b>{{ reproductionMode ? '失败任务配置' : `生成镜头 ${activeShotIndex + 1}` }}</b><small>{{ reproductionMode ? `快照保存 ${chosenAssets.length} 个素材 · ${duration} 秒` : `本次将发送 ${requestAssets.length} 个素材 · ${duration} 秒` }}</small></div>
           <div class="creation-generate-actions"><el-button size="small" @click="requestPreviewOpen = true">预览请求</el-button><el-button class="generate-button" type="primary" :loading="creating" :disabled="!canCreate" @click="create">{{ reproductionMode ? '复现模式不提交' : creating ? '生成中…' : '生成当前镜头' }}</el-button></div>
         </div>
         <div v-if="creationMode === 'first_last_frame'" class="frame-slots">
@@ -103,23 +103,23 @@
         <details class="creation-secondary-section">
           <summary><b>当前镜头素材</b><small>已加入 {{ chosenAssets.length }} 个 · 按需展开</small></summary>
           <div class="creation-secondary-body">
-        <div class="materials-title"><div><b>素材与引用</b><small>仅显示本镜已加入的素材；上传后会自动加入本镜。</small></div><div><el-button text size="small" @click="projectLibraryOpen = true">从项目素材库加入</el-button><el-button text size="small" @click="openMediaLibrary">管理素材</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
+        <div class="materials-title"><div><b>素材与引用</b><small>{{ reproductionMode ? '只读展示失败任务保存的素材快照。' : '仅显示本镜已加入的素材；上传后会自动加入本镜。' }}</small></div><div v-if="!reproductionMode"><el-button text size="small" @click="projectLibraryOpen = true">从项目素材库加入</el-button><el-button text size="small" @click="openMediaLibrary">管理素材</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
         <input ref="fileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="uploadFiles" />
-        <div class="dropzone" @click="pickFiles" @dragover.prevent @drop.prevent="dropFiles"><el-icon><Upload /></el-icon>拖入图片、视频或音频</div>
-        <small class="upload-limit-note">{{ limitSummary }}</small>
+        <div v-if="!reproductionMode" class="dropzone" @click="pickFiles" @dragover.prevent @drop.prevent="dropFiles"><el-icon><Upload /></el-icon>拖入图片、视频或音频</div>
+        <small v-if="!reproductionMode" class="upload-limit-note">{{ limitSummary }}</small>
         <div class="material-pool current-shot-material-pool">
-          <article v-for="asset in chosenAssets" :key="asset.id" class="material-card" :class="{ selected: selected.has(asset.id) }" draggable="false" :aria-pressed="selected.has(asset.id)" @dragstart.prevent @pointerdown="beginAssetPointerDrag($event, promptAssetFor(asset))" @click="onMaterialCardClick(promptAssetFor(asset))"><img v-if="asset.type === 'image'" :src="assetUrl(asset)" alt="" draggable="false"/><img v-else-if="asset.type === 'video' && assetThumbnailUrl(asset)" :src="assetThumbnailUrl(asset)" alt="" draggable="false"/><span v-else-if="asset.type === 'video'" class="material-video-placeholder"><el-icon><VideoCamera /></el-icon></span><span v-else>🎵</span><small>{{ assetDisplayName(asset) }}</small><button type="button" class="material-delete" :aria-label="`移出当前镜头 ${assetDisplayName(asset)}`" title="移出当前镜头" @pointerdown.stop @click.stop="remove(asset.id)">×</button><button type="button" class="insert-at-caret" :aria-label="`将 ${promptAssetFor(asset).alias} 插入光标处`" title="插入光标处" @click.stop="promptEditorRef?.insertAtCaret(promptAssetFor(asset))">插入此处</button><em v-if="asset.drama_id" class="asset-scope-label">项目</em><em v-else class="asset-scope-label">全局</em></article>
+          <article v-for="asset in chosenAssets" :key="asset.id" class="material-card" :class="{ selected: selected.has(asset.id), 'is-readonly': reproductionMode }" draggable="false" :aria-pressed="selected.has(asset.id)" @dragstart.prevent @pointerdown="!reproductionMode && beginAssetPointerDrag($event, promptAssetFor(asset))" @click="!reproductionMode && onMaterialCardClick(promptAssetFor(asset))"><img v-if="asset.type === 'image'" :src="assetUrl(asset)" alt="" draggable="false"/><img v-else-if="asset.type === 'video' && assetThumbnailUrl(asset)" :src="assetThumbnailUrl(asset)" alt="" draggable="false"/><span v-else-if="asset.type === 'video'" class="material-video-placeholder"><el-icon><VideoCamera /></el-icon></span><span v-else>🎵</span><small>{{ assetDisplayName(asset) }}</small><button v-if="!reproductionMode" type="button" class="material-delete" :aria-label="`移出当前镜头 ${assetDisplayName(asset)}`" title="移出当前镜头" @pointerdown.stop @click.stop="remove(asset.id)">×</button><button v-if="!reproductionMode" type="button" class="insert-at-caret" :aria-label="`将 ${promptAssetFor(asset).alias} 插入光标处`" title="插入光标处" @click.stop="promptEditorRef?.insertAtCaret(promptAssetFor(asset))">插入此处</button><em v-if="asset.drama_id" class="asset-scope-label">项目</em><em v-else class="asset-scope-label">全局</em></article>
           <p v-if="!chosenAssets.length" class="current-shot-material-empty">本镜暂未加入素材。上传新素材，或从项目素材库搜索后加入。</p>
         </div>
 
         <div class="selected-assets">
           <article v-for="asset in referencedAssets" :key="asset.id" draggable="true" @dragstart="draggedAssetId = asset.id" @dragover.prevent @drop="dropSelectedAsset(asset.id)"><span class="drag-handle">⠿</span><span class="asset-name"><b>@{{ promptAssetFor(asset).alias }}</b><small class="asset-route-hint">{{ assetRouteHint(asset) }}</small></span><el-select v-model="asset.usage" size="small" @change="onUsageChange(asset)"><el-option v-for="usage in usages(asset.type)" :key="usage.value" :label="usage.label" :value="usage.value"/></el-select><el-button text size="small" @click="remove(asset.id)">移除</el-button></article>
         </div>
-        <div class="selection-actions"><small class="selection-limit-note">{{ selectionSummary }} · 已引用的素材会随本次生成发送</small><el-button v-if="chosenAssets.length" text size="small" @click="clearSelectedAssets">清空本镜素材</el-button></div><small v-if="creationMode === 'first_last_frame'" class="selection-limit-note">首帧 {{ firstFrameCount }}/1，尾帧 {{ lastFrameCount }}/1</small>
+        <div class="selection-actions"><small class="selection-limit-note">{{ selectionSummary }} · {{ reproductionMode ? '快照素材不会提交' : '已引用的素材会随本次生成发送' }}</small><el-button v-if="chosenAssets.length && !reproductionMode" text size="small" @click="clearSelectedAssets">清空本镜素材</el-button></div><small v-if="creationMode === 'first_last_frame'" class="selection-limit-note">首帧 {{ firstFrameCount }}/1，尾帧 {{ lastFrameCount }}/1</small>
         <div v-if="chosenImageAssets.length" class="identity-options">
           <div class="identity-heading"><b>素材声明</b><small>只需勾选含真人；未勾选即为不含真人，不再需要额外认证。</small></div>
           <div v-for="asset in chosenImageAssets" :key="asset.id" class="identity-row">
-            <el-checkbox :model-value="asset.requires_sd2_identity" @change="setRealPerson(asset, $event)">{{ assetDisplayName(asset) }}</el-checkbox>
+            <el-checkbox :model-value="asset.requires_sd2_identity" :disabled="reproductionMode" @change="setRealPerson(asset, $event)">{{ assetDisplayName(asset) }}</el-checkbox>
             <small v-if="asset.requires_sd2_identity" class="identity-help">系统将自动完成真人素材准备。</small>
             <small v-else class="identity-help">不含真人素材。</small>
           </div>
@@ -203,7 +203,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Delete, Edit, Picture, Upload, VideoCamera, WarningFilled } from '@element-plus/icons-vue'
+import { ArrowLeft, CopyDocument, Delete, Edit, Picture, Upload, VideoCamera, WarningFilled } from '@element-plus/icons-vue'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { videosAPI } from '@/api/videos'
 import { dramaAPI } from '@/api/drama'
@@ -543,8 +543,8 @@ async function adoptVersion(job) {
   } catch (error) { ElMessage.error(error.message || '设置当前成片失败') }
   finally { retryingJobIds.delete(actionKey) }
 }
-const stageLabel = computed(() => ({ completed: '成片完成', sd2_waiting: '真人素材认证准备中', processing: '生成中', upscale_pending: '等待超分', upscaling: 'AI 超分中', interpolation_pending: '等待插帧', interpolating: '智能插帧中', persisting: '成片持久化中', billing_reconciliation: '等待计费对账', failed: failureLabel(activeJob.value), retryable: '可重试', invalid: '无效任务', unknown: '状态暂不可用' })[activeJob.value?.status] || '镜头草稿')
-const stageTagType = computed(() => ({ completed: 'success', failed: 'danger', retryable: 'warning', invalid: 'info' })[activeJob.value?.status] || 'info')
+const stageLabel = computed(() => reproductionMode.value ? '失败快照' : (({ completed: '成片完成', sd2_waiting: '真人素材认证准备中', processing: '生成中', upscale_pending: '等待超分', upscaling: 'AI 超分中', interpolation_pending: '等待插帧', interpolating: '智能插帧中', persisting: '成片持久化中', billing_reconciliation: '等待计费对账', failed: failureLabel(activeJob.value), retryable: '可重试', invalid: '无效任务', unknown: '状态暂不可用' })[activeJob.value?.status] || '镜头草稿'))
+const stageTagType = computed(() => reproductionMode.value ? 'danger' : (({ completed: 'success', failed: 'danger', retryable: 'warning', invalid: 'info' })[activeJob.value?.status] || 'info'))
 const generationProgress = computed(() => Math.max(0, Math.min(100, Number(activeJob.value?.task_progress || 0))))
 const generationProgressIndeterminate = computed(() => activeJob.value?.status === 'processing' && !!String(activeJob.value?.provider_task_id || '').trim() && generationProgress.value < 70)
 const generationProgressLabel = computed(() => ['upscale_pending','upscaling'].includes(activeJob.value?.status) ? '正在进行 AI 超分' : activeJob.value?.status === 'interpolating' ? '正在进行智能插帧' : activeJob.value?.status === 'persisting' ? '正在持久化最终成片' : (stagePhase.value || '正在生成当前镜头'))
@@ -699,10 +699,13 @@ function projectShot(storyboard, video = null) {
   const assetIds = [...ids]
   if (firstFrameId && !assetIds.includes(firstFrameId)) assetIds.push(firstFrameId)
   if (lastFrameId && !assetIds.includes(lastFrameId)) assetIds.push(lastFrameId)
+  const videoUrl = video ? localVideoUrl(video) : storyboard.video_url
+  const rawStatus = video?.status || storyboard.status
   return {
     ...rest,
-    video_url: video ? localVideoUrl(video) : storyboard.video_url,
+    video_url: videoUrl,
     poster_local_path: video?.poster_local_path || null,
+    status: videoUrl && ['pending', 'draft', '', null, undefined].includes(rawStatus) ? 'completed' : rawStatus,
     prompt: storyboard.universal_segment_text || storyboard.video_prompt || '',
     prompt_document: storyboard.omni_prompt_document || promptDocumentFor(storyboard.universal_segment_text || storyboard.video_prompt || '', assetIds),
     assets: assetIds.map((asset_id) => ({ asset_id, usage: asset_id === firstFrameId ? 'first_frame' : asset_id === lastFrameId ? 'last_frame' : usage[asset_id] || 'reference' })),
@@ -740,6 +743,7 @@ async function restoreCurrentShotMaster() {
   } catch (error) { ElMessage.error(error.message || '恢复首镜参数失败') }
 }
 function backToProject() {
+  if (reproductionMode.value?.standalone) return router.push({ path: '/admin', query: { tab: 'production' } })
   if (isProjectMode.value && projectDramaId.value) router.push({ path: `/film/${projectDramaId.value}`, query: projectEpisodeId.value ? { episode: projectEpisodeId.value } : {} })
   else router.push('/')
 }
@@ -845,6 +849,66 @@ async function loadProjectScopedAssets() {
   ;[...(project.items || []), ...(global.items || [])].forEach((item) => byId.set(Number(item.id), item))
   return { items: [...byId.values()] }
 }
+function applyReproductionFields(replay, replayAssets) {
+  selectedOrder.value = replayAssets.map((asset) => asset.id)
+  prompt.value = replay.prompt || ''
+  const selectedIds = new Set(selectedOrder.value.map(Number))
+  const sourceDocument = replay.prompt_document && typeof replay.prompt_document === 'object' ? replay.prompt_document : { text: prompt.value, refs: [] }
+  const refs = (sourceDocument.refs || []).map((ref, index) => {
+    if (selectedIds.has(Number(ref.asset_id))) return ref
+    const matched = replayAssets.find((asset) => asset.snapshot_asset_id != null && Number(asset.snapshot_asset_id) === Number(ref.asset_id))
+    return matched ? { ...ref, asset_id: matched.id } : { ...ref, asset_id: replayAssets[index]?.id }
+  }).filter((ref) => selectedIds.has(Number(ref.asset_id)))
+  promptDocument.value = { ...sourceDocument, text: prompt.value, refs }
+  selected.value = new Set(refs.map((ref) => Number(ref.asset_id)))
+  model.value = replay.settings?.model || ''
+  creationMode.value = replay.settings?.creation_mode || 'multi_reference'
+  aspectRatio.value = replay.settings?.aspect_ratio || '16:9'
+  duration.value = normalizeDuration(replay.settings?.duration || 15)
+  resolution.value = replay.settings?.resolution || '720p'
+  upscaleResolution.value = replay.settings?.upscale_resolution || null
+  targetFps.value = replay.settings?.target_fps || null
+  audioStrategy.value = replay.settings?.audio_strategy || 'reference_only'
+  keepOriginalAudio.value = !!replay.settings?.keep_original_audio
+  audioVolume.value = replay.settings?.audio_volume ?? 1
+  audioFadeSeconds.value = replay.settings?.audio_fade_seconds ?? 0
+  projectGenerationDirty.value = false
+  queueMicrotask(() => { loadingShot.value = false; projectGenerationDirty.value = false })
+}
+async function loadStandaloneProductionReproduction() {
+  const generationId = Number(route.query.replay_generation_id)
+  if (!Number.isInteger(generationId) || generationId <= 0) return false
+  const [detail, caps, limits] = await Promise.all([adminAPI.productionDetail(generationId), omniVideoAPI.capabilities(), omniVideoAPI.uploadLimits()])
+  const replay = detail?.reproduction
+  if (!replay) throw new Error('失败任务没有可用的请求快照')
+  capabilities.value = caps || []
+  uploadLimits.value = limits || null
+  const replayAssets = (replay.materials || []).map((material, index) => ({
+    id: -1000000 - index,
+    snapshot_asset_id: material.asset_id == null ? null : Number(material.asset_id),
+    name: material.alias || `失败快照素材 ${index + 1}`,
+    alias: material.alias || `失败快照素材 ${index + 1}`,
+    type: material.type || 'image',
+    usage: material.usage || 'reference',
+    local_path: material.local_path || null,
+    thumbnail_local_path: material.thumbnail_local_path || null,
+    drama_id: replay.drama_id || null,
+    replay_snapshot: true,
+    processing_status: material.available ? 'ready' : 'unavailable',
+  }))
+  assets.value = replayAssets
+  sequence.value = { id: -generationId, name: `失败任务 #${generationId}` }
+  const shot = {
+    id: -(10000000 + generationId), title: replay.storyboard_title || `失败任务 #${generationId}`,
+    status: detail.status || 'failed', prompt: replay.prompt || '', prompt_document: replay.prompt_document,
+    assets: replayAssets.map((asset) => ({ asset_id: asset.id, usage: asset.usage })), settings: replay.settings || {},
+  }
+  shots.value = [shot]
+  activeShotId.value = shot.id
+  reproductionMode.value = { ...replay, standalone: true, original_assets: {} }
+  applyReproductionFields(replay, replayAssets)
+  return true
+}
 async function applyProductionReproduction() {
   const generationId = Number(route.query.replay_generation_id)
   if (!Number.isInteger(generationId) || generationId <= 0 || !isProjectMode.value) return
@@ -888,25 +952,7 @@ async function applyProductionReproduction() {
   })
   const replayOnly = replayAssets.filter((asset) => asset.replay_snapshot)
   assets.value = [...assets.value.filter((asset) => !asset.replay_snapshot), ...replayOnly]
-  selectedOrder.value = replayAssets.map((asset) => asset.id)
-  prompt.value = replay.prompt || ''
-  const selectedIds = new Set(selectedOrder.value.map(Number))
-  const sourceDocument = replay.prompt_document && typeof replay.prompt_document === 'object' ? replay.prompt_document : { text: prompt.value, refs: [] }
-  promptDocument.value = { ...sourceDocument, text: prompt.value, refs: (sourceDocument.refs || []).filter((ref) => selectedIds.has(Number(ref.asset_id))) }
-  selected.value = new Set(promptDocument.value.refs.map((ref) => Number(ref.asset_id)))
-  model.value = replay.settings?.model || ''
-  creationMode.value = replay.settings?.creation_mode || 'multi_reference'
-  aspectRatio.value = replay.settings?.aspect_ratio || '16:9'
-  duration.value = normalizeDuration(replay.settings?.duration || 15)
-  resolution.value = replay.settings?.resolution || '720p'
-  upscaleResolution.value = replay.settings?.upscale_resolution || null
-  targetFps.value = replay.settings?.target_fps || null
-  audioStrategy.value = replay.settings?.audio_strategy || 'reference_only'
-  keepOriginalAudio.value = !!replay.settings?.keep_original_audio
-  audioVolume.value = replay.settings?.audio_volume ?? 1
-  audioFadeSeconds.value = replay.settings?.audio_fade_seconds ?? 0
-  projectGenerationDirty.value = false
-  queueMicrotask(() => { loadingShot.value = false; projectGenerationDirty.value = false })
+  applyReproductionFields(replay, replayAssets)
 }
 async function copyReproductionPrompt() {
   const text = reproductionMode.value?.prompt || ''
@@ -927,6 +973,10 @@ async function copyReproductionPrompt() {
 }
 async function exitReproduction() {
   clearTimeout(saveTimer)
+  if (reproductionMode.value?.standalone) {
+    reproductionMode.value = null
+    return router.push({ path: '/admin', query: { tab: 'production' } })
+  }
   const query = { ...route.query }
   delete query.replay_generation_id
   const originalAssets = reproductionMode.value?.original_assets || {}
@@ -1092,6 +1142,11 @@ async function copyCurrentShot() {
     ElMessage.error(error.message || '复制镜头失败')
   }
 }
+async function copyShot(shot) {
+  if (!shot || reproductionMode.value) return
+  if (Number(shot.id) !== Number(activeShotId.value)) await selectShot(shot)
+  await copyCurrentShot()
+}
 async function renameShot(shot) { const previous = shot?.title; try { const { value } = await ElMessageBox.prompt('输入镜头名称', '重命名镜头', { inputValue: previous || '' }); const title = value || '未命名镜头'; if (isProjectMode.value) { Object.assign(shot, projectShot(await storyboardsAPI.update(shot.id, { title, expected_updated_at: shot.updated_at }))); emit('changed'); return } if (shot.id === activeShotId.value) { shot.title = title; await saveCurrentShot(false) } else Object.assign(shot, await omniVideoAPI.updateShot(sequence.value.id, shot.id, { title, expected_updated_at: shot.updated_at })) } catch (error) { if (shot) shot.title = previous; if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.message || '重命名镜头失败') } }
 async function removeShot(shot) {
   try {
@@ -1114,7 +1169,7 @@ async function removeShot(shot) {
     if (error !== 'cancel' && error !== 'close' && error?.action !== 'cancel' && error?.action !== 'close') ElMessage.error(error?.message || '删除镜头失败')
   }
 }
-async function persistShotOrder(list) { const previous = shots.value; shots.value = list; try { const result = isProjectMode.value ? await storyboardsAPI.reorder({ episode_id: projectEpisodeId.value, ids: list.map((shot) => shot.id) }) : await omniVideoAPI.reorderShots(sequence.value.id, list.map((shot) => shot.id)); shots.value = isProjectMode.value ? (result?.storyboards || []).map((item) => { const remote = projectShot(item); const local = list.find((shot) => Number(shot.id) === Number(remote.id)); if (!local) return remote; const localAssets = new Map((local.assets || []).map((asset) => [Number(asset.asset_id), asset])); return { ...remote, prompt: local.prompt, prompt_document: local.prompt_document, settings: local.settings, assets: remote.assets.map((asset) => ({ ...asset, ...localAssets.get(Number(asset.asset_id)) })) } }) : result; if (isProjectMode.value) emit('reordered') } catch (error) { shots.value = previous; ElMessage.error(error.message || '镜头排序保存失败') } }
+async function persistShotOrder(list) { const previous = shots.value; shots.value = list; try { const result = isProjectMode.value ? await storyboardsAPI.reorder({ episode_id: projectEpisodeId.value, ids: list.map((shot) => shot.id) }) : await omniVideoAPI.reorderShots(sequence.value.id, list.map((shot) => shot.id)); shots.value = isProjectMode.value ? (result?.storyboards || []).map((item) => { const remote = projectShot(item); const local = list.find((shot) => Number(shot.id) === Number(remote.id)); if (!local) return remote; const localAssets = new Map((local.assets || []).map((asset) => [Number(asset.asset_id), asset])); return { ...remote, video_url: local.video_url || remote.video_url, poster_local_path: local.poster_local_path || remote.poster_local_path, status: local.video_url && ['pending', 'draft', '', null, undefined].includes(remote.status) ? 'completed' : remote.status, prompt: local.prompt, prompt_document: local.prompt_document, settings: local.settings, assets: remote.assets.map((asset) => ({ ...asset, ...localAssets.get(Number(asset.asset_id)) })) } }) : result; if (isProjectMode.value) emit('reordered') } catch (error) { shots.value = previous; ElMessage.error(error.message || '镜头排序保存失败') } }
 async function dropShot(targetId) { if (!draggedShotId.value || draggedShotId.value === targetId) return; const list = [...shots.value]; const from = list.findIndex((shot) => shot.id === draggedShotId.value), to = list.findIndex((shot) => shot.id === targetId); const [moved] = list.splice(from, 1); list.splice(to, 0, moved); draggedShotId.value = null; await persistShotOrder(list) }
 async function moveShot(index, offset) { const target = index + offset; if (target < 0 || target >= shots.value.length) return; const list = [...shots.value]; [list[index], list[target]] = [list[target], list[index]]; await persistShotOrder(list) }
 function selectRelative(offset) { const target = shots.value[activeShotIndex.value + offset]; if (target) selectShot(target) }
@@ -1340,6 +1395,10 @@ onMounted(async () => {
   window.addEventListener('pagehide', flushPromptBeforePageHide)
   document.addEventListener('visibilitychange', onPromptVisibilityChange)
   try {
+    if (!isProjectMode.value && route.query.replay_generation_id) {
+      await loadStandaloneProductionReproduction()
+      return
+    }
     if (isProjectMode.value) {
       const [media, caps, history, limits, boards, project, generationContract] = await Promise.all([loadProjectScopedAssets(), omniVideoAPI.capabilities(), omniVideoAPI.list(), omniVideoAPI.uploadLimits(), dramaAPI.getStoryboards(projectEpisodeId.value), dramaAPI.get(projectDramaId.value), storyboardsAPI.getEpisodeGenerationSettings(projectEpisodeId.value)])
       const allAssets = await ensureProjectResourceAssets(project, media.items || [])
@@ -1542,7 +1601,7 @@ defineExpose({ refreshProjectShots })
 .shot-panel::before,.creation-panel::before{content:none}
 .shot-heading b,.panel-title b,.materials-title b,.t0-settings-heading b{color:var(--text-primary)!important}
 .shot-card{position:relative;background:var(--bg-raised)!important;border-color:var(--border-subtle)!important;border-radius:11px!important;box-shadow:none!important;transition:transform .16s ease,border-color .16s ease,background .16s ease}
-.shot-controls{display:flex;flex:none;gap:0}.shot-controls :deep(.el-button){min-width:20px;padding-inline:3px}.shot-delete{min-width:30px!important;padding:4px!important}.shot-delete span{display:none}
+.shot-controls{display:flex;flex:none;gap:1px}.shot-controls :deep(.el-button){width:24px;min-width:24px;height:24px;margin:0!important;padding:0!important;border:0!important;border-radius:5px;background:transparent!important}.shot-controls :deep(.el-button:hover){background:#353431!important}.shot-controls :deep(.el-icon){font-size:14px}.shot-controls .shot-delete{color:#ef6464!important}.shot-controls .shot-delete:hover{background:#3a2525!important;color:#ff7b7b!important}.shot-controls .shot-delete.is-disabled{background:transparent!important;color:#765151!important}
 .shot-card:hover{transform:translateX(2px);border-color:var(--border-strong)!important}
 .shot-card.active{background:color-mix(in srgb,var(--studio-accent) 12%,var(--bg-raised))!important;border-color:color-mix(in srgb,var(--studio-accent) 68%,var(--border-color))!important;box-shadow:inset 3px 0 0 var(--studio-accent)!important}
 .shot-number{background:color-mix(in srgb,var(--studio-accent) 18%,var(--bg-elevated))!important;color:var(--text-primary)!important}
@@ -1669,5 +1728,5 @@ defineExpose({ refreshProjectShots })
 .creation-secondary-section>summary b{font-size:12px}.creation-secondary-section>summary small{margin-left:auto;color:var(--text-muted);font-size:10px}
 .creation-secondary-body{padding:0 10px 10px;border-top:1px solid var(--border-subtle)}
 .creation-secondary-body .materials-title{margin-top:10px}.creation-history-section .generation-history{margin-top:0;padding-top:10px;border-top:0}
-.shot-actions{flex-wrap:wrap}.shot-actions .copy-shot-button{flex-basis:100%}
+.shot-actions{flex-wrap:wrap}
 </style>

@@ -299,9 +299,9 @@ async function changePage(name, page) { pages[name].page = page; if (name === ac
 async function openProduction(id) { productionDetail.value = await adminAPI.productionDetail(id); showProduction.value = true }
 function openProductionReproduction() {
   const replay = productionDetail.value?.reproduction
-  if (!replay?.can_open_workbench) return ElMessage.warning('原镜头已删除，不能在制作台加载')
+  if (!replay?.can_open_workbench) return ElMessage.warning('该任务没有可用的请求快照')
   showProduction.value = false
-  router.push({ path: `/film/${replay.drama_id}`, query: { episode: replay.episode_id, stage: 'storyboard', replay_generation_id: replay.video_generation_id } })
+  router.push({ path: '/free-create', query: { replay_generation_id: replay.video_generation_id } })
 }
 async function handleProductionAction(action) { const labels = { upscale: '仅重试超分', interpolation: '仅重试插帧', adopt: '采用原片', archive: '仅重试 OSS' }; try { const result = await ElMessageBox.prompt(`“${labels[action]}”将按既有安全流程执行，不会重新提交原始视频。请填写处置原因。`, '二次确认', { inputPattern: /.+/, inputErrorMessage: '必须填写原因', confirmButtonText: '确认处置', cancelButtonText: '取消' }); const data = { confirm: true, reason: result.value, idempotency_key: createClientRequestId() }; if (action === 'adopt') await adminAPI.adoptProductionSource(productionDetail.value.id, data); else if (action === 'archive') await adminAPI.retryProductionArchive(productionDetail.value.id, data); else await adminAPI.retryProductionPostprocess(productionDetail.value.id, { ...data, stage: action }); await openProduction(productionDetail.value.id); await loadProduction(); ElMessage.success(`${labels[action]}已提交`) } catch (error) { if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.message || '处置失败') } }
 async function downloadProduction() { const blob = await adminAPI.productionExport(filters.production); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `production-${new Date().toISOString().slice(0, 10)}.csv`; anchor.click(); URL.revokeObjectURL(url) }

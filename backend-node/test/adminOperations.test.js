@@ -127,6 +127,8 @@ test('failed production detail returns the immutable prompt and material reprodu
     const restored = operations.productionDetail(db, videoId);
     assert.equal(restored.reproduction.prompt, '用户完整提示词 @角色参考');
     assert.equal(restored.reproduction.materials[0].local_path, 'projects/replay/role.png');
+    db.prepare('UPDATE storyboards SET deleted_at=? WHERE id=?').run(now, storyboardId);
+    assert.equal(operations.productionDetail(db, videoId).reproduction.can_open_workbench, true);
   } finally {
     closeDb();
     for (const suffix of ['', '-wal', '-shm']) try { fs.unlinkSync(dbPath + suffix); } catch (_) {}

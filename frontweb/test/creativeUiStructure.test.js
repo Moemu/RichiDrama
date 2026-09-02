@@ -273,7 +273,7 @@ test('镜头素材集合从镜头保存的 assets 恢复，未引用素材不丢
 
   assert.match(handler, /const materialIds = \(shot\.assets \|\| \[\]\)\.map/)
   assert.match(handler, /selectedOrder\.value = \[\.\.\.new Set\(materialIds\)\]/)
-  assert.match(source, /:class="\{ selected: selected\.has\(asset\.id\) \}"/)
+  assert.match(source, /:class="\{ selected: selected\.has\(asset\.id\), 'is-readonly': reproductionMode \}"/)
 })
 
 test('工作台不以镜头时长重复模拟生成进度', async () => {

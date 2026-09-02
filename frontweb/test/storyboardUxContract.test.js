@@ -63,7 +63,7 @@ test('an empty episode shows one explicit empty state instead of a phantom first
   assert.match(freeCreate, /<section v-else class="empty-shot-workspace"/)
   assert.match(freeCreate, /当前剧集还没有分镜/)
   assert.match(freeCreate, /@click="addShot\(false\)">添加第一个镜头/)
-  assert.match(freeCreate, /:disabled="!currentShot" @click="addShot\(true\)">当前镜头后添加/)
+  assert.match(freeCreate, /:disabled="!currentShot \|\| reproductionMode" @click="addShot\(true\)">当前镜头后添加/)
   assert.match(freeCreate, /const workspaceReady = ref\(false\)/)
   assert.match(freeCreate, /finally \{ workspaceReady\.value = true \}/)
 })
@@ -90,7 +90,9 @@ test('clicking a completed history record previews it without changing the adopt
 })
 
 test('project storyboard history shows the saved generation prompt and supports safe copying', () => {
-  assert.match(freeCreate, /class="copy-shot-button"[\s\S]*@click="copyCurrentShot">复制当前镜头/)
+  assert.match(freeCreate, /aria-label="复制镜头" @click\.stop="copyShot\(shot\)"/)
+  assert.doesNotMatch(freeCreate, />复制当前镜头<\/el-button>/)
+  assert.doesNotMatch(freeCreate, /aria-label="上移镜头"|aria-label="下移镜头"/)
   assert.match(freeCreate, /const copied = await storyboardsAPI\.copy\(currentShot\.value\.id\)/)
   assert.match(freeCreate, /@click\.stop="viewHistoryPrompt\(job\)">查看生成提示词/)
   assert.match(freeCreate, /@click="viewHistoryPrompt\(activeJob\)">查看本版本提示词/)
@@ -128,13 +130,21 @@ test('admin production detail opens an immutable workbench reproduction snapshot
   assert.match(adminConsole, /请求素材/)
   assert.match(adminConsole, /在制作台复现/)
   assert.match(adminConsole, /replay_generation_id: replay\.video_generation_id/)
+  assert.match(adminConsole, /path: '\/free-create'/)
   assert.match(freeCreate, /adminAPI\.productionDetail\(generationId\)/)
+  assert.match(freeCreate, /loadStandaloneProductionReproduction/)
   assert.match(freeCreate, /当前提示词、参数和素材来自失败时快照/)
   assert.match(freeCreate, /const canCreate = computed\(\(\) => !reproductionMode\.value/)
   assert.match(freeCreate, /function scheduleSave\(\) \{ if \(loadingShot\.value \|\| reproductionMode\.value/)
   assert.match(freeCreate, /function flushPromptBeforePageHide\(\) \{ if \(reproductionMode\.value\) return/)
   assert.match(freeCreate, /document\.execCommand\('copy'\)/)
   assert.match(freeCreate, /delete query\.replay_generation_id/)
+})
+
+test('project shot reorder keeps generated media and completed presentation', () => {
+  assert.match(freeCreate, /video_url: local\.video_url \|\| remote\.video_url/)
+  assert.match(freeCreate, /poster_local_path: local\.poster_local_path \|\| remote\.poster_local_path/)
+  assert.match(freeCreate, /videoUrl && \['pending', 'draft'/)
 })
 
 test('embedded storyboard confines wheel scrolling to its side panels', () => {
@@ -181,7 +191,7 @@ test('asset mention menus are teleported translucent overlays with bounded inter
 
 test('asset drag shows an exact text-boundary caret and rejects whitespace-only lines', () => {
   assert.match(dragPreview, /setDragImage\(transparentPreview, 0, 0\)/)
-  assert.match(freeCreate, /@pointerdown="beginAssetPointerDrag\(\$event, promptAssetFor\(asset\)\)"/)
+  assert.match(freeCreate, /@pointerdown="!reproductionMode && beginAssetPointerDrag\(\$event, promptAssetFor\(asset\)\)"/)
   assert.match(pointerDrag, /Math\.hypot\([\s\S]*< 6/)
   assert.match(pointerDrag, /ASSET_POINTER_MOVE/)
   assert.match(pointerDrag, /ASSET_POINTER_DROP/)

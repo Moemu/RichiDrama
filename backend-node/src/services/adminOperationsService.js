@@ -207,7 +207,9 @@ function productionReproduction(db, row) {
       audio_fade_seconds: snapshot.post_process?.audio_fade_seconds ?? 0,
     },
     materials,
-    can_open_workbench: !!(row.drama_id && storyboard && !storyboard.deleted_at && !storyboard.episode_deleted_at),
+    // The admin workbench reads this immutable snapshot. It does not open the
+    // owner's project and does not require the original storyboard to exist.
+    can_open_workbench: !!job,
     unavailable_material_count: materials.filter((item) => !item.available).length,
   };
 }
