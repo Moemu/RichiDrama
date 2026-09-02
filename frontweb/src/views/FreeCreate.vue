@@ -1,11 +1,11 @@
 <template>
-  <section class="omni-page" :class="{ 'project-storyboard-page': isProjectMode, embedded: embedded }" @wheel.capture="containWorkbenchScroll">
+  <section class="omni-page" :class="{ 'project-storyboard-page': isProjectMode, embedded: embedded, 'is-reproduction': reproductionMode }" @wheel.capture="containWorkbenchScroll">
     <header v-if="!embedded" class="topbar">
       <div class="topbar-left">
         <el-button text @click="backToProject"><el-icon><ArrowLeft /></el-icon>返回项目</el-button>
         <span class="divider"></span><span>{{ isProjectMode ? '项目剧集：' : '剧集：' }}</span><el-input v-if="sequence" v-model="sequence.name" size="small" class="sequence-name" :readonly="isProjectMode" @change="saveCurrentShot" />
       </div>
-      <div class="topbar-actions"><AccountBalanceBadge /><el-button text @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" :disabled="!currentShot" @click="copyCurrentShot">复制当前镜头</el-button><el-button type="primary" plain size="small" @click="saveCurrentShot">保存整集</el-button></div>
+      <div class="topbar-actions"><AccountBalanceBadge /><el-button text @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" :disabled="!currentShot || reproductionMode" @click="copyCurrentShot">复制当前镜头</el-button><el-button type="primary" plain size="small" :disabled="reproductionMode" @click="saveCurrentShot">保存整集</el-button></div>
     </header>
 
     <nav class="mobile-workbench-tabs" aria-label="自由创作工作区">
@@ -13,6 +13,8 @@
       <button type="button" :class="{ active: mobileWorkspaceTab === 'stage' }" @click="mobileWorkspaceTab = 'stage'">画面</button>
       <button type="button" :class="{ active: mobileWorkspaceTab === 'create' }" @click="mobileWorkspaceTab = 'create'">控制</button>
     </nav>
+
+    <aside v-if="reproductionMode" class="reproduction-banner" role="status"><div><b>失败快照复现 · 任务 #{{ reproductionMode.video_generation_id }}</b><span>当前提示词、参数和素材来自失败时快照。页面不会自动保存、调用模型或产生计费。</span></div><div><el-button size="small" @click="copyReproductionPrompt">复制完整提示词</el-button><el-button size="small" type="primary" plain @click="exitReproduction">退出复现</el-button></div></aside>
 
     <section class="workbench" :class="`mobile-${mobileWorkspaceTab}`">
       <aside class="panel shot-panel" aria-label="镜头导航">
@@ -76,7 +78,7 @@
         </div>
         <div class="creation-generate-dock" aria-label="当前镜头生成操作">
           <div class="creation-generate-summary"><b>生成镜头 {{ activeShotIndex + 1 }}</b><small>本次将发送 {{ requestAssets.length }} 个素材 · {{ duration }} 秒</small></div>
-          <div class="creation-generate-actions"><el-button size="small" @click="requestPreviewOpen = true">预览请求</el-button><el-button class="generate-button" type="primary" :loading="creating" :disabled="!canCreate" @click="create">{{ creating ? '生成中…' : '生成当前镜头' }}</el-button></div>
+          <div class="creation-generate-actions"><el-button size="small" @click="requestPreviewOpen = true">预览请求</el-button><el-button class="generate-button" type="primary" :loading="creating" :disabled="!canCreate" @click="create">{{ reproductionMode ? '复现模式不提交' : creating ? '生成中…' : '生成当前镜头' }}</el-button></div>
         </div>
         <div v-if="creationMode === 'first_last_frame'" class="frame-slots">
           <div class="frame-slot" :class="{ filled: !!firstFrameAsset, required: true }" @click="openFramePicker('first_frame')">
@@ -206,6 +208,7 @@ import { omniVideoAPI } from '@/api/omniVideo'
 import { videosAPI } from '@/api/videos'
 import { dramaAPI } from '@/api/drama'
 import { storyboardsAPI } from '@/api/storyboards'
+import { adminAPI } from '@/api/account'
 import OmniAssetPromptEditor from '@/components/OmniAssetPromptEditor.vue'
 import { findAssetMentions, promptAliasForAsset } from '@/utils/assetMentions'
 import GenerationSettings from '@/components/GenerationSettings.vue'
@@ -247,6 +250,7 @@ let wheelShotLocked = false
 let wheelShotTimer = null
 const shotHistory = ref([]), selectedHistoryJobId = ref(null)
 const historyPromptOpen = ref(false), historyPromptText = ref('')
+const reproductionMode = ref(null)
 let saveTimer = null
 let promptRevision = 0
 let restoredDraftNoticeShown = false
@@ -298,7 +302,7 @@ function currentPromptDraftPayload() {
 }
 
 function persistCurrentPromptDraft() {
-  if (loadingShot.value || !currentShot.value) return
+  if (loadingShot.value || reproductionMode.value || !currentShot.value) return
   promptRevision += 1
   writePromptDraft(localStorage, currentPromptDraftIdentity(), currentPromptDraftPayload())
 }
@@ -453,7 +457,7 @@ const pickerImageAssets = computed(() => assets.value.filter((asset) => asset.ty
 const expiredIdentityAssets = computed(() => chosenImageAssets.value.filter((asset) => asset.requires_sd2_identity && ['invalid', 'failed', 'stale'].includes(sd2Status(asset))))
 const framePicker = ref({ open: false, target: 'first_frame' })
 const hasActiveShotGeneration = computed(() => shotHistory.value.some((job) => activeGenerationStatuses.has(job.status)))
-const canCreate = computed(() => !creating.value && !hasActiveShotGeneration.value && !!model.value && !!currentCapability.value && prompt.value.trim() && (isProjectMode.value || Number(freeProjectId.value) > 0) && (creationMode.value !== 'first_last_frame' || (firstFrameCount.value === 1 && lastFrameCount.value <= 1 && currentCapability.value.supports?.first_last_frame)))
+const canCreate = computed(() => !reproductionMode.value && !creating.value && !hasActiveShotGeneration.value && !!model.value && !!currentCapability.value && prompt.value.trim() && (isProjectMode.value || Number(freeProjectId.value) > 0) && (creationMode.value !== 'first_last_frame' || (firstFrameCount.value === 1 && lastFrameCount.value <= 1 && currentCapability.value.supports?.first_last_frame)))
 const nativeImageLimit = computed(() => Math.min(shotLimits.value.image, Number(currentCapability.value?.supports?.image_reference?.max || 0)))
 const limitSummary = computed(() => `单文件：图片 ${uploadLimits.value?.files?.image?.max_mb || 30}MB、视频 ${uploadLimits.value?.files?.video?.max_mb || 50}MB、音频 ${uploadLimits.value?.files?.audio?.max_mb || 15}MB；单镜头最多 ${shotLimits.value.total} 个素材。`)
 const selectionSummary = computed(() => `已加入本镜 ${chosenAssets.value.length}/${shotLimits.value.total}；图片 ${selectionCounts.value.image}/${shotLimits.value.image}，视频 ${selectionCounts.value.video}/${shotLimits.value.video}，音频 ${selectionCounts.value.audio}/${shotLimits.value.audio}${currentCapability.value ? `；当前模型原生图片参考 ${selectionCounts.value.image}/${nativeImageLimit.value}` : ''}`)
@@ -824,6 +828,101 @@ async function loadProjectScopedAssets() {
   ;[...(project.items || []), ...(global.items || [])].forEach((item) => byId.set(Number(item.id), item))
   return { items: [...byId.values()] }
 }
+async function applyProductionReproduction() {
+  const generationId = Number(route.query.replay_generation_id)
+  if (!Number.isInteger(generationId) || generationId <= 0 || !isProjectMode.value) return
+  const detail = await adminAPI.productionDetail(generationId)
+  const replay = detail?.reproduction
+  if (!replay || Number(replay.drama_id) !== Number(projectDramaId.value) || Number(replay.episode_id) !== Number(projectEpisodeId.value)) throw new Error('失败快照与当前项目或剧集不匹配')
+  const target = shots.value.find((shot) => Number(shot.id) === Number(replay.storyboard_id))
+  if (!target) throw new Error('失败快照对应的镜头已删除，不能在制作台复现')
+  loadShot(target)
+  await nextTick()
+  loadingShot.value = true
+  const originalAssets = {}
+  reproductionMode.value = { ...replay, original_assets: originalAssets }
+  const replayAssets = (replay.materials || []).map((material, index) => {
+    const existing = material.asset_id == null ? null : assets.value.find((asset) => Number(asset.id) === Number(material.asset_id))
+    if (existing) {
+      originalAssets[existing.id] = {
+        name: existing.name, alias: existing.alias, type: existing.type, usage: existing.usage,
+        local_path: existing.local_path, thumbnail_local_path: existing.thumbnail_local_path,
+      }
+      existing.name = material.alias || existing.name
+      existing.alias = material.alias || existing.alias
+      existing.type = material.type || existing.type
+      existing.usage = material.usage || existing.usage || 'reference'
+      if (material.local_path) existing.local_path = material.local_path
+      if (material.thumbnail_local_path) existing.thumbnail_local_path = material.thumbnail_local_path
+      return existing
+    }
+    return {
+      id: -1000000 - index,
+      name: material.alias || `失败快照素材 ${index + 1}`,
+      alias: material.alias || `失败快照素材 ${index + 1}`,
+      type: material.type || 'image',
+      usage: material.usage || 'reference',
+      local_path: material.local_path || null,
+      thumbnail_local_path: material.thumbnail_local_path || null,
+      drama_id: projectDramaId.value,
+      replay_snapshot: true,
+      processing_status: material.available ? 'ready' : 'unavailable',
+    }
+  })
+  const replayOnly = replayAssets.filter((asset) => asset.replay_snapshot)
+  assets.value = [...assets.value.filter((asset) => !asset.replay_snapshot), ...replayOnly]
+  selectedOrder.value = replayAssets.map((asset) => asset.id)
+  prompt.value = replay.prompt || ''
+  const selectedIds = new Set(selectedOrder.value.map(Number))
+  const sourceDocument = replay.prompt_document && typeof replay.prompt_document === 'object' ? replay.prompt_document : { text: prompt.value, refs: [] }
+  promptDocument.value = { ...sourceDocument, text: prompt.value, refs: (sourceDocument.refs || []).filter((ref) => selectedIds.has(Number(ref.asset_id))) }
+  selected.value = new Set(promptDocument.value.refs.map((ref) => Number(ref.asset_id)))
+  model.value = replay.settings?.model || ''
+  creationMode.value = replay.settings?.creation_mode || 'multi_reference'
+  aspectRatio.value = replay.settings?.aspect_ratio || '16:9'
+  duration.value = normalizeDuration(replay.settings?.duration || 15)
+  resolution.value = replay.settings?.resolution || '720p'
+  upscaleResolution.value = replay.settings?.upscale_resolution || null
+  targetFps.value = replay.settings?.target_fps || null
+  audioStrategy.value = replay.settings?.audio_strategy || 'reference_only'
+  keepOriginalAudio.value = !!replay.settings?.keep_original_audio
+  audioVolume.value = replay.settings?.audio_volume ?? 1
+  audioFadeSeconds.value = replay.settings?.audio_fade_seconds ?? 0
+  projectGenerationDirty.value = false
+  queueMicrotask(() => { loadingShot.value = false; projectGenerationDirty.value = false })
+}
+async function copyReproductionPrompt() {
+  const text = reproductionMode.value?.prompt || ''
+  try {
+    let copied = false
+    if (navigator.clipboard?.writeText) {
+      try { await navigator.clipboard.writeText(text); copied = true } catch (_) {}
+    }
+    if (!copied) {
+      const input = document.createElement('textarea')
+      input.value = text; input.style.position = 'fixed'; input.style.left = '-9999px'
+      document.body.appendChild(input); input.select()
+      try { if (!document.execCommand('copy')) throw new Error('copy command rejected') }
+      finally { input.remove() }
+    }
+    ElMessage.success('完整提示词已复制')
+  } catch (_) { ElMessage.error('复制失败，请在提示词框中手动复制') }
+}
+async function exitReproduction() {
+  clearTimeout(saveTimer)
+  const query = { ...route.query }
+  delete query.replay_generation_id
+  const originalAssets = reproductionMode.value?.original_assets || {}
+  assets.value.forEach((asset) => {
+    const original = originalAssets[asset.id]
+    if (original) Object.assign(asset, original)
+  })
+  reproductionMode.value = null
+  assets.value = assets.value.filter((asset) => !asset.replay_snapshot)
+  await router.replace({ query })
+  const target = currentShot.value
+  if (target) loadShot(target)
+}
 async function hideHistoryJob(job) {
   try {
     await ElMessageBox.confirm('隐藏后该版本不会再出现在本镜生成记录中；成片、积分账本和已采用的项目成片不会被删除。', '隐藏生成记录', { type: 'warning', confirmButtonText: '隐藏记录', cancelButtonText: '保留' })
@@ -868,9 +967,9 @@ async function loadShotHistory(shot) {
     jobs.filter((job) => activeGenerationStatuses.has(job.status)).forEach((job) => poll(job.id))
   } catch (error) { if (Number(currentShot.value?.id) === shotId) ElMessage.warning(error?.message || '生成记录加载失败，已保留当前列表，请稍后刷新') }
 }
-async function selectShot(shot) { if (shot.id === activeShotId.value) { playOnSelection.value = true; return }; await saveCurrentShot(false); playOnSelection.value = true; loadShot(shot) }
+async function selectShot(shot) { if (shot.id === activeShotId.value) { playOnSelection.value = true; return }; if (reproductionMode.value) await exitReproduction(); await saveCurrentShot(false); playOnSelection.value = true; loadShot(shot) }
 async function saveCurrentShot(showMessage = true) {
-  if (!sequence.value || !currentShot.value || loadingShot.value) return
+  if (!sequence.value || !currentShot.value || loadingShot.value || reproductionMode.value) return
   clearTimeout(saveTimer)
   const savingShotId = currentShot.value.id
   const savingIdentity = currentPromptDraftIdentity(savingShotId)
@@ -907,7 +1006,7 @@ async function saveCurrentShot(showMessage = true) {
   if (savingRevision === promptRevision && Number(currentShot.value?.id) === Number(savingShotId)) clearPromptDraft(localStorage, savingIdentity)
 }
 let autoSaveErrorShown = false
-function scheduleSave() { if (loadingShot.value || !currentShot.value) return; clearTimeout(saveTimer); saveTimer = setTimeout(() => saveCurrentShot(false).then(() => { autoSaveErrorShown = false }).catch((error) => { if (!autoSaveErrorShown) { autoSaveErrorShown = true; ElMessage.error(error?.message || '自动保存失败，草稿仍保留在当前页面，请重试保存') } }), 650) }
+function scheduleSave() { if (loadingShot.value || reproductionMode.value || !currentShot.value) return; clearTimeout(saveTimer); saveTimer = setTimeout(() => saveCurrentShot(false).then(() => { autoSaveErrorShown = false }).catch((error) => { if (!autoSaveErrorShown) { autoSaveErrorShown = true; ElMessage.error(error?.message || '自动保存失败，草稿仍保留在当前页面，请重试保存') } }), 650) }
 async function addShot(afterCurrent) {
   await saveCurrentShot(false)
   if (isProjectMode.value) {
@@ -1215,7 +1314,7 @@ watch([assetScope, freeProjectId], async () => {
     selected.value = new Set([...selected.value].filter((id) => available.has(Number(id))))
   } catch (error) { ElMessage.error(error?.message || '素材来源加载失败') }
 })
-function flushPromptBeforePageHide() { persistCurrentPromptDraft(); saveCurrentShot(false).catch((error) => console.warn('[FreeCreate] page-hide save failed:', error?.message)) }
+function flushPromptBeforePageHide() { if (reproductionMode.value) return; persistCurrentPromptDraft(); saveCurrentShot(false).catch((error) => console.warn('[FreeCreate] page-hide save failed:', error?.message)) }
 function onPromptVisibilityChange() { if (document.visibilityState === 'hidden') flushPromptBeforePageHide() }
 onBeforeUnmount(() => { pollLifecycleStopped = true; pendingPollVisibilityResumes.forEach((resume) => resume()); clearTimeout(saveTimer); clearTimeout(wheelShotTimer); window.clearTimeout(mediaLayerTransitionTimer); window.clearInterval(generationClockTimer); window.removeEventListener('pagehide', flushPromptBeforePageHide); document.removeEventListener('visibilitychange', onPromptVisibilityChange); flushPromptBeforePageHide() })
 onMounted(async () => {
@@ -1234,6 +1333,7 @@ onMounted(async () => {
       applyProjectVideoSources(projectStoryboards, await loadProjectVideos(projectStoryboards))
       applyGenerationContract(generationContract)
       if (shots.value[0]) loadShot(shots.value[0])
+      await applyProductionReproduction()
       return
     }
     const baseRequests = [loadFreeScopedAssets(), omniVideoAPI.capabilities(), omniVideoAPI.list(), omniVideoAPI.uploadLimits(), dramaAPI.list({ page_size: 100 })]
@@ -1368,13 +1468,14 @@ defineExpose({ refreshProjectShots })
    否则分镜列表或素材栏的上下滚轮会让整个工作台离开可视区，打断当前编辑。 */
 .omni-page.embedded.project-storyboard-page{position:sticky!important;top:58px;z-index:20;height:calc(100dvh - 58px)!important;min-height:520px!important;overflow:hidden!important}
 .omni-page.embedded.project-storyboard-page .workbench{height:100%!important;min-height:0!important}
+.reproduction-banner{min-height:58px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:9px 14px;border-bottom:1px solid #7a6038;background:#302619;color:#f6ead4}.reproduction-banner>div:first-child{display:grid;gap:3px}.reproduction-banner span{font-size:12px;color:#dcc9a8}.reproduction-banner>div:last-child{display:flex;gap:8px;flex-shrink:0}.omni-page.is-reproduction:not(.embedded) .workbench{height:calc(100vh - 112px)}.omni-page.embedded.is-reproduction .workbench{height:calc(100% - 58px)!important}
 .omni-page.embedded.project-storyboard-page .shot-list,
 .omni-page.embedded.project-storyboard-page .creation-panel,
 .omni-page.embedded.project-storyboard-page .material-pool,
 .omni-page.embedded.project-storyboard-page .selected-assets,
 .omni-page.embedded.project-storyboard-page .frame-picker-grid{overscroll-behavior-y:contain;scrollbar-gutter:stable}
 .creation-generate-dock{position:sticky;top:0;z-index:12;display:grid;gap:8px;margin:12px -2px 14px;padding:10px;border:1px solid #69655e;border-radius:8px;background:#181818f2;box-shadow:0 6px 18px #0006;backdrop-filter:blur(8px)}.creation-generate-summary{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.creation-generate-summary b{color:#f5f3ee;font-size:13px}.creation-generate-summary small{color:#c4c1ba;font-size:11px;white-space:nowrap}.creation-generate-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:7px}.creation-generate-actions .generate-button{margin:0!important;min-width:0}.project-storyboard-page .creation-generate-dock{top:-1px;background:#181f29f5;border-color:#3c4958}.project-storyboard-page .creation-generate-summary b{color:#f2f0ea}.project-storyboard-page .creation-generate-summary small{color:#aab4c0}@media(max-width:720px){.creation-generate-dock{position:sticky;top:0;margin-left:0;margin-right:0}.creation-generate-summary{align-items:flex-start;flex-direction:column;gap:3px}.creation-generate-summary small{white-space:normal}}
-@media(max-width:960px){.omni-page.embedded.project-storyboard-page{position:static!important;height:auto!important;min-height:0!important;overflow:visible!important}.omni-page.embedded.project-storyboard-page .workbench{height:auto!important;min-height:520px}}
+@media(max-width:960px){.omni-page.embedded.project-storyboard-page{position:static!important;height:auto!important;min-height:0!important;overflow:visible!important}.omni-page.embedded.project-storyboard-page .workbench,.omni-page.embedded.is-reproduction .workbench{height:auto!important;min-height:520px}.reproduction-banner{align-items:stretch;flex-direction:column}.reproduction-banner>div:last-child{flex-wrap:wrap}}
 .t0-generation-settings{display:grid;gap:10px;margin:12px -2px 14px;padding:12px;border:1px solid #88837a;border-radius:8px;background:#252525}.t0-settings-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.t0-settings-heading b{font-size:14px;color:#f5f3ee}.t0-settings-heading small{font-size:11px;color:#c4c1ba}.center-stage{grid-template-rows:42px minmax(170px,.8fr) 42px 38px minmax(235px,1fr)}.shot-script{min-height:235px;border-top:2px solid #88837a}.project-storyboard-page .t0-generation-settings{background:#202934;border-color:#506174}.project-storyboard-page .t0-settings-heading b{color:#f2f0ea}.project-storyboard-page .t0-settings-heading small{color:#aab4c0}@media(max-width:760px){.center-stage{grid-template-rows:42px minmax(200px,.8fr) 42px 38px minmax(260px,1fr)}.t0-settings-heading{align-items:flex-start;flex-direction:column;gap:3px}}
 .template-status{display:flex;align-items:center;gap:3px;margin-left:auto}.template-status+small{max-width:46%;text-align:right}.shot-preview img{display:block;background:#111820}
 /* 2026-08 usability pass: readable T0 controls, wheel navigation, and media-light lists. */

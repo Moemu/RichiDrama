@@ -6,6 +6,7 @@ const freeCreate = readFileSync(new URL('../src/views/FreeCreate.vue', import.me
 const promptEditor = readFileSync(new URL('../src/components/OmniAssetPromptEditor.vue', import.meta.url), 'utf8')
 const universalEditor = readFileSync(new URL('../src/components/UniversalSegmentOmniAtEditor.vue', import.meta.url), 'utf8')
 const filmCreate = readFileSync(new URL('../src/views/FilmCreate.vue', import.meta.url), 'utf8')
+const adminConsole = readFileSync(new URL('../src/views/AdminConsole.vue', import.meta.url), 'utf8')
 const dragPreview = readFileSync(new URL('../src/utils/dragPreview.js', import.meta.url), 'utf8')
 const pointerDrag = readFileSync(new URL('../src/utils/assetPointerDrag.js', import.meta.url), 'utf8')
 const canvasEpisodeGenerate = readFileSync(new URL('../src/composables/useCanvasEpisodeGenerate.js', import.meta.url), 'utf8')
@@ -99,6 +100,20 @@ test('project storyboard history shows the saved generation prompt and supports 
   assert.match(filmCreate, /function getDisplayedSbVideoPrompt\(sb\)/)
   assert.match(filmCreate, /getSbVideo\(sb\.id\)\?\.prompt \|\| sb\.video_prompt/)
   assert.match(filmCreate, /item\.video\?\.prompt \? `生成提示词：\$\{item\.video\.prompt\}`/)
+})
+
+test('admin failed production detail opens an immutable workbench reproduction snapshot', () => {
+  assert.match(adminConsole, /<h3>完整提示词<\/h3>/)
+  assert.match(adminConsole, /失败时素材/)
+  assert.match(adminConsole, /在制作台复现/)
+  assert.match(adminConsole, /replay_generation_id: replay\.video_generation_id/)
+  assert.match(freeCreate, /adminAPI\.productionDetail\(generationId\)/)
+  assert.match(freeCreate, /当前提示词、参数和素材来自失败时快照/)
+  assert.match(freeCreate, /const canCreate = computed\(\(\) => !reproductionMode\.value/)
+  assert.match(freeCreate, /function scheduleSave\(\) \{ if \(loadingShot\.value \|\| reproductionMode\.value/)
+  assert.match(freeCreate, /function flushPromptBeforePageHide\(\) \{ if \(reproductionMode\.value\) return/)
+  assert.match(freeCreate, /document\.execCommand\('copy'\)/)
+  assert.match(freeCreate, /delete query\.replay_generation_id/)
 })
 
 test('embedded storyboard confines wheel scrolling to its side panels', () => {
