@@ -3,17 +3,59 @@
     <b>{{ failure.title }}</b>
     <p>{{ failure.message }}</p>
     <small>{{ failure.action }}</small>
+    <section v-if="target?.found" class="real-person-target" aria-label="需授权的真人参考图">
+      <img v-if="target.preview_url" :src="target.preview_url" :alt="target.alias || '需授权的参考图'" width="160" height="100" />
+      <div class="real-person-target-copy">
+        <b>已定位：第 {{ target.reference_image_number }} 张参考图</b>
+        <span>{{ target.alias || `参考图 ${target.reference_image_number}` }}</span>
+        <small>火山字段：content[{{ target.provider_content_index }}]</small>
+        <el-tag v-if="certificationStatus === 'active'" size="small" type="success">已完成授权</el-tag>
+        <el-tag v-else-if="target.in_asset_library" size="small" type="info">已在本地素材库</el-tag>
+        <el-tag v-else size="small" type="warning">尚未加入本地素材库</el-tag>
+      </div>
+      <el-button v-if="certificationStatus !== 'active' && (target.asset_id || target.can_import)" type="primary" size="small" :loading="preparing" @click="prepareAuthorization">{{ target.asset_id ? '标记含真人并授权' : '加入素材库并授权' }}</el-button>
+    </section>
+    <div v-else-if="locating" class="real-person-locating">正在定位失败图片…</div>
+    <div v-else-if="failure.realPersonContentIndex && lookupFinished" class="real-person-unresolved">火山指出第 {{ failure.realPersonContentIndex }} 张参考图，但任务快照中没有可预览文件。请复制技术详情给管理员。</div>
     <div v-if="failure.requestId" class="generation-failure-trace"><span>火山响应 ID</span><code :title="failure.requestId">{{ failure.shortRequestId }}</code><el-button text size="small" @click="copyRequestId">复制响应 ID</el-button></div>
     <details><summary>查看技术详情</summary><div class="generation-failure-raw"><code>{{ failure.rawReason }}</code><el-button size="small" plain @click="copyFullDetails">复制完整失败信息</el-button></div></details>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { generationFailureCopyText, presentGenerationFailure } from '@/utils/generationFailure'
+import { omniVideoAPI } from '@/api/omniVideo'
 const props = defineProps({ job: { type: Object, required: true } })
 const failure = computed(() => presentGenerationFailure(props.job))
+const target = ref(null)
+const locating = ref(false)
+const lookupFinished = ref(false)
+const preparing = ref(false)
+const certificationStatus = computed(() => String(target.value?.seedance2_asset?.status || 'none').toLowerCase())
+function omniJobId() { return props.job.omni_job_id || (props.job.request_snapshot ? props.job.id : null) }
+watch(() => [omniJobId(), failure.value.realPersonContentIndex], async ([jobId, contentIndex]) => {
+  target.value = props.job.real_person_failure_asset || null
+  lookupFinished.value = false
+  if (!jobId || !contentIndex || target.value) { lookupFinished.value = true; return }
+  locating.value = true
+  try { target.value = (await omniVideoAPI.get(jobId))?.real_person_failure_asset || null } catch (_) {}
+  finally { locating.value = false; lookupFinished.value = true }
+}, { immediate: true })
+async function prepareAuthorization() {
+  if (!target.value || preparing.value) return
+  preparing.value = true
+  try {
+    if (!target.value.asset_id) target.value = await omniVideoAPI.importRealPersonAsset(omniJobId())
+    const updated = await omniVideoAPI.updateAsset(target.value.asset_id, { requires_sd2_identity: true })
+    target.value = { ...target.value, in_asset_library: true, requires_sd2_identity: true, seedance2_asset: updated?.seedance2_asset || target.value.seedance2_asset }
+    const result = await omniVideoAPI.certifyAsset(target.value.asset_id)
+    if (result?.seedance2_asset) target.value.seedance2_asset = result.seedance2_asset
+    ElMessage.success(certificationStatus.value === 'active' ? '真人素材授权已完成' : '真人素材已提交授权，系统将继续处理')
+  } catch (error) { ElMessage.error(error.message || '真人素材授权失败') }
+  finally { preparing.value = false }
+}
 async function copyText(value) {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value)
   const input = document.createElement('textarea'); input.value = value; input.style.position = 'fixed'; input.style.opacity = '0'; document.body.appendChild(input); input.select(); document.execCommand('copy'); input.remove()
@@ -24,4 +66,5 @@ async function copyFullDetails() { try { await copyText(generationFailureCopyTex
 
 <style scoped>
 .generation-failure-details{display:grid;min-width:0;gap:4px}.generation-failure-details>b{color:var(--text-primary);font-size:14px}.generation-failure-details p{margin:0;color:var(--text-regular);font-size:13px;line-height:1.55}.generation-failure-details>small{color:var(--text-muted);font-size:12px;line-height:1.55}.generation-failure-trace{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:5px;color:var(--text-muted);font-size:11px}.generation-failure-trace code{max-width:100%;padding:3px 6px;border:1px solid var(--border-subtle);border-radius:5px;background:var(--bg-raised);color:var(--text-regular);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.generation-failure-details details{margin-top:3px}.generation-failure-details summary{width:max-content;max-width:100%;color:var(--text-muted);font-size:11px;cursor:pointer}.generation-failure-raw{display:grid;gap:8px;margin-top:7px;padding:9px;border:1px solid var(--border-subtle);border-radius:7px;background:color-mix(in srgb,var(--bg-page) 45%,transparent)}.generation-failure-raw code{max-height:120px;overflow:auto;color:var(--text-muted);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;line-height:1.5;overflow-wrap:anywhere;white-space:pre-wrap}.generation-failure-raw .el-button{justify-self:start}
+.real-person-target{display:grid;grid-template-columns:112px minmax(0,1fr) auto;align-items:center;gap:10px;margin-top:8px;padding:10px;border:1px solid color-mix(in srgb,var(--status-warning,#d89b36) 42%,var(--border-subtle));border-radius:10px;background:color-mix(in srgb,var(--status-warning,#d89b36) 8%,var(--bg-raised))}.real-person-target img{width:112px;height:72px;border-radius:7px;background:var(--bg-page);object-fit:cover}.real-person-target-copy{display:grid;min-width:0;gap:3px}.real-person-target-copy>b{color:var(--text-primary);font-size:12px}.real-person-target-copy>span{overflow:hidden;color:var(--text-regular);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.real-person-target-copy>small,.real-person-locating,.real-person-unresolved{color:var(--text-muted);font-size:11px}.real-person-target-copy .el-tag{justify-self:start}.real-person-unresolved{margin-top:6px;padding:8px;border-radius:7px;background:var(--bg-raised);line-height:1.5}@media(max-width:720px){.real-person-target{grid-template-columns:82px minmax(0,1fr)}.real-person-target img{width:82px;height:62px}.real-person-target>.el-button{grid-column:1/-1;width:100%}}
 </style>

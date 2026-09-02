@@ -11,6 +11,11 @@ export function shortRequestId(value) {
   return `${requestId.slice(0, 8)}…${requestId.slice(-6)}`
 }
 
+export function extractRealPersonContentIndex(value) {
+  const index = Number(String(value || '').match(/input\s+image\s+['"]?content\[(\d+)\]['"]?/i)?.[1])
+  return Number.isInteger(index) && index > 0 ? index : null
+}
+
 const RULES = [
   { test: /has not activated the model|model.+not activated|模型.+未开通/i, title: '当前模型未开通', message: '当前火山账号不能使用此模型。', action: '请联系管理员开通模型，或选择已开通的模型。' },
   { test: /forbidden by ip whitelist|ip whitelist|白名单/i, title: '服务访问地址不在白名单中', message: '火山账号的 IP 白名单阻止了本次请求。', action: '请联系管理员更新白名单后重试。' },
@@ -41,7 +46,7 @@ export function presentGenerationFailure(job = {}) {
   else if (job.upscale_status === 'failed') result = { title: '视频超分失败', message: '原始视频已保留。', action: '你可以仅重试超分，或直接采用原始视频。' }
   else if (job.interpolation_status === 'failed') result = { title: '视频插帧失败', message: '上一阶段的视频已保留。', action: '你可以仅重试插帧，或采用已生成的视频。' }
   else result = RULES.find((rule) => rule.test.test(rawReason)) || { title: '视频生成失败', message: '系统没有识别出明确原因。', action: requestId ? '请复制完整失败信息，并提供给管理员或火山技术支持。' : '请重试。问题持续时，请联系管理员。' }
-  return { ...result, rawReason: rawReason || '服务未返回详细失败原因。', requestId, shortRequestId: shortRequestId(requestId) }
+  return { ...result, rawReason: rawReason || '服务未返回详细失败原因。', requestId, shortRequestId: shortRequestId(requestId), realPersonContentIndex: extractRealPersonContentIndex(rawReason) }
 }
 
 export function generationFailureCopyText(job = {}) {

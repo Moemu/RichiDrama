@@ -226,7 +226,7 @@ const mobileWorkspaceTab = ref('stage')
 const videoStatusPreviewEnabled = import.meta.env.DEV
 const previewVideoError = ref(false)
 const previewVideoProgress = ref(false)
-const previewVideoErrorJob = Object.freeze({ id: 'DEV-PREVIEW', status: 'failed', error_msg: 'input image content[1] may contain real person. Request id: 02178652123456789abcdef0123456789be64' })
+const previewVideoErrorJob = Object.freeze({ id: 'DEV-PREVIEW', status: 'failed', error_msg: "input image 'content[5]' may contain real person. Request id: 02178652123456789abcdef0123456789be64", real_person_failure_asset: { provider_content_index: 5, reference_image_number: 5, found: true, alias: '角色参考图 5', asset_id: null, in_asset_library: false, preview_url: '/style-thumbs/cinematic.jpg', can_import: true } })
 const route = useRoute()
 const router = useRouter()
 const embedded = computed(() => componentProps.embedded)

@@ -463,6 +463,91 @@ function safeSnapshot(snapshot) {
 }
 function buildSummary(assets) { return { sent_to_model: assets.filter((a) => a.send_to_model).map(safeAssetSummary), post_process_or_preprocess: assets.filter((a) => !a.send_to_model).map(safeAssetSummary) }; }
 
+function realPersonContentIndex(errorMessage) {
+  const match = String(errorMessage || '').match(/input\s+image\s+['"]?content\[(\d+)\]['"]?/i);
+  const index = Number(match?.[1]);
+  return Number.isInteger(index) && index > 0 ? index : null;
+}
+
+function publicFailureAssetPreview(snapshot, asset) {
+  if (asset?.url) return asset.url;
+  const localPath = failureAssetStorageKey(snapshot);
+  if (!localPath) return null;
+  try { return require('./mediaStorageService').objectUrl(require('../config').loadConfig(), localPath); } catch (_) { return null; }
+}
+
+function failureAssetStorageKey(snapshot) {
+  try { return require('./mediaStorageService').normalizeKey(snapshot?.local_path); } catch (_) { return null; }
+}
+
+function locateRealPersonFailureAsset(db, omniJobId, actor = null) {
+  const job = actor
+    ? assertOwnedJob(db, omniJobId, actor)
+    : db.prepare(`SELECT j.id AS omni_job_id, j.owner_user_id AS job_owner_user_id,
+        v.id AS video_generation_id, v.drama_id, v.error_msg
+      FROM omni_video_jobs j JOIN video_generations v ON v.id=j.video_generation_id
+      WHERE j.id=? AND v.deleted_at IS NULL`).get(Number(omniJobId));
+  if (!job) return null;
+  const contentIndex = realPersonContentIndex(job.error_msg);
+  if (!contentIndex) return null;
+  const imageRows = db.prepare(`SELECT * FROM omni_video_job_assets
+    WHERE omni_job_id=? AND media_type='image' AND send_to_model=1 ORDER BY ordinal`).all(Number(omniJobId));
+  const row = imageRows[contentIndex - 1];
+  if (!row) return { provider_content_index: contentIndex, reference_image_number: contentIndex, found: false };
+  const snapshot = parse(row.snapshot_json) || {};
+  const assetService = require('./assetService');
+  const asset = row.asset_id ? assetService.getByIdForOwner(db, row.asset_id, job.job_owner_user_id) : null;
+  return {
+    provider_content_index: contentIndex,
+    reference_image_number: contentIndex,
+    found: true,
+    alias: row.alias || snapshot.alias || `参考图 ${contentIndex}`,
+    ordinal: row.ordinal,
+    asset_id: asset?.id || null,
+    in_asset_library: !!asset,
+    preview_url: publicFailureAssetPreview(snapshot, asset),
+    can_import: !asset && !!failureAssetStorageKey(snapshot),
+    requires_sd2_identity: !!asset?.requires_sd2_identity,
+    seedance2_asset: asset?.seedance2_asset || null,
+  };
+}
+
+function importRealPersonFailureAsset(db, log, omniJobId, actor) {
+  const job = assertOwnedJob(db, omniJobId, actor);
+  const located = locateRealPersonFailureAsset(db, omniJobId, actor);
+  if (!located?.found) throw new Error('失败原因没有可定位的真人参考图');
+  if (located.asset_id) return located;
+  if (!located.can_import) throw new Error('该参考图没有可持久化的本地文件，不能加入素材库');
+  const row = db.prepare(`SELECT * FROM omni_video_job_assets
+    WHERE omni_job_id=? AND media_type='image' AND send_to_model=1 ORDER BY ordinal LIMIT 1 OFFSET ?`)
+    .get(Number(omniJobId), located.provider_content_index - 1);
+  const snapshot = parse(row?.snapshot_json) || {};
+  const localPath = failureAssetStorageKey(snapshot);
+  if (!localPath) throw new Error('该参考图的本地文件路径无效，不能加入素材库');
+  const assetService = require('./assetService');
+  const targetOwnerId = Number(job.job_owner_user_id);
+  const created = db.transaction(() => {
+    const latest = db.prepare('SELECT asset_id FROM omni_video_job_assets WHERE id=?').get(row.id);
+    if (latest?.asset_id) {
+      const existing = assetService.getByIdForOwner(db, latest.asset_id, targetOwnerId);
+      if (existing) return existing;
+    }
+    const item = assetService.create(db, log, {
+      drama_id: Number(job.drama_id) > 0 ? Number(job.drama_id) : null,
+      owner_user_id: targetOwnerId,
+      name: row.alias || snapshot.alias || `失败任务 #${job.video_generation_id} 参考图 ${located.reference_image_number}`,
+      type: 'image', category: 'reference', url: snapshot.url || '', local_path: localPath,
+      mime_type: snapshot.mime_type || null, file_size: snapshot.file_size || null,
+      checksum: snapshot.checksum || null, source_type: 'failed_generation_reference',
+      metadata: { omni_job_id: Number(omniJobId), video_generation_id: Number(job.video_generation_id), provider_content_index: located.provider_content_index },
+    });
+    assetService.update(db, log, item.id, { requires_sd2_identity: true }, targetOwnerId);
+    db.prepare('UPDATE omni_video_job_assets SET asset_id=? WHERE id=?').run(item.id, row.id);
+    return assetService.getByIdForOwner(db, item.id, targetOwnerId);
+  })();
+  return { ...locateRealPersonFailureAsset(db, omniJobId, actor), asset_id: created.id, in_asset_library: true, requires_sd2_identity: true };
+}
+
 function get(db, id) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
   if (!job) return null;
@@ -480,7 +565,7 @@ function get(db, id) {
         || (!storyboard?.active_video_generation_id && String(storyboard?.local_path || '') === String(generation.local_path || ''));
     } catch (_) {}
   }
-  return { ...job, is_current: isCurrent, actual_points: actualPoints, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), generation: safeGeneration };
+  return { ...job, is_current: isCurrent, actual_points: actualPoints, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), real_person_failure_asset: locateRealPersonFailureAsset(db, job.id), generation: safeGeneration };
 }
 function list(db, query = {}) {
   const storyboardId = Number(query.storyboard_id);
@@ -747,4 +832,4 @@ function cancelJob(db, log, jobId, user) {
   return get(db, jobId);
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, quote, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, SHOT_ASSET_LIMITS };
+module.exports = { create, quote, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, locateRealPersonFailureAsset, importRealPersonFailureAsset, SHOT_ASSET_LIMITS };
