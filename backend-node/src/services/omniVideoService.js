@@ -551,7 +551,7 @@ function locateRealPersonFailureAsset(db, omniJobId, actor = null) {
   };
 }
 
-function importRealPersonFailureAsset(db, log, omniJobId, actor) {
+function importRealPersonFailureAsset(db, log, omniJobId, actor, options = {}) {
   const job = assertOwnedJob(db, omniJobId, actor);
   const located = locateRealPersonFailureAsset(db, omniJobId, actor);
   if (!located?.found) throw new Error('失败原因没有可定位的真人参考图');
@@ -562,6 +562,7 @@ function importRealPersonFailureAsset(db, log, omniJobId, actor) {
     .get(Number(omniJobId), located.provider_content_index - 1);
   const snapshot = parse(row?.snapshot_json) || {};
   const localPath = failureAssetStorageKey(snapshot);
+  const requiresIdentity = options.identity_required !== false;
   if (!localPath) throw new Error('该参考图的本地文件路径无效，不能加入素材库');
   const assetService = require('./assetService');
   const targetOwnerId = Number(job.job_owner_user_id);
@@ -580,11 +581,11 @@ function importRealPersonFailureAsset(db, log, omniJobId, actor) {
       checksum: snapshot.checksum || null, source_type: 'failed_generation_reference',
       metadata: { omni_job_id: Number(omniJobId), video_generation_id: Number(job.video_generation_id), provider_content_index: located.provider_content_index },
     });
-    assetService.update(db, log, item.id, { requires_sd2_identity: true }, targetOwnerId);
+    if (requiresIdentity) assetService.update(db, log, item.id, { requires_sd2_identity: true }, targetOwnerId);
     db.prepare('UPDATE omni_video_job_assets SET asset_id=? WHERE id=?').run(item.id, row.id);
     return assetService.getByIdForOwner(db, item.id, targetOwnerId);
   })();
-  return { ...locateRealPersonFailureAsset(db, omniJobId, actor), asset_id: created.id, in_asset_library: true, requires_sd2_identity: true };
+  return { ...locateRealPersonFailureAsset(db, omniJobId, actor), asset_id: created.id, in_asset_library: true, requires_sd2_identity: requiresIdentity };
 }
 
 function get(db, id) {

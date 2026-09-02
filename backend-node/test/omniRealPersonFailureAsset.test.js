@@ -48,3 +48,12 @@ test('one-click import is owned, marked as real person, and idempotent', () => {
   assert.throws(() => omni.importRealPersonFailureAsset(db, log, 92, { id: 8, role: 'user' }), /无权操作/);
   db.close();
 });
+
+test('an explicit library-only import does not declare the image as a real person', () => {
+  const db = fixture();
+  const imported = omni.importRealPersonFailureAsset(db, log, 92, { id: 7, role: 'user' }, { identity_required: false });
+  assert.equal(imported.in_asset_library, true);
+  assert.equal(imported.requires_sd2_identity, false);
+  assert.equal(db.prepare('SELECT requires_sd2_identity FROM assets WHERE id=?').get(imported.asset_id).requires_sd2_identity, 0);
+  db.close();
+});

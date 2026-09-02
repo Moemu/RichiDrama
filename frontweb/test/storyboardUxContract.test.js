@@ -9,6 +9,7 @@ const filmCreate = readFileSync(new URL('../src/views/FilmCreate.vue', import.me
 const adminConsole = readFileSync(new URL('../src/views/AdminConsole.vue', import.meta.url), 'utf8')
 const mediaLibrary = readFileSync(new URL('../src/views/MediaLibrary.vue', import.meta.url), 'utf8')
 const historyDetail = readFileSync(new URL('../src/views/GenerationHistoryDetail.vue', import.meta.url), 'utf8')
+const failureDetails = readFileSync(new URL('../src/components/GenerationFailureDetails.vue', import.meta.url), 'utf8')
 const router = readFileSync(new URL('../src/router/index.js', import.meta.url), 'utf8')
 const dragPreview = readFileSync(new URL('../src/utils/dragPreview.js', import.meta.url), 'utf8')
 const pointerDrag = readFileSync(new URL('../src/utils/assetPointerDrag.js', import.meta.url), 'utf8')
@@ -45,6 +46,15 @@ test('development mode can preview the video error state without creating a task
   assert.match(freeCreate, /activeVideoUrl && !previewVideoError && !previewVideoProgress/)
   assert.match(freeCreate, /预览真人授权提示/)
   assert.match(freeCreate, /watch\(activeShotId, \(\) => \{ previewVideoError\.value = false; previewVideoProgress\.value = false \}\)/)
+})
+
+test('a possible real-person false positive defaults to library import and keeps certification optional', () => {
+  assert.match(failureDetails, />仅加入素材库<\/el-button>/)
+  assert.match(failureDetails, />声明含真人并认证<\/el-button>/)
+  assert.match(failureDetails, /identity_required: false/)
+  assert.match(failureDetails, /identity_required: true/)
+  assert.match(failureDetails, /图片已加入素材库，未声明为真人素材/)
+  assert.doesNotMatch(failureDetails, /加入素材库并授权|标记含真人并授权/)
 })
 
 test('development mode can preview indeterminate provider progress without creating a task', () => {
