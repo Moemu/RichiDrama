@@ -96,13 +96,19 @@ docker exec avatar-proxy-api-gateway-1 \
   wget -qO- http://host.docker.internal:10588/ready
 ```
 
-在 PR 验收模式下，把检查端口改为 `5410`，并设置 PR Host：
+在 PR 验收模式下，只检查公开的回调路径。`/ready` 仍受 Basic Auth 保护：
 
 ```bash
 docker exec avatar-proxy-api-gateway-1 \
-  wget -qO- --header='Host: pr-22.preview.drama.richbest.cn' \
-  http://host.docker.internal:5410/ready
+  wget --server-response -O- \
+  --header='Host: pr-22.preview.drama.richbest.cn' \
+  --header='Content-Type: application/json' \
+  --post-data='{}' \
+  http://host.docker.internal:5410/api/v1/payments/callbacks/wechat
 ```
+
+预期响应是应用返回的 `INVALID_SIGNATURE` JSON。它证明请求没有进入
+Preview Basic Auth。
 
 最后向公网回调发送空 JSON：
 
