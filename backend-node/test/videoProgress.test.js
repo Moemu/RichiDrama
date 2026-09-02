@@ -29,7 +29,7 @@ test('provider polling reports normalized status without inventing overall progr
 
 test('video task stages do not claim every reference is uploaded to an image proxy', () => {
   const source = fs.readFileSync(require.resolve('../src/services/videoService'), 'utf8');
-  assert.match(source, /正在准备 \$\{reference_urls\.length\} 个参考素材/);
+  assert.match(source, /正在准备 \$\{omniReferenceCount\} 个参考素材/);
   assert.match(source, /任务已提交模型服务，正在等待生成结果/);
   assert.match(source, /模型服务正在生成视频/);
   assert.match(source, /视频已生成，正在下载并保存原片/);

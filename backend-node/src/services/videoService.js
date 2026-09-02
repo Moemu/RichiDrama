@@ -951,6 +951,42 @@ function loadOmniReferenceImageInputs(db, videoGenId, referenceUrls = []) {
   });
 }
 
+function isProviderReachableMediaUrl(value) {
+  const url = String(value || '').trim();
+  return /^https?:\/\//i.test(url) && !/localhost|127\.0\.0\.1|\[::1\]/i.test(url);
+}
+
+async function loadOmniReferenceVideoUrls(db, cfg, storageRoot, videoGenId, log) {
+  const omni = db.prepare('SELECT id FROM omni_video_jobs WHERE video_generation_id = ?').get(Number(videoGenId));
+  if (!omni) return [];
+  const rows = db.prepare(`SELECT j.asset_id, j.alias, j.snapshot_json, a.local_path AS asset_local_path
+    FROM omni_video_job_assets j LEFT JOIN assets a ON a.id=j.asset_id
+    WHERE j.omni_job_id = ? AND j.media_type = 'video' AND j.send_to_model = 1
+    ORDER BY j.ordinal`).all(omni.id);
+  const storage = require('./mediaStorageService');
+  const urls = [];
+  for (const row of rows) {
+    let snapshot = {};
+    try { snapshot = JSON.parse(row.snapshot_json || '{}'); } catch (_) {}
+    const direct = [snapshot.model_url, snapshot.url].find(isProviderReachableMediaUrl);
+    if (direct) { urls.push(String(direct).trim()); continue; }
+    const localPath = row.asset_local_path || snapshot.local_path || null;
+    if (localPath && storage.isOss(cfg)) {
+      const record = db.prepare(`SELECT archive_status FROM media_archive_records
+        WHERE local_path = ? AND archive_status IN ('oss_synced', 'local_pruned') LIMIT 1`).get(localPath);
+      if (record) { urls.push(storage.objectUrl(cfg, localPath)); continue; }
+      const absolute = path.join(storageRoot, storage.normalizeKey(localPath));
+      if (fs.existsSync(absolute)) {
+        const mirrored = await storage.mirrorAndTrack(db, cfg, storageRoot, localPath, 'asset', row.asset_id, log, { contentType: snapshot.mime_type || 'video/mp4' });
+        urls.push(mirrored.url || storage.objectUrl(cfg, localPath));
+        continue;
+      }
+    }
+    throw new Error(`视频素材“${row.alias || row.asset_id || '未命名'}”没有模型可访问的公网地址，请重新上传后重试`);
+  }
+  return urls;
+}
+
 async function processVideoGeneration(db, log, videoGenId) {
   if (activeVideoPolls.has(videoGenId)) {
     log.info('Video generation already in progress, skip duplicate', { videoGenId });
@@ -987,12 +1023,14 @@ async function processVideoGeneration(db, log, videoGenId) {
       } catch (_) {}
     }
     let referenceImageInputs = null;
+    let referenceVideoUrls = [];
     // 全能工作台的音频引用与图片一样从任务快照恢复，避免依赖角色专用音色字段。
     let voiceReferenceUrl = null;
     try {
       const omni = db.prepare('SELECT id FROM omni_video_jobs WHERE video_generation_id = ?').get(Number(videoGenId));
       if (omni) {
         referenceImageInputs = loadOmniReferenceImageInputs(db, videoGenId, reference_urls || []);
+        referenceVideoUrls = await loadOmniReferenceVideoUrls(db, cfg, storageLocalPath, videoGenId, log);
         const audio = db.prepare(`SELECT snapshot_json FROM omni_video_job_assets
           WHERE omni_job_id = ? AND media_type = 'audio' AND send_to_model = 1 ORDER BY ordinal LIMIT 1`).get(omni.id);
         if (audio?.snapshot_json) {
@@ -1000,7 +1038,12 @@ async function processVideoGeneration(db, log, videoGenId) {
           voiceReferenceUrl = snapshot.local_path || snapshot.url || null;
         }
       }
-    } catch (_) {}
+    } catch (error) {
+      // Legacy databases can briefly lack the Omni tables during startup.
+      // Do not hide material recovery errors because that would submit a
+      // generation without the selected source video.
+      if (!/no such table:\s*omni_video_/i.test(String(error?.message || ''))) throw error;
+    }
     // 优先使用分镜自身的镜头时长（storyboard.duration），其次用 video_generations.duration
     let effectiveDuration = row.duration || null;
     if (row.storyboard_id) {
@@ -1028,14 +1071,15 @@ async function processVideoGeneration(db, log, videoGenId) {
       } catch (_) {}
     }
     const rowForAspect = { ...row, aspect_ratio: aspectForVideo || row.aspect_ratio };
-    const hasOmniRefs = !!(reference_urls && reference_urls.length > 0);
+    const omniReferenceCount = Number(reference_urls?.length || 0) + referenceVideoUrls.length + (voiceReferenceUrl ? 1 : 0);
+    const hasOmniRefs = omniReferenceCount > 0;
     if (row.task_id) {
       taskService.updateTaskStatus(
         db,
         row.task_id,
         'processing',
         5,
-        hasOmniRefs ? `正在准备 ${reference_urls.length} 个参考素材` : '正在准备生成参数'
+        hasOmniRefs ? `正在准备 ${omniReferenceCount} 个参考素材` : '正在准备生成参数'
       );
     }
     const result = await videoClient.callVideoApi(db, log, {
@@ -1054,6 +1098,7 @@ async function processVideoGeneration(db, log, videoGenId) {
       first_frame_url: hasOmniRefs ? undefined : row.first_frame_url,
       last_frame_url: hasOmniRefs ? undefined : row.last_frame_url,
       reference_urls,
+      reference_video_urls: referenceVideoUrls,
       reference_image_inputs: referenceImageInputs,
       voice_reference_url: voiceReferenceUrl,
       files_base_url: filesBaseUrl,
@@ -1137,6 +1182,7 @@ module.exports = {
   reconcileUnarchivedCompletedVideos,
   resumePostprocessVideoGeneration,
   loadOmniReferenceImageInputs,
+  loadOmniReferenceVideoUrls,
   targetVideoPixelsForAspect,
   normalizeFinalVideoToContract,
   pruneSupersededVideoArtifacts,

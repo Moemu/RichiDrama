@@ -38,7 +38,7 @@ test('Seedance omni sends a valid text-only video request without reference mate
   }
 });
 
-test('Seedance omni request carries every image reference and the selected audio reference', async () => {
+test('Seedance omni request carries image, native video, and audio references', async () => {
   const originalFetch = global.fetch;
   const calls = [];
   global.fetch = async (url, init) => {
@@ -51,6 +51,7 @@ test('Seedance omni request carries every image reference and the selected audio
     }, log, {
       prompt: '一个角色在雨夜奔跑', model: 'seedance-2.0', duration: 5, aspect_ratio: '16:9',
       reference_urls: ['https://assets.example.test/character.jpg', 'https://assets.example.test/street.jpg'],
+      reference_video_urls: ['https://assets.example.test/motion.mp4'],
       voice_reference_url: 'https://assets.example.test/voice.mp3', video_gen_id: 42,
     });
 
@@ -63,9 +64,21 @@ test('Seedance omni request carries every image reference and the selected audio
     assert.deepEqual(content.find((item) => item.role === 'reference_audio'), {
       type: 'audio_url', audio_url: { url: 'https://assets.example.test/voice.mp3' }, role: 'reference_audio',
     });
+    assert.deepEqual(content.find((item) => item.role === 'reference_video'), {
+      type: 'video_url', video_url: { url: 'https://assets.example.test/motion.mp4' }, role: 'reference_video',
+    });
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test('Seedance omni rejects a source video that the provider cannot reach', async () => {
+  await assert.rejects(() => callVolcengineOmniVideoApi({
+    base_url: 'https://video.example.test', api_key: 'test-key', model: ['seedance-2.0'], default_model: 'seedance-2.0',
+  }, log, {
+    prompt: '动作参考', model: 'seedance-2.0', duration: 5, aspect_ratio: '16:9',
+    reference_video_urls: ['http://127.0.0.1:5679/static/library/videos/motion.mp4'], video_gen_id: 45,
+  }), /需要模型可访问的 HTTP\(S\) 地址/);
 });
 
 test('Seedance omni converts a library relative path to a data URL before sending it', async () => {

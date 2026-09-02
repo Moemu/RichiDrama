@@ -640,6 +640,7 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
     watermark,
     image_url,
     reference_urls,
+    reference_video_urls,
     files_base_url,
     storage_local_path,
     video_gen_id,
@@ -660,6 +661,10 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
   const maxRef = /seedance[-_]?2[-_]?5|2[-_]?5[-_]?260628/i.test(finalModel) ? 30 : 9;
   const urls = orderedUrls.slice(0, maxRef);
   const referenceImageInputs = Array.isArray(opts.reference_image_inputs) ? opts.reference_image_inputs : [];
+  const maxVideoRef = /seedance[-_]?2[-_]?5|2[-_]?5[-_]?260628/i.test(finalModel) ? 10 : 3;
+  const videoUrls = Array.isArray(reference_video_urls)
+    ? reference_video_urls.map((value) => String(value || '').trim()).filter(Boolean).slice(0, maxVideoRef)
+    : [];
 
   const body = {
     model: finalModel,
@@ -725,6 +730,17 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
     if (body.content.length > 1) body.task_type = 'i2v';
   }
 
+  for (const videoUrl of videoUrls) {
+    if (!/^https?:\/\//i.test(videoUrl) || /localhost|127\.0\.0\.1|\[::1\]/i.test(videoUrl)) {
+      throw new Error('Seedance 原生视频参考需要模型可访问的 HTTP(S) 地址');
+    }
+    body.content.push({
+      type: 'video_url',
+      video_url: { url: videoUrl },
+      role: 'reference_video',
+    });
+  }
+
   // Seedance 2.0 音色参考：本路径仅 volcengine_omni 调用；有 URL 即注入（网关别名如 mingiz-sd2 也要生效）
   if (opts.voice_reference_url) {
     let voiceUrl = String(opts.voice_reference_url).trim();
@@ -752,17 +768,21 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
         preview = String(part.image_url.url).slice(0, 80);
       } else if (part.audio_url?.url) {
         preview = String(part.audio_url.url).slice(0, 80);
+      } else if (part.video_url?.url) {
+        preview = String(part.video_url.url).slice(0, 80);
       }
       return { idx, type: t, role, preview };
     });
 
     const hasAudioRef = body.content.some(p => p.role === 'reference_audio' || p.type === 'audio_url');
+    const hasVideoRef = body.content.some(p => p.role === 'reference_video' || p.type === 'video_url');
 
     log.info('[VolcOmni][全能结构体] 最终发往火山的 content 概览（含音色参考验证）', {
       video_gen_id,
       model: finalModel,
       content_length: body.content.length,
       has_reference_audio: hasAudioRef,
+      has_reference_video: hasVideoRef,
       voice_reference_url_from_opts: voice_reference_url ? String(voice_reference_url).slice(0, 100) : null,
       content_summary: contentSummary
     });
@@ -776,6 +796,7 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
     ratio,
     duration: effectiveDuration,
     image_count: urls.length,
+    video_count: videoUrls.length,
     has_voice_ref: !!voice_reference_url,
     video_gen_id,
   });
@@ -784,6 +805,7 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
     ratio,
     duration: effectiveDuration,
     image_count: urls.length,
+    video_count: videoUrls.length,
     has_voice_ref: !!voice_reference_url,
   });
 
@@ -3842,6 +3864,7 @@ async function callVideoApi(db, log, opts) {
       watermark: opts.watermark,
       image_url: opts.image_url,
       reference_urls: opts.reference_urls,
+      reference_video_urls: opts.reference_video_urls,
       reference_image_inputs: opts.reference_image_inputs,
       files_base_url: opts.files_base_url,
       storage_local_path: opts.storage_local_path,
