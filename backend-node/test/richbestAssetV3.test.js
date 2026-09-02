@@ -128,6 +128,57 @@ test('asset group lookup reuses an earlier remote write before creating again', 
   } finally { env.close(); }
 });
 
+test('asset registration replaces a deleted cached group and retries only the definite failed create', async () => {
+  const env = setup();
+  const now = new Date().toISOString();
+  env.db.prepare(`INSERT INTO external_asset_groups
+    (tenant_id,ai_config_id,provider,remote_group_id,name,created_at,updated_at)
+    VALUES (9,31,?,'group-20260901071716-sm2fl','RichiDrama素材库-T9',?,?)`)
+    .run(richbest.PROVIDER, now, now);
+  const createGroups = [];
+  const createAssets = [];
+  let uploads = 0;
+  const fakeFetch = async (url, init) => {
+    const pathname = new URL(url).pathname;
+    if (pathname === '/api/auth/me') return response({ authenticated: true });
+    if (pathname === '/api/asset/upload-file') {
+      uploads += 1;
+      return response({ url: 'https://cdn.test/rebind.png', uploadId: 'upload-rebind', assetType: 'Image' });
+    }
+    if (pathname === '/api/asset-group/list') return response({ items: [] });
+    if (pathname === '/api/asset-group/create') {
+      createGroups.push(JSON.parse(init.body));
+      return response({ groupId: 'group-current-project' });
+    }
+    if (pathname === '/api/asset/create') {
+      const body = JSON.parse(init.body);
+      createAssets.push(body);
+      if (body.groupId === 'group-20260901071716-sm2fl') {
+        return response({ error: { code: 'not_found', message: 'The specified asset_group group-20260901071716-sm2fl is not found.' } }, 404);
+      }
+      return response({ assetId: 'asset-current-project', status: 'Active', name: body.name });
+    }
+    throw new Error(`unexpected ${pathname}`);
+  };
+  try {
+    const result = await richbest.registerAsset(
+      env.db, log, { storage: { local_path: env.storage } }, 2, 7,
+      { row: configRow(), fetchImpl: fakeFetch }
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.seedance2_asset.asset_url, 'asset://asset-current-project');
+    assert.equal(result.seedance2_asset.group_id, 'group-current-project');
+    assert.equal(uploads, 1);
+    assert.equal(createGroups.length, 1);
+    assert.deepEqual(createAssets.map((item) => item.groupId), [
+      'group-20260901071716-sm2fl',
+      'group-current-project',
+    ]);
+    assert.equal(env.db.prepare('SELECT remote_group_id FROM external_asset_groups').get().remote_group_id, 'group-current-project');
+    assert.equal(env.db.prepare('SELECT remote_group_id FROM external_asset_bindings').get().remote_group_id, 'group-current-project');
+  } finally { env.close(); }
+});
+
 test('character registration uploads once, becomes active, and is idempotent', async () => {
   const env = setup();
   const calls = [];

@@ -8,7 +8,7 @@ const TYPE_META = {
 }
 
 const SERVICE_LABELS = {
-  text: '文本生成', image: '图片生成', video: '视频生成', tts: '语音合成', asr: '语音识别',
+  text: '文本生成', image: '图片生成', storyboard_image: '分镜图片', video: '视频生成', video_postprocess: '视频后处理', tts: '语音合成', asr: '语音识别', jimeng2_character_auth: '角色认证', model_ark_asset: '素材认证',
 }
 
 const METER_LABELS = {
@@ -69,4 +69,8 @@ export function transactionDescription(row) {
 
 export function formatCredits(value) {
   return number(value)
+}
+
+export function serviceLabel(value) {
+  return SERVICE_LABELS[value] || value || '其他服务'
 }

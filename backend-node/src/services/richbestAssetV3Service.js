@@ -248,10 +248,10 @@ function saveGroup(db, ctx, name, groupId) {
     .get(ctx.tenantId, ctx.row.id, PROVIDER);
 }
 
-async function ensureGroup(db, ctx) {
+async function ensureGroup(db, ctx, options = {}) {
   const existing = db.prepare(`SELECT * FROM external_asset_groups
     WHERE tenant_id=? AND ai_config_id=? AND provider=?`).get(ctx.tenantId, ctx.row.id, PROVIDER);
-  if (existing?.remote_group_id) return existing;
+  if (existing?.remote_group_id && !options.refresh) return existing;
   const name = `RichiDrama素材库-T${ctx.tenantId || 0}`.slice(0, 64);
   const remoteExisting = await findGroupByName(ctx, name);
   if (remoteExisting?.id) return saveGroup(db, ctx, name, remoteExisting.id);
@@ -272,6 +272,23 @@ async function ensureGroup(db, ctx) {
     });
   }
   return saveGroup(db, ctx, name, created.id);
+}
+
+function isMissingGroupError(error) {
+  const detail = `${error?.code || ''} ${error?.message || ''}`;
+  return /(asset[_\s-]*group|素材组).*(not found|does not exist|不存在|已删除)/i.test(detail);
+}
+
+async function createAssetWithGroupRecovery(db, ctx, group, input, onGroupChange) {
+  try {
+    return await createAsset(ctx, { ...input, groupId: group.remote_group_id });
+  } catch (error) {
+    if (!isMissingGroupError(error)) throw error;
+    const replacement = await ensureGroup(db, ctx, { refresh: true });
+    if (replacement.remote_group_id === group.remote_group_id) throw error;
+    await onGroupChange(replacement);
+    return createAsset(ctx, { ...input, groupId: replacement.remote_group_id });
+  }
 }
 
 async function uploadFile(ctx, absolutePath, filename, mimeType) {
@@ -559,7 +576,7 @@ async function registerCharacter(db, log, cfg, characterId, userId, options = {}
   }
   markOtherBindingsStale(db, ctx, character.id, fingerprint);
   let binding = findBinding(db, ctx, character.id, fingerprint);
-  if (!binding || binding.status === 'failed') {
+  if (!binding || ['failed', 'stale'].includes(String(binding.status).toLowerCase())) {
     binding = createBinding(db, ctx, character, mapped?.id, fingerprint, sourceName);
   }
   if (binding.status === 'active') return { ok: true, seedance2_asset: saveProjection(db, log, character.id, binding), reused: true };
@@ -585,7 +602,12 @@ async function registerCharacter(db, log, cfg, characterId, userId, options = {}
     saveProjection(db, log, character.id, binding);
     let created;
     try {
-      created = await createAsset(ctx, { groupId: group.remote_group_id, url: uploaded.url, uploadId: uploaded.uploadId, name: binding.source_name });
+      created = await createAssetWithGroupRecovery(db, ctx, group, {
+        url: uploaded.url, uploadId: uploaded.uploadId, name: binding.source_name,
+      }, async (replacement) => {
+        binding = updateBinding(db, binding.id, { remote_group_id: replacement.remote_group_id });
+        saveProjection(db, log, character.id, binding);
+      });
     } catch (error) {
       binding = updateBinding(db, binding.id, {
         status: error.ambiguous ? 'reconciling' : 'failed',
@@ -733,7 +755,7 @@ async function registerAsset(db, log, cfg, assetId, userId, options = {}) {
   const sourceName = `rb-asset-${asset.id}-${fingerprint.slice(0, 12)}`.slice(0, 64);
   markOtherAssetBindingsStale(db, ctx, asset.id, fingerprint);
   let binding = findAssetBinding(db, ctx, asset.id, fingerprint);
-  if (!binding || binding.status === 'failed') {
+  if (!binding || ['failed', 'stale'].includes(String(binding.status).toLowerCase())) {
     binding = createAssetBinding(db, ctx, asset, fingerprint, sourceName, assetType);
   }
   if (binding.status === 'active') {
@@ -764,12 +786,14 @@ async function registerAsset(db, log, cfg, assetId, userId, options = {}) {
     saveAssetProjection(db, asset.id, binding);
     let created;
     try {
-      created = await createAsset(ctx, {
-        groupId: group.remote_group_id,
+      created = await createAssetWithGroupRecovery(db, ctx, group, {
         url: uploaded.url,
         uploadId: uploaded.uploadId,
         assetType: uploaded.assetType || assetType,
         name: binding.source_name,
+      }, async (replacement) => {
+        binding = updateBinding(db, binding.id, { remote_group_id: replacement.remote_group_id });
+        saveAssetProjection(db, asset.id, binding);
       });
     } catch (error) {
       binding = updateBinding(db, binding.id, {
@@ -849,6 +873,27 @@ async function refreshAsset(db, log, cfg, assetId, userId, options = {}) {
   return result;
 }
 
+function prepareRebind(db, log, bindingId, reason) {
+  const binding = db.prepare('SELECT * FROM external_asset_bindings WHERE id=? AND provider=?')
+    .get(Number(bindingId), PROVIDER);
+  if (!binding) throw new Error('Richbest 素材绑定不存在');
+  const status = String(binding.status || '').toLowerCase();
+  if (status === 'active') {
+    const now = new Date().toISOString();
+    const stale = updateBinding(db, binding.id, {
+      status: 'stale',
+      stage: 'stale',
+      stale_at: now,
+      error_code: 'admin_rebind_requested',
+      error_message: String(reason || '管理员要求重新绑定').slice(0, 2000),
+    });
+    saveBindingProjection(db, log, stale);
+    return stale;
+  }
+  if (status === 'stale' && binding.error_code === 'admin_rebind_requested') return binding;
+  throw new Error(`绑定状态 ${binding.status || 'unknown'} 不能强制重绑`);
+}
+
 module.exports = {
   PROVIDER,
   PENDING_STATUSES,
@@ -873,4 +918,5 @@ module.exports = {
   assetTypeFor,
   mimeFor,
   validateLocalAsset,
+  prepareRebind,
 };

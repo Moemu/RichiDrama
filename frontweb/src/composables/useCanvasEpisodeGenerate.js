@@ -5,7 +5,7 @@ import { storyboardsAPI } from '@/api/storyboards'
 import { taskAPI } from '@/api/task'
 import { parseDramaMetadata } from '@/utils/canvasLayout'
 import { getDramaGenerationOptions } from '@/utils/canvasWorkflow'
-import { runImageStep, runVideoStep } from '@/composables/useCanvasWorkflowRunner'
+import { canRunVideoStep, runImageStep, runVideoStep } from '@/composables/useCanvasWorkflowRunner'
 import { hasStoryboardImage, hasStoryboardVideo } from '@/utils/storyboardMedia'
 import { CANVAS_NODE_STATUS_LABELS } from '@/composables/useCanvasNodeStatus'
 
@@ -160,17 +160,32 @@ export function useCanvasEpisodeGenerate(deps) {
       return
     }
     const boards = getStoryboardsForEpisode()
-    const todo = boards.filter(
-      (sb) => sb.creation_mode !== 'universal' && !hasStoryboardImage(sb, imagesBySbId.value, drama.value)
-    )
+    if (!boards.length) {
+      ElMessage.warning({ message: '当前集还没有分镜，请先生成或新建分镜', grouping: true })
+      return
+    }
+    const imageBoards = boards.filter((sb) => sb.creation_mode !== 'universal')
+    if (!imageBoards.length) {
+      ElMessage.info({ message: '当前集只有全能模式分镜，无需生图，请直接生视频', grouping: true })
+      return
+    }
+    const missingImages = imageBoards.filter((sb) => !hasStoryboardImage(sb, imagesBySbId.value, drama.value))
+    if (!missingImages.length) {
+      ElMessage.info({ message: '当前集经典模式分镜均已有图片，无需重复生成', grouping: true })
+      return
+    }
+    const todo = missingImages.filter((sb) => (
+      sb.polished_prompt || sb.image_prompt || sb.description || sb.action || ''
+    ).trim())
+    const missingPromptCount = missingImages.length - todo.length
     if (!todo.length) {
-      ElMessage.info('当前集分镜均已有图片（全能模式分镜请直接生视频）')
+      ElMessage.warning({ message: `当前集 ${missingPromptCount} 个分镜缺少图片提示词，请先编辑分镜`, grouping: true })
       return
     }
     episodeGenerating.value = true
     try {
       await ElMessageBox.confirm(
-        `将为 ${todo.length} 个分镜依次生图，耗时可能较长，是否继续？`,
+        `将为 ${todo.length} 个分镜依次生图${missingPromptCount ? `；另有 ${missingPromptCount} 个缺少图片提示词，将跳过` : ''}。耗时可能较长，是否继续？`,
         '批量生成分镜图',
         { type: 'info', confirmButtonText: '开始' }
       )
@@ -213,15 +228,29 @@ export function useCanvasEpisodeGenerate(deps) {
       return
     }
     const boards = getStoryboardsForEpisode()
-    const todo = boards.filter((sb) => !hasStoryboardVideo(sb, videosBySbId.value))
+    if (!boards.length) {
+      ElMessage.warning({ message: '当前集还没有分镜，请先生成或新建分镜', grouping: true })
+      return
+    }
+    const incomplete = boards.filter((sb) => !hasStoryboardVideo(sb, videosBySbId.value))
+    if (!incomplete.length) {
+      ElMessage.info({ message: '当前集分镜均已有视频，无需重复生成', grouping: true })
+      return
+    }
+    const genOpts = getGenOpts()
+    const todo = incomplete.filter((sb) => canRunVideoStep(drama.value, sb, genOpts))
+    const missingInputCount = incomplete.length - todo.length
     if (!todo.length) {
-      ElMessage.info('当前集分镜均已有视频')
+      ElMessage.warning({
+        message: `当前集 ${missingInputCount} 个分镜缺少分镜图或视频提示词，请先补充生成输入`,
+        grouping: true,
+      })
       return
     }
     episodeGenerating.value = true
     try {
       await ElMessageBox.confirm(
-        `将为 ${todo.length} 个分镜依次生视频，是否继续？`,
+        `将为 ${todo.length} 个分镜依次生视频${missingInputCount ? `；另有 ${missingInputCount} 个缺少生成输入，将跳过` : ''}，是否继续？`,
         '批量生成分镜视频',
         { type: 'info', confirmButtonText: '开始' }
       )
@@ -238,7 +267,7 @@ export function useCanvasEpisodeGenerate(deps) {
         episodeGenProgress.value = `批量生视频 ${i + 1}/${todo.length}：分镜 #${sb.storyboard_number ?? sb.id}`
         setSbBusy(sb, 'video', `${CANVAS_NODE_STATUS_LABELS.video} ${i + 1}/${todo.length}`)
         try {
-          await runVideoStep(drama.value, sb, getGenOpts())
+          await runVideoStep(drama.value, sb, genOpts)
           ok++
           await refreshCanvas(true)
         } catch (e) {

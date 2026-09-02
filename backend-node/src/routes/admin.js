@@ -4,9 +4,10 @@ const operations = require('../services/adminOperationsService');
 const tenants = require('../services/tenantService');
 const customerOrganizations = require('../services/customerOrganizationService');
 const providerPrices = require('../services/providerPriceService');
+const richbestRebind = require('../services/richbestAssetRebindService');
 const response = require('../response');
 
-module.exports = function adminRoutes(db, log = console) {
+module.exports = function adminRoutes(db, log = console, cfg = {}) {
   function guarded(fn) { return (req, res) => { try { fn(req, res); } catch (e) { response.badRequest(res, e.message); } }; }
   function guardedAsync(fn) { return async (req, res) => { try { await fn(req, res); } catch (e) { response.badRequest(res, e.message); } }; }
   function confirmed(req) {
@@ -160,6 +161,23 @@ module.exports = function adminRoutes(db, log = console) {
       response.success(res, item);
     },
     mediaArchives: (req, res) => response.success(res, operations.listArchives(db, req.query)),
+    richbestRebindCandidates: guarded((req, res) => response.success(res, richbestRebind.listCandidates(db, req.query))),
+    richbestRebindRun: (req, res) => {
+      const run = richbestRebind.view(db, req.params.id);
+      return run ? response.success(res, run) : response.notFound(res, '重绑任务不存在');
+    },
+    createRichbestRebind: guarded((req, res) => {
+      const body = confirmed(req);
+      const run = richbestRebind.create(db, req.auth.id, body);
+      billing.audit(db, req.auth.id, 'admin.richbest_asset.rebind', 'richbest_asset_rebind', run.id, {
+        cutoff_at: run.cutoff_at,
+        binding_ids: run.items.map((item) => item.binding_id),
+        reason: body.reason,
+        reused: !!run.reused,
+      });
+      richbestRebind.dispatch(db, log, cfg, run.id);
+      response.created(res, run);
+    }),
     retryPostprocess: guardedAsync(async (req, res) => {
       const body = confirmed(req); const item = productionItem(req.params.id);
       if (!item.omni_job_id) throw new Error('该历史视频没有 Omni 工作台关联，不能从运营台发起阶段重试');

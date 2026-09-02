@@ -5,6 +5,7 @@ export const accountAPI = {
   transactions: (params) => request.get('/billing/transactions', { params }),
   usage: (params) => request.get('/billing/usage', { params }),
   quoteResourceImages: (data) => request.post('/billing/resource-image-quotes', data),
+  usageMembers: () => request.get('/billing/usage-members'),
   models: () => request.get('/models/available'),
   paymentOptions: () => request.get('/payments/options'),
   paymentOrders: (params) => request.get('/payments/orders', { params }),
@@ -69,6 +70,9 @@ export const adminAPI = {
   adoptProductionSource: (id, data) => request.post(`/admin/production/${id}/adopt-source`, data),
   retryProductionArchive: (id, data) => request.post(`/admin/production/${id}/retry-archive`, data),
   mediaArchives: (params) => request.get('/admin/media-archives', { params }),
+  richbestRebindCandidates: (params) => request.get('/admin/richbest-asset-rebind-candidates', { params }),
+  createRichbestRebind: (data) => request.post('/admin/richbest-asset-rebinds', data),
+  richbestRebind: (id) => request.get(`/admin/richbest-asset-rebinds/${id}`),
   reconciliations: (params) => request.get('/admin/billing-reconciliations', { params }),
   audit: (params) => request.get('/admin/audit-logs', { params }),
 }

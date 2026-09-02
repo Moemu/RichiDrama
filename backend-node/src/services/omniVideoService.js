@@ -40,6 +40,7 @@ function quote(db, body, payer) {
   const tenantOptions = tenantId ? { tenant_id: tenantId } : {};
   const capability = capabilityService.resolve(db, model, [], tenantOptions);
   if (!capability.model || capability.model !== model) throw new Error('所选视频模型不可用');
+  capabilityService.validateResolution(capability, body.resolution || '480p');
   const aiConfigs = require('./aiConfigService');
   const billing = require('./billingService');
   const billingTarget = aiConfigs.resolveBillingTarget(db, 'video', capability.model, capability.config_id, tenantOptions);
@@ -90,6 +91,7 @@ function create(db, log, body, billingUser) {
   const assets = prioritizePromptReferenceAssets(input.map((entry, ordinal) => resolveAsset(db, entry, ordinal, body.owner_user_id)), body.prompt_document, prompt);
   const capability = capabilityService.resolve(db, body.model, assets, tenantOptions);
   if (!capability.model) throw new Error('请先在 AI 配置中启用视频模型');
+  capabilityService.validateResolution(capability, body.resolution);
   validateShotAssetLimits(assets, capability);
   body.duration = Math.min(maxDurationForModel(capability.model), Math.max(4, Math.round(Number(body.duration) || 15)));
   const creationMode = body.creation_mode || body.settings?.creation_mode || 'multi_reference';
@@ -112,20 +114,32 @@ function create(db, log, body, billingUser) {
   const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
   const existingWaitingId = Number(body.__sd2_waiting_generation_id) || null;
-  if (!waitingForSd2 && !String(body.idempotency_key || '').trim()) throw new Error('视频生成请求缺少幂等键，请刷新后重试');
+  const existingWaiting = existingWaitingId
+    ? db.prepare('SELECT id, task_id, status, owner_user_id FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(existingWaitingId)
+    : null;
+  if (existingWaitingId && (!existingWaiting || existingWaiting.status !== 'sd2_waiting' || Number(existingWaiting.owner_user_id) !== Number(payer.id))) {
+    throw new Error('SD2 等待任务不存在或已被处理');
+  }
+  if (existingWaiting && waitingForSd2) {
+    const existingJobId = Number(db.prepare('SELECT id FROM omni_video_jobs WHERE video_generation_id = ? ORDER BY id DESC LIMIT 1').get(existingWaitingId)?.id) || null;
+    return { omni_job_id: existingJobId, video_generation_id: existingWaitingId, task_id: existingWaiting.task_id, status: 'sd2_waiting', resolved_model: capability.model, routing_summary: buildSummary(routed) };
+  }
+  // Older waiting snapshots did not store the client key. A stable server key
+  // lets those records resume after restart without creating duplicate billing
+  // authorizations on later recovery passes.
+  const idempotencyKey = String(body.idempotency_key || (existingWaitingId ? `omni-video:sd2-resume:${existingWaitingId}` : '')).trim();
+  if (!waitingForSd2 && !idempotencyKey) throw new Error('视频生成请求缺少幂等键，请刷新后重试');
   const authorization = waitingForSd2 ? null : billing.createAuthorization(db, payer, {
-    idempotency_key: String(body.idempotency_key).trim(),
+    idempotency_key: idempotencyKey,
     service_type: 'video', model: billingTarget.billing_key, usage,
-    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || null, drama_id: body.drama_id || null, source_kind: body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.storyboard_id || body.shot_id || null,
+    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || null, drama_id: body.drama_id || null, source_kind: body.source_context === 'single_video_tool' ? 'single_video_tool' : body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.storyboard_id || body.shot_id || null,
   });
   let task = null;
   let videoGenerationId = null;
   let jobId = null;
   if (existingWaitingId) {
-    const existing = db.prepare('SELECT id, task_id, status, owner_user_id FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(existingWaitingId);
-    if (!existing || existing.status !== 'sd2_waiting' || Number(existing.owner_user_id) !== Number(payer.id)) throw new Error('SD2 等待任务不存在或已被处理');
-    task = taskService.getTask(db, existing.task_id) || { id: existing.task_id };
-    videoGenerationId = existing.id;
+    task = taskService.getTask(db, existingWaiting.task_id) || { id: existingWaiting.task_id };
+    videoGenerationId = existingWaiting.id;
   } else task = taskService.createTask(db, log, 'video_generation', '', body.owner_user_id || payer.id, tenantId);
   const imageUrls = routed.filter((asset) => asset.send_to_model && asset.type === 'image').map((asset) => asset.model_url || asset.local_path || asset.url).filter(Boolean);
   const first = routed.find((asset) => asset.usage === 'first_frame' && asset.send_to_model);
@@ -143,7 +157,7 @@ function create(db, log, body, billingUser) {
     videoGenerationId = Number(result.lastInsertRowid);
   }
   const postProcess = { keep_original_audio: !!body.keep_original_audio, audio_volume: clamp(body.audio_volume, 0, 2, 1), audio_fade_seconds: clamp(body.audio_fade_seconds, 0, 10, 0) };
-  const requestSnapshot = { prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, asset_selection_policy: assetSelectionPolicy, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
+  const requestSnapshot = { source_context: body.source_context || null, idempotency_key: idempotencyKey || String(body.idempotency_key || '').trim() || null, prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, asset_selection_policy: assetSelectionPolicy, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
   const job = !existingWaitingId ? db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, owner_user_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, storyboard_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(videoGenerationId, body.owner_user_id || payer.id, modelPrompt, body.negative_prompt || null, body.model || 'auto', capability.model,
@@ -444,7 +458,8 @@ function safeAssetSummary(asset) {
 }
 function safeSnapshot(snapshot) {
   if (!snapshot) return null;
-  return { ...snapshot, assets: Array.isArray(snapshot.assets) ? snapshot.assets.map(safeAssetSummary) : [] };
+  const { idempotency_key: _idempotencyKey, ...safe } = snapshot;
+  return { ...safe, assets: Array.isArray(snapshot.assets) ? snapshot.assets.map(safeAssetSummary) : [] };
 }
 function buildSummary(assets) { return { sent_to_model: assets.filter((a) => a.send_to_model).map(safeAssetSummary), post_process_or_preprocess: assets.filter((a) => !a.send_to_model).map(safeAssetSummary) }; }
 
@@ -480,6 +495,9 @@ function list(db, query = {}) {
   const params = [];
   const filters = ['j.hidden_at IS NULL'];
   if (query.owner_user_id) { filters.push('j.owner_user_id = ?'); params.push(Number(query.owner_user_id)); }
+  if (String(query.tool_only || '') === '1' || String(query.tool_only || '').toLowerCase() === 'true') {
+    filters.push('COALESCE(v.drama_id, 0) = 0 AND j.sequence_id IS NULL AND j.shot_id IS NULL AND COALESCE(j.storyboard_id, v.storyboard_id) IS NULL');
+  }
   if (Number.isInteger(storyboardId) && storyboardId > 0) {
     // Older jobs predate omni_video_jobs.storyboard_id; recover them through
     // their video generation so existing project history remains visible.
@@ -614,7 +632,7 @@ function retry(db, log, id, billingUser) {
   const snapshot = parse(job.request_snapshot_json);
   if (!snapshot?.prompt || !Array.isArray(snapshot.assets) || !snapshot.assets.length) throw new Error('该任务没有可重试的完整请求快照');
   return create(db, log, {
-    prompt: snapshot.prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
+    source_context: snapshot.source_context || undefined, prompt: snapshot.prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
     aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
     upscale_resolution: snapshot.upscale_resolution, target_fps: snapshot.target_fps,
     creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
@@ -627,6 +645,7 @@ function retry(db, log, id, billingUser) {
       url: asset.url || null, local_path: asset.local_path || null, type: asset.type || 'image',
     })),
     owner_user_id: job.owner_user_id,
+    idempotency_key: `omni-video:retry:${job.omni_job_id}`,
   }, billingUser);
 }
 function resumeSd2WaitingGenerations(db, log) {
@@ -658,7 +677,7 @@ function resumeSd2WaitingGenerations(db, log) {
         keep_original_audio: snapshot.post_process?.keep_original_audio, audio_volume: snapshot.post_process?.audio_volume, audio_fade_seconds: snapshot.post_process?.audio_fade_seconds,
         drama_id: job.drama_id || undefined, sequence_id: job.sequence_id || undefined, shot_id: job.shot_id || undefined, storyboard_id: job.storyboard_id || undefined,
         assets: snapshot.assets.map((asset) => ({ asset_id: asset.asset_id, alias: asset.alias, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, send_to_model: asset.send_to_model, url: asset.url || null, local_path: asset.local_path || null, type: asset.type || 'image' })),
-        owner_user_id: job.owner_user_id, __sd2_waiting_generation_id: job.video_generation_id,
+        owner_user_id: job.owner_user_id, idempotency_key: snapshot.idempotency_key || undefined, __sd2_waiting_generation_id: job.video_generation_id,
       }, { id: job.owner_user_id, role: job.user_role || 'user' });
     } catch (error) {
       // Still processing is normal; only terminal certification failures should

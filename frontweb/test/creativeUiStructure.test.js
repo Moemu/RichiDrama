@@ -346,22 +346,88 @@ test('专项工具页沿用中文工作台标签和产品主色', async () => {
     assert.match(workbench, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   }
   assert.doesNotMatch(workbench, /AI RUN STUDIO|INPUT DECK|RUN ARCHIVE|OUTPUT STAGE/)
-  assert.match(media, /<p>结果预览<\/p>/)
+  assert.match(media, /<h1 id="tool-title">\{\{ media === 'image' \? '生成单张图片' : '直接生成单个视频' \}\}<\/h1>/)
+  assert.match(media, /<h2>素材库<\/h2>/)
+  assert.match(media, /class="history-toggle"/)
   assert.doesNotMatch(media, /OUTPUT PREVIEW/)
 })
 
-test('每次工具与自由全能生成都要求并传递唯一的计费归属项目', async () => {
+test('单视频工具直达生成并引用账号全部素材', async () => {
+  const [media, selector] = await Promise.all([
+    readSource('../src/views/ToolMediaGeneration.vue'),
+    readSource('../src/components/ToolAssetSelector.vue'),
+  ])
+
+  assert.match(media, /无需新建项目。输入长提示词，引用已有素材，然后生成成片。/)
+  assert.match(media, /source_context: 'single_video_tool'/)
+  assert.match(media, /media === 'image' && !Number\(dramaId\.value\)/)
+  assert.match(media, /omniVideoAPI\.create\(\{/)
+  assert.match(media, /asset_selection_policy: 'all_selected'/)
+  assert.match(media, /creation_mode: mode\.value === 'first_last' \? 'first_last_frame' : 'multi_reference'/)
+  assert.match(media, /\['image', 'video', 'audio'\]/)
+  assert.match(media, /window\.setTimeout\(\(\) => load\(true\), 4000\)/)
+  assert.match(media, /omniVideoAPI\.list\(\{ tool_only: 1 \}\)/)
+  assert.match(media, /videosAPI\.list\(\{ page_size: 30, tool_only: 1 \}\)/)
+  assert.match(media, /history_kind: 'legacy'/)
+  assert.match(media, /label: '组生组图', value: 'batch'/)
+  assert.match(selector, /scope: 'project', drama_id: Number\(props\.dramaId\)/)
+  assert.match(selector, /scope: 'global'/)
+  assert.match(selector, /loadScope\(\{ scope: 'all' \}\)/)
+  assert.match(selector, /可引用项目素材和个人素材/)
+  assert.match(selector, /drama_id: Number\(props\.dramaId\) \|\| undefined/)
+  assert.match(selector, /multiple/)
+  assert.match(selector, /Promise\.allSettled\(requests\)/)
+  assert.match(media, /historyKey\(featured\) === historyKey\(item\)/)
+  assert.match(media, /historyExpanded = ref\(false\)/)
+  assert.match(media, /featured\.value = null[\s\S]*created = await omniVideoAPI\.create/)
+  assert.match(media, /history_kind: 'omni'[\s\S]*await load\(true, submittedPreview\)/)
+  assert.match(media, /const pendingFeatured = activeStatuses\.has\(featured\.value\?\.status\)[\s\S]*preferredFeatured \|\| pendingFeatured/)
+  assert.match(media, /activeStatuses\.has\(featured\.value\?\.status\)/)
+  assert.match(media, /\.featured\s*>\s*footer\s*\{[\s\S]*position:\s*static/)
+  assert.match(media, /grid-template-rows:\s*minmax\(0,\s*1fr\)\s*auto/)
+  assert.match(media, /OmniAssetPromptEditor/)
+  assert.match(media, /prompt_document: promptDocument\.value/)
+  assert.match(media, /include-generation-quote/)
+  assert.match(media, /:has-video-input="quoteHasVideoInput"/)
+  assert.match(media, /:has-audio-input="quoteHasAudioInput"/)
+  assert.match(media, /@pick="onPromptAssetPick"/)
+  assert.match(selector, /beginAssetPointerDrag/)
+  assert.match(selector, /assets-loaded/)
+  assert.match(selector, /<article[\s\S]*role="button"[\s\S]*@pointerdown="promptDraggable && beginAssetPointerDrag\(\$event, asset\)"/)
+  assert.match(media, /:prompt-draggable="media === 'video'"/)
+  assert.match(selector, /@keydown\.enter\.prevent="select\(asset\)"/)
+  assert.match(media, /class="setup-grid"/)
+  assert.match(media, /\.setup-grid \{[\s\S]*grid-template-columns: minmax\(360px, \.8fr\) minmax\(0, 1\.2fr\)/)
+  assert.match(media, /class="output-grid" aria-label="生成规格与结果预览"/)
+  assert.match(media, /\.output-grid \{[\s\S]*grid-template-columns: minmax\(320px, \.58fr\) minmax\(0, 1\.42fr\)/)
+  assert.match(media, /\.spec-panel :deep\(\.generation-settings\) \{ grid-template-columns: minmax\(0, 1fr\); \}/)
+  assert.match(media, /\.spec-panel :deep\(\.ui-choice-field__panel\) \{[\s\S]*position: absolute/)
+  assert.match(selector, /<el-radio-button value="library">从项目素材库导入<\/el-radio-button>/)
+  assert.match(selector, /class="source-tabs"/)
+  assert.match(selector, /min-height: 44px/)
+  assert.match(selector, /source === 'library' \? label : '上传到素材库'/)
+  assert.match(selector, /文件会保存到个人素材库。上传后可立即引用。/)
+  assert.doesNotMatch(selector, /我的全部素材（含项目素材）/)
+  assert.match(selector, /draggable="false"/)
+  assert.match(selector, /@dragstart\.prevent/)
+  assert.doesNotMatch(media, /历史默认折叠，减少页面干扰|@click="load">刷新/)
+  assert.match(media, /\.tool-content \{[\s\S]*display: grid/)
+  assert.doesNotMatch(media, /\.tool-content \{[^}]*grid-template-columns/)
+  assert.match(media, /downloadResult/)
+  assert.match((await readSource('../src/views/ToolWorkbench.vue')), /row-gap:1rem;[\s\S]*height:100%;[\s\S]*overflow:hidden/)
+})
+
+test('剧本工具与自由全能生成仍要求并传递唯一的计费归属项目', async () => {
   const [workbench, media, freeCreate] = await Promise.all([
     readSource('../src/views/ToolWorkbench.vue'),
     readSource('../src/views/ToolMediaGeneration.vue'),
     readSource('../src/views/FreeCreate.vue'),
   ])
 
-  for (const source of [workbench, media]) {
-    assert.match(source, /计费归属项目/)
-    assert.match(source, /dramaAPI\.list\(\{\s*page_size:\s*100\s*\}\)/)
-    assert.match(source, /drama_id:\s*Number\(dramaId\.value\)/)
-  }
+  assert.match(workbench, /计费归属项目/)
+  assert.match(workbench, /dramaAPI\.list\(\{\s*page_size:\s*100\s*\}\)/)
+  assert.match(workbench, /drama_id:\s*Number\(dramaId\.value\)/)
+  assert.doesNotMatch(media, /source_context: 'single_video_tool',[^}]*drama_id:/)
   assert.match(freeCreate, /placeholder="选择计费项目" aria-label="选择计费归属项目"/)
   assert.match(freeCreate, /class="billing-project-field" aria-labelledby="billing-project-title"/)
   assert.match(freeCreate, /首次生成后将锁定，避免跨项目混账/)
@@ -375,6 +441,30 @@ test('generation settings keep configured model identifiers unchanged', async ()
   const source = await readSource('../src/components/GenerationSettings.vue')
   assert.match(source, /return String\(model \|\| ''\) \|\| '未选择'/)
   assert.doesNotMatch(source, /Seedance .*标准版|可灵视频模型|万相视频模型|混元视频模型/)
+})
+
+test('generation settings use model capabilities to filter source resolutions', async () => {
+  const [source, config] = await Promise.all([
+    readSource('../src/components/GenerationSettings.vue'),
+    readSource('../src/components/AIConfigContent.vue'),
+  ])
+  assert.match(source, /selectedVideoCapability/)
+  assert.match(source, /limits\?\.resolutions/)
+  assert.match(source, /resolutionOptions = computed/)
+  assert.match(source, /当前模型不支持/)
+  assert.match(source, /需要 1080p 成片时可启用 AI 超分/)
+  assert.match(config, /models 可按模型 ID 覆盖/)
+  assert.doesNotMatch(config, /duration_seconds/)
+})
+
+test('generation settings refresh the full video quote when billable inputs change', async () => {
+  const source = await readSource('../src/components/GenerationSettings.vue')
+  assert.match(source, /omniVideoAPI\.quoteBilling\(\{/)
+  assert.match(source, /videosAPI\.postprocessQuote\(\{/)
+  assert.match(source, /estimated_total_points: results\.reduce\(\(sum, item\) => sum \+ item\.points, 0\)/)
+  assert.match(source, /value\.value\.video_model[\s\S]*value\.value\.duration[\s\S]*value\.value\.resolution/)
+  assert.match(source, /props\.hasVideoInput[\s\S]*props\.hasAudioInput/)
+  assert.match(source, /const revision = \+\+quoteRevision[\s\S]*if \(props\.includeGenerationQuote && !includeGeneration\)/)
 })
 
 test('运营页面始终提供返回主页入口', async () => {
@@ -522,6 +612,33 @@ test('账户和运营页面使用工作台层级而非传统驾驶舱卡片墙',
   assert.match(admin, /在一屏内完成“发现问题、判断生产、进入处置”/)
   assert.match(admin, /\.overview-mode \.trend-card :deep\(\.operations-echart\)\{height:11rem/)
   assert.doesNotMatch(admin, /AI 漫剧运营驾驶舱/)
+})
+
+test('共享额度账单提供受控消费明细和资金流水双视图', async () => {
+  const [account, api] = await Promise.all([
+    readSource('../src/views/AccountCenter.vue'),
+    readSource('../src/api/account.js'),
+  ])
+
+  assert.match(account, /消费明细/)
+  assert.match(account, /资金流水/)
+  assert.match(account, /isOrganizationAdmin/)
+  assert.match(account, /usageFilters\.user_id/)
+  assert.match(account, /formatChinaDateTime\(row\.created_at\)/)
+  assert.match(account, /row\.display_name \|\| row\.username/)
+  assert.match(account, /row\.project_title_snapshot/)
+  assert.match(api, /usageMembers: \(\) => request\.get\('\/billing\/usage-members'\)/)
+})
+
+test('账户安全表单使用收缩安全布局并把冻结说明放入额度卡片', async () => {
+  const account = await readSource('../src/views/AccountCenter.vue')
+
+  assert.doesNotMatch(account, /账单怎么看/)
+  assert.match(account, /完成后按实际用量结算，失败则自动释放/)
+  assert.match(account, /class="panel security-card security-card--password"/)
+  assert.match(account, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
+  assert.match(account, /security-form-fields--password/)
+  assert.doesNotMatch(account, /<el-form inline>/)
 })
 
 test('工作区在缩放时让舞台优先收缩，运营导航提供图标语义', async () => {

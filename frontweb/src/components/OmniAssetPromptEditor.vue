@@ -10,7 +10,7 @@
       role="textbox"
       aria-multiline="true"
       aria-label="镜头提示词"
-      data-placeholder="描述你要生成的视频；输入 @ 引用素材，或直接把左侧素材拖入此处"
+      :data-placeholder="placeholder"
       @input="onInput"
       @keyup="onCursorChange"
       @click="onCursorChange"
@@ -57,6 +57,7 @@ const props = defineProps({
   chosenIds: { type: Set, default: () => new Set() },
   /** 结构化引用：素材 ID + 文本位置。重名素材不再仅靠文件名猜测。 */
   referenceDocument: { type: Object, default: () => ({ refs: [] }) },
+  placeholder: { type: String, default: '描述你要生成的视频；输入 @ 引用素材，或直接把左侧素材拖入此处' },
 })
 const emit = defineEmits(['update:modelValue', 'pick', 'references'])
 const editorRef = ref(null)
@@ -67,7 +68,7 @@ const dragging = ref(false)
 const dropCaret = ref({ visible: false, offset: 0, x: 0, y: 0, height: 18, rejected: false })
 const pickerStyle = ref({})
 let dragCounter = 0
-let lastCaretOffset = 0
+const lastCaretOffset = ref(0)
 let layoutCache = null
 let dragRaf = 0
 let pickerRaf = 0
@@ -113,7 +114,7 @@ function onInput() {
  * of treating only a trailing @ as an active mention.
  */
 function activeMentionRange(value = text.value) {
-  const cursor = lastCaretOffset
+  const cursor = lastCaretOffset.value
   const source = String(value || '')
   const before = source.slice(0, cursor)
   const at = before.lastIndexOf('@')
@@ -123,7 +124,7 @@ function activeMentionRange(value = text.value) {
   return { start: at, end: cursor, query: source.slice(at + 1, cursor) }
 }
 function onCursorChange() {
-  lastCaretOffset = caretOffset()
+  lastCaretOffset.value = caretOffset()
   showPicker.value = !!activeMentionRange()
   if (showPicker.value) nextTick(positionPickerAndMention)
 }
@@ -220,7 +221,7 @@ function insertAsset(asset, opts = {}) {
   if (explicitOffset != null) {
     const inserted = insertTokenAtOffset(text.value, token, explicitOffset)
     text.value = inserted.text
-    lastCaretOffset = inserted.caret
+    lastCaretOffset.value = inserted.caret
     caret = inserted.caret
   } else if (mention) {
     // Replace exactly the @ token around the caret, including one in the
@@ -229,11 +230,11 @@ function insertAsset(asset, opts = {}) {
     const separator = suffix && !/^\s/.test(suffix) ? ' ' : ''
     text.value = `${text.value.slice(0, mention.start)}${token}${separator}${suffix}`
     caret = mention.start + token.length + separator.length
-    lastCaretOffset = caret
+    lastCaretOffset.value = caret
   } else if (opts.append) {
     text.value = `${text.value}${text.value && !/\s$/.test(text.value) ? ' ' : ''}${token} `
     caret = text.value.length
-    lastCaretOffset = caret
+    lastCaretOffset.value = caret
   } else return
   emit('update:modelValue', text.value)
   syncReferences(text.value)
@@ -246,7 +247,7 @@ function insertAsset(asset, opts = {}) {
 // Deterministic alternative to HTML5 drag-and-drop: the parent material card
 // can insert at the last native textarea caret even after the button takes focus.
 function insertAtCaret(asset) {
-  insertAsset(asset, { offset: lastCaretOffset })
+  insertAsset(asset, { offset: lastCaretOffset.value })
 }
 
 defineExpose({ insertAtCaret })
@@ -311,7 +312,7 @@ function caretOffset() {
 function focusEditorEnd() {
   const el = editorRef.value; if (!el) return; el.focus()
   const range = document.createRange(); range.selectNodeContents(el); range.collapse(false)
-  const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); lastCaretOffset = String(text.value || '').length
+  const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); lastCaretOffset.value = String(text.value || '').length
 }
 
 // ===== 拖拽支持 =====
@@ -459,7 +460,7 @@ function focusEditorAtOffset(offset, scrollPosition) {
   // 原位置可避免在提示词底部插入时预览面跳回顶部。
   el.scrollTop = scrollPosition?.top || 0
   el.scrollLeft = scrollPosition?.left || 0
-  lastCaretOffset = target
+  lastCaretOffset.value = target
 }
 
 function restoreEditorAfterInsert(caret, scrollPosition) {
@@ -479,7 +480,7 @@ function offsetForRange(range) {
 }
 
 function textareaPointFromEvent(event) {
-  if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return { offset: lastCaretOffset, x: 0, y: 0, height: 18, rejected: true }
+  if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return { offset: lastCaretOffset.value, x: 0, y: 0, height: 18, rejected: true }
   const position = document.caretPositionFromPoint?.(event.clientX, event.clientY)
   const range = position ? (() => { const next = document.createRange(); next.setStart(position.offsetNode, position.offset); next.collapse(true); return next })() : document.caretRangeFromPoint?.(event.clientX, event.clientY)
   if (range && editorRef.value?.contains(range.startContainer)) {
@@ -506,7 +507,7 @@ function textareaPointFromEvent(event) {
     }
   }
   const cache = ensureLayoutCache()
-  if (!cache) return { offset: lastCaretOffset, x: 0, y: 0, height: 18 }
+  if (!cache) return { offset: lastCaretOffset.value, x: 0, y: 0, height: 18 }
   let best = { ...cache.boundaries[0], score: Number.POSITIVE_INFINITY }
   for (const boundary of cache.boundaries) {
     const bottom = boundary.y + boundary.height

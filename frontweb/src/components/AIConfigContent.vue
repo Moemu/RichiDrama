@@ -907,8 +907,8 @@ input_reference = (图片文件，可选)</pre>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video'">
           <template #label><span class="form-label-tip">全能能力</span></template>
-          <el-input v-model="form.video_capabilities" type="textarea" :rows="5" placeholder='可选 JSON，例如：{"supports":{"image_reference":{"max":9},"audio_reference":true,"video_reference":false},"limits":{"duration_seconds":{"min":4,"max":15}}}' />
-          <p class="field-tip">留空使用系统默认能力。此配置由全能视频的前后端共同读取，用于展示兼容性、自动匹配和提交校验。</p>
+          <el-input v-model="form.video_capabilities" type="textarea" :rows="5" placeholder='可选 JSON，例如：{"supports":{"image_reference":{"max":9}},"limits":{"duration":{"min":4,"max":15},"resolutions":["480p","720p"]},"models":{"模型 ID":{"limits":{"resolutions":["480p","720p"]}}}}' />
+          <p class="field-tip">留空使用系统默认能力。limits 作用于此配置的全部模型；models 可按模型 ID 覆盖。前后端共同使用该限制。</p>
         </el-form-item>
         <el-form-item v-if="isDeepSeekOfficialForm">
           <template #label>

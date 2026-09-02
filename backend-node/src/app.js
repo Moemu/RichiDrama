@@ -93,6 +93,7 @@ function createApp() {
   require('./services/operationsReportService').startDailyReporting(db, log);
   require('./services/providerPriceService').startHourlySync(db, log);
   require('./services/assetSd2Service').resumePendingCertifications(db, log, config);
+  require('./services/richbestAssetRebindService').startRecovery(db, log, config);
   require('./services/omniVideoService').startSd2WaitingGenerationRecovery(db, log);
   const paymentRecovery = require('./services/paymentService').createPaymentService(db, config, log);
   const reconcilePayments = () => paymentRecovery.recover(50).catch((error) => log.warn('payment recovery sweep failed', { error: error.message }));
