@@ -86,6 +86,20 @@ test('clicking a completed history record previews it without changing the adopt
   assert.match(freeCreate, /return selected \|\| adopted \|\| bound \|\| shotHistory\.value\[0\] \|\| null/)
 })
 
+test('project storyboard history shows the saved generation prompt and supports safe copying', () => {
+  assert.match(freeCreate, /class="copy-shot-button"[\s\S]*@click="copyCurrentShot">复制当前镜头/)
+  assert.match(freeCreate, /const copied = await storyboardsAPI\.copy\(currentShot\.value\.id\)/)
+  assert.match(freeCreate, /@click\.stop="viewHistoryPrompt\(job\)">查看生成提示词/)
+  assert.match(freeCreate, /@click="viewHistoryPrompt\(activeJob\)">查看本版本提示词/)
+  assert.match(freeCreate, /<el-input :model-value="historyPromptText" type="textarea" :rows="14" readonly/)
+  assert.match(filmCreate, />复制当前分镜<\/el-button>/)
+  assert.match(filmCreate, /storyboardsAPI\.copy\(sb\.id\)/)
+  assert.match(filmCreate, /生成结果和历史记录未复制/)
+  assert.match(filmCreate, /function getDisplayedSbVideoPrompt\(sb\)/)
+  assert.match(filmCreate, /getSbVideo\(sb\.id\)\?\.prompt \|\| sb\.video_prompt/)
+  assert.match(filmCreate, /item\.video\?\.prompt \? `生成提示词：\$\{item\.video\.prompt\}`/)
+})
+
 test('embedded storyboard confines wheel scrolling to its side panels', () => {
   assert.match(freeCreate, /\.project-storyboard-page \.shot-list\{flex:1 1 auto;min-height:0\}/)
   assert.match(freeCreate, /@media\(min-width:761px\)\{\.center-stage\{min-height:0;overflow:hidden\}\.shot-script\{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior-y:contain\}/)

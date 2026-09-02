@@ -145,7 +145,7 @@ function activeOmniAssetIds(db, storyboardId, rawIds, ownerUserId, log) {
 function updateStoryboard(db, log, id, req, ownerUserId = null) {
   const row = db.prepare('SELECT id, updated_at FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!row) return null;
-  const allowed = ['title', 'description', 'location', 'time', 'duration', 'dialogue', 'narration', 'action', 'result', 'atmosphere', 'image_prompt', 'polished_prompt', 'video_prompt', 'text_model', 'video_model', 'video_resolution', 'video_aspect_ratio', 'video_upscale_resolution', 'video_target_fps', 'scene_id', 'characters', 'composed_image', 'image_url', 'local_path', 'main_panel_idx', 'video_url', 'audio_local_path', 'narration_audio_local_path', 'status', 'shot_type', 'angle', 'angle_h', 'angle_v', 'angle_s', 'movement', 'segment_index', 'segment_title', 'creation_mode', 'universal_segment_text', 'layout_description', 'first_frame_image_id', 'last_frame_image_id', 'last_frame_image_url', 'last_frame_local_path', 'omni_asset_ids', 'audio_strategy', 'keep_original_audio', 'audio_volume', 'audio_fade_seconds', 'omni_creation_mode', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'omni_asset_usage_json', 'omni_asset_send_policy', 'omni_prompt_document'];
+  const allowed = ['title', 'description', 'location', 'time', 'duration', 'dialogue', 'narration', 'action', 'result', 'atmosphere', 'image_prompt', 'polished_prompt', 'video_prompt', 'text_model', 'video_model', 'video_resolution', 'video_aspect_ratio', 'video_upscale_resolution', 'video_target_fps', 'scene_id', 'characters', 'composed_image', 'image_url', 'local_path', 'main_panel_idx', 'video_url', 'active_video_generation_id', 'audio_local_path', 'narration_audio_local_path', 'status', 'shot_type', 'angle', 'angle_h', 'angle_v', 'angle_s', 'movement', 'segment_index', 'segment_title', 'creation_mode', 'universal_segment_text', 'layout_description', 'first_frame_image_id', 'last_frame_image_id', 'last_frame_image_url', 'last_frame_local_path', 'omni_asset_ids', 'audio_strategy', 'keep_original_audio', 'audio_volume', 'audio_fade_seconds', 'omni_creation_mode', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'omni_asset_usage_json', 'omni_asset_send_policy', 'omni_prompt_document'];
   const updates = [];
   const params = [];
   // 前端可能传 character_ids，与 characters 统一：存为 JSON 字符串
@@ -288,6 +288,7 @@ function getStoryboardById(db, id) {
     video_url: (r.local_path && /\.(?:mp4|webm|mov|m4v|avi|mkv)(?:[?#].*)?$/i.test(String(r.local_path).trim()))
       ? `/static/${String(r.local_path).trim().replace(/^\/+/, '')}`
       : (r.video_url || null),
+    active_video_generation_id: r.active_video_generation_id ?? null,
     audio_local_path: r.audio_local_path ?? null,
     narration_audio_local_path: r.narration_audio_local_path ?? null,
     status: r.status || 'pending',
@@ -358,9 +359,101 @@ function insertBeforeStoryboard(db, log, targetId) {
   return getStoryboardById(db, info.lastInsertRowid);
 }
 
+/**
+ * Copy one storyboard after itself.
+ *
+ * Copy editable content, generation settings, and asset references. Do not copy
+ * generated media, adopted video state, audio files, or task status.
+ */
+function copyStoryboard(db, log, sourceId) {
+  const source = db.prepare('SELECT * FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(sourceId));
+  if (!source) return null;
+
+  const availableColumns = new Set(db.prepare('PRAGMA table_info(storyboards)').all().map((column) => column.name));
+  const copyColumns = [
+    'episode_id', 'scene_id', 'title', 'description', 'layout_description',
+    'location', 'time', 'duration', 'dialogue', 'narration', 'action', 'result',
+    'atmosphere', 'image_prompt', 'polished_prompt', 'video_prompt', 'text_model',
+    'video_model', 'video_resolution', 'video_aspect_ratio', 'video_upscale_resolution',
+    'video_target_fps', 'generation_overrides_json', 'characters', 'shot_type', 'angle',
+    'angle_h', 'angle_v', 'angle_s', 'movement', 'lighting_style', 'depth_of_field',
+    'emotion', 'emotion_intensity', 'segment_index', 'segment_title', 'creation_mode',
+    'universal_segment_text', 'omni_asset_ids', 'audio_strategy', 'keep_original_audio',
+    'audio_volume', 'audio_fade_seconds', 'omni_creation_mode', 'omni_first_frame_asset_id',
+    'omni_last_frame_asset_id', 'omni_asset_usage_json', 'omni_asset_send_policy',
+    'omni_prompt_document_json', 'continuity_snapshot',
+  ].filter((column) => availableColumns.has(column));
+
+  const now = new Date().toISOString();
+  const copiedId = db.transaction(() => {
+    db.prepare(
+      'UPDATE storyboards SET storyboard_number = storyboard_number + 1, updated_at = ? WHERE episode_id = ? AND storyboard_number > ? AND deleted_at IS NULL'
+    ).run(now, source.episode_id, source.storyboard_number);
+
+    const insertColumns = ['storyboard_number', ...copyColumns, 'status', 'created_at', 'updated_at'];
+    const values = [
+      Number(source.storyboard_number) + 1,
+      ...copyColumns.map((column) => column === 'title'
+        ? `${String(source.title || '未命名分镜').trim()}（副本）`
+        : source[column]),
+      'pending',
+      now,
+      now,
+    ];
+    const placeholders = insertColumns.map(() => '?').join(', ');
+    const info = db.prepare(
+      `INSERT INTO storyboards (${insertColumns.join(', ')}) VALUES (${placeholders})`
+    ).run(...values);
+    const newId = Number(info.lastInsertRowid);
+
+    const orderBy = availableColumns.has('sort_order')
+      ? 'sort_order ASC, storyboard_number ASC, id ASC'
+      : 'storyboard_number ASC, id ASC';
+    const currentOrder = db.prepare(
+      `SELECT id FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL AND id <> ? ORDER BY ${orderBy}`
+    ).all(source.episode_id, newId).map((row) => Number(row.id));
+    const sourceIndex = currentOrder.indexOf(Number(source.id));
+    currentOrder.splice(sourceIndex >= 0 ? sourceIndex + 1 : currentOrder.length, 0, newId);
+    if (availableColumns.has('sort_order')) {
+      const updateSort = db.prepare('UPDATE storyboards SET sort_order = ?, updated_at = ? WHERE id = ?');
+      currentOrder.forEach((id, index) => updateSort.run(index, now, id));
+    }
+
+    try {
+      const characterLinks = db.prepare('SELECT character_id FROM storyboard_characters WHERE storyboard_id = ?').all(source.id);
+      const insertCharacter = db.prepare(
+        'INSERT OR IGNORE INTO storyboard_characters (storyboard_id, character_id, created_at) VALUES (?, ?, ?)'
+      );
+      characterLinks.forEach((link) => insertCharacter.run(newId, link.character_id, now));
+    } catch (_) {}
+    try {
+      const propLinks = db.prepare('SELECT prop_id FROM storyboard_props WHERE storyboard_id = ?').all(source.id);
+      const insertProp = db.prepare('INSERT OR IGNORE INTO storyboard_props (storyboard_id, prop_id) VALUES (?, ?)');
+      propLinks.forEach((link) => insertProp.run(newId, link.prop_id));
+    } catch (_) {}
+    try {
+      const prompts = db.prepare(
+        'SELECT frame_type, prompt, description, layout FROM frame_prompts WHERE storyboard_id = ? ORDER BY created_at ASC'
+      ).all(source.id);
+      const insertPrompt = db.prepare(
+        'INSERT INTO frame_prompts (storyboard_id, frame_type, prompt, description, layout, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      );
+      prompts.forEach((prompt) => insertPrompt.run(
+        newId, prompt.frame_type, prompt.prompt, prompt.description, prompt.layout, now, now
+      ));
+    } catch (_) {}
+
+    return newId;
+  })();
+
+  log.info('Storyboard copied', { source_id: source.id, copied_id: copiedId, episode_id: source.episode_id });
+  return getStoryboardById(db, copiedId);
+}
+
 module.exports = {
   createStoryboard,
   insertBeforeStoryboard,
+  copyStoryboard,
   updateStoryboard,
   deleteStoryboard,
   getStoryboardById,

@@ -39,7 +39,7 @@ test('new free-create shots default to 15 seconds', () => {
 
 test('classic storyboard persists per-shot text and video generation settings', () => {
   const db = new Database(':memory:');
-  db.exec(`CREATE TABLE storyboards (id INTEGER PRIMARY KEY, episode_id INTEGER, title TEXT, duration REAL, text_model TEXT, video_model TEXT, video_resolution TEXT, video_aspect_ratio TEXT, updated_at TEXT, deleted_at TEXT);
+  db.exec(`CREATE TABLE storyboards (id INTEGER PRIMARY KEY, episode_id INTEGER, title TEXT, duration REAL, text_model TEXT, video_model TEXT, video_resolution TEXT, video_aspect_ratio TEXT, active_video_generation_id INTEGER, updated_at TEXT, deleted_at TEXT);
     CREATE TABLE storyboard_props (storyboard_id INTEGER, prop_id INTEGER);
     CREATE TABLE storyboard_characters (storyboard_id INTEGER, character_id INTEGER);
     CREATE TABLE episodes (id INTEGER PRIMARY KEY, drama_id INTEGER);
@@ -53,6 +53,8 @@ test('classic storyboard persists per-shot text and video generation settings', 
   assert.equal(updated.video_resolution, '1080p');
   assert.equal(updated.video_aspect_ratio, '9:16');
   assert.equal(updated.duration, 10);
+  const selected = storyboardService.updateStoryboard(db, log, 1, { active_video_generation_id: 88 });
+  assert.equal(selected.active_video_generation_id, 88);
 });
 
 test('first storyboard edit establishes episode defaults, later edits only override the current shot', () => {

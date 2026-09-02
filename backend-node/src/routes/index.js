@@ -492,6 +492,7 @@ function setupRouter(cfg, db, log) {
   r.put('/storyboards/reorder', storyboards.reorder);
   r.post('/storyboards', storyboards.create);
   r.post('/storyboards/:id/insert-before', storyboards.insertBefore);
+  r.post('/storyboards/:id/copy', storyboards.copy);
   r.get('/storyboards/:id', storyboards.getOne);
   r.put('/storyboards/:id', storyboards.update);
   r.patch('/storyboards/:id/generation-settings', storyboards.storyboardGenerationSettingsUpdate);

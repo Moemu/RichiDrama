@@ -780,6 +780,14 @@
             </el-button>
             <el-button size="small" plain class="sb-ctrl-btn" title="在本镜头前增加一个分镜" @click="onInsertStoryboardBefore(sb)">＋ 新增</el-button>
             <el-button
+              size="small"
+              plain
+              class="sb-ctrl-btn"
+              title="复制当前分镜的脚本、配置、提示词和素材引用，不复制生成结果"
+              :loading="copyingStoryboardIds.has(sb.id)"
+              @click.stop="onCopyStoryboard(sb)"
+            >复制当前分镜</el-button>
+            <el-button
               class="sb-ctrl-delete"
               type="danger"
               plain
@@ -1390,7 +1398,7 @@
                   v-for="item in getVideoStripItems(sb.id)"
                   :key="item.key"
                   class="sb-video-thumb"
-                  :title="`${item.label}（点击切换）`"
+                  :title="[`${item.label}（点击切换）`, item.video?.prompt ? `生成提示词：${item.video.prompt}` : ''].filter(Boolean).join('\n\n')"
                   @click="onSelectSbMainVideo(sb, item.video)"
                 >
                   <span class="sb-video-thumb-player sb-video-thumb-placeholder"><img :src="sbVideoPoster(sb, item.video)" alt="" /></span>
@@ -1415,11 +1423,12 @@
               </div>
               <div class="sb-video-prompt-label">
                 <span class="sb-dot"></span>
-                <span>视频提示词</span>
+                <span>{{ getSbVideo(sb.id)?.prompt ? '本条视频生成提示词' : '视频提示词' }}</span>
               </div>
               <div class="sb-video-params-bar">
-                <span class="sb-video-prompt-text sb-video-prompt-text--preview">{{ sb.video_prompt || '暂无视频提示词（在「视频配置」保存后自动生成）' }}</span>
-                <el-button size="small" link type="primary" @click="onOpenSbPromptDialog(sb)">手工编辑</el-button>
+                <span class="sb-video-prompt-text sb-video-prompt-text--preview" :title="getDisplayedSbVideoPrompt(sb)">{{ getDisplayedSbVideoPrompt(sb) }}</span>
+                <el-button v-if="getSbVideo(sb.id)?.prompt" size="small" link type="primary" @click="onViewGeneratedVideoPrompt(sb)">查看完整</el-button>
+                <el-button size="small" link type="primary" @click="onOpenSbPromptDialog(sb)">{{ getSbVideo(sb.id)?.prompt ? '编辑下次提示词' : '手工编辑' }}</el-button>
               </div>
             </div>
           </div>
@@ -2194,6 +2203,13 @@
       <template #footer>
         <el-button @click="showEditSceneLibrary = false">取消</el-button>
         <el-button type="primary" :loading="editSceneLibrarySaving" @click="submitEditSceneLibrary">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showGeneratedVideoPromptDialog" title="本条视频生成提示词" width="700px">
+      <el-input :model-value="generatedVideoPromptText" type="textarea" :rows="14" readonly />
+      <template #footer>
+        <el-button type="primary" @click="showGeneratedVideoPromptDialog = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -3321,6 +3337,8 @@ const sbPromptPolishedText = ref('')    // AI 优化后 polished_prompt
 const sbPromptVideoText = ref('')       // video_prompt
 const sbPromptSaving = ref(false)
 const sbPromptPolishing = ref(false)
+const showGeneratedVideoPromptDialog = ref(false)
+const generatedVideoPromptText = ref('')
 /** 首尾帧提示词编辑器 */
 const showFramePromptEditor = ref(false)
 const editingFramePromptSb = ref(null)
@@ -3840,6 +3858,9 @@ function getSbVideo(storyboardId) {
   }
   return all[0]
 }
+function getDisplayedSbVideoPrompt(sb) {
+  return getSbVideo(sb.id)?.prompt || sb.video_prompt || '暂无视频提示词（在「视频配置」保存后自动生成）'
+}
 /** 取下一个分镜（按 storyboard_number 顺序） */
 function getNextStoryboard(storyboardId) {
   const list = store.storyboards || []
@@ -3885,9 +3906,14 @@ function onSelectSbMainVideo(sb, video) {
   setActiveSbId(sb.id)
   sbSelectedVideoId.value = { ...sbSelectedVideoId.value, [sb.id]: video.id }
   storyboardsAPI.update(sb.id, {
+    active_video_generation_id: video.id,
     video_url: video.video_url || null,
     local_path: video.local_path || undefined,
   }).catch(e => console.warn('[主视频] 保存后端失败', e))
+}
+function onViewGeneratedVideoPrompt(sb) {
+  generatedVideoPromptText.value = getSbVideo(sb.id)?.prompt || sb.video_prompt || ''
+  showGeneratedVideoPromptDialog.value = true
 }
 /** 取该分镜最近一次视频生成的错误信息（从 API 返回的记录或本地即时错误） */
 function getSbVideoError(storyboardId) {
@@ -4069,6 +4095,12 @@ function restoreSelectionsFromBackend() {
     }
     if (sbSelectedLastImgId.value[sb.id] == null && sb.last_frame_image_id != null) {
       sbSelectedLastImgId.value = { ...sbSelectedLastImgId.value, [sb.id]: sb.last_frame_image_id }
+    }
+    if (sbSelectedVideoId.value[sb.id] == null && sb.active_video_generation_id != null) {
+      const videos = getSbAllVideos(sb.id)
+      if (videos.some((video) => Number(video.id) === Number(sb.active_video_generation_id))) {
+        sbSelectedVideoId.value = { ...sbSelectedVideoId.value, [sb.id]: Number(sb.active_video_generation_id) }
+      }
     }
   }
 }
@@ -7906,7 +7938,7 @@ async function runGenerateSbVideo(sb) {
     delete next[sb.id]
     sbSelectedVideoId.value = next
   }
-  storyboardsAPI.update(sb.id, { video_url: null }).catch((error) => {
+  storyboardsAPI.update(sb.id, { video_url: null, active_video_generation_id: null }).catch((error) => {
     ElMessage.warning(error?.message || '清除旧视频标记失败，生成完成后请刷新确认')
   })
   try {
@@ -8230,6 +8262,26 @@ async function onInsertStoryboardBefore(sb) {
   }
 }
 
+const copyingStoryboardIds = reactive(new Set())
+async function onCopyStoryboard(sb) {
+  if (!sb?.id || copyingStoryboardIds.has(sb.id)) return
+  copyingStoryboardIds.add(sb.id)
+  try {
+    const copied = await storyboardsAPI.copy(sb.id)
+    await loadDrama()
+    if (copied?.id) {
+      setActiveSbId(copied.id)
+      await nextTick()
+      document.getElementById(`sb-${copied.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    ElMessage.success('已复制当前分镜；生成结果和历史记录未复制')
+  } catch (e) {
+    ElMessage.error(e.message || '复制分镜失败')
+  } finally {
+    copyingStoryboardIds.delete(sb.id)
+  }
+}
+
 async function startBatchImageGeneration() {
   if (!currentEpisodeId.value || batchImageRunning.value || pipelineRunning.value) return
   batchImageErrors.value = []
@@ -8385,7 +8437,7 @@ async function startBatchVideoGeneration() {
         try {
           generatingSbVideoIds.add(sb.id)
           // 批量生成时清除手动指定的视频，确保合成时使用最新生成记录
-          storyboardsAPI.update(sb.id, { video_url: null }).catch((error) => {
+          storyboardsAPI.update(sb.id, { video_url: null, active_video_generation_id: null }).catch((error) => {
             ElMessage.warning(error?.message || `分镜 #${sb.shot_number || sb.id} 清除旧视频标记失败`)
           })
           if (sbSelectedVideoId.value[sb.id] != null) {

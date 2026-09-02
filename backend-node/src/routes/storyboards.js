@@ -289,6 +289,16 @@ function routes(db, log) {
         response.internalError(res, err.message);
       }
     },
+    copy: (req, res) => {
+      try {
+        const sb = storyboardService.copyStoryboard(db, log, req.params.id);
+        if (!sb) return response.notFound(res, '目标分镜不存在');
+        response.created(res, sb);
+      } catch (err) {
+        log.error('storyboards copy', { error: err.message, id: req.params.id });
+        response.internalError(res, err.message || '复制分镜失败');
+      }
+    },
     getOne: (req, res) => {
       try {
         const sb = storyboardService.getStoryboardById(db, req.params.id);

@@ -17,7 +17,7 @@
     <section class="workbench" :class="`mobile-${mobileWorkspaceTab}`">
       <aside class="panel shot-panel" aria-label="镜头导航">
         <div class="shot-heading"><b>镜头列表</b><small>{{ shots.length }} 个 · 滚轮切镜</small></div>
-        <div class="shot-actions"><el-button size="small" type="primary" plain @click="addShot(false)">+ 尾部添加</el-button><el-button size="small" :disabled="!currentShot" @click="addShot(true)">当前镜头后添加</el-button></div>
+        <div class="shot-actions"><el-button size="small" type="primary" plain @click="addShot(false)">+ 尾部添加</el-button><el-button size="small" :disabled="!currentShot" @click="addShot(true)">当前镜头后添加</el-button><el-button class="copy-shot-button" size="small" :disabled="!currentShot" @click="copyCurrentShot">复制当前镜头</el-button></div>
         <div ref="shotListRef" class="shot-list" tabindex="0" aria-label="镜头列表，可用上下方向键或滚轮切换镜头" @keydown.up.prevent="selectRelative(-1)" @keydown.down.prevent="selectRelative(1)" @wheel.prevent="onShotListWheel">
           <article v-for="(shot, index) in shots" :key="shot.id" class="shot-card" :class="{ active: shot.id === activeShotId, dragging: draggedShotId === shot.id }" :aria-current="shot.id === activeShotId ? 'true' : undefined" draggable="true" @dragstart="draggedShotId = shot.id" @dragend="draggedShotId = null" @dragover.prevent @drop="dropShot(shot.id)" @click="selectShot(shot)">
             <div class="shot-title"><span class="drag-handle">⠿</span><span class="shot-number">{{ index + 1 }}</span><b :title="shot.title || '未命名镜头'">{{ shot.title || '未命名镜头' }}</b><span class="shot-controls"><el-button text size="small" :disabled="index === 0" aria-label="上移镜头" @click.stop="moveShot(index, -1)">↑</el-button><el-button text size="small" :disabled="index === shots.length - 1" aria-label="下移镜头" @click.stop="moveShot(index, 1)">↓</el-button><el-button text size="small" aria-label="重命名镜头" @click.stop="renameShot(shot)"><el-icon><Edit /></el-icon></el-button></span><el-button class="shot-delete" type="danger" plain size="small" :disabled="shots.length <= 1" :title="shots.length <= 1 ? '至少保留一个镜头；请先新增镜头再删除当前镜头' : '删除镜头'" aria-label="删除镜头" @click.stop="removeShot(shot)"><el-icon><Delete /></el-icon><span>删除</span></el-button></div>
@@ -35,7 +35,7 @@
             <template v-if="mediaLayers.length"><video v-for="layer in mediaLayers" :key="layer.id" :src="layer.url" :controls="layer.id === topMediaLayerId && layer.ready" playsinline preload="metadata" :autoplay="playOnSelection && layer.id === topMediaLayerId" class="main-video" :class="{ 'is-ready': layer.ready, 'is-current': layer.id === topMediaLayerId }" @canplay="promoteMediaLayer(layer.id)" @error="discardMediaLayer(layer.id)" /></template>
             <template v-else><b>正在载入成片…</b></template>
           </div>
-          <div class="frame-actions" aria-label="成片操作"><el-button size="small" @click="downloadCurrentVideo">下载成片</el-button><template v-if="activeJob"><el-button size="small" type="primary" :disabled="savedResultJobId === activeJob.id" @click="saveResultAsAsset">{{ savedResultJobId === activeJob.id ? '已加入素材' : '作为视频素材继续创作' }}</el-button><el-button v-if="isProjectMode && savedResultJobId === activeJob.id" size="small" @click="$router.push(`/film/${projectDramaId}/canvas`)">在项目画布中打开</el-button><template v-if="canExtractFrames"><el-button size="small" :loading="extractingPosition === 'first'" :disabled="!!extractingPosition" @click="extractFrame('first')">提取首帧</el-button><el-button size="small" :loading="extractingPosition === 'last'" :disabled="!!extractingPosition" @click="extractFrame('last')">提取尾帧</el-button></template></template></div>
+          <div class="frame-actions" aria-label="成片操作"><el-button size="small" @click="downloadCurrentVideo">下载成片</el-button><el-button v-if="activeJob?.prompt" size="small" @click="viewHistoryPrompt(activeJob)">查看本版本提示词</el-button><template v-if="activeJob"><el-button size="small" type="primary" :disabled="savedResultJobId === activeJob.id" @click="saveResultAsAsset">{{ savedResultJobId === activeJob.id ? '已加入素材' : '作为视频素材继续创作' }}</el-button><el-button v-if="isProjectMode && savedResultJobId === activeJob.id" size="small" @click="$router.push(`/film/${projectDramaId}/canvas`)">在项目画布中打开</el-button><template v-if="canExtractFrames"><el-button size="small" :loading="extractingPosition === 'first'" :disabled="!!extractingPosition" @click="extractFrame('first')">提取首帧</el-button><el-button size="small" :loading="extractingPosition === 'last'" :disabled="!!extractingPosition" @click="extractFrame('last')">提取尾帧</el-button></template></template></div>
           <div class="time-ruler" aria-label="镜头时长"><span>时长 {{ duration }} 秒</span><span>最多 {{ maxDuration }} 秒</span></div>
         </template>
         <section v-else class="generation-stage-status" :class="{ 'is-processing': previewVideoProgress || (!previewVideoError && ['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status)), 'is-failed': previewVideoError || (activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)) }" :role="previewVideoError || (activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)) ? 'alert' : 'status'" aria-live="polite">
@@ -133,7 +133,7 @@
           <div class="generation-history-grid">
             <article v-for="job in shotHistory" :key="job.id" class="generation-history-item" :class="{ active: String(selectedHistoryJobId) === String(job.id) }" role="button" tabindex="0" @click="selectHistoryJob(job)" @keydown.enter.prevent="selectHistoryJob(job)" @keydown.space.prevent="selectHistoryJob(job)">
               <img v-if="historyPoster(job)" :src="historyPoster(job)" alt="" class="history-poster"/><span v-else class="history-video-empty"><el-icon><VideoCamera /></el-icon>{{ job.videoUrl ? '点击切换成片' : (['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(job.status) ? '处理中' : '暂无预览') }}</span>
-              <span class="history-card-meta"><b>{{ job.model_resolved || job.model || '视频版本' }}</b><small>{{ job.is_current ? '当前采用' : '未采用' }} · {{ historyStatus(job.status) }} · {{ job.duration || duration }}秒</small><small>{{ postprocessSummary(job) }}</small><small>实际扣费：{{ job.actual_points == null ? '待结算' : `${Number(job.actual_points).toFixed(2)} 积分` }}</small><el-button v-if="job.status === 'completed' && !job.is_current && isProjectMode" text size="small" @click.stop="adoptVersion(job)">设为当前成片</el-button><el-button v-if="canAdoptSource(job)" text type="primary" size="small" @click.stop="adoptSource(job)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(job)" text type="warning" size="small" @click.stop="retryPostprocess(job)">仅重试{{ job.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-if="!activeGenerationStatuses.has(job.status)" text type="danger" size="small" @click.stop="hideHistoryJob(job)">隐藏记录</el-button></span>
+              <span class="history-card-meta"><b>{{ job.model_resolved || job.model || '视频版本' }}</b><small>{{ job.is_current ? '当前采用' : '未采用' }} · {{ historyStatus(job.status) }} · {{ job.duration || duration }}秒</small><small>{{ postprocessSummary(job) }}</small><small>实际扣费：{{ job.actual_points == null ? '待结算' : `${Number(job.actual_points).toFixed(2)} 积分` }}</small><el-button v-if="job.prompt" text size="small" @click.stop="viewHistoryPrompt(job)">查看生成提示词</el-button><el-button v-if="job.status === 'completed' && !job.is_current && isProjectMode" text size="small" @click.stop="adoptVersion(job)">设为当前成片</el-button><el-button v-if="canAdoptSource(job)" text type="primary" size="small" @click.stop="adoptSource(job)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(job)" text type="warning" size="small" @click.stop="retryPostprocess(job)">仅重试{{ job.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-if="!activeGenerationStatuses.has(job.status)" text type="danger" size="small" @click.stop="hideHistoryJob(job)">隐藏记录</el-button></span>
               <span :class="['history-dot', job.status]"></span>
             </article>
           </div>
@@ -165,6 +165,10 @@
         </article>
       </div>
       <div v-if="!pickerImageAssets.length" class="frame-picker-empty">还没有图片素材，请先在上方上传图片</div>
+    </el-dialog>
+    <el-dialog v-model="historyPromptOpen" title="本版本生成提示词" width="min(720px, calc(100vw - 32px))" append-to-body>
+      <el-input :model-value="historyPromptText" type="textarea" :rows="14" readonly />
+      <template #footer><el-button type="primary" @click="historyPromptOpen = false">关闭</el-button></template>
     </el-dialog>
     <el-dialog v-model="projectLibraryOpen" title="从项目素材库加入本镜" width="760px" append-to-body>
       <div class="project-asset-library-toolbar">
@@ -242,6 +246,7 @@ const promptEditorRef = ref(null)
 let wheelShotLocked = false
 let wheelShotTimer = null
 const shotHistory = ref([]), selectedHistoryJobId = ref(null)
+const historyPromptOpen = ref(false), historyPromptText = ref('')
 let saveTimer = null
 let promptRevision = 0
 let restoredDraftNoticeShown = false
@@ -595,6 +600,10 @@ function postprocessSummary(job) {
 }
 function formatHistoryTime(value) { return formatChinaDateTime(value) }
 function selectHistoryJob(job) { playOnSelection.value = true; selectedHistoryJobId.value = job.id }
+function viewHistoryPrompt(job) {
+  historyPromptText.value = String(job?.prompt || job?.generation?.prompt || '')
+  historyPromptOpen.value = true
+}
 function historyPoster(job) {
   const image = String(job?.poster_local_path || job?.generation?.poster_local_path || job?.image_url || job?.generation?.image_url || '')
   if (!image || image.startsWith('asset://')) return '/images/video-poster-placeholder.svg'
@@ -925,7 +934,50 @@ async function addShot(afterCurrent) {
   shots.value = refreshed.shots
   loadShot(shots.value.find((item) => item.id === shot.id) || shots.value.at(-1))
 }
-async function copyCurrentShot() { if (!currentShot.value) return; const draft = { prompt: prompt.value, promptDocument: structuredClone(promptDocument.value || { text: prompt.value, refs: [] }), settings: { model: model.value, creationMode: creationMode.value, aspectRatio: aspectRatio.value, duration: duration.value, resolution: resolution.value, upscaleResolution: upscaleResolution.value, targetFps: targetFps.value, audioStrategy: audioStrategy.value, keepOriginalAudio: keepOriginalAudio.value, audioVolume: audioVolume.value, audioFadeSeconds: audioFadeSeconds.value }, selectedOrder: [...selectedOrder.value], assets: chosenAssets.value.map((asset) => ({ id: asset.id, usage: asset.usage })) }; try { await addShot(true); prompt.value = draft.prompt; promptDocument.value = draft.promptDocument; model.value = draft.settings.model; creationMode.value = draft.settings.creationMode; aspectRatio.value = draft.settings.aspectRatio; duration.value = draft.settings.duration; resolution.value = draft.settings.resolution; upscaleResolution.value = draft.settings.upscaleResolution || null; targetFps.value = draft.settings.targetFps || null; audioStrategy.value = draft.settings.audioStrategy; keepOriginalAudio.value = draft.settings.keepOriginalAudio; audioVolume.value = draft.settings.audioVolume; audioFadeSeconds.value = draft.settings.audioFadeSeconds; selectedOrder.value = draft.selectedOrder.filter((id) => assets.value.some((asset) => asset.id === id)); setPromptReferences(promptDocument.value); for (const saved of draft.assets) { const asset = assets.value.find((item) => item.id === saved.id); if (asset) asset.usage = saved.usage || asset.usage } await saveCurrentShot(false); ElMessage.success('已复制为当前镜头后的新镜头') } catch (error) { ElMessage.error(error.message || '复制镜头失败') } }
+async function copyCurrentShot() {
+  if (!currentShot.value) return
+  try {
+    await saveCurrentShot(false)
+    if (isProjectMode.value) {
+      const copied = await storyboardsAPI.copy(currentShot.value.id)
+      await refreshProjectShots(copied.id)
+      emit('changed')
+      ElMessage.success('已复制为当前镜头后的新镜头；生成记录未复制')
+      return
+    }
+    const draft = {
+      prompt: prompt.value,
+      promptDocument: structuredClone(promptDocument.value || { text: prompt.value, refs: [] }),
+      settings: { model: model.value, creationMode: creationMode.value, aspectRatio: aspectRatio.value, duration: duration.value, resolution: resolution.value, upscaleResolution: upscaleResolution.value, targetFps: targetFps.value, audioStrategy: audioStrategy.value, keepOriginalAudio: keepOriginalAudio.value, audioVolume: audioVolume.value, audioFadeSeconds: audioFadeSeconds.value },
+      selectedOrder: [...selectedOrder.value],
+      assets: chosenAssets.value.map((asset) => ({ id: asset.id, usage: asset.usage })),
+    }
+    await addShot(true)
+    prompt.value = draft.prompt
+    promptDocument.value = draft.promptDocument
+    model.value = draft.settings.model
+    creationMode.value = draft.settings.creationMode
+    aspectRatio.value = draft.settings.aspectRatio
+    duration.value = draft.settings.duration
+    resolution.value = draft.settings.resolution
+    upscaleResolution.value = draft.settings.upscaleResolution || null
+    targetFps.value = draft.settings.targetFps || null
+    audioStrategy.value = draft.settings.audioStrategy
+    keepOriginalAudio.value = draft.settings.keepOriginalAudio
+    audioVolume.value = draft.settings.audioVolume
+    audioFadeSeconds.value = draft.settings.audioFadeSeconds
+    selectedOrder.value = draft.selectedOrder.filter((id) => assets.value.some((asset) => asset.id === id))
+    setPromptReferences(promptDocument.value)
+    for (const saved of draft.assets) {
+      const asset = assets.value.find((item) => item.id === saved.id)
+      if (asset) asset.usage = saved.usage || asset.usage
+    }
+    await saveCurrentShot(false)
+    ElMessage.success('已复制为当前镜头后的新镜头')
+  } catch (error) {
+    ElMessage.error(error.message || '复制镜头失败')
+  }
+}
 async function renameShot(shot) { const previous = shot?.title; try { const { value } = await ElMessageBox.prompt('输入镜头名称', '重命名镜头', { inputValue: previous || '' }); const title = value || '未命名镜头'; if (isProjectMode.value) { Object.assign(shot, projectShot(await storyboardsAPI.update(shot.id, { title, expected_updated_at: shot.updated_at }))); emit('changed'); return } if (shot.id === activeShotId.value) { shot.title = title; await saveCurrentShot(false) } else Object.assign(shot, await omniVideoAPI.updateShot(sequence.value.id, shot.id, { title, expected_updated_at: shot.updated_at })) } catch (error) { if (shot) shot.title = previous; if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.message || '重命名镜头失败') } }
 async function removeShot(shot) {
   try {
@@ -1501,4 +1553,5 @@ defineExpose({ refreshProjectShots })
 .creation-secondary-section>summary b{font-size:12px}.creation-secondary-section>summary small{margin-left:auto;color:var(--text-muted);font-size:10px}
 .creation-secondary-body{padding:0 10px 10px;border-top:1px solid var(--border-subtle)}
 .creation-secondary-body .materials-title{margin-top:10px}.creation-history-section .generation-history{margin-top:0;padding-top:10px;border-top:0}
+.shot-actions{flex-wrap:wrap}.shot-actions .copy-shot-button{flex-basis:100%}
 </style>
