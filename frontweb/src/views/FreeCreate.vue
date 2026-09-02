@@ -5,7 +5,7 @@
         <el-button text @click="backToProject"><el-icon><ArrowLeft /></el-icon>返回项目</el-button>
         <span class="divider"></span><span>{{ isProjectMode ? '项目剧集：' : '剧集：' }}</span><el-input v-if="sequence" v-model="sequence.name" size="small" class="sequence-name" :readonly="isProjectMode" @change="saveCurrentShot" />
       </div>
-      <div class="topbar-actions"><AccountBalanceBadge /><el-button text @click="$router.push('/media-library')">素材库</el-button><el-button text size="small" :disabled="!currentShot || reproductionMode" @click="copyCurrentShot">复制当前镜头</el-button><el-button type="primary" plain size="small" :disabled="reproductionMode" @click="saveCurrentShot">保存整集</el-button></div>
+      <div class="topbar-actions"><AccountBalanceBadge /><el-button text @click="openMediaLibrary">素材库</el-button><el-button text size="small" :disabled="!currentShot || reproductionMode" @click="copyCurrentShot">复制当前镜头</el-button><el-button type="primary" plain size="small" :disabled="reproductionMode" @click="saveCurrentShot">保存整集</el-button></div>
     </header>
 
     <nav class="mobile-workbench-tabs" aria-label="自由创作工作区">
@@ -103,7 +103,7 @@
         <details class="creation-secondary-section">
           <summary><b>当前镜头素材</b><small>已加入 {{ chosenAssets.length }} 个 · 按需展开</small></summary>
           <div class="creation-secondary-body">
-        <div class="materials-title"><div><b>素材与引用</b><small>仅显示本镜已加入的素材；上传后会自动加入本镜。</small></div><div><el-button text size="small" @click="projectLibraryOpen = true">从项目素材库加入</el-button><el-button text size="small" @click="$router.push('/media-library')">管理素材</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
+        <div class="materials-title"><div><b>素材与引用</b><small>仅显示本镜已加入的素材；上传后会自动加入本镜。</small></div><div><el-button text size="small" @click="projectLibraryOpen = true">从项目素材库加入</el-button><el-button text size="small" @click="openMediaLibrary">管理素材</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
         <input ref="fileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="uploadFiles" />
         <div class="dropzone" @click="pickFiles" @dragover.prevent @drop.prevent="dropFiles"><el-icon><Upload /></el-icon>拖入图片、视频或音频</div>
         <small class="upload-limit-note">{{ limitSummary }}</small>
@@ -735,6 +735,16 @@ async function restoreCurrentShotMaster() {
 function backToProject() {
   if (isProjectMode.value && projectDramaId.value) router.push({ path: `/film/${projectDramaId.value}`, query: projectEpisodeId.value ? { episode_id: projectEpisodeId.value } : {} })
   else router.push('/')
+}
+function openMediaLibrary() {
+  const targetDramaId = isProjectMode.value ? projectDramaId.value : Number(freeProjectId.value)
+  router.push({
+    path: '/media-library',
+    query: {
+      ...(Number.isInteger(targetDramaId) && targetDramaId > 0 ? { drama_id: targetDramaId } : {}),
+      return_to: route.fullPath,
+    },
+  })
 }
 async function loadProjectVideos(storyboards) {
   const groups = await Promise.all((storyboards || []).map(async (storyboard) => {

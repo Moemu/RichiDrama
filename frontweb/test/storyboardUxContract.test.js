@@ -7,6 +7,7 @@ const promptEditor = readFileSync(new URL('../src/components/OmniAssetPromptEdit
 const universalEditor = readFileSync(new URL('../src/components/UniversalSegmentOmniAtEditor.vue', import.meta.url), 'utf8')
 const filmCreate = readFileSync(new URL('../src/views/FilmCreate.vue', import.meta.url), 'utf8')
 const adminConsole = readFileSync(new URL('../src/views/AdminConsole.vue', import.meta.url), 'utf8')
+const mediaLibrary = readFileSync(new URL('../src/views/MediaLibrary.vue', import.meta.url), 'utf8')
 const dragPreview = readFileSync(new URL('../src/utils/dragPreview.js', import.meta.url), 'utf8')
 const pointerDrag = readFileSync(new URL('../src/utils/assetPointerDrag.js', import.meta.url), 'utf8')
 const canvasEpisodeGenerate = readFileSync(new URL('../src/composables/useCanvasEpisodeGenerate.js', import.meta.url), 'utf8')
@@ -100,6 +101,19 @@ test('project storyboard history shows the saved generation prompt and supports 
   assert.match(filmCreate, /function getDisplayedSbVideoPrompt\(sb\)/)
   assert.match(filmCreate, /getSbVideo\(sb\.id\)\?\.prompt \|\| sb\.video_prompt/)
   assert.match(filmCreate, /item\.video\?\.prompt \? `生成提示词：\$\{item\.video\.prompt\}`/)
+})
+
+test('storyboard media management keeps project scope and returns to its source page', () => {
+  assert.match(freeCreate, /function openMediaLibrary\(\)/)
+  assert.match(freeCreate, /drama_id: targetDramaId/)
+  assert.match(freeCreate, /return_to: route\.fullPath/)
+  assert.match(freeCreate, /@click="openMediaLibrary">管理素材/)
+  assert.match(filmCreate, /function openProjectMediaLibrary\(\)/)
+  assert.match(filmCreate, /return_to: route\.fullPath/)
+  assert.match(mediaLibrary, /@click="returnToSource"/)
+  assert.match(mediaLibrary, /safeRedirectPath\(rawReturnTo, ''\)/)
+  assert.match(mediaLibrary, /path: `\/film\/\$\{projectDramaId\.value\}`/)
+  assert.doesNotMatch(mediaLibrary, /@click="\$router\.push\('\/'\)">[\s\S]{0,100}返回/)
 })
 
 test('provider internal material timeout can retry from the immutable snapshot', () => {
