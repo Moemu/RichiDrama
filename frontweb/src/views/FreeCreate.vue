@@ -31,13 +31,13 @@
 
       <template v-if="currentShot">
       <section class="center-stage" aria-label="当前镜头播放与时间线">
-        <template v-if="activeVideoUrl">
+        <template v-if="activeVideoUrl && !previewVideoError && !previewVideoProgress">
           <div class="player-tools"><el-button text size="small" @click="selectRelative(-1)">上一镜</el-button><el-button text size="small" @click="selectRelative(1)">下一镜</el-button><span class="current-version">当前采用：{{ activeJob ? `版本 #${activeJob.video_generation_id || activeJob.id}` : '已有成片' }}</span><el-tag :type="stageTagType" effect="dark">{{ stageLabel }}</el-tag></div>
           <div class="video-stage has-video" :style="{ '--preview-aspect-ratio': previewAspectRatio }">
             <template v-if="mediaLayers.length"><video v-for="layer in mediaLayers" :key="layer.id" :src="layer.url" :controls="layer.id === topMediaLayerId && layer.ready" playsinline preload="metadata" :autoplay="playOnSelection && layer.id === topMediaLayerId" class="main-video" :class="{ 'is-ready': layer.ready, 'is-current': layer.id === topMediaLayerId }" @canplay="promoteMediaLayer(layer.id)" @error="discardMediaLayer(layer.id)" /></template>
             <template v-else><b>正在载入成片…</b></template>
           </div>
-          <div class="frame-actions" aria-label="成片操作"><el-button size="small" @click="downloadCurrentVideo">下载成片</el-button><el-button v-if="activeJob?.prompt" size="small" @click="viewHistoryPrompt(activeJob)">查看本版本提示词</el-button><template v-if="activeJob"><el-button size="small" type="primary" :disabled="savedResultJobId === activeJob.id" @click="saveResultAsAsset">{{ savedResultJobId === activeJob.id ? '已加入素材' : '作为视频素材继续创作' }}</el-button><el-button v-if="isProjectMode && savedResultJobId === activeJob.id" size="small" @click="$router.push(`/film/${projectDramaId}/canvas`)">在项目画布中打开</el-button><template v-if="canExtractFrames"><el-button size="small" :loading="extractingPosition === 'first'" :disabled="!!extractingPosition" @click="extractFrame('first')">提取首帧</el-button><el-button size="small" :loading="extractingPosition === 'last'" :disabled="!!extractingPosition" @click="extractFrame('last')">提取尾帧</el-button></template></template></div>
+          <div class="frame-actions" aria-label="成片操作"><el-button size="small" @click="downloadCurrentVideo">下载成片</el-button><el-button v-if="activeJob?.video_generation_id" size="small" @click="openHistoryDetail(activeJob)">查看本版本详情</el-button><template v-if="activeJob"><el-button size="small" type="primary" :disabled="savedResultJobId === activeJob.id" @click="saveResultAsAsset">{{ savedResultJobId === activeJob.id ? '已加入素材' : '作为视频素材继续创作' }}</el-button><el-button v-if="isProjectMode && savedResultJobId === activeJob.id" size="small" @click="$router.push(`/film/${projectDramaId}/canvas`)">在项目画布中打开</el-button><template v-if="canExtractFrames"><el-button size="small" :loading="extractingPosition === 'first'" :disabled="!!extractingPosition" @click="extractFrame('first')">提取首帧</el-button><el-button size="small" :loading="extractingPosition === 'last'" :disabled="!!extractingPosition" @click="extractFrame('last')">提取尾帧</el-button></template></template><el-button v-if="videoStatusPreviewEnabled" size="small" plain @click="previewVideoError = true; previewVideoProgress = false">预览真人授权提示</el-button></div>
           <div class="time-ruler" aria-label="镜头时长"><span>时长 {{ duration }} 秒</span><span>最多 {{ maxDuration }} 秒</span></div>
         </template>
         <section v-else class="generation-stage-status" :class="{ 'is-processing': previewVideoProgress || (!previewVideoError && ['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(activeJob?.status)), 'is-failed': previewVideoError || (activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)) }" :role="previewVideoError || (activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)) ? 'alert' : 'status'" aria-live="polite">
@@ -135,7 +135,7 @@
           <div class="generation-history-grid">
             <article v-for="job in shotHistory" :key="job.id" class="generation-history-item" :class="{ active: String(selectedHistoryJobId) === String(job.id) }" role="button" tabindex="0" @click="selectHistoryJob(job)" @keydown.enter.prevent="selectHistoryJob(job)" @keydown.space.prevent="selectHistoryJob(job)">
               <img v-if="historyPoster(job)" :src="historyPoster(job)" alt="" class="history-poster"/><span v-else class="history-video-empty"><el-icon><VideoCamera /></el-icon>{{ job.videoUrl ? '点击切换成片' : (['sd2_waiting','processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting'].includes(job.status) ? '处理中' : '暂无预览') }}</span>
-              <span class="history-card-meta"><b>{{ job.model_resolved || job.model || '视频版本' }}</b><small>{{ job.is_current ? '当前采用' : '未采用' }} · {{ historyStatus(job.status) }} · {{ job.duration || duration }}秒</small><small>{{ postprocessSummary(job) }}</small><small>实际扣费：{{ job.actual_points == null ? '待结算' : `${Number(job.actual_points).toFixed(2)} 积分` }}</small><el-button v-if="job.prompt" text size="small" @click.stop="viewHistoryPrompt(job)">查看生成提示词</el-button><el-button v-if="job.status === 'completed' && !job.is_current && isProjectMode" text size="small" @click.stop="adoptVersion(job)">设为当前成片</el-button><el-button v-if="canAdoptSource(job)" text type="primary" size="small" @click.stop="adoptSource(job)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(job)" text type="warning" size="small" @click.stop="retryPostprocess(job)">仅重试{{ job.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-else-if="job.status === 'retryable' || job.can_retry_generation" text type="primary" size="small" @click.stop="retry(job)">{{ job.can_retry_generation ? '使用原配置重试' : '重新生成' }}</el-button><el-button v-if="!activeGenerationStatuses.has(job.status)" text type="danger" size="small" @click.stop="hideHistoryJob(job)">隐藏记录</el-button></span>
+              <span class="history-card-meta"><b>{{ job.model_resolved || job.model || '视频版本' }}</b><small>{{ job.is_current ? '当前采用' : '未采用' }} · {{ historyStatus(job.status) }} · {{ job.duration || duration }}秒</small><small>{{ postprocessSummary(job) }}</small><small>实际扣费：{{ job.actual_points == null ? '待结算' : `${Number(job.actual_points).toFixed(2)} 积分` }}</small><el-button v-if="job.video_generation_id" text size="small" @click.stop="openHistoryDetail(job)">查看生成详情</el-button><el-button v-if="job.status === 'completed' && !job.is_current && isProjectMode" text size="small" @click.stop="adoptVersion(job)">设为当前成片</el-button><el-button v-if="canAdoptSource(job)" text type="primary" size="small" @click.stop="adoptSource(job)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(job)" text type="warning" size="small" @click.stop="retryPostprocess(job)">仅重试{{ job.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-else-if="job.status === 'retryable' || job.can_retry_generation" text type="primary" size="small" @click.stop="retry(job)">{{ job.can_retry_generation ? '使用原配置重试' : '重新生成' }}</el-button><el-button v-if="!activeGenerationStatuses.has(job.status)" text type="danger" size="small" @click.stop="hideHistoryJob(job)">隐藏记录</el-button></span>
               <span :class="['history-dot', job.status]"></span>
             </article>
           </div>
@@ -167,10 +167,6 @@
         </article>
       </div>
       <div v-if="!pickerImageAssets.length" class="frame-picker-empty">还没有图片素材，请先在上方上传图片</div>
-    </el-dialog>
-    <el-dialog v-model="historyPromptOpen" title="本版本生成提示词" width="min(720px, calc(100vw - 32px))" append-to-body>
-      <el-input :model-value="historyPromptText" type="textarea" :rows="14" readonly />
-      <template #footer><el-button type="primary" @click="historyPromptOpen = false">关闭</el-button></template>
     </el-dialog>
     <el-dialog v-model="projectLibraryOpen" title="从项目素材库加入本镜" width="760px" append-to-body>
       <div class="project-asset-library-toolbar">
@@ -250,7 +246,6 @@ const promptEditorRef = ref(null)
 let wheelShotLocked = false
 let wheelShotTimer = null
 const shotHistory = ref([]), selectedHistoryJobId = ref(null)
-const historyPromptOpen = ref(false), historyPromptText = ref('')
 const reproductionMode = ref(null)
 let saveTimer = null
 let promptRevision = 0
@@ -611,9 +606,10 @@ function postprocessSummary(job) {
 }
 function formatHistoryTime(value) { return formatChinaDateTime(value) }
 function selectHistoryJob(job) { playOnSelection.value = true; selectedHistoryJobId.value = job.id }
-function viewHistoryPrompt(job) {
-  historyPromptText.value = String(job?.prompt || job?.generation?.prompt || '')
-  historyPromptOpen.value = true
+function openHistoryDetail(job) {
+  const generationId = Number(job?.video_generation_id || job?.generation?.id)
+  if (!Number.isInteger(generationId) || generationId <= 0) return ElMessage.warning('该历史记录没有可读取的生成详情')
+  router.push({ path: `/generation-history/${generationId}`, query: { return_to: route.fullPath } })
 }
 function historyPoster(job) {
   const image = String(job?.poster_local_path || job?.generation?.poster_local_path || job?.image_url || job?.generation?.image_url || '')
@@ -672,7 +668,7 @@ function bestPlayableVideo(items) {
     || videos.find((video) => !!localVideoUrl(video))
     || null
 }
-function normalizeJob(data) { const generation = data.generation || {}; return { ...data, ...generation, omni_job_id: data.id, status: generation.status || data.status || 'processing', error_msg: generation.error_msg || data.error_msg, task_progress: generation.task_progress ?? data.task_progress ?? null, task_message: generation.task_message || data.task_message || null, task_updated_at: generation.task_updated_at || data.task_updated_at || null, videoUrl: localVideoUrl(generation) || data.video_url, local_path: generation.local_path || data.local_path, duration: generation.duration || data.duration } }
+function normalizeJob(data) { const generation = data.generation || {}; const snapshot = data.request_snapshot || {}; return { ...data, ...generation, omni_job_id: data.id, original_prompt: snapshot.original_prompt || snapshot.prompt || data.original_prompt || data.prompt || generation.prompt || '', provider_prompt: generation.prompt || data.prompt || snapshot.prompt || '', status: generation.status || data.status || 'processing', error_msg: generation.error_msg || data.error_msg, task_progress: generation.task_progress ?? data.task_progress ?? null, task_message: generation.task_message || data.task_message || null, task_updated_at: generation.task_updated_at || data.task_updated_at || null, videoUrl: localVideoUrl(generation) || data.video_url, local_path: generation.local_path || data.local_path, duration: generation.duration || data.duration } }
 function legacyVideoHistoryItem(video) { return { ...video, id: `video-${video.id}`, omni_job_id: null, video_generation_id: video.id, status: video.status || 'completed', videoUrl: localVideoUrl(video), duration: video.duration } }
 function promptDocumentFor(text, preferredAssetIds = []) {
   const value = String(text || '')

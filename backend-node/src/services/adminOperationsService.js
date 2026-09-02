@@ -182,7 +182,7 @@ function productionReproduction(db, row) {
       local_path: safeLocalPath(value), thumbnail_local_path: null, available: !!safeLocalPath(value),
     }));
   }
-  const originalPrompt = String(snapshot.original_prompt || snapshot.prompt || row.prompt || '');
+  const originalPrompt = require('./omniVideoService').originalPromptFromSnapshot(snapshot, row.prompt || '');
   return {
     video_generation_id: Number(row.id),
     omni_job_id: job ? Number(job.id) : null,

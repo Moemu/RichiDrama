@@ -740,7 +740,7 @@ test('成片操作栏不会覆盖视频，嵌入分镜保持三栏创作节奏',
     readSource('../src/views/FilmCreate.vue'),
   ])
 
-  const playablePreviewStart = free.indexOf('<template v-if="activeVideoUrl">')
+  const playablePreviewStart = free.indexOf('<template v-if="activeVideoUrl && !previewVideoError && !previewVideoProgress">')
   const videoStageStart = free.indexOf('<div class="video-stage has-video"', playablePreviewStart)
   const frameActionsStart = free.indexOf('<div class="frame-actions"', videoStageStart)
   assert.ok(playablePreviewStart >= 0 && videoStageStart > playablePreviewStart && frameActionsStart > videoStageStart, 'preview controls and frame actions must wait for a playable video')
@@ -775,7 +775,7 @@ test('生产工作流保持稳定导航、比例预览和可展开的次要信�
   assert.match(film, /\.merge-stage-active \.video-option-hint,\.merge-stage-active \.video-watermark-input\{grid-column:1 \/ -1;width:100%;min-width:0/)
   assert.match(film, /\.merge-stage-active \.main>:is\(\.merge-settings,\.merge-output\)\{overflow-y:auto;overscroll-behavior-y:contain/)
   assert.match(free, /'--preview-aspect-ratio': previewAspectRatio/)
-  assert.match(free, /<template v-if="activeVideoUrl">[\s\S]*<div class="video-stage has-video"/)
+  assert.match(free, /<template v-if="activeVideoUrl && !previewVideoError && !previewVideoProgress">[\s\S]*<div class="video-stage has-video"/)
   assert.match(free, /\.project-storyboard-page \.player-tools\{flex:0 0 44px;min-height:44px;overflow:visible\}/)
   assert.match(free, /\.project-storyboard-page \.video-stage\{flex:0 0 auto!important;width:auto;height:clamp\(190px,28dvh,300px\);margin:12px auto!important;aspect-ratio:var\(--preview-aspect-ratio,16 \/ 9\)\}/)
   assert.match(free, /video-stage\.has-video \.main-video\{inset:0!important;transform:none\}/)

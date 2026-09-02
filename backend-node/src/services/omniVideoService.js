@@ -208,7 +208,7 @@ function create(db, log, body, billingUser) {
   if (body.shot_id && body.sequence_id) {
     const shot = db.prepare('SELECT id FROM omni_video_sequence_shots WHERE id = ? AND sequence_id = ? AND deleted_at IS NULL').get(Number(body.shot_id), Number(body.sequence_id));
     if (shot) db.prepare('UPDATE omni_video_sequence_shots SET omni_job_id = ?, prompt = ?, prompt_document_json = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?').run(
-      jobId, modelPrompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model, creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: body.duration, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
+      jobId, prompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model, creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: body.duration, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
   }
   if (waitingForSd2) {
     // Persist the user-facing stage as well as the generation row.  Without
@@ -489,7 +489,16 @@ function safeAssetSummary(asset) {
 function safeSnapshot(snapshot) {
   if (!snapshot) return null;
   const { idempotency_key: _idempotencyKey, ...safe } = snapshot;
-  return { ...safe, assets: Array.isArray(snapshot.assets) ? snapshot.assets.map(safeAssetSummary) : [] };
+  return { ...safe, original_prompt: originalPromptFromSnapshot(snapshot), assets: Array.isArray(snapshot.assets) ? snapshot.assets.map(safeAssetSummary) : [] };
+}
+function originalPromptFromSnapshot(snapshot, fallback = '') {
+  const prompt = String(snapshot?.original_prompt || snapshot?.prompt || fallback || '');
+  // Early omni records wrote the generated reference constraint back into the
+  // editable shot prompt. The marker belongs to this service, so it is safe to
+  // remove for display and retry without rewriting historical database rows.
+  const marker = '\n\n【@引用素材硬约束】';
+  const markerIndex = prompt.indexOf(marker);
+  return markerIndex >= 0 ? prompt.slice(0, markerIndex).trimEnd() : prompt;
 }
 function buildSummary(assets) { return { sent_to_model: assets.filter((a) => a.send_to_model).map(safeAssetSummary), post_process_or_preprocess: assets.filter((a) => !a.send_to_model).map(safeAssetSummary) }; }
 
@@ -596,6 +605,96 @@ function get(db, id) {
     } catch (_) {}
   }
   return { ...job, is_current: isCurrent, actual_points: actualPoints, can_retry_generation: canRetryGeneration(generation), capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), real_person_failure_asset: locateRealPersonFailureAsset(db, job.id), generation: safeGeneration };
+}
+
+function generationHistoryDetail(db, videoGenerationId, actor) {
+  const generation = db.prepare(`SELECT v.*, t.status AS task_status, t.progress AS task_progress,
+    t.message AS task_message, t.updated_at AS task_updated_at
+    FROM video_generations v
+    LEFT JOIN async_tasks t ON t.id=v.task_id AND t.deleted_at IS NULL
+    WHERE v.id=? AND v.deleted_at IS NULL`).get(Number(videoGenerationId));
+  if (!generation || (Number(generation.owner_user_id) !== Number(actor?.id) && actor?.role !== 'admin')) {
+    throw new Error('视频生成记录不存在或无权查看');
+  }
+  const job = db.prepare('SELECT * FROM omni_video_jobs WHERE video_generation_id=? ORDER BY id DESC LIMIT 1').get(generation.id);
+  const snapshot = safeSnapshot(parse(job?.request_snapshot_json)) || null;
+  const assets = job
+    ? db.prepare('SELECT * FROM omni_video_job_assets WHERE omni_job_id=? ORDER BY ordinal').all(job.id)
+      .map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) }))
+    : [];
+  let usage = null;
+  if (generation.billing_authorization_id) {
+    try { usage = db.prepare('SELECT * FROM billing_usage_logs WHERE authorization_id=? ORDER BY created_at DESC LIMIT 1').get(generation.billing_authorization_id) || null; } catch (_) {}
+  }
+  const actualPoints = usage ? Number(usage.charged_micro || 0) / 10000 : null;
+  const originalPrompt = originalPromptFromSnapshot(snapshot, generation.prompt || job?.prompt || '');
+  const providerPrompt = String(generation.prompt || job?.prompt || snapshot?.prompt || '');
+  return {
+    id: Number(generation.id),
+    omni_job_id: job ? Number(job.id) : null,
+    drama_id: generation.drama_id || null,
+    storyboard_id: generation.storyboard_id || job?.storyboard_id || null,
+    sequence_id: job?.sequence_id || null,
+    shot_id: job?.shot_id || null,
+    status: generation.status,
+    original_prompt: originalPrompt,
+    provider_prompt: providerPrompt,
+    prompt_document: snapshot?.prompt_document || null,
+    negative_prompt: snapshot?.negative_prompt || job?.negative_prompt || '',
+    request: {
+      creation_mode: snapshot?.creation_mode || null,
+      source_context: snapshot?.source_context || null,
+      model_requested: job?.model_requested || null,
+      model_resolved: job?.model_resolved || generation.model || snapshot?.model || null,
+      provider: generation.provider || null,
+      duration: snapshot?.duration ?? generation.duration ?? null,
+      aspect_ratio: snapshot?.aspect_ratio || generation.aspect_ratio || null,
+      resolution: snapshot?.resolution || generation.resolution || null,
+      upscale_resolution: snapshot?.upscale_resolution || generation.upscale_resolution || null,
+      target_fps: snapshot?.target_fps ?? generation.target_fps ?? null,
+      audio_strategy: snapshot?.audio_strategy || job?.audio_strategy || null,
+      post_process: snapshot?.post_process || null,
+      asset_selection_policy: snapshot?.asset_selection_policy || null,
+    },
+    output: {
+      video_url: videoService.publicVideoUrl(generation.video_url, generation.local_path),
+      poster_local_path: generation.poster_local_path || null,
+      persisted_locally: Boolean(generation.local_path),
+      resolution: generation.output_resolution || generation.resolution || null,
+      width: generation.output_width || null,
+      height: generation.output_height || null,
+      fps: generation.output_fps || null,
+      duration_ms: generation.output_duration_ms || null,
+      upscale_status: generation.upscale_status || null,
+      interpolation_status: generation.interpolation_status || null,
+      archive_status: generation.archive_status || null,
+      archive_error: generation.archive_error || null,
+    },
+    billing: {
+      authorization_id: generation.billing_authorization_id || null,
+      status: usage ? 'settled' : (['processing', 'sd2_waiting', 'upscale_pending', 'upscaling', 'interpolation_pending', 'interpolating', 'persisting', 'billing_reconciliation'].includes(generation.status) ? 'pending' : 'not_charged'),
+      actual_points: actualPoints,
+      usage: parse(usage?.usage_json),
+      price_snapshot: parse(usage?.snapshot_json),
+      provider_request_id: usage?.provider_request_id || generation.provider_task_id || null,
+      settled_at: usage?.created_at || null,
+    },
+    task: {
+      id: generation.task_id || null,
+      provider_task_id: generation.provider_task_id || null,
+      status: generation.task_status || null,
+      progress: generation.task_progress ?? null,
+      message: generation.task_message || null,
+      updated_at: generation.task_updated_at || null,
+    },
+    assets,
+    input_summary: parse(job?.input_summary_json),
+    capability_snapshot: parse(job?.capability_snapshot_json),
+    error_msg: generation.error_msg || null,
+    created_at: generation.created_at || null,
+    updated_at: generation.updated_at || null,
+    completed_at: generation.completed_at || null,
+  };
 }
 function list(db, query = {}) {
   const storyboardId = Number(query.storyboard_id);
@@ -760,7 +859,7 @@ function retry(db, log, id, billingUser) {
   const snapshot = parse(job.request_snapshot_json);
   if (!(snapshot?.original_prompt || snapshot?.prompt) || !Array.isArray(snapshot.assets) || !snapshot.assets.length) throw new Error('该任务没有可重试的完整请求快照');
   return create(db, log, {
-    source_context: snapshot.source_context || undefined, prompt: snapshot.original_prompt || snapshot.prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
+    source_context: snapshot.source_context || undefined, prompt: originalPromptFromSnapshot(snapshot), negative_prompt: snapshot.negative_prompt, model: snapshot.model,
     aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
     upscale_resolution: snapshot.upscale_resolution, target_fps: snapshot.target_fps,
     creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
@@ -798,7 +897,7 @@ function resumeSd2WaitingGenerations(db, log) {
     }
     try {
       create(db, log, {
-        prompt: snapshot.original_prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
+        prompt: originalPromptFromSnapshot(snapshot), negative_prompt: snapshot.negative_prompt, model: snapshot.model,
         aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
         upscale_resolution: snapshot.upscale_resolution, target_fps: snapshot.target_fps,
         creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy,
@@ -875,4 +974,4 @@ function cancelJob(db, log, jobId, user) {
   return get(db, jobId);
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, quote, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, locateRealPersonFailureAsset, importRealPersonFailureAsset, isProviderInternalMaterialTimeout, isProviderInputImageFetchTimeout, canRetryGeneration, SHOT_ASSET_LIMITS };
+module.exports = { create, quote, get, generationHistoryDetail, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, originalPromptFromSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, locateRealPersonFailureAsset, importRealPersonFailureAsset, isProviderInternalMaterialTimeout, isProviderInputImageFetchTimeout, canRetryGeneration, SHOT_ASSET_LIMITS };

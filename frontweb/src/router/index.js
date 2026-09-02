@@ -49,6 +49,12 @@ const router = createRouter({
       meta: { title: '全能视频' }
     },
     {
+      path: '/generation-history/:id',
+      name: 'generation-history-detail',
+      component: () => import('@/views/GenerationHistoryDetail.vue'),
+      meta: { title: '生成记录详情' }
+    },
+    {
       path: '/media-library',
       name: 'media-library',
       component: () => import('@/views/MediaLibrary.vue'),

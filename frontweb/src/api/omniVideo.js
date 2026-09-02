@@ -22,6 +22,7 @@ export const omniVideoAPI = {
   adopt(id, body = {}) { return request.post(`/omni-video-jobs/${id}/adopt`, body) },
   extractFrame(id, position) { return request.post(`/omni-video-jobs/${id}/extract-frame`, { position }) },
   extractVideoFrame(id, position) { return request.post(`/video-generations/${id}/extract-frame`, { position }) },
+  historyDetail(id) { return request.get(`/video-generations/${id}/history-detail`) },
   list(params) { return request.get('/omni-video-jobs', { params: params || {} }) },
   get(id) { return request.get(`/omni-video-jobs/${id}`) },
   importRealPersonAsset(id) { return request.post(`/omni-video-jobs/${id}/real-person-asset`) },
