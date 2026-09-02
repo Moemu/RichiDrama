@@ -742,6 +742,10 @@ async function pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspec
       taskService.updateTaskStatus(db, row.task_id, 'processing', 15, message);
     }
   );
+  if (pollResult.stopped) {
+    log.info('Provider poll stopped after local task reached a terminal state', { video_gen_id: videoGenId, status: pollResult.local_status });
+    return;
+  }
   const now = new Date().toISOString();
   const polledVideo = resolveRemoteVideoUrl(pollResult.video_url, pollResult.error);
   if (polledVideo.ok) {

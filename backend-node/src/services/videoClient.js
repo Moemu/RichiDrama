@@ -1200,6 +1200,38 @@ function buildQueryUrl(config, taskId) {
   return base + ep;
 }
 
+/**
+ * 火山方舟只允许取消仍处于 queued 的视频任务。
+ * 先查询实时状态，避免 DELETE 误删已经结束的厂商记录。
+ */
+async function cancelVideoTask(config, log, taskId) {
+  const provider = String(config?.provider || '').toLowerCase();
+  if (!['volces', 'volcengine', 'volc'].includes(provider)) {
+    return { cancelled: false, reason: 'unsupported_provider' };
+  }
+  const url = buildQueryUrl(config, taskId);
+  const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (config.api_key || '') };
+  let queryResponse;
+  try { queryResponse = await fetch(url, { method: 'GET', headers }); }
+  catch (error) { throw new Error(`查询火山任务状态失败: ${error.message || error}`); }
+  const queryRaw = await queryResponse.text();
+  if (!queryResponse.ok) throw new Error(`查询火山任务状态失败: ${queryResponse.status}${queryRaw ? ` - ${queryRaw.slice(0, 200)}` : ''}`);
+  let queryData;
+  try { queryData = queryRaw ? JSON.parse(queryRaw) : {}; } catch (_) { throw new Error('查询火山任务状态失败: 响应不是有效 JSON'); }
+  const providerStatus = extractPollTaskStatus(queryData);
+  if (providerStatus !== 'queued') {
+    const terminal = ['succeeded', 'failed', 'cancelled', 'canceled', 'expired'].includes(providerStatus);
+    return { cancelled: false, reason: terminal ? 'terminal' : providerStatus === 'running' ? 'running' : 'unknown_status', provider_status: providerStatus };
+  }
+  let deleteResponse;
+  try { deleteResponse = await fetch(url, { method: 'DELETE', headers }); }
+  catch (error) { throw new Error(`取消火山排队任务失败: ${error.message || error}`); }
+  const deleteRaw = await deleteResponse.text();
+  if (!deleteResponse.ok) throw new Error(`取消火山排队任务失败: ${deleteResponse.status}${deleteRaw ? ` - ${deleteRaw.slice(0, 200)}` : ''}`);
+  log.info('Volcengine queued video task cancelled', { task_id: taskId });
+  return { cancelled: true, provider_status: 'cancelled' };
+}
+
 // ????????? ? API ?? ID ???API ????+???????
 const VOLC_MODEL_ALIASES = {
   'doubao-seedance-1.0-pro-fast':  'doubao-seedance-1-0-pro-250528',
@@ -4109,6 +4141,12 @@ async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 
   log.info('[poll] 开始', { video_gen_id: videoGenId, task_id: pollTaskId, protocol, poll_url: queryUrl() });
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await new Promise((r) => setTimeout(r, intervalMs));
+    // A confirmed user cancellation changes the durable local status first.
+    // Stop this in-memory poll before it can overwrite that terminal result.
+    if (db?.prepare) {
+      const local = db.prepare('SELECT status FROM video_generations WHERE id = ?').get(videoGenId);
+      if (local && local.status !== 'processing') return { stopped: true, local_status: local.status };
+    }
     try {
       let url, headers;
       if (isKling) {
@@ -4455,6 +4493,7 @@ module.exports = {
   getDefaultVideoConfig,
   callVideoApi,
   pollVideoTask,
+  cancelVideoTask,
   normalizeAspectRatioForApi,
   isPlausibleHttpVideoUrl,
   pickProxyVideoUrl,

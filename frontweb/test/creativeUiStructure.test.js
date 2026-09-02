@@ -276,6 +276,16 @@ test('镜头素材集合从镜头保存的 assets 恢复，未引用素材不丢
   assert.match(source, /:class="\{ selected: selected\.has\(asset\.id\), 'is-readonly': reproductionMode \}"/)
 })
 
+test('切换镜头时立即隔离上一镜头的生成记录', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+  const handler = source.slice(source.indexOf('function loadShot'), source.indexOf('async function loadShotHistory'))
+
+  assert.match(handler, /shotHistory\.value = \[\]/)
+  assert.match(handler, /shotHistoryShotId\.value = shot\.id/)
+  assert.match(source, /Number\(shotHistoryShotId\.value\) === Number\(currentShot\.value\?\.id\)/)
+  assert.doesNotMatch(source, /生成记录加载失败，已保留当前列表/)
+})
+
 test('工作台不以镜头时长重复模拟生成进度', async () => {
   const source = await readSource('../src/views/FreeCreate.vue')
 
