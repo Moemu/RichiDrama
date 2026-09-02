@@ -35,7 +35,7 @@ preview 优先读取 `/data/minidrama-config/.preview.env`。
 
 ## 2. 公共回调地址
 
-假设公共地址为 `https://example.com`。
+支付宝默认使用公共基址生成通知地址。
 
 支付宝通知地址：
 
@@ -43,11 +43,13 @@ preview 优先读取 `/data/minidrama-config/.preview.env`。
 https://example.com/api/v1/payments/callbacks/alipay
 ```
 
-微信通知地址：
+微信可以使用独立的固定通知地址。当前入口为：
 
 ```text
-https://example.com/api/v1/payments/callbacks/wechat
+https://api.richbest.cn/minidrama/payments/callbacks/wechat
 ```
+
+该外部路径由 HTTPS 入口改写为后端微信回调路径。
 
 通知路由不要求登录。
 
@@ -121,6 +123,7 @@ CFG_PAYMENTS__ALIPAY__ENDPOINT=https://openapi-sandbox.dl.alipaydev.com/gateway.
 ```text
 CFG_PAYMENTS__WECHAT__APP_ID
 CFG_PAYMENTS__WECHAT__MCH_ID
+CFG_PAYMENTS__WECHAT__NOTIFY_URL=https://api.richbest.cn/minidrama/payments/callbacks/wechat
 CFG_PAYMENTS__WECHAT__MERCHANT_SERIAL_NO
 CFG_PAYMENTS__WECHAT__MERCHANT_PRIVATE_KEY
 CFG_PAYMENTS__WECHAT__API_V3_KEY
@@ -157,7 +160,9 @@ CFG_PAYMENTS__ENABLED=true
 
 `CFG_PAYMENTS__PUBLIC_BASE_URL` 必须是 HTTPS 地址。
 
-系统会在该地址后添加支付通知路径。
+系统默认在该地址后添加支付通知路径。
+
+渠道的 `NOTIFY_URL` 可以覆盖默认通知地址。该值也必须使用 HTTPS。
 
 建议按以下顺序启用：
 

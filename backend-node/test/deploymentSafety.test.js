@@ -77,6 +77,11 @@ test('preview vhost authenticates and routes like production would', () => {
   // application is reachable through the same mechanism as production.
   assert.match(vhost, /auth_basic "RichiDrama PR Preview"/);
   assert.match(vhost, /auth_basic_user_file \/etc\/nginx\/minidrama-preview\.htpasswd/);
+  const wechatCallback = vhost.match(/location = \/api\/v1\/payments\/callbacks\/wechat \{([\s\S]*?)\n    \}/);
+  assert.ok(wechatCallback, 'Preview must define an exact WeChat callback location.');
+  assert.match(wechatCallback[1], /auth_basic off/);
+  assert.match(wechatCallback[1], /proxy_pass http:\/\/pr-\$preview_pr:5679/);
+  assert.match(vhost, /location \/ \{/);
   assert.match(vhost, /resolver 127\.0\.0\.11/);
   // The routed hostname carries the literal pr- prefix; a digits-only match
   // silently falls through to the rejection block (regression 2026-08-27).

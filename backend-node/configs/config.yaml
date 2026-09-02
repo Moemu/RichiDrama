@@ -30,6 +30,7 @@ payments:
     key_type: PKCS8
   wechat:
     enabled: false
+    notify_url: ''
     app_id: ''
     mch_id: ''
     merchant_serial_no: ''

@@ -53,12 +53,13 @@ LocalMiniDrama 不得执行以下操作：
 
 Preview 页面继续使用 Basic Auth。
 
-以下精确路径必须关闭 Basic Auth：
+当前高优验收只对以下精确路径关闭 Basic Auth：
 
 ```text
-/api/v1/payments/callbacks/alipay
 /api/v1/payments/callbacks/wechat
 ```
+
+支付宝路径继续使用 Basic Auth，直到支付宝验收开始。
 
 不要关闭整个 `/api/` 的 Basic Auth。应用仍会验证渠道签名。
 

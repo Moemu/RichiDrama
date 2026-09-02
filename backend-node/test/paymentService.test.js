@@ -8,7 +8,7 @@ const { runMigrationsAndEnsure } = require('../src/db/migrate');
 const auth = require('../src/services/authService');
 const billing = require('../src/services/billingService');
 const organizations = require('../src/services/customerOrganizationService');
-const { createPaymentService } = require('../src/services/paymentService');
+const { createPaymentService, paymentNotifyUrl } = require('../src/services/paymentService');
 
 function setup() {
   const dbPath = path.join(os.tmpdir(), `minidrama-payments-${Date.now()}-${Math.random()}.db`);
@@ -37,6 +37,16 @@ function teardown(dbPath) {
   closeDb();
   for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(dbPath + suffix); } catch (_) {} }
 }
+
+test('channel notification URL supports a fixed HTTPS gateway path', () => {
+  const config = {
+    public_base_url: 'https://legacy.example.test',
+    wechat: { notify_url: 'https://api.example.test/minidrama/payments/callbacks/wechat' },
+  };
+  assert.equal(paymentNotifyUrl(config, 'wechat'), 'https://api.example.test/minidrama/payments/callbacks/wechat');
+  assert.equal(paymentNotifyUrl(config, 'alipay'), 'https://legacy.example.test/api/v1/payments/callbacks/alipay');
+  assert.equal(paymentNotifyUrl({ public_base_url: 'https://fallback.example.test', wechat: { notify_url: 'http://unsafe.example.test/callback' } }, 'wechat'), '');
+});
 
 test('payment amount validation uses exact fen boundaries', () => {
   const { dbPath, service } = setup();

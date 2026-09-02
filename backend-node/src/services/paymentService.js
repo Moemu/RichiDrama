@@ -20,8 +20,16 @@ function paymentConfig(cfg) {
   };
 }
 
+function paymentNotifyUrl(config, channel) {
+  const explicit = String(config?.[channel]?.notify_url || '').trim();
+  if (explicit) return /^https:\/\//i.test(explicit) ? explicit : '';
+  const base = String(config?.public_base_url || '').trim().replace(/\/$/, '');
+  if (!/^https:\/\//i.test(base)) return '';
+  return `${base}/api/v1/payments/callbacks/${channel}`;
+}
+
 function channelReady(config, channel) {
-  if (!config.enabled || !/^https:\/\//i.test(String(config.public_base_url || ''))) return false;
+  if (!config.enabled || !paymentNotifyUrl(config, channel)) return false;
   if (channel === 'alipay') {
     const row = config.alipay || {};
     return row.enabled === true && ['app_id', 'app_private_key', 'alipay_public_key', 'seller_id'].every((key) => String(row[key] || '').trim());
@@ -65,10 +73,9 @@ function publicOrder(row, includeCode = false) {
 
 function createPaymentService(db, cfg, log, overrides = {}) {
   const config = paymentConfig(cfg);
-  const base = String(config.public_base_url || '').replace(/\/$/, '');
   const adapters = {
-    alipay: overrides.alipay || (channelReady(config, 'alipay') ? new AlipayAdapter(config.alipay, `${base}/api/v1/payments/callbacks/alipay`) : null),
-    wechat: overrides.wechat || (channelReady(config, 'wechat') ? new WechatAdapter(config.wechat, `${base}/api/v1/payments/callbacks/wechat`) : null),
+    alipay: overrides.alipay || (channelReady(config, 'alipay') ? new AlipayAdapter(config.alipay, paymentNotifyUrl(config, 'alipay')) : null),
+    wechat: overrides.wechat || (channelReady(config, 'wechat') ? new WechatAdapter(config.wechat, paymentNotifyUrl(config, 'wechat')) : null),
   };
 
   function options(userId) {
@@ -252,4 +259,4 @@ function createPaymentService(db, cfg, log, overrides = {}) {
   return { config, adapters, options, create, getForUser, list, sync, close, notify, recover, find, credit, parseAmountFen: (value) => parseAmountFen(value, config) };
 }
 
-module.exports = { createPaymentService, parseAmountFen, paymentConfig, publicOrder, CREDIT_MICRO_PER_FEN };
+module.exports = { createPaymentService, parseAmountFen, paymentConfig, paymentNotifyUrl, publicOrder, CREDIT_MICRO_PER_FEN };
