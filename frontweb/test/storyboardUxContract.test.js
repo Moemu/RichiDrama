@@ -123,9 +123,9 @@ test('provider internal material timeout can retry from the immutable snapshot',
   assert.match(freeCreate, /omniVideoAPI\.retry\(job\.id\)/)
 })
 
-test('admin failed production detail opens an immutable workbench reproduction snapshot', () => {
+test('admin production detail opens an immutable workbench reproduction snapshot', () => {
   assert.match(adminConsole, /<h3>完整提示词<\/h3>/)
-  assert.match(adminConsole, /失败时素材/)
+  assert.match(adminConsole, /请求素材/)
   assert.match(adminConsole, /在制作台复现/)
   assert.match(adminConsole, /replay_generation_id: replay\.video_generation_id/)
   assert.match(freeCreate, /adminAPI\.productionDetail\(generationId\)/)
