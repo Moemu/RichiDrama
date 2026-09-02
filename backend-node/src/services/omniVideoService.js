@@ -9,6 +9,36 @@ const SHOT_ASSET_LIMITS = { total: 15, image: 9, video: 3, audio: 3 };
 
 const IMAGE_USAGES = new Set(['primary', 'identity', 'environment', 'style', 'prop', 'first_frame', 'last_frame', 'reference']);
 
+// Ark can accept a task, then time out while it reads its own temporary TOS
+// material. The URL in this error is not a user asset URL. A new submission
+// from the saved request snapshot is safe after the failed authorization is
+// voided.
+function isProviderInternalMaterialTimeout(errorMessage) {
+  const message = String(errorMessage || '');
+  return /timeout while downloading url:/i.test(message)
+    && /ark-common-storage[^\s]*\/ark-async-gateway\//i.test(message)
+    && /x-tos-process=image(?:%2f|\/)format/i.test(message);
+}
+
+// Ark rejects the create request before it returns a provider task ID when it
+// cannot fetch one of the submitted reference-image URLs. The immutable Omni
+// snapshot makes a new submission safe. Oversized images are normalized by
+// videoClient before the retry is sent.
+function isProviderInputImageFetchTimeout(errorMessage) {
+  const message = String(errorMessage || '');
+  return /content\[\d+\]\.image_url/i.test(message)
+    && /not valid/i.test(message)
+    && /timeout while fetching resource/i.test(message);
+}
+
+function canRetryGeneration(generation) {
+  return generation?.status === 'retryable'
+    || (generation?.status === 'failed' && (
+      isProviderInternalMaterialTimeout(generation.error_msg)
+      || (!generation.provider_task_id && isProviderInputImageFetchTimeout(generation.error_msg))
+    ));
+}
+
 // This produces only the local billing reservation. It never changes the
 // provider request body, whose fields are built later by videoService.
 function buildAuthorizationUsage(meters, billingSettings, duration) {
@@ -178,7 +208,7 @@ function create(db, log, body, billingUser) {
   if (body.shot_id && body.sequence_id) {
     const shot = db.prepare('SELECT id FROM omni_video_sequence_shots WHERE id = ? AND sequence_id = ? AND deleted_at IS NULL').get(Number(body.shot_id), Number(body.sequence_id));
     if (shot) db.prepare('UPDATE omni_video_sequence_shots SET omni_job_id = ?, prompt = ?, prompt_document_json = ?, assets_json = ?, settings_json = ?, updated_at = ? WHERE id = ?').run(
-      jobId, modelPrompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model, creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: body.duration, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
+      jobId, prompt, body.prompt_document ? JSON.stringify(body.prompt_document) : null, JSON.stringify(routed.map(publicAsset)), JSON.stringify({ model: body.model, creation_mode: creationMode, aspect_ratio: body.aspect_ratio || '16:9', duration: body.duration, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only' }), now, shot.id);
   }
   if (waitingForSd2) {
     // Persist the user-facing stage as well as the generation row.  Without
@@ -440,7 +470,7 @@ function applySd2CertifiedAssetReferences(assets, capability) {
 }
 // Keep retry snapshots server-side and complete, but never return raw file paths,
 // signed URLs, or provider asset URLs through the job APIs.
-function publicAsset(asset) { return { asset_id: asset.id, alias: asset.alias, type: asset.type, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, local_path: asset.local_path, url: asset.url, model_url: asset.model_url || null, seedance2_asset: asset.seedance2_asset || null, checksum: asset.checksum || null, send_to_model: !!asset.send_to_model, strategy: asset.strategy }; }
+function publicAsset(asset) { return { asset_id: asset.id, alias: asset.alias, type: asset.type, role: asset.role, usage: asset.usage, ordinal: asset.ordinal, local_path: asset.local_path, url: asset.url, model_url: asset.model_url || null, width: Number(asset.width) || null, height: Number(asset.height) || null, file_size: Number(asset.file_size) || null, seedance2_asset: asset.seedance2_asset || null, checksum: asset.checksum || null, send_to_model: !!asset.send_to_model, strategy: asset.strategy }; }
 function safeAssetSummary(asset) {
   if (!asset) return null;
   return {
@@ -459,9 +489,191 @@ function safeAssetSummary(asset) {
 function safeSnapshot(snapshot) {
   if (!snapshot) return null;
   const { idempotency_key: _idempotencyKey, ...safe } = snapshot;
-  return { ...safe, assets: Array.isArray(snapshot.assets) ? snapshot.assets.map(safeAssetSummary) : [] };
+  return { ...safe, original_prompt: originalPromptFromSnapshot(snapshot), assets: Array.isArray(snapshot.assets) ? snapshot.assets.map(safeAssetSummary) : [] };
+}
+function originalPromptFromSnapshot(snapshot, fallback = '') {
+  const prompt = String(snapshot?.original_prompt || snapshot?.prompt || fallback || '');
+  // Early omni records wrote the generated reference constraint back into the
+  // editable shot prompt. The marker belongs to this service, so it is safe to
+  // remove for display and retry without rewriting historical database rows.
+  const marker = '\n\n【@引用素材硬约束】';
+  const markerIndex = prompt.indexOf(marker);
+  return markerIndex >= 0 ? prompt.slice(0, markerIndex).trimEnd() : prompt;
 }
 function buildSummary(assets) { return { sent_to_model: assets.filter((a) => a.send_to_model).map(safeAssetSummary), post_process_or_preprocess: assets.filter((a) => !a.send_to_model).map(safeAssetSummary) }; }
+
+function realPersonContentIndex(errorMessage) {
+  const match = String(errorMessage || '').match(/input\s+image\s+['"]?content\[(\d+)\]['"]?/i);
+  const index = Number(match?.[1]);
+  return Number.isInteger(index) && index > 0 ? index : null;
+}
+
+function isCopyrightRestriction(errorMessage) {
+  return /copyright(?:\s+restrictions?)?|版权限制/i.test(String(errorMessage || ''));
+}
+
+function publicFailureAssetPreview(snapshot, asset) {
+  if (asset?.url) return asset.url;
+  const localPath = failureAssetStorageKey(snapshot);
+  if (!localPath) return null;
+  try { return require('./mediaStorageService').objectUrl(require('../config').loadConfig(), localPath); } catch (_) { return null; }
+}
+
+function failureAssetStorageKey(snapshot) {
+  try { return require('./mediaStorageService').normalizeKey(snapshot?.local_path); } catch (_) { return null; }
+}
+
+function locateRealPersonFailureAsset(db, omniJobId, actor = null) {
+  const job = actor
+    ? assertOwnedJob(db, omniJobId, actor)
+    : db.prepare(`SELECT j.id AS omni_job_id, j.owner_user_id AS job_owner_user_id,
+        v.id AS video_generation_id, v.drama_id, v.error_msg
+      FROM omni_video_jobs j JOIN video_generations v ON v.id=j.video_generation_id
+      WHERE j.id=? AND v.deleted_at IS NULL`).get(Number(omniJobId));
+  if (!job) return null;
+  const contentIndex = realPersonContentIndex(job.error_msg);
+  if (!contentIndex) return null;
+  const imageRows = db.prepare(`SELECT * FROM omni_video_job_assets
+    WHERE omni_job_id=? AND media_type='image' AND send_to_model=1 ORDER BY ordinal`).all(Number(omniJobId));
+  const row = imageRows[contentIndex - 1];
+  if (!row) return { provider_content_index: contentIndex, reference_image_number: contentIndex, found: false };
+  const snapshot = parse(row.snapshot_json) || {};
+  const assetService = require('./assetService');
+  const asset = row.asset_id ? assetService.getByIdForOwner(db, row.asset_id, job.job_owner_user_id) : null;
+  return {
+    provider_content_index: contentIndex,
+    reference_image_number: contentIndex,
+    found: true,
+    alias: row.alias || snapshot.alias || `参考图 ${contentIndex}`,
+    ordinal: row.ordinal,
+    asset_id: asset?.id || null,
+    in_asset_library: !!asset,
+    preview_url: publicFailureAssetPreview(snapshot, asset),
+    can_import: !asset && !!failureAssetStorageKey(snapshot),
+    requires_sd2_identity: !!asset?.requires_sd2_identity,
+    seedance2_asset: asset?.seedance2_asset || null,
+  };
+}
+
+function locateCopyrightFailureAssets(db, omniJobId, actor = null) {
+  const job = actor
+    ? assertOwnedJob(db, omniJobId, actor)
+    : db.prepare(`SELECT j.id AS omni_job_id, j.owner_user_id AS job_owner_user_id,
+        v.id AS video_generation_id, v.drama_id, v.error_msg
+      FROM omni_video_jobs j JOIN video_generations v ON v.id=j.video_generation_id
+      WHERE j.id=? AND v.deleted_at IS NULL`).get(Number(omniJobId));
+  if (!job || !isCopyrightRestriction(job.error_msg)) return [];
+  const assetService = require('./assetService');
+  return db.prepare(`SELECT * FROM omni_video_job_assets
+    WHERE omni_job_id=? AND media_type='image' AND send_to_model=1 ORDER BY ordinal`).all(Number(omniJobId)).map((row, index) => {
+    const snapshot = parse(row.snapshot_json) || {};
+    const asset = row.asset_id ? assetService.getByIdForOwner(db, row.asset_id, job.job_owner_user_id) : null;
+    return {
+      reference_image_number: index + 1,
+      found: true,
+      alias: row.alias || snapshot.alias || `参考图 ${index + 1}`,
+      ordinal: row.ordinal,
+      asset_id: asset?.id || null,
+      in_asset_library: !!asset,
+      preview_url: publicFailureAssetPreview(snapshot, asset),
+      can_import: !asset && !!failureAssetStorageKey(snapshot),
+    };
+  });
+}
+
+function copyrightFailureAssetSummary(db, omniJobId, actor = null) {
+  const assets = locateCopyrightFailureAssets(db, omniJobId, actor);
+  if (!assets.length) return null;
+  return {
+    total: assets.length,
+    in_asset_library: assets.filter((item) => item.in_asset_library).length,
+    importable: assets.filter((item) => !item.in_asset_library && item.can_import).length,
+    unavailable: assets.filter((item) => !item.in_asset_library && !item.can_import).length,
+  };
+}
+
+function importCopyrightFailureAsset(db, log, omniJobId, ordinal, actor) {
+  const job = assertOwnedJob(db, omniJobId, actor);
+  if (!isCopyrightRestriction(job.error_msg)) throw new Error('当前失败原因不是版权限制');
+  const located = locateCopyrightFailureAssets(db, omniJobId, actor).find((item) => Number(item.ordinal) === Number(ordinal));
+  if (!located) throw new Error('版权失败记录中没有该参考图');
+  if (located.asset_id) return located;
+  if (!located.can_import) throw new Error('该参考图没有可持久化的本地文件，不能加入素材库');
+  const row = db.prepare(`SELECT * FROM omni_video_job_assets
+    WHERE omni_job_id=? AND ordinal=? AND media_type='image' AND send_to_model=1`).get(Number(omniJobId), Number(ordinal));
+  const snapshot = parse(row?.snapshot_json) || {};
+  const localPath = failureAssetStorageKey(snapshot);
+  if (!localPath) throw new Error('该参考图的本地文件路径无效，不能加入素材库');
+  const assetService = require('./assetService');
+  const targetOwnerId = Number(job.job_owner_user_id);
+  const created = db.transaction(() => {
+    const latest = db.prepare('SELECT asset_id FROM omni_video_job_assets WHERE id=?').get(row.id);
+    if (latest?.asset_id) {
+      const existing = assetService.getByIdForOwner(db, latest.asset_id, targetOwnerId);
+      if (existing) return existing;
+    }
+    const item = assetService.create(db, log, {
+      drama_id: Number(job.drama_id) > 0 ? Number(job.drama_id) : null,
+      owner_user_id: targetOwnerId,
+      name: row.alias || snapshot.alias || `失败任务 #${job.video_generation_id} 参考图 ${located.reference_image_number}`,
+      type: 'image', category: 'reference', url: snapshot.url || '', local_path: localPath,
+      mime_type: snapshot.mime_type || null, file_size: snapshot.file_size || null,
+      checksum: snapshot.checksum || null, source_type: 'failed_generation_reference',
+      metadata: { omni_job_id: Number(omniJobId), video_generation_id: Number(job.video_generation_id), copyright_review: true, ordinal: Number(row.ordinal) },
+    });
+    db.prepare('UPDATE omni_video_job_assets SET asset_id=? WHERE id=?').run(item.id, row.id);
+    return assetService.getByIdForOwner(db, item.id, targetOwnerId);
+  })();
+  return { ...locateCopyrightFailureAssets(db, omniJobId, actor).find((item) => Number(item.ordinal) === Number(ordinal)), asset_id: created.id, in_asset_library: true };
+}
+
+function importCopyrightFailureAssets(db, log, omniJobId, actor) {
+  const job = assertOwnedJob(db, omniJobId, actor);
+  if (!isCopyrightRestriction(job.error_msg)) throw new Error('当前失败原因不是版权限制');
+  const targets = locateCopyrightFailureAssets(db, omniJobId, actor);
+  if (!targets.length) throw new Error('版权失败记录中没有参考图');
+  for (const item of targets) {
+    if (!item.in_asset_library && item.can_import) importCopyrightFailureAsset(db, log, omniJobId, item.ordinal, actor);
+  }
+  return copyrightFailureAssetSummary(db, omniJobId, actor);
+}
+
+function importRealPersonFailureAsset(db, log, omniJobId, actor, options = {}) {
+  const job = assertOwnedJob(db, omniJobId, actor);
+  const located = locateRealPersonFailureAsset(db, omniJobId, actor);
+  if (!located?.found) throw new Error('失败原因没有可定位的真人参考图');
+  if (located.asset_id) return located;
+  if (!located.can_import) throw new Error('该参考图没有可持久化的本地文件，不能加入素材库');
+  const row = db.prepare(`SELECT * FROM omni_video_job_assets
+    WHERE omni_job_id=? AND media_type='image' AND send_to_model=1 ORDER BY ordinal LIMIT 1 OFFSET ?`)
+    .get(Number(omniJobId), located.provider_content_index - 1);
+  const snapshot = parse(row?.snapshot_json) || {};
+  const localPath = failureAssetStorageKey(snapshot);
+  const requiresIdentity = options.identity_required !== false;
+  if (!localPath) throw new Error('该参考图的本地文件路径无效，不能加入素材库');
+  const assetService = require('./assetService');
+  const targetOwnerId = Number(job.job_owner_user_id);
+  const created = db.transaction(() => {
+    const latest = db.prepare('SELECT asset_id FROM omni_video_job_assets WHERE id=?').get(row.id);
+    if (latest?.asset_id) {
+      const existing = assetService.getByIdForOwner(db, latest.asset_id, targetOwnerId);
+      if (existing) return existing;
+    }
+    const item = assetService.create(db, log, {
+      drama_id: Number(job.drama_id) > 0 ? Number(job.drama_id) : null,
+      owner_user_id: targetOwnerId,
+      name: row.alias || snapshot.alias || `失败任务 #${job.video_generation_id} 参考图 ${located.reference_image_number}`,
+      type: 'image', category: 'reference', url: snapshot.url || '', local_path: localPath,
+      mime_type: snapshot.mime_type || null, file_size: snapshot.file_size || null,
+      checksum: snapshot.checksum || null, source_type: 'failed_generation_reference',
+      metadata: { omni_job_id: Number(omniJobId), video_generation_id: Number(job.video_generation_id), provider_content_index: located.provider_content_index },
+    });
+    if (requiresIdentity) assetService.update(db, log, item.id, { requires_sd2_identity: true }, targetOwnerId);
+    db.prepare('UPDATE omni_video_job_assets SET asset_id=? WHERE id=?').run(item.id, row.id);
+    return assetService.getByIdForOwner(db, item.id, targetOwnerId);
+  })();
+  return { ...locateRealPersonFailureAsset(db, omniJobId, actor), asset_id: created.id, in_asset_library: true, requires_sd2_identity: requiresIdentity };
+}
 
 function get(db, id) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(id));
@@ -480,7 +692,97 @@ function get(db, id) {
         || (!storyboard?.active_video_generation_id && String(storyboard?.local_path || '') === String(generation.local_path || ''));
     } catch (_) {}
   }
-  return { ...job, is_current: isCurrent, actual_points: actualPoints, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), generation: safeGeneration };
+  return { ...job, is_current: isCurrent, actual_points: actualPoints, can_retry_generation: canRetryGeneration(generation), capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), real_person_failure_asset: locateRealPersonFailureAsset(db, job.id), copyright_failure_asset_summary: copyrightFailureAssetSummary(db, job.id), generation: safeGeneration };
+}
+
+function generationHistoryDetail(db, videoGenerationId, actor) {
+  const generation = db.prepare(`SELECT v.*, t.status AS task_status, t.progress AS task_progress,
+    t.message AS task_message, t.updated_at AS task_updated_at
+    FROM video_generations v
+    LEFT JOIN async_tasks t ON t.id=v.task_id AND t.deleted_at IS NULL
+    WHERE v.id=? AND v.deleted_at IS NULL`).get(Number(videoGenerationId));
+  if (!generation || (Number(generation.owner_user_id) !== Number(actor?.id) && actor?.role !== 'admin')) {
+    throw new Error('视频生成记录不存在或无权查看');
+  }
+  const job = db.prepare('SELECT * FROM omni_video_jobs WHERE video_generation_id=? ORDER BY id DESC LIMIT 1').get(generation.id);
+  const snapshot = safeSnapshot(parse(job?.request_snapshot_json)) || null;
+  const assets = job
+    ? db.prepare('SELECT * FROM omni_video_job_assets WHERE omni_job_id=? ORDER BY ordinal').all(job.id)
+      .map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) }))
+    : [];
+  let usage = null;
+  if (generation.billing_authorization_id) {
+    try { usage = db.prepare('SELECT * FROM billing_usage_logs WHERE authorization_id=? ORDER BY created_at DESC LIMIT 1').get(generation.billing_authorization_id) || null; } catch (_) {}
+  }
+  const actualPoints = usage ? Number(usage.charged_micro || 0) / 10000 : null;
+  const originalPrompt = originalPromptFromSnapshot(snapshot, generation.prompt || job?.prompt || '');
+  const providerPrompt = String(generation.prompt || job?.prompt || snapshot?.prompt || '');
+  return {
+    id: Number(generation.id),
+    omni_job_id: job ? Number(job.id) : null,
+    drama_id: generation.drama_id || null,
+    storyboard_id: generation.storyboard_id || job?.storyboard_id || null,
+    sequence_id: job?.sequence_id || null,
+    shot_id: job?.shot_id || null,
+    status: generation.status,
+    original_prompt: originalPrompt,
+    provider_prompt: providerPrompt,
+    prompt_document: snapshot?.prompt_document || null,
+    negative_prompt: snapshot?.negative_prompt || job?.negative_prompt || '',
+    request: {
+      creation_mode: snapshot?.creation_mode || null,
+      source_context: snapshot?.source_context || null,
+      model_requested: job?.model_requested || null,
+      model_resolved: job?.model_resolved || generation.model || snapshot?.model || null,
+      provider: generation.provider || null,
+      duration: snapshot?.duration ?? generation.duration ?? null,
+      aspect_ratio: snapshot?.aspect_ratio || generation.aspect_ratio || null,
+      resolution: snapshot?.resolution || generation.resolution || null,
+      upscale_resolution: snapshot?.upscale_resolution || generation.upscale_resolution || null,
+      target_fps: snapshot?.target_fps ?? generation.target_fps ?? null,
+      audio_strategy: snapshot?.audio_strategy || job?.audio_strategy || null,
+      post_process: snapshot?.post_process || null,
+      asset_selection_policy: snapshot?.asset_selection_policy || null,
+    },
+    output: {
+      video_url: videoService.publicVideoUrl(generation.video_url, generation.local_path),
+      poster_local_path: generation.poster_local_path || null,
+      persisted_locally: Boolean(generation.local_path),
+      resolution: generation.output_resolution || generation.resolution || null,
+      width: generation.output_width || null,
+      height: generation.output_height || null,
+      fps: generation.output_fps || null,
+      duration_ms: generation.output_duration_ms || null,
+      upscale_status: generation.upscale_status || null,
+      interpolation_status: generation.interpolation_status || null,
+      archive_status: generation.archive_status || null,
+      archive_error: generation.archive_error || null,
+    },
+    billing: {
+      authorization_id: generation.billing_authorization_id || null,
+      status: usage ? 'settled' : (['processing', 'sd2_waiting', 'upscale_pending', 'upscaling', 'interpolation_pending', 'interpolating', 'persisting', 'billing_reconciliation'].includes(generation.status) ? 'pending' : 'not_charged'),
+      actual_points: actualPoints,
+      usage: parse(usage?.usage_json),
+      price_snapshot: parse(usage?.snapshot_json),
+      provider_request_id: usage?.provider_request_id || generation.provider_task_id || null,
+      settled_at: usage?.created_at || null,
+    },
+    task: {
+      id: generation.task_id || null,
+      provider_task_id: generation.provider_task_id || null,
+      status: generation.task_status || null,
+      progress: generation.task_progress ?? null,
+      message: generation.task_message || null,
+      updated_at: generation.task_updated_at || null,
+    },
+    assets,
+    input_summary: parse(job?.input_summary_json),
+    capability_snapshot: parse(job?.capability_snapshot_json),
+    error_msg: generation.error_msg || null,
+    created_at: generation.created_at || null,
+    updated_at: generation.updated_at || null,
+    completed_at: generation.completed_at || null,
+  };
 }
 function list(db, query = {}) {
   const storyboardId = Number(query.storyboard_id);
@@ -494,15 +796,19 @@ function list(db, query = {}) {
     LEFT JOIN storyboards s ON s.id = v.storyboard_id AND s.deleted_at IS NULL`;
   const params = [];
   const filters = ['j.hidden_at IS NULL'];
+  let currentStoryboard = null;
   if (query.owner_user_id) { filters.push('j.owner_user_id = ?'); params.push(Number(query.owner_user_id)); }
   if (String(query.tool_only || '') === '1' || String(query.tool_only || '').toLowerCase() === 'true') {
     filters.push('COALESCE(v.drama_id, 0) = 0 AND j.sequence_id IS NULL AND j.shot_id IS NULL AND COALESCE(j.storyboard_id, v.storyboard_id) IS NULL');
   }
   if (Number.isInteger(storyboardId) && storyboardId > 0) {
-    // Older jobs predate omni_video_jobs.storyboard_id; recover them through
-    // their video generation so existing project history remains visible.
-    filters.push('(j.storyboard_id = ? OR (j.storyboard_id IS NULL AND v.storyboard_id = ?))');
-    params.push(storyboardId, storyboardId);
+    const storyboardIds = require('./storyboardIdentityService').historyStoryboardIds(db, storyboardId);
+    const placeholders = storyboardIds.map(() => '?').join(', ');
+    // Older jobs predate omni_video_jobs.storyboard_id. COALESCE keeps those
+    // jobs visible through their durable video generation relation.
+    filters.push(`COALESCE(j.storyboard_id, v.storyboard_id) IN (${placeholders})`);
+    params.push(...storyboardIds);
+    try { currentStoryboard = db.prepare('SELECT active_video_generation_id, local_path FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(storyboardId); } catch (_) {}
   } else if (Number.isInteger(shotId) && shotId > 0) {
     filters.push('j.shot_id = ?');
     params.push(shotId);
@@ -511,9 +817,15 @@ function list(db, query = {}) {
   sql += ' ORDER BY j.id DESC LIMIT 100';
   return db.prepare(sql).all(...params).map((item) => ({
     ...item,
-    is_current: item.active_video_generation_id != null
-      ? Number(item.active_video_generation_id) === Number(item.video_generation_id)
-      : Boolean(item.storyboard_local_path && item.local_path && item.storyboard_local_path === item.local_path),
+    is_current: currentStoryboard
+      ? (currentStoryboard.active_video_generation_id != null
+        ? Number(currentStoryboard.active_video_generation_id) === Number(item.video_generation_id)
+        : Boolean(currentStoryboard.local_path && item.local_path && currentStoryboard.local_path === item.local_path))
+      : (item.active_video_generation_id != null
+        ? Number(item.active_video_generation_id) === Number(item.video_generation_id)
+        : Boolean(item.storyboard_local_path && item.local_path && item.storyboard_local_path === item.local_path)),
+    target_storyboard_id: currentStoryboard ? storyboardId : undefined,
+    can_retry_generation: canRetryGeneration(item),
     video_url: videoService.publicVideoUrl(item.video_url, item.local_path),
     postprocess_chain: `${require('./videoPostprocessPolicy').describe(item)} → 本地规范 ${item.aspect_ratio || '原画幅'}`,
     request_snapshot: safeSnapshot(parse(item.request_snapshot_json)),
@@ -615,24 +927,27 @@ function adoptSourceVideo(db, log, omniJobId, actor, options = {}) {
   return get(db, job.omni_job_id);
 }
 
-function adoptCompletedVersion(db, omniJobId, actor) {
+function adoptCompletedVersion(db, omniJobId, actor, targetStoryboardId = null) {
   const job = assertOwnedJob(db, omniJobId, actor);
   if (!job.storyboard_id || job.status !== 'completed' || !job.local_path) throw new Error('只有已完成并已本地归档的分镜历史版本可设为当前成片');
+  const targetId = Number(targetStoryboardId || job.storyboard_id);
+  const allowedIds = require('./storyboardIdentityService').historyStoryboardIds(db, targetId);
+  if (!allowedIds.includes(Number(job.storyboard_id))) throw new Error('该历史版本不属于当前分镜');
   const now = new Date().toISOString();
   const videoUrl = `/static/${String(job.local_path).replace(/^\/+/, '')}`;
   const result = db.prepare(`UPDATE storyboards SET active_video_generation_id=?, video_url=?, local_path=?, status='completed',
-    error_msg=NULL, updated_at=? WHERE id=? AND deleted_at IS NULL`).run(job.video_generation_id, videoUrl, job.local_path, now, job.storyboard_id);
+    error_msg=NULL, updated_at=? WHERE id=? AND deleted_at IS NULL`).run(job.video_generation_id, videoUrl, job.local_path, now, targetId);
   if (!result.changes) throw new Error('分镜不存在或已删除');
-  return get(db, job.omni_job_id);
+  return { ...get(db, job.omni_job_id), is_current: true, target_storyboard_id: targetId };
 }
 function retry(db, log, id, billingUser) {
   const job = assertOwnedJob(db, id, billingUser);
-  const generation = db.prepare('SELECT status, drama_id, storyboard_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
-  if (!generation || generation.status !== 'retryable') throw new Error('只有重启中断且可重试的任务可以重试');
+  const generation = db.prepare('SELECT status, error_msg, provider_task_id, drama_id, storyboard_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
+  if (!canRetryGeneration(generation)) throw new Error('该任务不是可安全重试的中断或参考素材读取超时任务');
   const snapshot = parse(job.request_snapshot_json);
-  if (!snapshot?.prompt || !Array.isArray(snapshot.assets) || !snapshot.assets.length) throw new Error('该任务没有可重试的完整请求快照');
+  if (!(snapshot?.original_prompt || snapshot?.prompt) || !Array.isArray(snapshot.assets) || !snapshot.assets.length) throw new Error('该任务没有可重试的完整请求快照');
   return create(db, log, {
-    source_context: snapshot.source_context || undefined, prompt: snapshot.prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
+    source_context: snapshot.source_context || undefined, prompt: originalPromptFromSnapshot(snapshot), negative_prompt: snapshot.negative_prompt, model: snapshot.model,
     aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
     upscale_resolution: snapshot.upscale_resolution, target_fps: snapshot.target_fps,
     creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
@@ -670,7 +985,7 @@ function resumeSd2WaitingGenerations(db, log) {
     }
     try {
       create(db, log, {
-        prompt: snapshot.original_prompt, negative_prompt: snapshot.negative_prompt, model: snapshot.model,
+        prompt: originalPromptFromSnapshot(snapshot), negative_prompt: snapshot.negative_prompt, model: snapshot.model,
         aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
         upscale_resolution: snapshot.upscale_resolution, target_fps: snapshot.target_fps,
         creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy,
@@ -747,4 +1062,4 @@ function cancelJob(db, log, jobId, user) {
   return get(db, jobId);
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, quote, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, SHOT_ASSET_LIMITS };
+module.exports = { create, quote, get, generationHistoryDetail, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, originalPromptFromSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, isCopyrightRestriction, locateRealPersonFailureAsset, locateCopyrightFailureAssets, copyrightFailureAssetSummary, importRealPersonFailureAsset, importCopyrightFailureAssets, isProviderInternalMaterialTimeout, isProviderInputImageFetchTimeout, canRetryGeneration, SHOT_ASSET_LIMITS };

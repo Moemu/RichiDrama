@@ -1,4 +1,5 @@
 const assetSd2Service = require('./assetSd2Service');
+const storyboardIdentity = require('./storyboardIdentityService');
 
 function list(db, query) {
   let sql = 'FROM image_generations WHERE deleted_at IS NULL';
@@ -12,8 +13,9 @@ function list(db, query) {
     params.push(query.drama_id);
   }
   if (query.storyboard_id) {
-    sql += ' AND storyboard_id = ?';
-    params.push(query.storyboard_id);
+    const ids = storyboardIdentity.historyStoryboardIds(db, query.storyboard_id);
+    sql += ` AND storyboard_id IN (${ids.map(() => '?').join(', ')})`;
+    params.push(...ids);
   }
   if (query.frame_type) {
     sql += ' AND frame_type = ?';

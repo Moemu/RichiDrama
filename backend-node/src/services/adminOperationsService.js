@@ -124,6 +124,96 @@ function listProduction(db, query) {
   return { items: rows.map((row) => ({ ...row, stages: stages(row), error_summary: row.error_msg || row.interpolation_error_msg || row.upscale_error_msg || row.archive_record_error || row.archive_error || null })), total, page: meta.page, page_size: meta.page_size };
 }
 
+function parseJson(value, fallback = null) {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'object') return value;
+  try { return JSON.parse(value); } catch (_) { return fallback; }
+}
+
+function safeLocalPath(value) {
+  const raw = String(value || '').trim();
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('//')) return null;
+  const normalized = raw.replace(/\\/g, '/').replace(/^\/+/, '').replace(/^static\//, '');
+  if (!normalized || normalized.split('/').includes('..')) return null;
+  return normalized;
+}
+
+function productionReproduction(db, row) {
+  const job = db.prepare(`SELECT * FROM omni_video_jobs
+    WHERE video_generation_id = ? ORDER BY id DESC LIMIT 1`).get(Number(row.id));
+  const snapshot = parseJson(job?.request_snapshot_json, {}) || {};
+  const storyboard = row.storyboard_id
+    ? db.prepare(`SELECT s.id, s.episode_id, s.title, s.deleted_at, e.deleted_at AS episode_deleted_at
+        FROM storyboards s LEFT JOIN episodes e ON e.id=s.episode_id WHERE s.id=?`).get(Number(row.storyboard_id))
+    : null;
+  const storedAssets = job ? db.prepare(`SELECT ja.*, a.name AS current_name, a.type AS current_type,
+      a.local_path AS current_local_path, a.thumbnail_local_path AS current_thumbnail_local_path,
+      a.deleted_at AS asset_deleted_at
+    FROM omni_video_job_assets ja LEFT JOIN assets a ON a.id=ja.asset_id
+    WHERE ja.omni_job_id=? ORDER BY ja.ordinal ASC, ja.id ASC`).all(Number(job.id)) : [];
+  const materials = storedAssets.map((item, index) => {
+    const stored = parseJson(item.snapshot_json, {}) || {};
+    const localPath = safeLocalPath(stored.local_path || item.current_local_path);
+    const thumbnailPath = safeLocalPath(stored.thumbnail_local_path || item.current_thumbnail_local_path);
+    return {
+      asset_id: item.asset_id == null ? null : Number(item.asset_id),
+      alias: item.alias || stored.alias || item.current_name || `素材 ${index + 1}`,
+      type: item.media_type || stored.type || item.current_type || 'image',
+      role: item.role || stored.role || 'reference',
+      usage: item.usage || stored.usage || 'reference',
+      ordinal: Number(item.ordinal) || index + 1,
+      send_to_model: !!item.send_to_model,
+      strategy: stored.strategy || null,
+      source: localPath ? 'local' : (stored.url || stored.model_url ? 'remote_snapshot' : 'asset_library'),
+      local_path: localPath,
+      thumbnail_local_path: thumbnailPath,
+      available: !!localPath || (!!item.asset_id && !item.asset_deleted_at),
+    };
+  });
+  if (!materials.length) {
+    const legacy = parseJson(row.reference_image_urls, []);
+    const urls = Array.isArray(legacy) ? legacy : [];
+    if (row.first_frame_url) urls.unshift(row.first_frame_url);
+    if (row.last_frame_url) urls.push(row.last_frame_url);
+    [...new Set(urls.filter(Boolean))].forEach((value, index) => materials.push({
+      asset_id: null, alias: `历史参考素材 ${index + 1}`, type: 'image', role: 'reference',
+      usage: index === 0 && row.first_frame_url ? 'first_frame' : 'reference', ordinal: index + 1,
+      send_to_model: true, strategy: null, source: safeLocalPath(value) ? 'local' : 'remote_snapshot',
+      local_path: safeLocalPath(value), thumbnail_local_path: null, available: !!safeLocalPath(value),
+    }));
+  }
+  const originalPrompt = require('./omniVideoService').originalPromptFromSnapshot(snapshot, row.prompt || '');
+  return {
+    video_generation_id: Number(row.id),
+    omni_job_id: job ? Number(job.id) : null,
+    drama_id: Number(row.drama_id) || null,
+    storyboard_id: Number(row.storyboard_id) || null,
+    episode_id: storyboard ? Number(storyboard.episode_id) || null : null,
+    storyboard_title: storyboard?.title || null,
+    prompt: originalPrompt,
+    provider_prompt: String(row.prompt || snapshot.prompt || ''),
+    prompt_document: snapshot.prompt_document && typeof snapshot.prompt_document === 'object' ? snapshot.prompt_document : { text: originalPrompt, refs: [] },
+    settings: {
+      model: snapshot.model || row.model || null,
+      creation_mode: snapshot.creation_mode || 'multi_reference',
+      aspect_ratio: snapshot.aspect_ratio || row.aspect_ratio || '16:9',
+      duration: Number(snapshot.duration || row.duration) || null,
+      resolution: snapshot.resolution || row.resolution || null,
+      upscale_resolution: snapshot.upscale_resolution || row.upscale_resolution || null,
+      target_fps: snapshot.target_fps || row.target_fps || null,
+      audio_strategy: snapshot.audio_strategy || job?.audio_strategy || 'reference_only',
+      keep_original_audio: !!snapshot.post_process?.keep_original_audio,
+      audio_volume: snapshot.post_process?.audio_volume ?? 1,
+      audio_fade_seconds: snapshot.post_process?.audio_fade_seconds ?? 0,
+    },
+    materials,
+    // The admin workbench reads this immutable snapshot. It does not open the
+    // owner's project and does not require the original storyboard to exist.
+    can_open_workbench: !!job,
+    unavailable_material_count: materials.filter((item) => !item.available).length,
+  };
+}
+
 function productionDetail(db, id) {
   // Query explicitly so an ID cannot be confused with a list position.
   const row = db.prepare(`SELECT v.*, u.username, d.title AS project_title,
@@ -137,7 +227,7 @@ function productionDetail(db, id) {
   if (!row) return null;
   const authorizations = db.prepare(`SELECT id, type, amount_micro, reason, created_at FROM billing_transactions WHERE authorization_id IN (?, ?, ?) OR id IN (?, ?, ?)`)
     .all(row.billing_authorization_id, row.upscale_billing_authorization_id, row.interpolation_billing_authorization_id, row.billing_authorization_id, row.upscale_billing_authorization_id, row.interpolation_billing_authorization_id);
-  return { ...row, stages: stages(row), authorizations, error_summary: row.error_msg || row.interpolation_error_msg || row.upscale_error_msg || row.archive_record_error || row.archive_error || null };
+  return { ...row, stages: stages(row), authorizations, reproduction: productionReproduction(db, row), error_summary: row.error_msg || row.interpolation_error_msg || row.upscale_error_msg || row.archive_record_error || row.archive_error || null };
 }
 
 function listArchives(db, query = {}) {

@@ -230,9 +230,10 @@ function buildFallbackUniversalSeedanceLine(sb, d, styleHint) {
 }
 
 function getStoryboardsForEpisode(db, episodeId) {
+  const hasIdentity = require('./storyboardIdentityService').supportsIdentity(db);
   const rows = dedupeStoryboardRowsByNumber(
     db.prepare(
-      'SELECT * FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY sort_order ASC, storyboard_number ASC, id ASC'
+      `SELECT * FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY ${hasIdentity ? 'COALESCE(position, sort_order, storyboard_number - 1, id)' : 'sort_order, storyboard_number'}, id ASC`
     ).all(episodeId)
   );
   return rows.map((r) => {
@@ -243,9 +244,11 @@ function getStoryboardsForEpisode(db, episodeId) {
     }
     return {
       id: r.id,
+      storyboard_uid: r.storyboard_uid ?? null,
       episode_id: r.episode_id,
       scene_id: r.scene_id,
       storyboard_number: r.storyboard_number,
+      position: r.position ?? r.sort_order ?? Math.max(0, Number(r.storyboard_number || 1) - 1),
       sort_order: r.sort_order ?? 0,
       title: r.title,
       description: r.description,
@@ -291,6 +294,7 @@ function getStoryboardsForEpisode(db, episodeId) {
       })(),
       composed_image: r.composed_image,
       video_url: r.video_url,
+      active_video_generation_id: r.active_video_generation_id ?? null,
       audio_local_path: r.audio_local_path ?? null,
       narration_audio_local_path: r.narration_audio_local_path ?? null,
       status: r.status || 'pending',
@@ -572,6 +576,7 @@ function insertOneStoryboard(db, episodeIdNum, sb, style, videoRatio, now, deriv
       now, now
     );
     const newId = db.prepare('SELECT last_insert_rowid() as id').get().id;
+    try { require('./storyboardIdentityService').ensureIdentity(db, newId, Math.max(0, shotNumber - 1)); } catch (_) {}
     if (d.propIds.length > 0) {
       try {
         const insProp = db.prepare('INSERT OR IGNORE INTO storyboard_props (storyboard_id, prop_id) VALUES (?, ?)');
@@ -786,6 +791,7 @@ function saveStoryboards(db, log, episodeId, storyboards, cfg, styleOverride, sk
       }
     }
     const id = db.prepare('SELECT last_insert_rowid() as id').get().id;
+    try { require('./storyboardIdentityService').ensureIdentity(db, id, Math.max(0, shotNumber - 1)); } catch (_) {}
     if (d.propIds.length > 0) {
       try {
         const insProp = db.prepare('INSERT OR IGNORE INTO storyboard_props (storyboard_id, prop_id) VALUES (?, ?)');
@@ -840,23 +846,56 @@ function replaceStoryboardsAtomically(db, log, episodeId, storyboards, cfg, styl
       throw new Error('分镜在生成期间已变化。旧分镜已保留，请重新生成');
     }
 
-    if (currentSnapshot.length > 0) {
-      const now = new Date().toISOString();
-      const ids = currentSnapshot.map((row) => row.id);
-      const placeholders = ids.map(() => '?').join(', ');
-      const changed = db.prepare(
-        `UPDATE storyboards
-         SET deleted_at = ?, updated_at = ?
-         WHERE id IN (${placeholders}) AND episode_id = ? AND deleted_at IS NULL`
-      ).run(now, now, ...ids, episodeIdNum).changes;
-      if (changed !== ids.length) {
-        throw new Error('旧分镜状态已变化。旧分镜已保留，请重新生成');
+    if (!Array.isArray(storyboards) || storyboards.length === 0) throw new Error('AI生成分镜失败：没有可保存的新分镜');
+    const style = (styleOverride && String(styleOverride).trim()) || cfg?.style?.default_style || '';
+    const videoRatio = cfg?.style?.default_video_ratio || '16:9';
+    const now = new Date().toISOString();
+    const identity = require('./storyboardIdentityService');
+    const currentIds = identity.orderedActiveRows(db, episodeIdNum);
+    const generated = [];
+    const seenNumbers = new Set();
+    for (const item of storyboards) {
+      const number = normalizeStoryboardShotNumber(item);
+      if (number > 0 && seenNumbers.has(number)) continue;
+      if (number > 0) seenNumbers.add(number);
+      generated.push(item);
+    }
+    const keptIds = [];
+    for (let index = 0; index < generated.length; index += 1) {
+      const item = generated[index];
+      const existingId = currentIds[index];
+      if (existingId) {
+        const derived = deriveStoryboardFieldsFromAi(item, style, videoRatio, deriveOpts);
+        const available = new Set(db.prepare('PRAGMA table_info(storyboards)').all().map((column) => column.name));
+        const clearColumns = [
+          'image_url', 'local_path', 'composed_image', 'main_panel_idx', 'video_url', 'active_video_generation_id',
+          'first_frame_image_id', 'last_frame_image_id', 'last_frame_image_url', 'last_frame_local_path',
+          'audio_local_path', 'narration_audio_local_path', 'omni_asset_ids', 'omni_first_frame_asset_id',
+          'omni_last_frame_asset_id', 'omni_asset_usage_json', 'omni_prompt_document_json', 'error_msg',
+        ].filter((column) => available.has(column)).map((column) => `${column}=NULL`);
+        if (available.has('status')) clearColumns.push("status='pending'");
+        if (clearColumns.length) db.prepare(`UPDATE storyboards SET ${clearColumns.join(', ')} WHERE id=? AND episode_id=? AND deleted_at IS NULL`).run(existingId, episodeIdNum);
+        try { db.prepare('DELETE FROM frame_prompts WHERE storyboard_id = ?').run(existingId); } catch (_) {}
+        try { db.prepare('DELETE FROM storyboard_characters WHERE storyboard_id = ?').run(existingId); } catch (_) {}
+        updateStoryboardRowFromDerived(db, existingId, episodeIdNum, derived, item, now);
+        identity.ensureIdentity(db, existingId, index);
+        keptIds.push(existingId);
+      } else {
+        const newId = insertOneStoryboard(db, episodeIdNum, item, style, videoRatio, now, deriveOpts);
+        if (!newId) throw new Error('新分镜保存失败。旧分镜已保留，请重新生成');
+        identity.ensureIdentity(db, newId, index);
+        keptIds.push(Number(newId));
       }
     }
-
-    const saved = saveStoryboards(db, log, episodeIdNum, storyboards, cfg, styleOverride, null, deriveOpts);
-    if (saved.length === 0) throw new Error('AI生成分镜失败：没有可保存的新分镜');
-    return saved;
+    const removedIds = currentIds.slice(keptIds.length);
+    if (removedIds.length) {
+      const placeholders = removedIds.map(() => '?').join(', ');
+      db.prepare(`UPDATE storyboards SET deleted_at=?, updated_at=? WHERE id IN (${placeholders}) AND episode_id=? AND deleted_at IS NULL`)
+        .run(now, now, ...removedIds, episodeIdNum);
+    }
+    identity.reindexEpisode(db, episodeIdNum, keptIds, now);
+    log.info('Storyboards replaced in place', { episode_id: episodeIdNum, reused: Math.min(currentIds.length, keptIds.length), created: Math.max(0, keptIds.length - currentIds.length), removed: removedIds.length });
+    return getStoryboardsForEpisode(db, episodeIdNum);
   });
   return replace();
 }
@@ -1567,6 +1606,7 @@ function persistSplitStoryboardRow(db, episodeId, storyboardNumber, baseRow, pla
     now,
     now
   );
+  try { require('./storyboardIdentityService').ensureIdentity(db, info.lastInsertRowid, Math.max(0, Number(storyboardNumber || 1) - 1)); } catch (_) {}
   return info.lastInsertRowid;
 }
 
@@ -1632,6 +1672,11 @@ function splitStoryboardByAudio(db, log, storyboardId) {
   for (const id of storyboardIds) {
     rebuildVideoPromptForStoryboard(db, log, id);
   }
+  try {
+    const orderedIds = db.prepare('SELECT id FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY storyboard_number, id')
+      .all(episodeId).map((item) => Number(item.id));
+    require('./storyboardIdentityService').reindexEpisode(db, episodeId, orderedIds, now);
+  } catch (_) {}
 
   const summary = plans.map((p) => `${p.duration}s ${p.title}`).join('；');
   if (log?.info) {
@@ -1657,18 +1702,13 @@ function reorderStoryboards(db, log, episodeId, ids) {
   if (!list.length) throw new Error('缺少分镜顺序列表');
   const rows = db.prepare('SELECT id, episode_id FROM storyboards WHERE id IN (' + list.map(() => '?').join(',') + ') AND deleted_at IS NULL').all(...list);
   const validIds = new Set(rows.map((r) => Number(r.id)));
+  const allIds = require('./storyboardIdentityService').orderedActiveRows(db, episodeId);
+  if (new Set(list).size !== list.length || list.length !== allIds.length || allIds.some((id) => !validIds.has(id))) {
+    throw new Error('分镜顺序列表必须包含本集全部有效分镜，且每个分镜只能出现一次');
+  }
   const wrongEpisode = rows.find((r) => Number(r.episode_id) !== Number(episodeId));
   if (wrongEpisode) throw new Error(`分镜 #${wrongEpisode.id} 不属于该集，无法排序`);
-  const now = new Date().toISOString();
-  const update = db.prepare('UPDATE storyboards SET sort_order = ?, updated_at = ? WHERE id = ?');
-  const tx = db.transaction(() => {
-    let order = 0;
-    for (const id of list) {
-      if (!validIds.has(id)) continue;
-      update.run(order++, now, id);
-    }
-  });
-  tx();
+  db.transaction(() => require('./storyboardIdentityService').reindexEpisode(db, episodeId, list))();
   log.info('Storyboards reordered', { episode_id: episodeId, count: list.length });
   return getStoryboardsForEpisode(db, episodeId);
 }

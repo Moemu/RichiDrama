@@ -63,6 +63,8 @@ test('自由创作报价由后端按模型的有效计量单位计算', async ()
   assert.match(apiSource, /request\.post\('\/omni-video-jobs\/quote', body\)/)
   assert.match(quoteHandler, /model: currentCapability\.value\.model/)
   assert.match(quoteHandler, /duration: normalizeDuration\(duration\.value\)/)
+  assert.match(quoteHandler, /requestMaterialRouting\.value\.sent\.video > 0/)
+  assert.match(quoteHandler, /requestMaterialRouting\.value\.sent\.audio > 0/)
   assert.doesNotMatch(quoteHandler, /usage:\s*\{\s*second:/)
 })
 
@@ -271,7 +273,7 @@ test('镜头素材集合从镜头保存的 assets 恢复，未引用素材不丢
 
   assert.match(handler, /const materialIds = \(shot\.assets \|\| \[\]\)\.map/)
   assert.match(handler, /selectedOrder\.value = \[\.\.\.new Set\(materialIds\)\]/)
-  assert.match(source, /:class="\{ selected: selected\.has\(asset\.id\) \}"/)
+  assert.match(source, /:class="\{ selected: selected\.has\(asset\.id\), 'is-readonly': reproductionMode \}"/)
 })
 
 test('工作台不以镜头时长重复模拟生成进度', async () => {
@@ -390,6 +392,10 @@ test('单视频工具直达生成并引用账号全部素材', async () => {
   assert.match(media, /include-generation-quote/)
   assert.match(media, /:has-video-input="quoteHasVideoInput"/)
   assert.match(media, /:has-audio-input="quoteHasAudioInput"/)
+  assert.match(media, /Seedance 2\.0\/2\.5 支持图片、视频和音频全模态参考/)
+  assert.match(media, /平台接入：当前适配层尚未发送视频本体/)
+  assert.match(media, /materialRouting\.value\.sent\.video > 0/)
+  assert.match(media, /当前平台预计发送/)
   assert.match(media, /@pick="onPromptAssetPick"/)
   assert.match(selector, /beginAssetPointerDrag/)
   assert.match(selector, /assets-loaded/)
@@ -734,7 +740,7 @@ test('成片操作栏不会覆盖视频，嵌入分镜保持三栏创作节奏',
     readSource('../src/views/FilmCreate.vue'),
   ])
 
-  const playablePreviewStart = free.indexOf('<template v-if="activeVideoUrl">')
+  const playablePreviewStart = free.indexOf('<template v-if="activeVideoUrl && !previewVideoError && !previewVideoProgress">')
   const videoStageStart = free.indexOf('<div class="video-stage has-video"', playablePreviewStart)
   const frameActionsStart = free.indexOf('<div class="frame-actions"', videoStageStart)
   assert.ok(playablePreviewStart >= 0 && videoStageStart > playablePreviewStart && frameActionsStart > videoStageStart, 'preview controls and frame actions must wait for a playable video')
@@ -769,7 +775,7 @@ test('生产工作流保持稳定导航、比例预览和可展开的次要信�
   assert.match(film, /\.merge-stage-active \.video-option-hint,\.merge-stage-active \.video-watermark-input\{grid-column:1 \/ -1;width:100%;min-width:0/)
   assert.match(film, /\.merge-stage-active \.main>:is\(\.merge-settings,\.merge-output\)\{overflow-y:auto;overscroll-behavior-y:contain/)
   assert.match(free, /'--preview-aspect-ratio': previewAspectRatio/)
-  assert.match(free, /<template v-if="activeVideoUrl">[\s\S]*<div class="video-stage has-video"/)
+  assert.match(free, /<template v-if="activeVideoUrl && !previewVideoError && !previewVideoProgress">[\s\S]*<div class="video-stage has-video"/)
   assert.match(free, /\.project-storyboard-page \.player-tools\{flex:0 0 44px;min-height:44px;overflow:visible\}/)
   assert.match(free, /\.project-storyboard-page \.video-stage\{flex:0 0 auto!important;width:auto;height:clamp\(190px,28dvh,300px\);margin:12px auto!important;aspect-ratio:var\(--preview-aspect-ratio,16 \/ 9\)\}/)
   assert.match(free, /video-stage\.has-video \.main-video\{inset:0!important;transform:none\}/)

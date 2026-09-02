@@ -96,21 +96,21 @@ function validateResolution(capability, requestedResolution) {
 function normalizeSupports(config, declared = {}, selectedModel = '') {
   const supports = { ...DEFAULT_CAPABILITIES, ...declared };
   const protocol = String(config.api_protocol || '').toLowerCase();
+  const provider = String(config.provider || '').toLowerCase();
   const model = String(selectedModel || config.default_model || config.model || '').toLowerCase();
   const hasNativeAudioReference = protocol === 'volcengine_omni'
     || protocol === 'kling_omni'
     || ((!protocol || protocol === 'volcengine') && /seedance|doubao-seedance/.test(model));
+  const usesModelArkContentsAdapter = protocol === 'volcengine_omni'
+    || (!protocol && ['volces', 'volcengine', 'volc'].includes(provider));
+  const isSeedanceFullModal = /seedance[-_]?2|seedance2|(^|[-_./])sd2($|[-_./])/.test(model);
 
   const seedance25 = seedance25Limits(model);
   if (seedance25.image_reference) supports.image_reference = { ...supports.image_reference, ...seedance25.image_reference };
   supports.audio_reference = hasNativeAudioReference && declared.audio_reference !== false;
-  // No request adapter currently transmits source-video, extend, or driving-audio
-  // parameters. Reporting these as false gives users a deterministic fallback
-  // instead of silently dropping a selected asset.
-  // The current ModelArk contents adapter serializes image and audio parts.
-  // Do not advertise native video-reference until the corresponding content
-  // part is implemented; otherwise selected video would be silently omitted.
-  supports.video_reference = false;
+  // The ModelArk contents adapter serializes reference_video parts for
+  // Seedance 2.x. Other protocols stay on the explicit keyframe fallback.
+  supports.video_reference = usesModelArkContentsAdapter && isSeedanceFullModal && declared.video_reference !== false;
   supports.video_extend = false;
   supports.audio_driven = false;
   return supports;

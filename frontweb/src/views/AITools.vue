@@ -7,7 +7,7 @@
       <footer><AccountBalanceBadge /><button type="button" @click="$router.push('/free-create')">进入全能创作 ↗</button></footer>
     </aside>
     <section class="tool-directory" aria-labelledby="tool-directory-title">
-      <header><div><p class="eyebrow">选择工具</p><h2 id="tool-directory-title">创作能力</h2></div><button type="button" @click="$router.push('/media-library')">媒体素材库 →</button></header>
+      <header><div><p class="eyebrow">选择工具</p><h2 id="tool-directory-title">创作能力</h2></div><button type="button" @click="openMediaLibrary">媒体素材库 →</button></header>
       <div class="directory-list">
         <button v-for="(tool, index) in tools" :key="tool.title" type="button" @click="$router.push(tool.to)">
           <span class="directory-index">{{ String(index + 1).padStart(2, '0') }}</span>
@@ -21,7 +21,16 @@
   </main>
 </template>
 <script setup>
+import { useRoute, useRouter } from 'vue-router'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
+
+const route = useRoute()
+const router = useRouter()
+
+function openMediaLibrary() {
+  router.push({ path: '/media-library', query: { return_to: route.fullPath } })
+}
+
 const tools = [
   { title: '剧本分析', icon: '◎', tone: 'blue', label: '文本策划', input: '剧本与项目设定', output: '角色、场景、镜头建议', description: '将剧本拆解为可以直接进入制作流程的结构化信息。', to: '/ai-tools/script-analysis', group: 'writing' },
   { title: '剧本分析（流式）', icon: '≋', tone: 'copper', label: '批量处理', input: '多个 TXT / 剧本', output: '可续写的分析记录', description: '适合长剧本与批量拆解，运行过程持续保存。', to: '/ai-tools/script-analysis-stream', group: 'writing' },
