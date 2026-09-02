@@ -45,7 +45,17 @@ test('development mode can preview the video error state without creating a task
   assert.match(freeCreate, /@click="previewVideoError = false">退出错误预览/)
   assert.match(freeCreate, /activeVideoUrl && !previewVideoError && !previewVideoProgress/)
   assert.match(freeCreate, /预览真人授权提示/)
+  assert.match(freeCreate, /预览版权限制提示/)
   assert.match(freeCreate, /watch\(activeShotId, \(\) => \{ previewVideoError\.value = false; previewVideoProgress\.value = false \}\)/)
+})
+
+test('copyright failures keep one compact bulk library import action', () => {
+  assert.match(failureDetails, /本次包含.*张参考图/)
+  assert.match(failureDetails, /火山没有指出具体图片/)
+  assert.match(failureDetails, /importCopyrightAssets/)
+  assert.match(failureDetails, /批量加入素材库/)
+  assert.doesNotMatch(failureDetails, /v-for="item in copyrightTargets"|copyright-target-card/)
+  assert.doesNotMatch(failureDetails, /版权[^\n]{0,80}声明含真人并认证/)
 })
 
 test('a possible real-person false positive defaults to library import and keeps certification optional', () => {

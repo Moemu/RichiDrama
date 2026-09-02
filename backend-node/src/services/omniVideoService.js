@@ -508,6 +508,10 @@ function realPersonContentIndex(errorMessage) {
   return Number.isInteger(index) && index > 0 ? index : null;
 }
 
+function isCopyrightRestriction(errorMessage) {
+  return /copyright(?:\s+restrictions?)?|版权限制/i.test(String(errorMessage || ''));
+}
+
 function publicFailureAssetPreview(snapshot, asset) {
   if (asset?.url) return asset.url;
   const localPath = failureAssetStorageKey(snapshot);
@@ -549,6 +553,89 @@ function locateRealPersonFailureAsset(db, omniJobId, actor = null) {
     requires_sd2_identity: !!asset?.requires_sd2_identity,
     seedance2_asset: asset?.seedance2_asset || null,
   };
+}
+
+function locateCopyrightFailureAssets(db, omniJobId, actor = null) {
+  const job = actor
+    ? assertOwnedJob(db, omniJobId, actor)
+    : db.prepare(`SELECT j.id AS omni_job_id, j.owner_user_id AS job_owner_user_id,
+        v.id AS video_generation_id, v.drama_id, v.error_msg
+      FROM omni_video_jobs j JOIN video_generations v ON v.id=j.video_generation_id
+      WHERE j.id=? AND v.deleted_at IS NULL`).get(Number(omniJobId));
+  if (!job || !isCopyrightRestriction(job.error_msg)) return [];
+  const assetService = require('./assetService');
+  return db.prepare(`SELECT * FROM omni_video_job_assets
+    WHERE omni_job_id=? AND media_type='image' AND send_to_model=1 ORDER BY ordinal`).all(Number(omniJobId)).map((row, index) => {
+    const snapshot = parse(row.snapshot_json) || {};
+    const asset = row.asset_id ? assetService.getByIdForOwner(db, row.asset_id, job.job_owner_user_id) : null;
+    return {
+      reference_image_number: index + 1,
+      found: true,
+      alias: row.alias || snapshot.alias || `参考图 ${index + 1}`,
+      ordinal: row.ordinal,
+      asset_id: asset?.id || null,
+      in_asset_library: !!asset,
+      preview_url: publicFailureAssetPreview(snapshot, asset),
+      can_import: !asset && !!failureAssetStorageKey(snapshot),
+    };
+  });
+}
+
+function copyrightFailureAssetSummary(db, omniJobId, actor = null) {
+  const assets = locateCopyrightFailureAssets(db, omniJobId, actor);
+  if (!assets.length) return null;
+  return {
+    total: assets.length,
+    in_asset_library: assets.filter((item) => item.in_asset_library).length,
+    importable: assets.filter((item) => !item.in_asset_library && item.can_import).length,
+    unavailable: assets.filter((item) => !item.in_asset_library && !item.can_import).length,
+  };
+}
+
+function importCopyrightFailureAsset(db, log, omniJobId, ordinal, actor) {
+  const job = assertOwnedJob(db, omniJobId, actor);
+  if (!isCopyrightRestriction(job.error_msg)) throw new Error('当前失败原因不是版权限制');
+  const located = locateCopyrightFailureAssets(db, omniJobId, actor).find((item) => Number(item.ordinal) === Number(ordinal));
+  if (!located) throw new Error('版权失败记录中没有该参考图');
+  if (located.asset_id) return located;
+  if (!located.can_import) throw new Error('该参考图没有可持久化的本地文件，不能加入素材库');
+  const row = db.prepare(`SELECT * FROM omni_video_job_assets
+    WHERE omni_job_id=? AND ordinal=? AND media_type='image' AND send_to_model=1`).get(Number(omniJobId), Number(ordinal));
+  const snapshot = parse(row?.snapshot_json) || {};
+  const localPath = failureAssetStorageKey(snapshot);
+  if (!localPath) throw new Error('该参考图的本地文件路径无效，不能加入素材库');
+  const assetService = require('./assetService');
+  const targetOwnerId = Number(job.job_owner_user_id);
+  const created = db.transaction(() => {
+    const latest = db.prepare('SELECT asset_id FROM omni_video_job_assets WHERE id=?').get(row.id);
+    if (latest?.asset_id) {
+      const existing = assetService.getByIdForOwner(db, latest.asset_id, targetOwnerId);
+      if (existing) return existing;
+    }
+    const item = assetService.create(db, log, {
+      drama_id: Number(job.drama_id) > 0 ? Number(job.drama_id) : null,
+      owner_user_id: targetOwnerId,
+      name: row.alias || snapshot.alias || `失败任务 #${job.video_generation_id} 参考图 ${located.reference_image_number}`,
+      type: 'image', category: 'reference', url: snapshot.url || '', local_path: localPath,
+      mime_type: snapshot.mime_type || null, file_size: snapshot.file_size || null,
+      checksum: snapshot.checksum || null, source_type: 'failed_generation_reference',
+      metadata: { omni_job_id: Number(omniJobId), video_generation_id: Number(job.video_generation_id), copyright_review: true, ordinal: Number(row.ordinal) },
+    });
+    db.prepare('UPDATE omni_video_job_assets SET asset_id=? WHERE id=?').run(item.id, row.id);
+    return assetService.getByIdForOwner(db, item.id, targetOwnerId);
+  })();
+  return { ...locateCopyrightFailureAssets(db, omniJobId, actor).find((item) => Number(item.ordinal) === Number(ordinal)), asset_id: created.id, in_asset_library: true };
+}
+
+function importCopyrightFailureAssets(db, log, omniJobId, actor) {
+  const job = assertOwnedJob(db, omniJobId, actor);
+  if (!isCopyrightRestriction(job.error_msg)) throw new Error('当前失败原因不是版权限制');
+  const targets = locateCopyrightFailureAssets(db, omniJobId, actor);
+  if (!targets.length) throw new Error('版权失败记录中没有参考图');
+  for (const item of targets) {
+    if (!item.in_asset_library && item.can_import) importCopyrightFailureAsset(db, log, omniJobId, item.ordinal, actor);
+  }
+  return copyrightFailureAssetSummary(db, omniJobId, actor);
 }
 
 function importRealPersonFailureAsset(db, log, omniJobId, actor, options = {}) {
@@ -605,7 +692,7 @@ function get(db, id) {
         || (!storyboard?.active_video_generation_id && String(storyboard?.local_path || '') === String(generation.local_path || ''));
     } catch (_) {}
   }
-  return { ...job, is_current: isCurrent, actual_points: actualPoints, can_retry_generation: canRetryGeneration(generation), capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), real_person_failure_asset: locateRealPersonFailureAsset(db, job.id), generation: safeGeneration };
+  return { ...job, is_current: isCurrent, actual_points: actualPoints, can_retry_generation: canRetryGeneration(generation), capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), real_person_failure_asset: locateRealPersonFailureAsset(db, job.id), copyright_failure_asset_summary: copyrightFailureAssetSummary(db, job.id), generation: safeGeneration };
 }
 
 function generationHistoryDetail(db, videoGenerationId, actor) {
@@ -975,4 +1062,4 @@ function cancelJob(db, log, jobId, user) {
   return get(db, jobId);
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, quote, get, generationHistoryDetail, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, originalPromptFromSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, locateRealPersonFailureAsset, importRealPersonFailureAsset, isProviderInternalMaterialTimeout, isProviderInputImageFetchTimeout, canRetryGeneration, SHOT_ASSET_LIMITS };
+module.exports = { create, quote, get, generationHistoryDetail, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, originalPromptFromSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, isCopyrightRestriction, locateRealPersonFailureAsset, locateCopyrightFailureAssets, copyrightFailureAssetSummary, importRealPersonFailureAsset, importCopyrightFailureAssets, isProviderInternalMaterialTimeout, isProviderInputImageFetchTimeout, canRetryGeneration, SHOT_ASSET_LIMITS };

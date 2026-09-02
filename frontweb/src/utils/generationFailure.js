@@ -22,7 +22,8 @@ const RULES = [
   { test: /may contain real person|real[- ]?person|trusted material|真人|认证素材/i, title: '真人素材需要授权', message: '参考素材可能包含真人。火山要求先完成可信素材授权。', action: '请确认素材声明，并使用已授权的清晰正脸素材。' },
   { test: /InputTextSensitiveContentDetected|InputImageSensitiveContentDetected|input.+sensitive|输入.+审核|输入.+敏感/i, title: '输入内容未通过审核', message: '提示词或参考素材可能包含受限制内容。', action: '请修改提示词，或更换参考素材后重试。' },
   { test: /OutputVideoSensitiveContentDetected|output.+sensitive|输出.+审核|输出.+敏感/i, title: '生成结果未通过审核', message: '生成结果触发了内容审核。', action: '请调整提示词或素材后重试。' },
-  { test: /PolicyViolation|copyright|content policy|内容合规|版权限制|restriction/i, title: '内容不符合生成规则', message: '提示词、素材或生成结果可能包含受限制内容。', action: '请删除相关内容，或更换素材后重试。' },
+  { test: /copyright|版权限制/i, title: '生成结果可能涉及版权限制', message: '火山认为输出视频可能涉及版权限制，但没有指出具体参考图。', action: '请检查提示词和本次参考图。你可以把参考图加入素材库后逐张替换。' },
+  { test: /PolicyViolation|content policy|内容合规|restriction/i, title: '内容不符合生成规则', message: '提示词、素材或生成结果可能包含受限制内容。', action: '请删除相关内容，或更换素材后重试。' },
   { test: /audio.+(?:below|less than).+1\.8|audio.+too short|音频.+(?:过短|1\.8)/i, title: '音频时长太短', message: '参考音频少于模型要求的最短时长。', action: '请使用至少 1.8 秒的有效音频。' },
   { test: /reference audio.+only reference|audio.+only.+reference|音频.+唯一.+参考/i, title: '不能只使用音频参考', message: '当前生成方式还需要图片、视频或文本输入。', action: '请添加一种视觉素材，或改用支持的生成方式。' },
   { test: /invalid audio url|audio url.+invalid|无效.+音频.+url/i, title: '音频链接无效', message: '火山不能读取当前音频链接。', action: '请重新上传音频，或使用可公开访问的链接。' },
@@ -48,7 +49,7 @@ export function presentGenerationFailure(job = {}) {
   else if (job.upscale_status === 'failed') result = { title: '视频超分失败', message: '原始视频已保留。', action: '你可以仅重试超分，或直接采用原始视频。' }
   else if (job.interpolation_status === 'failed') result = { title: '视频插帧失败', message: '上一阶段的视频已保留。', action: '你可以仅重试插帧，或采用已生成的视频。' }
   else result = RULES.find((rule) => rule.test.test(rawReason)) || { title: '视频生成失败', message: '系统没有识别出明确原因。', action: requestId ? '请复制完整失败信息，并提供给管理员或火山技术支持。' : '请重试。问题持续时，请联系管理员。' }
-  return { ...result, rawReason: rawReason || '服务未返回详细失败原因。', requestId, shortRequestId: shortRequestId(requestId), realPersonContentIndex: extractRealPersonContentIndex(rawReason) }
+  return { ...result, rawReason: rawReason || '服务未返回详细失败原因。', requestId, shortRequestId: shortRequestId(requestId), realPersonContentIndex: extractRealPersonContentIndex(rawReason), copyrightRestriction: /copyright|版权限制/i.test(rawReason) }
 }
 
 export function generationFailureCopyText(job = {}) {

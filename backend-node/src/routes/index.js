@@ -407,6 +407,7 @@ function setupRouter(cfg, db, log) {
   r.post('/omni-video-jobs/:id/adopt', omniVideo.adopt);
   r.post('/omni-video-jobs/:id/extract-frame', omniVideo.extractFrame);
   r.post('/omni-video-jobs/:id/real-person-asset', omniVideo.importRealPersonAsset);
+  r.post('/omni-video-jobs/:id/copyright-assets/import', omniVideo.importCopyrightAssets);
   r.post('/video-generations/:id/extract-frame', omniVideo.extractVideoFrame);
   r.get('/video-generations/:id/history-detail', omniVideo.generationHistoryDetail);
   r.get('/omni-video-jobs/:id', omniVideo.get);

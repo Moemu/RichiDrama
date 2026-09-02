@@ -57,3 +57,28 @@ test('an explicit library-only import does not declare the image as a real perso
   assert.equal(db.prepare('SELECT requires_sd2_identity FROM assets WHERE id=?').get(imported.asset_id).requires_sd2_identity, 0);
   db.close();
 });
+
+test('copyright restrictions expose all reference images without claiming one caused the failure', () => {
+  const db = fixture();
+  db.prepare('UPDATE video_generations SET error_msg=? WHERE id=927')
+    .run('The request failed because the output video may be related to copyright restrictions. Request id: copyright-123456');
+  const targets = omni.locateCopyrightFailureAssets(db, 92, { id: 7, role: 'user' });
+  assert.equal(targets.length, 6);
+  assert.deepEqual(targets.map((item) => item.reference_image_number), [1, 2, 3, 4, 5, 6]);
+  assert.ok(targets.every((item) => item.can_import));
+  assert.throws(() => omni.locateCopyrightFailureAssets(db, 92, { id: 8, role: 'user' }), /无权操作/);
+  db.close();
+});
+
+test('copyright references are imported in one batch without real-person declarations', () => {
+  const db = fixture();
+  db.prepare('UPDATE video_generations SET error_msg=? WHERE id=927')
+    .run('The request failed because the output video may be related to copyright restrictions.');
+  const first = omni.importCopyrightFailureAssets(db, log, 92, { id: 7, role: 'user' });
+  const second = omni.importCopyrightFailureAssets(db, log, 92, { id: 7, role: 'user' });
+  assert.deepEqual(first, { total: 6, in_asset_library: 6, importable: 0, unavailable: 0 });
+  assert.deepEqual(second, first);
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM assets').get().count, 6);
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM assets WHERE requires_sd2_identity=1').get().count, 0);
+  db.close();
+});

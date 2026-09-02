@@ -26,6 +26,7 @@ export const omniVideoAPI = {
   list(params) { return request.get('/omni-video-jobs', { params: params || {} }) },
   get(id) { return request.get(`/omni-video-jobs/${id}`) },
   importRealPersonAsset(id, body = {}) { return request.post(`/omni-video-jobs/${id}/real-person-asset`, body) },
+  importCopyrightAssets(id) { return request.post(`/omni-video-jobs/${id}/copyright-assets/import`) },
   assets(params) { return request.get('/assets', { params: params || {} }) },
   /** 创建素材记录（如把场景/角色/道具图导入素材池统一管理） */
   createAsset(body) { return request.post('/assets', body || {}) },
