@@ -13,6 +13,15 @@ const tenants = require('../src/services/tenantService');
 const billing = require('../src/services/billingService');
 const videoService = require('../src/services/videoService');
 
+test('only Ark internal material-cache download timeouts enable failed-generation retry', () => {
+  const internalTimeout = 'Timeout while downloading url: https://ark-common-storage-prod-cn-beijing.tos-cn-beijing.volces.com/ark-async-gateway/cgt-test/2?x-tos-process=image%2Fformat%2Cjpg Request id: 021788';
+  assert.equal(omni.isProviderInternalMaterialTimeout(internalTimeout), true);
+  assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: internalTimeout }), true);
+  assert.equal(omni.canRetryGeneration({ status: 'retryable', error_msg: 'restart recovery' }), true);
+  assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: 'failed to download input image https://customer.example/reference.png' }), false);
+  assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: 'Timeout while downloading url: https://example.com/image.jpg' }), false);
+});
+
 test('SD2 recovery marks an unrecoverable waiting job invalid instead of retrying forever', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'local-mini-drama-sd2-recovery-'));
   try {
@@ -109,7 +118,10 @@ test('SD2 waiting generation resumes after restart when an old snapshot has no i
     assert.equal(authorization.idempotency_key, `omni-video:sd2-resume:${waiting.video_generation_id}`);
 
     billing.voidAuthorization(db, admin, resumed.billing_authorization_id, 'SD2 recovery retry test');
-    db.prepare("UPDATE video_generations SET status='retryable' WHERE id=?").run(waiting.video_generation_id);
+    const internalTimeout = 'Timeout while downloading url: https://ark-common-storage-prod-cn-beijing.tos-cn-beijing.volces.com/ark-async-gateway/cgt-test/2?x-tos-process=image%2Fformat%2Cjpg Request id: 021788';
+    db.prepare("UPDATE video_generations SET status='failed', error_msg=? WHERE id=?").run(internalTimeout, waiting.video_generation_id);
+    assert.equal(omni.get(db, storedJob.id).can_retry_generation, true);
+    assert.equal(omni.list(db, { owner_user_id: admin.id }).find((item) => item.id === storedJob.id)?.can_retry_generation, true);
     const retried = omni.retry(db, log, storedJob.id, admin);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(retried.status, 'processing');

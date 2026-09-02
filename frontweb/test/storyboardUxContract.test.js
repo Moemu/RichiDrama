@@ -102,6 +102,13 @@ test('project storyboard history shows the saved generation prompt and supports 
   assert.match(filmCreate, /item\.video\?\.prompt \? `生成提示词：\$\{item\.video\.prompt\}`/)
 })
 
+test('provider internal material timeout can retry from the immutable snapshot', () => {
+  assert.match(freeCreate, /activeJob\.status === 'retryable' \|\| activeJob\.can_retry_generation/)
+  assert.match(freeCreate, /job\.status === 'retryable' \|\| job\.can_retry_generation/)
+  assert.match(freeCreate, /使用原配置重试/)
+  assert.match(freeCreate, /omniVideoAPI\.retry\(job\.id\)/)
+})
+
 test('admin failed production detail opens an immutable workbench reproduction snapshot', () => {
   assert.match(adminConsole, /<h3>完整提示词<\/h3>/)
   assert.match(adminConsole, /失败时素材/)

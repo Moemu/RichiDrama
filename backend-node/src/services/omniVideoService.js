@@ -9,6 +9,22 @@ const SHOT_ASSET_LIMITS = { total: 15, image: 9, video: 3, audio: 3 };
 
 const IMAGE_USAGES = new Set(['primary', 'identity', 'environment', 'style', 'prop', 'first_frame', 'last_frame', 'reference']);
 
+// Ark can accept a task, then time out while it reads its own temporary TOS
+// material. The URL in this error is not a user asset URL. A new submission
+// from the saved request snapshot is safe after the failed authorization is
+// voided.
+function isProviderInternalMaterialTimeout(errorMessage) {
+  const message = String(errorMessage || '');
+  return /timeout while downloading url:/i.test(message)
+    && /ark-common-storage[^\s]*\/ark-async-gateway\//i.test(message)
+    && /x-tos-process=image(?:%2f|\/)format/i.test(message);
+}
+
+function canRetryGeneration(generation) {
+  return generation?.status === 'retryable'
+    || (generation?.status === 'failed' && isProviderInternalMaterialTimeout(generation.error_msg));
+}
+
 // This produces only the local billing reservation. It never changes the
 // provider request body, whose fields are built later by videoService.
 function buildAuthorizationUsage(meters, billingSettings, duration) {
@@ -565,7 +581,7 @@ function get(db, id) {
         || (!storyboard?.active_video_generation_id && String(storyboard?.local_path || '') === String(generation.local_path || ''));
     } catch (_) {}
   }
-  return { ...job, is_current: isCurrent, actual_points: actualPoints, capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), real_person_failure_asset: locateRealPersonFailureAsset(db, job.id), generation: safeGeneration };
+  return { ...job, is_current: isCurrent, actual_points: actualPoints, can_retry_generation: canRetryGeneration(generation), capability_snapshot: parse(job.capability_snapshot_json), request_snapshot: safeSnapshot(parse(job.request_snapshot_json)), input_summary: parse(job.input_summary_json), assets: assets.map((asset) => ({ ...asset, snapshot: safeAssetSummary(parse(asset.snapshot_json)) })), real_person_failure_asset: locateRealPersonFailureAsset(db, job.id), generation: safeGeneration };
 }
 function list(db, query = {}) {
   const storyboardId = Number(query.storyboard_id);
@@ -608,6 +624,7 @@ function list(db, query = {}) {
         ? Number(item.active_video_generation_id) === Number(item.video_generation_id)
         : Boolean(item.storyboard_local_path && item.local_path && item.storyboard_local_path === item.local_path)),
     target_storyboard_id: currentStoryboard ? storyboardId : undefined,
+    can_retry_generation: canRetryGeneration(item),
     video_url: videoService.publicVideoUrl(item.video_url, item.local_path),
     postprocess_chain: `${require('./videoPostprocessPolicy').describe(item)} → 本地规范 ${item.aspect_ratio || '原画幅'}`,
     request_snapshot: safeSnapshot(parse(item.request_snapshot_json)),
@@ -724,8 +741,8 @@ function adoptCompletedVersion(db, omniJobId, actor, targetStoryboardId = null) 
 }
 function retry(db, log, id, billingUser) {
   const job = assertOwnedJob(db, id, billingUser);
-  const generation = db.prepare('SELECT status, drama_id, storyboard_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
-  if (!generation || generation.status !== 'retryable') throw new Error('只有重启中断且可重试的任务可以重试');
+  const generation = db.prepare('SELECT status, error_msg, drama_id, storyboard_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
+  if (!canRetryGeneration(generation)) throw new Error('该任务不是可安全重试的中断或模型内部素材读取超时任务');
   const snapshot = parse(job.request_snapshot_json);
   if (!snapshot?.prompt || !Array.isArray(snapshot.assets) || !snapshot.assets.length) throw new Error('该任务没有可重试的完整请求快照');
   return create(db, log, {
@@ -844,4 +861,4 @@ function cancelJob(db, log, jobId, user) {
   return get(db, jobId);
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, quote, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, locateRealPersonFailureAsset, importRealPersonFailureAsset, SHOT_ASSET_LIMITS };
+module.exports = { create, quote, get, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, locateRealPersonFailureAsset, importRealPersonFailureAsset, isProviderInternalMaterialTimeout, canRetryGeneration, SHOT_ASSET_LIMITS };
