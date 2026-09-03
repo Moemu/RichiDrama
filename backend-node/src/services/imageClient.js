@@ -24,6 +24,15 @@ function mergeNegativePromptFragments(auto, user) {
   return a || u || '';
 }
 
+/** 火山图片接口不支持 negative_prompt。将负向要求改成主提示词中的明确约束。 */
+function appendNegativePromptToMainPrompt(prompt, negativePrompt) {
+  const base = prompt == null ? '' : String(prompt);
+  const negative = negativePrompt == null ? '' : String(negativePrompt).trim();
+  if (!negative) return base;
+  const instruction = `Do not include these elements or styles: ${negative}`;
+  return base.trim() ? `${base}\n\n${instruction}` : instruction;
+}
+
 /** 角色/场景/道具资产生图：请求里显式传入 model 且资产上存有负面词时，与自动负面片段合并后传给图生 API */
 function resolveAssetUserNegativeForApi(explicitModelName, storedNegative) {
   const hasModel = explicitModelName != null && String(explicitModelName).trim().length > 0;
@@ -1523,18 +1532,22 @@ async function callImageApi(db, log, opts) {
   if (isSeedream && size) effectiveSize = fixSeedreamSize(size);
   else if (isAgnes && size) effectiveSize = fixAgnesImageSize(size);
 
+  // 火山 Seedream 不接受 negative_prompt。按供应商要求将负向内容拼入主提示词。
+  const requestPrompt = isSeedream
+    ? appendNegativePromptToMainPrompt(effectivePrompt, mergedNegativePrompt)
+    : effectivePrompt;
+
   const body = {
     model,
-    prompt: effectivePrompt,
+    prompt: requestPrompt,
     // doubao-seedream API 不使用 n，其他 OpenAI 兼容接口保留
     ...(!isSeedream ? { n: 1 } : {}),
     ...(effectiveSize ? { size: effectiveSize } : {}),
     ...(quality ? { quality } : {}),
     // volcengine 原生或 doubao-seedream 模型均需关闭水印（默认为 true）
     ...((isVolc || isSeedream) ? { watermark: false } : {}),
-    // 多张参考图时加 negative_prompt，防止模型把参考图拼成左右分割的合图
-    // Doubao/Seedream 原生支持；通用 OpenAI-compat 接口大多也会接受该字段（不支持的会忽略）
-    ...(mergedNegativePrompt ? { negative_prompt: mergedNegativePrompt } : {}),
+    // 非火山接口继续使用独立的 negative_prompt 字段。
+    ...(!isSeedream && mergedNegativePrompt ? { negative_prompt: mergedNegativePrompt } : {}),
     // 参考图字段：volcengine doubao-seedream API 规范使用 image（数组），见官方文档
     ...(resolvedRefs.length > 0 && !isAgnes ? { image: resolvedRefs } : {}),
     // Agnes Image 2.x：参考图放在 extra_body.image
@@ -1963,6 +1976,7 @@ module.exports = {
   callImageApi,
   createAndGenerateImage,
   resolveAssetUserNegativeForApi,
+  appendNegativePromptToMainPrompt,
   getStoryboardReferenceLimits,
   canAddStoryboardCharacterRef,
   canAddStoryboardObjectRef,
