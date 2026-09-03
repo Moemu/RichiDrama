@@ -148,12 +148,14 @@ import GenerationFailureDetails from '@/components/GenerationFailureDetails.vue'
 import { formatChinaDateTime } from '@/utils/time'
 import { useModelOptions } from '@/composables/useModelOptions'
 import { isSeedanceOmniReferenceModel, materialRoutingPreview } from '@/utils/mediaRoutingPreview'
+import { chooseToolMediaFeatured } from '@/utils/toolMediaHistory'
+import { getDefaultCapabilityModel } from '@/utils/modelSelection'
 
 const props = defineProps({ media: { type: String, required: true } })
 const router = useRouter()
 const prompt = ref(''), promptDocument = ref({ text: '', refs: [], unresolved: [] }), promptEditorRef = ref(null), libraryAssets = ref([]), model = ref(''), reference = ref(''), selectedAssetId = ref(null), selectedAsset = ref(null), selectedAssetIds = ref([]), selectedAssets = ref([]), firstFrameAssetId = ref(null), lastFrameAssetId = ref(null), firstFrameAsset = ref(null), lastFrameAsset = ref(null)
 const videoSettings = ref({ video_model: '', duration: 15, resolution: '720p', aspect_ratio: '16:9', upscale_resolution: null, target_fps: null })
-const running = ref(false), importing = ref(false), historyLoading = ref(false), historyExpanded = ref(false), items = ref([]), mode = ref('text'), featured = ref(null), projects = ref([]), capabilities = ref([]), dramaId = ref(null)
+const running = ref(false), importing = ref(false), historyLoading = ref(false), historyExpanded = ref(false), items = ref([]), mode = ref('text'), featured = ref(null), currentSubmissionKey = ref(''), projects = ref([]), capabilities = ref([]), dramaId = ref(null)
 const imageModelOptions = useModelOptions('image')
 const activeStatuses = new Set(['pending', 'processing', 'sd2_waiting', 'upscale_pending', 'upscaling', 'interpolation_pending', 'interpolating', 'persisting', 'billing_reconciliation'])
 let pollTimer = null
@@ -274,9 +276,13 @@ async function load(silent = false, preferredFeatured = null) {
       if (!omniItems.length && !legacyItems.length && omniResult.status === 'rejected' && legacyResult.status === 'rejected') throw omniResult.reason
       items.value = [...omniItems, ...legacyItems].sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)).slice(0, 30)
     }
-    const selectedKey = historyKey(preferredFeatured || featured.value)
-    const pendingFeatured = activeStatuses.has(featured.value?.status) ? featured.value : null
-    featured.value = items.value.find((item) => historyKey(item) === selectedKey) || preferredFeatured || pendingFeatured || items.value[0] || null
+    featured.value = chooseToolMediaFeatured(items.value, {
+      current: featured.value,
+      preferred: preferredFeatured,
+      currentSubmissionKey: currentSubmissionKey.value,
+      keyOf: historyKey,
+      activeStatuses,
+    })
   } catch (error) { if (!silent) ElMessage.error(error.message || '生成记录加载失败') }
   finally { historyLoading.value = false; schedulePoll() }
 }
@@ -297,6 +303,7 @@ async function submit() {
     const submittedPreview = props.media === 'video'
       ? { ...created, id: created?.omni_job_id || created?.id, history_kind: 'omni', prompt: prompt.value.trim(), model: created?.resolved_model, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
       : created
+    currentSubmissionKey.value = historyKey(submittedPreview)
     featured.value = submittedPreview
     ElMessage.success('任务已提交，结果会自动刷新')
     await load(true, submittedPreview)
@@ -327,13 +334,16 @@ function downloadResult() {
 }
 function clearReferences() { selectedAssetId.value = null; selectedAsset.value = null; selectedAssetIds.value = []; selectedAssets.value = []; firstFrameAssetId.value = null; lastFrameAssetId.value = null; firstFrameAsset.value = null; lastFrameAsset.value = null; reference.value = '' }
 
-watch(() => props.media, () => { featured.value = null; mode.value = 'text'; clearReferences(); load() })
+watch(() => props.media, () => { featured.value = null; currentSubmissionKey.value = ''; mode.value = 'text'; clearReferences(); load() })
 watch(dramaId, clearReferences)
 watch(() => videoSettings.value.video_model, () => { if (!modeAvailable(mode.value)) mode.value = 'multi' })
 onMounted(async () => {
   const [data, modelCapabilities] = await Promise.all([props.media === 'image' ? dramaAPI.list({ page_size: 100 }) : Promise.resolve([]), props.media === 'video' ? omniVideoAPI.capabilities().catch(() => []) : Promise.resolve([])])
   projects.value = data?.items || data || []
   capabilities.value = Array.isArray(modelCapabilities) ? modelCapabilities : []
+  if (props.media === 'video' && !capabilities.value.some((item) => item.model === videoSettings.value.video_model)) {
+    videoSettings.value = { ...videoSettings.value, video_model: getDefaultCapabilityModel(capabilities.value) }
+  }
   await load()
 })
 onBeforeUnmount(clearPoll)

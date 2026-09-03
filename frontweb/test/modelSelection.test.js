@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { getSelectableModels } from '../src/utils/modelSelection.js'
+import { getDefaultCapabilityModel, getSelectableModels } from '../src/utils/modelSelection.js'
 
 const configs = [
   {
@@ -31,4 +31,13 @@ test('uses default active config models when no config is selected', () => {
 
 test('uses selected config models when config is selected', () => {
   assert.deepEqual(getSelectableModels(configs, 'text', 2), ['qwen-plus'])
+})
+
+test('selects the configured default video capability for a new tab', () => {
+  assert.equal(getDefaultCapabilityModel([
+    { model: 'video-secondary', is_default: false },
+    { model: 'video-default', is_default: true },
+  ]), 'video-default')
+  assert.equal(getDefaultCapabilityModel([{ model: 'video-first' }]), 'video-first')
+  assert.equal(getDefaultCapabilityModel([]), '')
 })

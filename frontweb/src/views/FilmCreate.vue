@@ -306,7 +306,7 @@
             <el-option label="15秒/段" :value="15" />
           </el-select>
           <template v-if="pipelinePanelExpanded">
-            <GenerationSettings :model-value="projectGenerationSettings" :max-duration="15" @update:model-value="setProjectGenerationSettings" />
+            <GenerationSettings :model-value="projectGenerationSettings" :max-duration="15" include-generation-quote @update:model-value="setProjectGenerationSettings" />
             <el-button size="small" plain @click="applyProjectGenerationSettingsToStoryboards">应用到全部分镜</el-button>
             <el-select v-model="scriptLanguage" placeholder="分镜语言" clearable style="width: 105px">
               <el-option label="中文" value="zh" />
@@ -808,6 +808,7 @@
               :model-value="sbGenerationSettings[sb.id] || {}"
               :show-text-model="true"
               :max-duration="15"
+              include-generation-quote
               @update:model-value="onInlineSbGenerationSettingsChange(sb, $event)"
             />
             <el-button v-if="sbGenerationModes[sb.id] === 'custom'" text size="small" @click="restoreSbGenerationDefaults(sb)">恢复跟随首镜</el-button>
@@ -2326,7 +2327,7 @@
           <div class="vp-mode-hint">全能模式：中间为片段描述；生视频时使用 <strong>AI 配置里当前启用的视频</strong>（接口规范 <code>kling_omni</code> 或 <code>volcengine_omni</code>，模型如 <code>kling-video-o1</code>、<code>doubao-seedance-2-0-260128</code> 等）并合并场景/角色/道具等参考图（不含经典分镜主图）。经典字段保留，可随时切回。</div>
         </el-form-item>
         <el-form-item label="生成参数">
-          <GenerationSettings :model-value="sbGenerationSettings[videoParamsTarget.id] || {}" :show-text-model="true" @update:model-value="setSbGenerationSettings(videoParamsTarget.id, $event)" />
+          <GenerationSettings :model-value="sbGenerationSettings[videoParamsTarget.id] || {}" :show-text-model="true" include-generation-quote @update:model-value="setSbGenerationSettings(videoParamsTarget.id, $event)" />
         </el-form-item>
         <el-row :gutter="12">
           <el-col :span="12">
