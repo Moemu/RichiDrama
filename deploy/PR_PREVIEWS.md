@@ -21,10 +21,17 @@
 
 ## 预览架构
 
-预览与生产**应用行为逐字段一致**：同一 Docker 网络、同一份环境配置（存储后端、OSS 凭据、外部集成）、同一套媒体服务路径。唯一允许的差异：
+预览与生产使用相同应用代码和 Docker 网络。运行密钥按档位隔离：
+
+- Prod 优先读取 `/data/minidrama-config/.prod.env`。
+- Preview 优先读取 `/data/minidrama-config/.preview.env`。
+- 旧 `minidrama.oss.env` 只作为兼容回退。
+
+应用行为保持一致。允许的运行差异如下：
 
 - **数据集**：每个 PR 使用生产库在线快照的隔离副本（迁移先双跑验证），预览内的写操作不会触碰生产数据。
 - **页面标题**：预览镜像构建时把 ` (preview)` 后缀写入静态 `<title>`，并以 `VITE_TITLE_BADGE` 烘焙进前端产物（`Dockerfile.preview` 的 `PREVIEW_TITLE_BADGE`，生产构建该参数为空），路由切换重写 `document.title` 后后缀仍然保留。
+- **运行密钥**：Preview 可以使用沙箱支付密钥和独立 OSS 写入前缀。
 
 结构上只有三件套：
 
@@ -37,6 +44,8 @@
 迁移安全不变：预览数据来自生产库在线快照，迁移先在快照副本上双跑验证后才启动预览应用。
 
 Runner 只发送 PR 编号和 commit SHA。服务器通过 GitHub SSH Deploy Key 获取 PR ref，并在本机创建源码包。
+
+如果 `.preview.env` 不存在，部署脚本会读取旧 `minidrama.oss.env`。此回退只用于无中断迁移。支付必须保持关闭。
 
 ## 首次服务器准备
 

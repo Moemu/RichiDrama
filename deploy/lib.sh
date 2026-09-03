@@ -18,10 +18,10 @@ require_root() { [[ "$(id -u)" == "0" ]] || fail 'Run this command as root.'; }
 # Production boots must never silently degrade to local storage because an
 # environment file went missing alongside a repository refresh.
 require_env_file() {
-  local file
-  file="$(resolve_env_file)"
+  local profile="${1:-${MINIDRAMA_PROFILE:-prod}}" file
+  file="$(resolve_env_file "$profile")"
   [[ -n "$file" ]] || fail \
-    'Production environment file not found. Put minidrama.oss.env in /data/minidrama-config (template: deploy/minidrama.oss.env.example).'
+    "Environment file not found for profile $profile. Put .$profile.env in /data/minidrama-config."
   printf '%s\n' "$file"
 }
 
@@ -35,8 +35,13 @@ validate_sha() { [[ "${1:-}" =~ ^[0-9a-f]{40}$ ]] || fail "Invalid commit SHA: $
 validate_pr() { [[ "${1:-}" =~ ^[1-9][0-9]*$ ]] || fail "Invalid PR number: ${1:-<empty>}"; }
 
 resolve_env_file() {
+  local profile="${1:-${MINIDRAMA_PROFILE:-prod}}"
+  [[ "$profile" =~ ^(dev|preview|prod)$ ]] || fail "Invalid environment profile: $profile"
   local candidates=(
     "${MINIDRAMA_ENV_FILE:-}"
+    "/data/minidrama-config/.${profile}.env"
+    "/data/apps/LocalMiniDrama/.${profile}.env"
+    # Compatibility paths. Remove only after every server has migrated.
     "/data/minidrama-config/minidrama.oss.env"
     "/data/apps/LocalMiniDrama/minidrama.oss.env"
   )
@@ -189,7 +194,7 @@ run_preflight_app() {
   local image="$1" sha="$2" data_dir="$3"
   local name="minidrama-preflight-${sha:0:12}"
   local env_file env_args=()
-  env_file="$(resolve_env_file)"
+  env_file="$(resolve_env_file prod)"
   [[ -n "$env_file" ]] && env_args+=(--env-file "$env_file")
   docker rm -f "$name" >/dev/null 2>&1 || true
   docker run -d --name "$name" --network none \

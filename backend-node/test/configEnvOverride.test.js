@@ -14,6 +14,33 @@ test('environment override diagnostics redact storage credentials', () => {
   else process.env.CFG_STORAGE__OSS__ACCESS_KEY_SECRET = prior;
 });
 
+test('environment override diagnostics redact payment keys and certificates', () => {
+  const values = {
+    CFG_PAYMENTS__ALIPAY__APP_PRIVATE_KEY: 'alipay-private-key-value',
+    CFG_PAYMENTS__WECHAT__API_V3_KEY: 'wechat-api-v3-key-value',
+    CFG_PAYMENTS__WECHAT__WECHATPAY_PUBLIC_KEY: 'wechat-public-key-value',
+    CFG_PAYMENTS__WECHAT__PLATFORM_CERTIFICATE: 'wechat-platform-certificate-value',
+  };
+  const prior = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, values);
+    delete require.cache[require.resolve('../src/config')];
+    const config = require('../src/config');
+    config.loadConfig();
+    const lines = config.getEnvOverrideLog();
+    for (const [key, secret] of Object.entries(values)) {
+      const line = lines.find((entry) => entry.includes(key));
+      assert.match(line, /<redacted>/);
+      assert.doesNotMatch(line, new RegExp(secret));
+    }
+  } finally {
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test('deployment MINIDRAMA OSS variables activate storage when Compose leaves CFG defaults empty', () => {
   const prior = {
     deploymentType: process.env.MINIDRAMA_STORAGE_TYPE,

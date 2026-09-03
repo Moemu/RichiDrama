@@ -26,11 +26,14 @@ test('preview deployment is production-identical except dataset and title', () =
   );
   // Previews are HTTP-only: no certificate machinery may return.
   assert.doesNotMatch(source + library + vhost, /certbot|letsencrypt|TLS_PROXY_NETWORK|TLS_NGINX_CONTAINER|listen 443/);
-  // Production-identical behaviour includes the production environment file —
-  // the same storage backend, the same credentials, the same integrations.
+  // Preview selects a profile-specific ignored environment file. The resolver
+  // keeps the legacy server path as a compatibility fallback.
   assert.match(source, /--env-file "\$ENV_FILE"/);
-  assert.match(source, /require_env_file/);
+  assert.match(source, /require_env_file preview/);
+  assert.match(library, /\/data\/minidrama-config\/\.\$\{profile\}\.env/);
+  assert.match(library, /\/data\/minidrama-config\/minidrama\.oss\.env/);
   assert.match(source, /MINIDRAMA_PROFILE=preview/);
+  assert.match(source, /CFG_PAYMENTS__MIN_AMOUNT_FEN=1/);
   assert.doesNotMatch(source, /MINIDRAMA_STORAGE_TYPE|static_missing_mode|remote_read_base/);
   // The retired security-theatre machinery must stay retired.
   assert.doesNotMatch(source + library, /media-proxy|nginx-preview-edge/);
@@ -78,6 +81,17 @@ test('preview vhost authenticates and routes like production would', () => {
   // application is reachable through the same mechanism as production.
   assert.match(vhost, /auth_basic "RichiDrama PR Preview"/);
   assert.match(vhost, /auth_basic_user_file \/etc\/nginx\/minidrama-preview\.htpasswd/);
+  const wechatCallback = vhost.match(/location = \/api\/v1\/payments\/callbacks\/wechat \{([\s\S]*?)\n    \}/);
+  assert.ok(wechatCallback, 'Preview must define an exact WeChat callback location.');
+  assert.match(wechatCallback[1], /auth_basic off/);
+  assert.match(wechatCallback[1], /proxy_pass http:\/\/pr-\$preview_pr:5679/);
+  const gatewayCallback = vhost.match(/location = \/minidrama\/payments\/callbacks\/wechat \{([\s\S]*?)\n    \}/);
+  assert.ok(gatewayCallback, 'Preview must define the fixed HTTPS gateway callback path.');
+  assert.match(gatewayCallback[1], /auth_basic off/);
+  assert.match(gatewayCallback[1], /proxy_pass http:\/\/pr-\$preview_pr:5679\/api\/v1\/payments\/callbacks\/wechat/);
+  assert.match(source, /minidrama\/payments\/callbacks\/wechat/);
+  assert.match(source, /WWW-Authenticate/);
+  assert.match(vhost, /location \/ \{/);
   assert.match(vhost, /resolver 127\.0\.0\.11/);
   // The routed hostname carries the literal pr- prefix; a digits-only match
   // silently falls through to the rejection block (regression 2026-08-27).
@@ -105,6 +119,7 @@ test('production release uses an immutable archive and rollback container', () =
   const library = read('deploy/lib.sh');
   const dockerfile = read('Dockerfile');
   assert.match(source, /prepare_source "\$SHA"/);
+  assert.match(source, /require_env_file prod/);
   assert.match(source, /verify_migrations/);
   assert.match(source, /wait_container_ready.*90/);
   assert.match(source, /--network "\$PROD_PROXY_NETWORK" --network-alias minidrama-app/);

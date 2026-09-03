@@ -39,7 +39,7 @@ jobs:
       - name: Check deployment shell scripts
         run: |
           shellcheck -e SC1091 \
-            deploy/lib.sh deploy/preview-deploy deploy/preview-remove deploy/preview-show deploy/preview-cleanup \
+            deploy/lib.sh deploy/preview-deploy deploy/preview-payment-smoke deploy/preview-remove deploy/preview-show deploy/preview-cleanup \
             deploy/release-deploy deploy/release-rollback deploy/install-operations
       - name: Install backend dependencies
         working-directory: backend-node

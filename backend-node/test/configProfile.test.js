@@ -7,13 +7,8 @@ const path = require('path');
 // loadConfig() resolves configs/config.yaml from process.cwd() first, so every
 // case materialises its own fixture project and chdirs into it.
 //
-// Two contamination sources are deliberately dodged so the tests stay hermetic:
-// 1. The repo-root minidrama.oss.env (relative to the module, regardless of cwd)
-//    would otherwise inject storage values into every load — therefore storage
-//    itself is exercised through deploymentSafety assertions on the deploy side,
-//    and these unit tests prove merge mechanics through an app.tag leaf that no
-//    deployment mapping touches.
-// 2. CFG_*/MINIDRAMA_* variables are snapshotted and restored around each load.
+// Profile environment files resolve from the fixture cwd. CFG_*/MINIDRAMA_*
+// variables are snapshotted and restored around each load.
 const MOD_PATH = require.resolve('../src/config/index.js');
 const BASE_YAML = [
   'app:',
@@ -51,6 +46,8 @@ function loadFrom(dir) {
   const previousCwd = process.cwd();
   const savedProxy = process.env.CFG_IMAGE_PROXY__USE_FOR_VIDEO;
   const savedProfile = process.env.MINIDRAMA_PROFILE;
+  const savedTag = process.env.CFG_APP__TAG;
+  const savedFixture = process.env.PROFILE_ENV_FIXTURE;
   fs.mkdirSync(dir, { recursive: true });
   process.chdir(dir);
   try {
@@ -62,6 +59,10 @@ function loadFrom(dir) {
     else process.env.CFG_IMAGE_PROXY__USE_FOR_VIDEO = savedProxy;
     if (savedProfile === undefined) delete process.env.MINIDRAMA_PROFILE;
     else process.env.MINIDRAMA_PROFILE = savedProfile;
+    if (savedTag === undefined) delete process.env.CFG_APP__TAG;
+    else process.env.CFG_APP__TAG = savedTag;
+    if (savedFixture === undefined) delete process.env.PROFILE_ENV_FIXTURE;
+    else process.env.PROFILE_ENV_FIXTURE = savedFixture;
   }
 }
 
@@ -122,6 +123,29 @@ test('preview profile is an intentional empty set (production-identical)', () =>
   const { mod, cfg } = loadFrom(dir);
   assert.equal(mod.getActiveProfile(), 'preview');
   assert.equal(cfg.image_proxy.use_for_video, true); // unchanged from base
+});
+
+test('profile env file loads before CFG overrides and process env wins', () => {
+  process.env.MINIDRAMA_PROFILE = 'preview';
+  const dir = writeFixture({ preview: '# intentionally empty\n' });
+  fs.writeFileSync(path.join(dir, '.preview.env'), [
+    'CFG_APP__TAG=from-profile-env',
+    'PROFILE_ENV_FIXTURE=from-file',
+  ].join('\n'));
+  process.env.PROFILE_ENV_FIXTURE = 'from-process';
+  delete require.cache[MOD_PATH];
+  const { cfg } = loadFrom(dir);
+  assert.equal(cfg.app.tag, 'from-profile-env');
+  assert.equal(process.env.PROFILE_ENV_FIXTURE, 'from-process');
+});
+
+test('legacy minidrama.oss.env remains the fallback when profile env is absent', () => {
+  process.env.MINIDRAMA_PROFILE = 'prod';
+  const dir = writeFixture({ prod: '# intentionally empty\n' });
+  fs.writeFileSync(path.join(dir, 'minidrama.oss.env'), 'CFG_APP__TAG=from-legacy\n');
+  delete require.cache[MOD_PATH];
+  const { cfg } = loadFrom(dir);
+  assert.equal(cfg.app.tag, 'from-legacy');
 });
 
 // Static-handler cache semantics: successful media responses must be

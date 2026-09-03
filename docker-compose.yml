@@ -16,15 +16,18 @@ services:
       # 数据与代码目录分离：SQLite 库 + 所有上传/生成素材。
       # 默认使用固定宿主机目录，避免重新克隆/替换仓库目录时丢失旧素材 ID。
       - ${MINIDRAMA_DATA_DIR:-/data/minidrama-data}:/app/backend-node/data
-    # Deployment-only credentials stay in this ignored file. Compose otherwise
-    # only loads `.env`, which left a valid `minidrama.oss.env` inactive.
+    # Load the legacy file first, then let .prod.env override it. Both paths
+    # are optional so an existing server and a migrated server can coexist.
     env_file:
-      - ./minidrama.oss.env
+      - path: ./minidrama.oss.env
+        required: false
+      - path: ./.prod.env
+        required: false
     environment:
       - NODE_ENV=production
       - PORT=5679
       - APP_REVISION=${APP_REVISION:-local}
-      # minidrama.oss.env is mapped by backend-node/src/config at runtime.
+      # Legacy MINIDRAMA_OSS_* values are mapped by config at runtime.
       # Do not inject CFG_STORAGE defaults here: Compose interpolation happens
       # before env_file is read and would otherwise force storage.type=local.
     healthcheck:

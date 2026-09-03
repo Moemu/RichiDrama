@@ -14,7 +14,11 @@ test('SD2 settlement is scheduled after the request-visible processing state is 
   scheduleResourceSettlement(db, { error() {} }, 'assets', 1, { provider: 'hub', ctx: {} }, { id: 'asset-1' }, initial, () => polled);
   assert.equal(JSON.parse(db.prepare('SELECT seedance2_asset FROM assets WHERE id = 1').get().seedance2_asset).status, 'processing');
   resolvePoll({ ok: true, asset: { asset_url: 'asset://asset-1', status: 'active' } });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  for (let count = 0; count < 40; count += 1) {
+    const status = JSON.parse(db.prepare('SELECT seedance2_asset FROM assets WHERE id = 1').get().seedance2_asset).status;
+    if (status === 'active') break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
   assert.equal(JSON.parse(db.prepare('SELECT seedance2_asset FROM assets WHERE id = 1').get().seedance2_asset).status, 'active');
 });
 

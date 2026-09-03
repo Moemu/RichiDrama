@@ -25,18 +25,49 @@ function applyDeploymentEnv(name, value) {
   if (!String(process.env[target] || '').trim()) process.env[target] = value;
 }
 
-// Docker Compose does not use `env_file` values while interpolating its
-// `environment` block. Read the deployment variables directly at runtime;
-// local `node` debugging additionally reads the same ignored file. Explicit
-// CFG_* values still win, and no setting is logged here.
-function loadOptionalDeploymentEnv() {
-  for (const name of Object.keys(DEPLOYMENT_OSS_ENV_MAP)) applyDeploymentEnv(name, process.env[name]);
-  const envPath = path.join(__dirname, '..', '..', '..', 'minidrama.oss.env');
-  if (!fs.existsSync(envPath)) return;
-  for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Z0-9_]+)=(.*)\s*$/);
-    if (match) applyDeploymentEnv(match[1], match[2]);
+function parseEnvFile(file) {
+  const values = {};
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!match) continue;
+    let value = match[2];
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    values[match[1]] = value;
   }
+  return values;
+}
+
+function resolveLocalEnvFile() {
+  const explicit = String(process.env.MINIDRAMA_ENV_FILE || '').trim();
+  if (explicit) {
+    const file = path.resolve(explicit);
+    if (!fs.existsSync(file)) throw new Error(`MINIDRAMA_ENV_FILE does not exist: ${file}`);
+    return file;
+  }
+  const profile = String(process.env.MINIDRAMA_PROFILE || '').trim().toLowerCase();
+  const roots = [...new Set([process.cwd(), path.resolve(process.cwd(), '..')])];
+  const candidates = [];
+  if (PROFILE_NAMES.includes(profile)) {
+    for (const root of roots) candidates.push(path.join(root, `.${profile}.env`));
+  }
+  // Compatibility path. A profile file always wins when both files exist.
+  for (const root of roots) candidates.push(path.join(root, 'minidrama.oss.env'));
+  return candidates.find((file) => fs.existsSync(file)) || null;
+}
+
+// Docker receives the selected file through --env-file. Local node processes
+// load the same ignored profile file here. Existing process variables win.
+// The legacy minidrama.oss.env path remains a final compatibility fallback.
+function loadOptionalDeploymentEnv() {
+  const envPath = resolveLocalEnvFile();
+  if (envPath) {
+    for (const [name, value] of Object.entries(parseEnvFile(envPath))) {
+      if (process.env[name] == null || process.env[name] === '') process.env[name] = value;
+    }
+  }
+  for (const name of Object.keys(DEPLOYMENT_OSS_ENV_MAP)) applyDeploymentEnv(name, process.env[name]);
 }
 
 /**
@@ -79,7 +110,8 @@ function applyEnvOverrides(cfg) {
     obj[finalKey] = parseEnvValue(rawVal);
     // Startup diagnostics must never disclose credentials or tokens. The
     // key/path still makes it clear that the override took effect.
-    const sensitive = /(?:secret|password|token|api[_-]?key|access[_-]?key)/i.test(envKey) || /(?:secret|password|token|api[_-]?key|access[_-]?key)/i.test(relPath.join('_'));
+    const sensitivePattern = /(?:secret|password|token|api.*key|access.*key|private.*key|public.*key|certificate|\bpem\b)/i;
+    const sensitive = sensitivePattern.test(envKey) || sensitivePattern.test(relPath.join('_'));
     changed.push(`${envKey} -> ${relPath.join('.')} = ${sensitive ? '<redacted>' : rawVal}`);
   }
   return changed;
