@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+container="${1:-}"
+[[ -n "$container" ]] || { echo 'Preview container name is required.' >&2; exit 1; }
+
+# Run inside the isolated preview container. The token stays in this process.
+# The smoke check never enables payments and never calls a payment provider.
+docker exec -i "$container" node <<'NODE'
+const Database = require('better-sqlite3');
+const authService = require('./src/services/authService');
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+async function main() {
+  const db = new Database('./data/drama_generator.db');
+  const admin = db.prepare("SELECT * FROM users WHERE is_active=1 AND role='admin' ORDER BY id LIMIT 1").get();
+  assert(admin, 'Preview payment smoke requires an active administrator.');
+  const token = authService.issueSession(db, admin).token;
+  const paymentTables = db.prepare("SELECT COUNT(*) count FROM sqlite_master WHERE type='table' AND name IN ('payment_orders','payment_order_events')").get().count;
+  db.close();
+  assert(paymentTables === 2, 'Payment migration tables are missing.');
+
+  const request = async (path, options = {}) => {
+    const response = await fetch(`http://127.0.0.1:5679${path}`, {
+      ...options,
+      headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) },
+    });
+    const text = await response.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch (_) {}
+    return { response, body, text };
+  };
+
+  const root = await fetch('http://127.0.0.1:5679/');
+  const html = await root.text();
+  assert(root.status === 200, 'Preview frontend is not available.');
+  assert(html.includes('(preview)'), 'Preview title badge is missing.');
+
+  const options = await request('/api/v1/payments/options');
+  assert(options.response.status === 200 && options.body?.success, 'Payment options API failed.');
+  const data = options.body.data;
+  assert(data.min_amount_yuan === '0.01', 'Preview payment minimum amount must be one fen.');
+  assert(data.max_amount_yuan === '5000.00', 'Payment maximum amount is incorrect.');
+  assert(data.credits_per_yuan === 100, 'Payment exchange ratio is incorrect.');
+  assert(data.order_expire_minutes === 15, 'Payment expiry is incorrect.');
+  assert(JSON.stringify(data.preset_amounts_yuan) === JSON.stringify(['39.00', '199.00', '599.00']), 'Payment presets are incorrect.');
+
+  const orders = await request('/api/v1/payments/orders');
+  assert(orders.response.status === 200 && orders.body?.success, 'User payment orders API failed.');
+
+  const adminOrders = await request('/api/v1/admin/payment-orders');
+  assert(adminOrders.response.status === 200 && adminOrders.body?.success, 'Admin payment orders API failed.');
+
+  let disabledCreate = 'skipped';
+  let publicCallbacks = 'skipped';
+  if (data.enabled === false) {
+    const create = await request('/api/v1/payments/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: 'wechat', amount_yuan: '10.00', client_request_id: 'preview_smoke_request' }),
+    });
+    assert(create.response.status === 400, 'Disabled payment creation did not fail safely.');
+    assert(create.body?.error?.message === '充值功能暂未开放', 'Disabled payment error changed.');
+    disabledCreate = 'ok';
+
+    const alipay = await fetch('http://127.0.0.1:5679/api/v1/payments/callbacks/alipay', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: '',
+    });
+    const wechat = await fetch('http://127.0.0.1:5679/api/v1/payments/callbacks/wechat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    assert(alipay.status === 503 && wechat.status === 503, 'Public callbacks did not reach the disabled payment service.');
+    publicCallbacks = 'ok';
+  }
+
+  process.stdout.write(`${JSON.stringify({ preview_payment_smoke: 'ok', payments_enabled: data.enabled, disabled_create: disabledCreate, public_callbacks: publicCallbacks })}\n`);
+}
+
+main().catch((error) => {
+  console.error(`Preview payment smoke failed: ${error.message}`);
+  process.exit(1);
+});
+NODE

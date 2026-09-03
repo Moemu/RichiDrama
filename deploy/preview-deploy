@@ -80,11 +80,10 @@ MEDIA_ARGS=()
 
 install_preview_ingress "$SOURCE_DIR/deploy/nginx-preview-vhost.conf"
 
-# The preview application is production-identical by construction: it joins
-# the SAME docker network as production, reads the SAME environment file and
-# therefore talks to the SAME storage backend. The only differences are the
-# per-PR dataset, the pr-<N> network alias and the profile marker.
-ENV_FILE="$(require_env_file)"
+# The preview application joins the same Docker network as production. A
+# dedicated .preview.env can isolate credentials and integrations. Until that
+# file exists, resolve_env_file keeps the legacy minidrama.oss.env fallback.
+ENV_FILE="$(require_env_file preview)"
 ENV_ARGS=(--env-file "$ENV_FILE")
 
 docker run -d --name "$APP_CONTAINER" \
@@ -93,6 +92,7 @@ docker run -d --name "$APP_CONTAINER" \
   --security-opt no-new-privileges --cap-drop ALL --pids-limit 256 \
   --memory 2g --cpus 1 --read-only --tmpfs /tmp:rw,noexec,nosuid,size=128m \
   "${ENV_ARGS[@]}" -e NODE_ENV=production -e PORT=5679 -e "APP_REVISION=$SHA" -e MINIDRAMA_PROFILE=preview \
+  -e CFG_PAYMENTS__MIN_AMOUNT_FEN=1 \
   -v "$DATA_DIR:/app/backend-node/data" "${MEDIA_ARGS[@]}" "$IMAGE" >/dev/null || \
   fail 'Cannot create the preview application container.'
 
@@ -104,6 +104,17 @@ wait_container_ready "$APP_CONTAINER" "$SHA" 90 || fail 'Preview application did
   fail 'Preview Basic Auth accepted incorrect credentials.'
 curl -fsS --max-time 15 --resolve "$HOST:80:127.0.0.1" -u "preview:$PASSWORD" "http://$HOST/ready" | \
   grep -q "\"revision\":\"$SHA\"" || fail 'External preview readiness check failed.'
+
+CALLBACK_RESPONSE="$(curl -sS -D - --max-time 15 --resolve "$HOST:80:127.0.0.1" \
+  -H 'Content-Type: application/json' --data '{}' \
+  "http://$HOST/minidrama/payments/callbacks/wechat")"
+! grep -qi '^WWW-Authenticate:' <<<"$CALLBACK_RESPONSE" || \
+  fail 'Preview HTTPS gateway callback path still requires Basic Auth.'
+grep -q '"code":' <<<"$CALLBACK_RESPONSE" || \
+  fail 'Preview HTTPS gateway callback path did not bypass Basic Auth.'
+
+bash "$SOURCE_DIR/deploy/preview-payment-smoke" "$APP_CONTAINER" || \
+  fail 'Preview payment smoke check failed.'
 
 PROD_DOMAIN="${MINIDRAMA_PROD_DOMAIN:-drama.richbest.cn}"
 curl -fsS --max-time 10 -H "Host: $PROD_DOMAIN" http://127.0.0.1/ready >/dev/null || \

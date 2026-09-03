@@ -94,7 +94,26 @@ cd LocalMiniDrama
 mkdir -p volumes/data
 ```
 
-### 4. 构建并启动
+### 4. 准备环境文件
+
+生产环境使用 Git 忽略文件 `.prod.env`：
+
+```bash
+install -d -m 700 /data/minidrama-config
+cp deploy/.prod.env.example /data/minidrama-config/.prod.env
+chmod 600 /data/minidrama-config/.prod.env
+```
+
+Preview 使用独立文件：
+
+```bash
+cp deploy/.preview.env.example /data/minidrama-config/.preview.env
+chmod 600 /data/minidrama-config/.preview.env
+```
+
+填写真实值时不要输出密钥。旧路径 `minidrama.oss.env` 仍可使用。
+
+### 5. 构建并启动
 
 ```bash
 docker compose up -d --build
@@ -102,7 +121,7 @@ docker compose up -d --build
 
 首次构建会编译 `better-sqlite3` / `sharp` 原生模块，约 5–10 分钟。
 
-### 5. 验证
+### 6. 验证
 
 ```bash
 docker compose ps
