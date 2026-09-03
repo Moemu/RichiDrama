@@ -31,11 +31,21 @@ function isProviderInputImageFetchTimeout(errorMessage) {
     && /timeout while fetching resource/i.test(message);
 }
 
+// The same create-time rejection can identify a reference video or audio.
+// Ark did not create a provider task, so retrying from the immutable snapshot
+// is safe after the failed billing authorization is voided.
+function isProviderInputMediaFetchTimeout(errorMessage) {
+  const message = String(errorMessage || '');
+  return /content\[\d+\]\.(?:image|video|audio)_url/i.test(message)
+    && /not valid/i.test(message)
+    && /timeout while fetching resource/i.test(message);
+}
+
 function canRetryGeneration(generation) {
   return generation?.status === 'retryable'
     || (generation?.status === 'failed' && (
       isProviderInternalMaterialTimeout(generation.error_msg)
-      || (!generation.provider_task_id && isProviderInputImageFetchTimeout(generation.error_msg))
+      || (!generation.provider_task_id && isProviderInputMediaFetchTimeout(generation.error_msg))
     ));
 }
 
@@ -1072,4 +1082,4 @@ async function cancelJob(db, log, jobId, user) {
   return get(db, jobId);
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-module.exports = { create, quote, get, generationHistoryDetail, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, originalPromptFromSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, isCopyrightRestriction, locateRealPersonFailureAsset, locateCopyrightFailureAssets, copyrightFailureAssetSummary, importRealPersonFailureAsset, importCopyrightFailureAssets, isProviderInternalMaterialTimeout, isProviderInputImageFetchTimeout, canRetryGeneration, SHOT_ASSET_LIMITS };
+module.exports = { create, quote, get, generationHistoryDetail, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, originalPromptFromSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, isCopyrightRestriction, locateRealPersonFailureAsset, locateCopyrightFailureAssets, copyrightFailureAssetSummary, importRealPersonFailureAsset, importCopyrightFailureAssets, isProviderInternalMaterialTimeout, isProviderInputImageFetchTimeout, isProviderInputMediaFetchTimeout, canRetryGeneration, SHOT_ASSET_LIMITS };
