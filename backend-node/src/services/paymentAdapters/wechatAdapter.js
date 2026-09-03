@@ -13,13 +13,16 @@ class WechatAdapter {
 
   privateKey() { return secret(this.config.merchant_private_key); }
   publicKey() { return secret(this.config.wechatpay_public_key || this.config.platform_public_key); }
+  appId() { return String(this.config.app_id || '').trim(); }
+  mchId() { return String(this.config.mch_id || '').trim(); }
+  merchantSerialNo() { return String(this.config.merchant_serial_no || '').trim(); }
   publicKeyId() { return String(this.config.wechatpay_public_key_id || '').trim(); }
 
   authorization(method, requestPath, body) {
     const ts = timestamp(); const n = nonce();
     const message = `${method}\n${requestPath}\n${ts}\n${n}\n${body}\n`;
     const signature = crypto.sign('RSA-SHA256', Buffer.from(message), this.privateKey()).toString('base64');
-    return `WECHATPAY2-SHA256-RSA2048 mchid="${this.config.mch_id}",nonce_str="${n}",timestamp="${ts}",serial_no="${this.config.merchant_serial_no}",signature="${signature}"`;
+    return `WECHATPAY2-SHA256-RSA2048 mchid="${this.mchId()}",nonce_str="${n}",timestamp="${ts}",serial_no="${this.merchantSerialNo()}",signature="${signature}"`;
   }
 
   verifySignature(headers, rawBody) {
@@ -69,8 +72,8 @@ class WechatAdapter {
 
   async createNativeOrder(order) {
     const data = await this.request('POST', '/v3/pay/transactions/native', {
-      appid: this.config.app_id,
-      mchid: this.config.mch_id,
+      appid: this.appId(),
+      mchid: this.mchId(),
       description: `瑞池短剧积分充值 ${order.amount_fen / 100}元`,
       out_trade_no: order.out_trade_no,
       time_expire: order.expires_at.replace('.000Z', '+00:00'),
@@ -81,7 +84,7 @@ class WechatAdapter {
   }
 
   async queryOrder(order) {
-    const data = await this.request('GET', `/v3/pay/transactions/out-trade-no/${encodeURIComponent(order.out_trade_no)}?mchid=${encodeURIComponent(this.config.mch_id)}`);
+    const data = await this.request('GET', `/v3/pay/transactions/out-trade-no/${encodeURIComponent(order.out_trade_no)}?mchid=${encodeURIComponent(this.mchId())}`);
     return {
       state: data.trade_state === 'SUCCESS' ? 'paid' : ['CLOSED', 'REVOKED', 'PAYERROR'].includes(data.trade_state) ? 'closed' : 'pending',
       provider_status: data.trade_state,
@@ -92,7 +95,7 @@ class WechatAdapter {
   }
 
   async closeOrder(order) {
-    await this.request('POST', `/v3/pay/transactions/out-trade-no/${encodeURIComponent(order.out_trade_no)}/close`, { mchid: this.config.mch_id });
+    await this.request('POST', `/v3/pay/transactions/out-trade-no/${encodeURIComponent(order.out_trade_no)}/close`, { mchid: this.mchId() });
     return { closed: true };
   }
 
