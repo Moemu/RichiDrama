@@ -3,7 +3,7 @@
     <div v-if="canConcatSelected" class="concat-bar"><el-button @click="concatSelectedVideos">拼接选中的视频</el-button></div>
     <div class="page-header library-header">
       <div class="header-left">
-        <el-button text @click="$router.push('/')">
+        <el-button text @click="returnToSource">
           <el-icon><ArrowLeft /></el-icon>
           返回
         </el-button>
@@ -187,6 +187,7 @@ import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
 import AudioWaveform from '@/components/AudioWaveform.vue'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
+import { safeRedirectPath } from '@/utils/routeRecovery'
 
 const loading = ref(false)
 const uploading = ref(false)
@@ -217,6 +218,14 @@ const route = useRoute()
 const projectDramaId = computed(() => { const id = Number(route.query.drama_id); return Number.isInteger(id) && id > 0 ? id : null })
 const assetScope = computed(() => projectDramaId.value ? 'project' : 'global')
 let keywordTimer = null
+
+function returnToSource() {
+  const rawReturnTo = Array.isArray(route.query.return_to) ? route.query.return_to[0] : route.query.return_to
+  const returnTo = safeRedirectPath(rawReturnTo, '')
+  if (returnTo && !returnTo.startsWith('/media-library')) return router.push(returnTo)
+  if (projectDramaId.value) return router.push({ path: `/film/${projectDramaId.value}`, query: { stage: 'storyboard' } })
+  return router.push('/')
+}
 
 function triggerUpload() {
   uploadInput.value?.click()

@@ -405,6 +405,88 @@ async function resolveVolcOmniImageAsync(rawUrl, files_base_url, storage_local_p
   return resolveImageInputForOmniLocalBase64(raw, files_base_url, storage_local_path, log, video_gen_id);
 }
 
+const SEEDANCE_IMAGE_MAX_DIMENSION = 6000;
+const SEEDANCE_IMAGE_MAX_BYTES = 30_000_000;
+const SEEDANCE_IMAGE_TARGET_DIMENSION = 4096;
+const SEEDANCE_IMAGE_TARGET_BYTES = 12 * 1024 * 1024;
+
+function seedanceImageNeedsNormalization(input) {
+  if (!input || typeof input !== 'object') return false;
+  return Number(input.width) > SEEDANCE_IMAGE_MAX_DIMENSION
+    || Number(input.height) > SEEDANCE_IMAGE_MAX_DIMENSION
+    || Number(input.file_size) > SEEDANCE_IMAGE_MAX_BYTES;
+}
+
+function safeSeedanceLocalImagePath(storageLocalPath, localPath) {
+  if (!storageLocalPath || !localPath) return null;
+  const root = path.resolve(storageLocalPath);
+  const candidate = path.resolve(root, String(localPath).replace(/^[/\\]+/, ''));
+  if (candidate !== root && !candidate.startsWith(root + path.sep)) return null;
+  return fs.statSync(candidate, { throwIfNoEntry: false })?.isFile() ? candidate : null;
+}
+
+async function loadSeedanceImageBuffer(resolvedUrl, input, storageLocalPath) {
+  const localFile = safeSeedanceLocalImagePath(storageLocalPath, input?.local_path);
+  if (localFile) return fs.readFileSync(localFile);
+  const value = String(resolvedUrl || '').trim();
+  if (value.startsWith('data:image/')) {
+    const comma = value.indexOf(',');
+    if (comma < 0) throw new Error('图片 data URL 无效');
+    return Buffer.from(value.slice(comma + 1), 'base64');
+  }
+  if (!/^https?:\/\//i.test(value)) throw new Error('没有可读取的本地文件或公网地址');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(value, { signal: controller.signal });
+    if (!response.ok) throw new Error(`下载图片失败: HTTP ${response.status}`);
+    const declaredBytes = Number(response.headers?.get?.('content-length') || 0);
+    if (declaredBytes > 64 * 1024 * 1024) throw new Error('图片文件超过预处理下载上限');
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length) throw new Error('图片内容为空');
+    if (buffer.length > 64 * 1024 * 1024) throw new Error('图片文件超过预处理下载上限');
+    return buffer;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function normalizeSeedanceImageForModel(resolvedUrl, input, storageLocalPath, log, videoGenId, index) {
+  if (!seedanceImageNeedsNormalization(input) || String(resolvedUrl || '').startsWith('asset://')) return resolvedUrl;
+  if (!sharp) throw new Error(`参考图 ${index + 1} 超出 Seedance 输入限制，但图片处理组件不可用`);
+  try {
+    const source = await loadSeedanceImageBuffer(resolvedUrl, input, storageLocalPath);
+    const pipeline = sharp(source, { failOn: 'none', limitInputPixels: false })
+      .rotate()
+      .resize({ width: SEEDANCE_IMAGE_TARGET_DIMENSION, height: SEEDANCE_IMAGE_TARGET_DIMENSION, fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: { r: 255, g: 255, b: 255 } });
+    let output = await pipeline.clone().jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+    if (output.length > SEEDANCE_IMAGE_TARGET_BYTES) {
+      output = await pipeline.clone().jpeg({ quality: 72, mozjpeg: true }).toBuffer();
+    }
+    const metadata = await sharp(output).metadata();
+    if (!metadata.width || !metadata.height
+      || metadata.width > SEEDANCE_IMAGE_TARGET_DIMENSION
+      || metadata.height > SEEDANCE_IMAGE_TARGET_DIMENSION
+      || output.length > SEEDANCE_IMAGE_MAX_BYTES) {
+      throw new Error('受控尺寸副本仍不符合模型输入限制');
+    }
+    log.info('[VolcOmni] 超限参考图已生成受控尺寸副本', {
+      video_gen_id: videoGenId,
+      index,
+      source_width: Number(input?.width) || null,
+      source_height: Number(input?.height) || null,
+      source_bytes: Number(input?.file_size) || source.length,
+      output_width: metadata.width,
+      output_height: metadata.height,
+      output_bytes: output.length,
+    });
+    return `data:image/jpeg;base64,${output.toString('base64')}`;
+  } catch (error) {
+    throw new Error(`参考图 ${index + 1} 超出 Seedance 输入限制，生成受控尺寸副本失败: ${error.message}`);
+  }
+}
+
 /**
  * Agnes Video：仅接受公网 http(s) 图片 URL，本地/localhost 须先上传图床，禁止 base64。
  */
@@ -558,6 +640,7 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
     watermark,
     image_url,
     reference_urls,
+    reference_video_urls,
     files_base_url,
     storage_local_path,
     video_gen_id,
@@ -577,6 +660,11 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
   // requests keep their established nine-image transport limit.
   const maxRef = /seedance[-_]?2[-_]?5|2[-_]?5[-_]?260628/i.test(finalModel) ? 30 : 9;
   const urls = orderedUrls.slice(0, maxRef);
+  const referenceImageInputs = Array.isArray(opts.reference_image_inputs) ? opts.reference_image_inputs : [];
+  const maxVideoRef = /seedance[-_]?2[-_]?5|2[-_]?5[-_]?260628/i.test(finalModel) ? 10 : 3;
+  const videoUrls = Array.isArray(reference_video_urls)
+    ? reference_video_urls.map((value) => String(value || '').trim()).filter(Boolean).slice(0, maxVideoRef)
+    : [];
 
   const body = {
     model: finalModel,
@@ -605,6 +693,14 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
         i
       );
       if (!u) continue;
+      u = await normalizeSeedanceImageForModel(
+        u,
+        referenceImageInputs[i],
+        storage_local_path,
+        log,
+        video_gen_id,
+        i
+      );
       if (/localhost|127\.0\.0\.1/i.test(u) && storage_local_path && (files_base_url || '').match(/localhost|127\.0\.0\.1/i)) {
         const baseUrl = (files_base_url || '').replace(/\/$/, '');
         const afterStatic = u.split('/static/')[1] || (baseUrl ? u.replace(baseUrl + '/', '').replace(baseUrl, '') : null);
@@ -634,6 +730,17 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
     if (body.content.length > 1) body.task_type = 'i2v';
   }
 
+  for (const videoUrl of videoUrls) {
+    if (!/^https?:\/\//i.test(videoUrl) || /localhost|127\.0\.0\.1|\[::1\]/i.test(videoUrl)) {
+      throw new Error('Seedance 原生视频参考需要模型可访问的 HTTP(S) 地址');
+    }
+    body.content.push({
+      type: 'video_url',
+      video_url: { url: videoUrl },
+      role: 'reference_video',
+    });
+  }
+
   // Seedance 2.0 音色参考：本路径仅 volcengine_omni 调用；有 URL 即注入（网关别名如 mingiz-sd2 也要生效）
   if (opts.voice_reference_url) {
     let voiceUrl = String(opts.voice_reference_url).trim();
@@ -661,17 +768,21 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
         preview = String(part.image_url.url).slice(0, 80);
       } else if (part.audio_url?.url) {
         preview = String(part.audio_url.url).slice(0, 80);
+      } else if (part.video_url?.url) {
+        preview = String(part.video_url.url).slice(0, 80);
       }
       return { idx, type: t, role, preview };
     });
 
     const hasAudioRef = body.content.some(p => p.role === 'reference_audio' || p.type === 'audio_url');
+    const hasVideoRef = body.content.some(p => p.role === 'reference_video' || p.type === 'video_url');
 
     log.info('[VolcOmni][全能结构体] 最终发往火山的 content 概览（含音色参考验证）', {
       video_gen_id,
       model: finalModel,
       content_length: body.content.length,
       has_reference_audio: hasAudioRef,
+      has_reference_video: hasVideoRef,
       voice_reference_url_from_opts: voice_reference_url ? String(voice_reference_url).slice(0, 100) : null,
       content_summary: contentSummary
     });
@@ -685,6 +796,7 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
     ratio,
     duration: effectiveDuration,
     image_count: urls.length,
+    video_count: videoUrls.length,
     has_voice_ref: !!voice_reference_url,
     video_gen_id,
   });
@@ -693,6 +805,7 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
     ratio,
     duration: effectiveDuration,
     image_count: urls.length,
+    video_count: videoUrls.length,
     has_voice_ref: !!voice_reference_url,
   });
 
@@ -1085,6 +1198,38 @@ function buildQueryUrl(config, taskId) {
   ep = String(ep).replace(/\{taskId\}/gi, encodeURIComponent(taskId)).replace(/\{task_id\}/gi, encodeURIComponent(taskId)).replace(/\{id\}/gi, encodeURIComponent(taskId));
   if (!ep.startsWith('/')) ep = '/' + ep;
   return base + ep;
+}
+
+/**
+ * 火山方舟只允许取消仍处于 queued 的视频任务。
+ * 先查询实时状态，避免 DELETE 误删已经结束的厂商记录。
+ */
+async function cancelVideoTask(config, log, taskId) {
+  const provider = String(config?.provider || '').toLowerCase();
+  if (!['volces', 'volcengine', 'volc'].includes(provider)) {
+    return { cancelled: false, reason: 'unsupported_provider' };
+  }
+  const url = buildQueryUrl(config, taskId);
+  const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (config.api_key || '') };
+  let queryResponse;
+  try { queryResponse = await fetch(url, { method: 'GET', headers }); }
+  catch (error) { throw new Error(`查询火山任务状态失败: ${error.message || error}`); }
+  const queryRaw = await queryResponse.text();
+  if (!queryResponse.ok) throw new Error(`查询火山任务状态失败: ${queryResponse.status}${queryRaw ? ` - ${queryRaw.slice(0, 200)}` : ''}`);
+  let queryData;
+  try { queryData = queryRaw ? JSON.parse(queryRaw) : {}; } catch (_) { throw new Error('查询火山任务状态失败: 响应不是有效 JSON'); }
+  const providerStatus = extractPollTaskStatus(queryData);
+  if (providerStatus !== 'queued') {
+    const terminal = ['succeeded', 'failed', 'cancelled', 'canceled', 'expired'].includes(providerStatus);
+    return { cancelled: false, reason: terminal ? 'terminal' : providerStatus === 'running' ? 'running' : 'unknown_status', provider_status: providerStatus };
+  }
+  let deleteResponse;
+  try { deleteResponse = await fetch(url, { method: 'DELETE', headers }); }
+  catch (error) { throw new Error(`取消火山排队任务失败: ${error.message || error}`); }
+  const deleteRaw = await deleteResponse.text();
+  if (!deleteResponse.ok) throw new Error(`取消火山排队任务失败: ${deleteResponse.status}${deleteRaw ? ` - ${deleteRaw.slice(0, 200)}` : ''}`);
+  log.info('Volcengine queued video task cancelled', { task_id: taskId });
+  return { cancelled: true, provider_status: 'cancelled' };
 }
 
 // ????????? ? API ?? ID ???API ????+???????
@@ -3751,6 +3896,8 @@ async function callVideoApi(db, log, opts) {
       watermark: opts.watermark,
       image_url: opts.image_url,
       reference_urls: opts.reference_urls,
+      reference_video_urls: opts.reference_video_urls,
+      reference_image_inputs: opts.reference_image_inputs,
       files_base_url: opts.files_base_url,
       storage_local_path: opts.storage_local_path,
       video_gen_id: opts.video_gen_id,
@@ -3994,6 +4141,12 @@ async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 
   log.info('[poll] 开始', { video_gen_id: videoGenId, task_id: pollTaskId, protocol, poll_url: queryUrl() });
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await new Promise((r) => setTimeout(r, intervalMs));
+    // A confirmed user cancellation changes the durable local status first.
+    // Stop this in-memory poll before it can overwrite that terminal result.
+    if (db?.prepare) {
+      const local = db.prepare('SELECT status FROM video_generations WHERE id = ?').get(videoGenId);
+      if (local && local.status !== 'processing') return { stopped: true, local_status: local.status };
+    }
     try {
       let url, headers;
       if (isKling) {
@@ -4340,6 +4493,7 @@ module.exports = {
   getDefaultVideoConfig,
   callVideoApi,
   pollVideoTask,
+  cancelVideoTask,
   normalizeAspectRatioForApi,
   isPlausibleHttpVideoUrl,
   pickProxyVideoUrl,
@@ -4355,4 +4509,6 @@ module.exports = {
   buildSd2ActiveAssetUrlLookup,
   applySeedance2CertifiedAssetUrlsToVideoOpts,
   callVolcengineOmniVideoApi,
+  seedanceImageNeedsNormalization,
+  normalizeSeedanceImageForModel,
 };

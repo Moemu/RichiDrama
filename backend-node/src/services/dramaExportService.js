@@ -95,7 +95,7 @@ async function exportDrama(db, cfg, log, dramaId) {
   const storyboardsByEp = {};
   for (const ep of episodes) {
     storyboardsByEp[ep.id] = db.prepare(
-      'SELECT * FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY storyboard_number'
+      `SELECT * FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY ${require('./storyboardIdentityService').orderSql(db)}`
     ).all(ep.id);
   }
 

@@ -1,5 +1,5 @@
 <template>
-  <button v-if="visible" class="account-balance" type="button" title="打开账户中心" @click="router.push('/account')">
+  <button v-if="visible" class="account-balance" type="button" title="打开账户中心" @click="openAccount">
     <span>{{ account?.account_scope === 'organization' ? '共享额度' : '可用余额' }}</span>
     <strong>{{ displayCredits }}</strong>
     <small v-if="frozen > 0">冻结 {{ frozen }}</small>
@@ -21,6 +21,11 @@ const visible = computed(() => !route.meta.public && hasSession.value)
 const available = computed(() => Number(account.value?.available ?? account.value?.balance ?? 0))
 const frozen = computed(() => Number(account.value?.frozen ?? 0))
 const displayCredits = computed(() => Number.isFinite(available.value) ? available.value.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '0')
+
+function openAccount() {
+  if (route.path === '/account') return
+  router.push({ path: '/account', query: { return_to: route.fullPath } })
+}
 
 async function refreshBalance() {
   hasSession.value = Boolean(localStorage.getItem('lmd_auth_token'))

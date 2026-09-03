@@ -43,16 +43,16 @@ function getResourceTasks(db, log) {
 }
 
 function cancelTaskStatus(db, log) {
-  return (req, res) => {
+  return async (req, res) => {
     try {
       const task = ownedTask(db, req.params.task_id, req.auth);
       if (!task || task === false) return response.notFound(res, '任务不存在');
-      // 全能视频有独立的账本和厂商提交边界；不能由通用 task 路由伪取消。
+      // 全能视频有独立账本，并可按厂商实时状态取消排队任务。
       const omni = db.prepare(`SELECT j.id FROM omni_video_jobs j
         JOIN video_generations v ON v.id = j.video_generation_id
         WHERE v.task_id = ?`).get(req.params.task_id);
       if (omni) {
-        const result = require('../services/omniVideoService').cancelJob(db, log, omni.id, req.auth);
+        const result = await require('../services/omniVideoService').cancelJob(db, log, omni.id, req.auth);
         return response.success(res, result);
       }
       const submitted = db.prepare(`SELECT provider_task_id FROM video_generations

@@ -334,4 +334,8 @@ test('video capabilities only advertise native media modes with an adapter', () 
 
   const seedance = normalizeSupports({ api_protocol: 'volcengine_omni', default_model: 'seedance-2.0' }, {});
   assert.equal(seedance.audio_reference, true);
+  assert.equal(seedance.video_reference, true);
+
+  const unsupportedSeedanceGateway = normalizeSupports({ api_protocol: 'openai', default_model: 'seedance-2.0' }, { video_reference: true });
+  assert.equal(unsupportedSeedanceGateway.video_reference, false);
 });

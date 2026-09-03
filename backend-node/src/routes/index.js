@@ -420,7 +420,10 @@ function setupRouter(cfg, db, log) {
   r.post('/omni-video-jobs/:id/adopt-source', omniVideo.adoptSource);
   r.post('/omni-video-jobs/:id/adopt', omniVideo.adopt);
   r.post('/omni-video-jobs/:id/extract-frame', omniVideo.extractFrame);
+  r.post('/omni-video-jobs/:id/real-person-asset', omniVideo.importRealPersonAsset);
+  r.post('/omni-video-jobs/:id/copyright-assets/import', omniVideo.importCopyrightAssets);
   r.post('/video-generations/:id/extract-frame', omniVideo.extractVideoFrame);
+  r.get('/video-generations/:id/history-detail', omniVideo.generationHistoryDetail);
   r.get('/omni-video-jobs/:id', omniVideo.get);
 
   // ---------- episodes ----------
@@ -506,6 +509,7 @@ function setupRouter(cfg, db, log) {
   r.put('/storyboards/reorder', storyboards.reorder);
   r.post('/storyboards', storyboards.create);
   r.post('/storyboards/:id/insert-before', storyboards.insertBefore);
+  r.post('/storyboards/:id/copy', storyboards.copy);
   r.get('/storyboards/:id', storyboards.getOne);
   r.put('/storyboards/:id', storyboards.update);
   r.patch('/storyboards/:id/generation-settings', storyboards.storyboardGenerationSettingsUpdate);

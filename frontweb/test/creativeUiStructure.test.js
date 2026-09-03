@@ -63,6 +63,10 @@ test('自由创作报价由后端按模型的有效计量单位计算', async ()
   assert.match(apiSource, /request\.post\('\/omni-video-jobs\/quote', body\)/)
   assert.match(quoteHandler, /model: currentCapability\.value\.model/)
   assert.match(quoteHandler, /duration: normalizeDuration\(duration\.value\)/)
+  assert.match(source, /quoteHasVideoInput = computed\(\(\) => requestMaterialRouting\.value\.sent\.video > 0\)/)
+  assert.match(source, /quoteHasAudioInput = computed\(\(\) => requestMaterialRouting\.value\.sent\.audio > 0\)/)
+  assert.match(quoteHandler, /has_video_input: quoteHasVideoInput\.value/)
+  assert.match(quoteHandler, /has_audio: quoteHasAudioInput\.value/)
   assert.doesNotMatch(quoteHandler, /usage:\s*\{\s*second:/)
 })
 
@@ -271,7 +275,17 @@ test('镜头素材集合从镜头保存的 assets 恢复，未引用素材不丢
 
   assert.match(handler, /const materialIds = \(shot\.assets \|\| \[\]\)\.map/)
   assert.match(handler, /selectedOrder\.value = \[\.\.\.new Set\(materialIds\)\]/)
-  assert.match(source, /:class="\{ selected: selected\.has\(asset\.id\) \}"/)
+  assert.match(source, /:class="\{ selected: selected\.has\(asset\.id\), 'is-readonly': reproductionMode \}"/)
+})
+
+test('切换镜头时立即隔离上一镜头的生成记录', async () => {
+  const source = await readSource('../src/views/FreeCreate.vue')
+  const handler = source.slice(source.indexOf('function loadShot'), source.indexOf('async function loadShotHistory'))
+
+  assert.match(handler, /shotHistory\.value = \[\]/)
+  assert.match(handler, /shotHistoryShotId\.value = shot\.id/)
+  assert.match(source, /Number\(shotHistoryShotId\.value\) === Number\(currentShot\.value\?\.id\)/)
+  assert.doesNotMatch(source, /生成记录加载失败，已保留当前列表/)
 })
 
 test('工作台不以镜头时长重复模拟生成进度', async () => {
@@ -381,7 +395,11 @@ test('单视频工具直达生成并引用账号全部素材', async () => {
   assert.match(media, /historyExpanded = ref\(false\)/)
   assert.match(media, /featured\.value = null[\s\S]*created = await omniVideoAPI\.create/)
   assert.match(media, /history_kind: 'omni'[\s\S]*await load\(true, submittedPreview\)/)
-  assert.match(media, /const pendingFeatured = activeStatuses\.has\(featured\.value\?\.status\)[\s\S]*preferredFeatured \|\| pendingFeatured/)
+  assert.match(media, /currentSubmissionKey = ref\(''\)/)
+  assert.match(media, /chooseToolMediaFeatured\(items\.value, \{/)
+  assert.match(media, /currentSubmissionKey: currentSubmissionKey\.value/)
+  assert.match(media, /currentSubmissionKey\.value = historyKey\(submittedPreview\)/)
+  assert.match(media, /video_model: getDefaultCapabilityModel\(capabilities\.value\)/)
   assert.match(media, /activeStatuses\.has\(featured\.value\?\.status\)/)
   assert.match(media, /\.featured\s*>\s*footer\s*\{[\s\S]*position:\s*static/)
   assert.match(media, /grid-template-rows:\s*minmax\(0,\s*1fr\)\s*auto/)
@@ -390,6 +408,10 @@ test('单视频工具直达生成并引用账号全部素材', async () => {
   assert.match(media, /include-generation-quote/)
   assert.match(media, /:has-video-input="quoteHasVideoInput"/)
   assert.match(media, /:has-audio-input="quoteHasAudioInput"/)
+  assert.match(media, /Seedance 2\.0\/2\.5 支持图片、视频和音频全模态参考/)
+  assert.match(media, /平台接入：当前适配层尚未发送视频本体/)
+  assert.match(media, /materialRouting\.value\.sent\.video > 0/)
+  assert.match(media, /当前平台预计发送/)
   assert.match(media, /@pick="onPromptAssetPick"/)
   assert.match(selector, /beginAssetPointerDrag/)
   assert.match(selector, /assets-loaded/)
@@ -465,6 +487,20 @@ test('generation settings refresh the full video quote when billable inputs chan
   assert.match(source, /value\.value\.video_model[\s\S]*value\.value\.duration[\s\S]*value\.value\.resolution/)
   assert.match(source, /props\.hasVideoInput[\s\S]*props\.hasAudioInput/)
   assert.match(source, /const revision = \+\+quoteRevision[\s\S]*if \(props\.includeGenerationQuote && !includeGeneration\)/)
+})
+
+test('project storyboard generation settings include the video generation quote', async () => {
+  const [filmCreate, freeCreate] = await Promise.all([
+    readSource('../src/views/FilmCreate.vue'),
+    readSource('../src/views/FreeCreate.vue'),
+  ])
+  const legacySettingsTags = filmCreate.match(/<GenerationSettings\b[\s\S]*?\/>/g) || []
+  assert.equal(legacySettingsTags.length, 3)
+  for (const tag of legacySettingsTags) assert.match(tag, /include-generation-quote/)
+  assert.match(filmCreate, /<FreeCreate[\s\S]*embedded/)
+  assert.match(freeCreate, /<GenerationSettings[\s\S]*include-generation-quote[\s\S]*:has-video-input="quoteHasVideoInput"[\s\S]*:has-audio-input="quoteHasAudioInput"/)
+  assert.match(freeCreate, /quoteHasVideoInput = computed\(\(\) => requestMaterialRouting\.value\.sent\.video > 0\)/)
+  assert.match(freeCreate, /quoteHasAudioInput = computed\(\(\) => requestMaterialRouting\.value\.sent\.audio > 0\)/)
 })
 
 test('运营页面始终提供返回主页入口', async () => {
@@ -734,7 +770,7 @@ test('成片操作栏不会覆盖视频，嵌入分镜保持三栏创作节奏',
     readSource('../src/views/FilmCreate.vue'),
   ])
 
-  const playablePreviewStart = free.indexOf('<template v-if="activeVideoUrl">')
+  const playablePreviewStart = free.indexOf('<template v-if="activeVideoUrl && !previewVideoError && !previewVideoProgress">')
   const videoStageStart = free.indexOf('<div class="video-stage has-video"', playablePreviewStart)
   const frameActionsStart = free.indexOf('<div class="frame-actions"', videoStageStart)
   assert.ok(playablePreviewStart >= 0 && videoStageStart > playablePreviewStart && frameActionsStart > videoStageStart, 'preview controls and frame actions must wait for a playable video')
@@ -769,7 +805,7 @@ test('生产工作流保持稳定导航、比例预览和可展开的次要信�
   assert.match(film, /\.merge-stage-active \.video-option-hint,\.merge-stage-active \.video-watermark-input\{grid-column:1 \/ -1;width:100%;min-width:0/)
   assert.match(film, /\.merge-stage-active \.main>:is\(\.merge-settings,\.merge-output\)\{overflow-y:auto;overscroll-behavior-y:contain/)
   assert.match(free, /'--preview-aspect-ratio': previewAspectRatio/)
-  assert.match(free, /<template v-if="activeVideoUrl">[\s\S]*<div class="video-stage has-video"/)
+  assert.match(free, /<template v-if="activeVideoUrl && !previewVideoError && !previewVideoProgress">[\s\S]*<div class="video-stage has-video"/)
   assert.match(free, /\.project-storyboard-page \.player-tools\{flex:0 0 44px;min-height:44px;overflow:visible\}/)
   assert.match(free, /\.project-storyboard-page \.video-stage\{flex:0 0 auto!important;width:auto;height:clamp\(190px,28dvh,300px\);margin:12px auto!important;aspect-ratio:var\(--preview-aspect-ratio,16 \/ 9\)\}/)
   assert.match(free, /video-stage\.has-video \.main-video\{inset:0!important;transform:none\}/)

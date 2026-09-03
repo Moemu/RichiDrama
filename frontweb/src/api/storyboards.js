@@ -134,6 +134,9 @@ export const storyboardsAPI = {
   insertBefore(id) {
     return request.post(`/storyboards/${id}/insert-before`, {})
   },
+  copy(id) {
+    return request.post(`/storyboards/${id}/copy`, {})
+  },
   batchInferParams(episodeId, overwrite = false) {
     return request.post('/storyboards/batch-infer-params', { episode_id: episodeId, overwrite })
   },

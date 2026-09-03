@@ -76,6 +76,65 @@ test('operations projections paginate video production and keep optional stages 
   }
 });
 
+test('failed production detail returns the immutable prompt and material reproduction snapshot', () => {
+  const dbPath = path.join(os.tmpdir(), `lmd-production-reproduction-${Date.now()}.db`);
+  let db = getDb({ path: dbPath, type: 'sqlite' });
+  try {
+    runMigrationsAndEnsure(db);
+    const now = '2026-09-02T02:00:00.000Z';
+    db.prepare("INSERT INTO users (username,password_hash,role,is_active,created_at,updated_at) VALUES ('replay-admin','x','admin',1,?,?)").run(now, now);
+    const ownerId = db.prepare("SELECT id FROM users WHERE username='replay-admin'").get().id;
+    const dramaId = Number(db.prepare("INSERT INTO dramas (title,owner_user_id,created_at,updated_at) VALUES ('复现项目',?,?,?)").run(ownerId, now, now).lastInsertRowid);
+    const episodeId = Number(db.prepare("INSERT INTO episodes (drama_id,episode_number,title,created_at,updated_at) VALUES (?,1,'第一集',?,?)").run(dramaId, now, now).lastInsertRowid);
+    const storyboardId = Number(db.prepare("INSERT INTO storyboards (episode_id,storyboard_number,title,status,created_at,updated_at) VALUES (?,1,'失败镜头','failed',?,?)").run(episodeId, now, now).lastInsertRowid);
+    const assetId = Number(db.prepare("INSERT INTO assets (drama_id,owner_user_id,name,type,local_path,created_at,updated_at) VALUES (?,?,'角色参考','image','projects/replay/role.png',?,?)").run(dramaId, ownerId, now, now).lastInsertRowid);
+    const videoId = Number(db.prepare(`INSERT INTO video_generations
+      (drama_id,storyboard_id,owner_user_id,provider,prompt,model,duration,aspect_ratio,resolution,status,error_msg,created_at,updated_at)
+      VALUES (?,?,?,'chatfire','实际提交提示词','seedance-replay',8,'16:9','720p','failed','供应商拒绝',?,?)`).run(dramaId, storyboardId, ownerId, now, now).lastInsertRowid);
+    const requestSnapshot = {
+      original_prompt: '用户完整提示词 @角色参考', prompt: '实际提交提示词',
+      prompt_document: { text: '用户完整提示词 @角色参考', refs: [{ asset_id: assetId, alias: '角色参考' }] },
+      model: 'seedance-replay', creation_mode: 'multi_reference', duration: 8,
+      aspect_ratio: '16:9', resolution: '720p', audio_strategy: 'reference_only',
+      post_process: { keep_original_audio: false, audio_volume: 1, audio_fade_seconds: 0 },
+    };
+    const jobId = Number(db.prepare(`INSERT INTO omni_video_jobs
+      (video_generation_id,owner_user_id,prompt,model_requested,model_resolved,request_snapshot_json,storyboard_id,created_at,updated_at)
+      VALUES (?,?,?,'seedance-replay','seedance-replay',?,?,?,?)`).run(videoId, ownerId, '实际提交提示词', JSON.stringify(requestSnapshot), storyboardId, now, now).lastInsertRowid);
+    db.prepare(`INSERT INTO omni_video_job_assets
+      (omni_job_id,asset_id,ordinal,alias,media_type,role,usage,send_to_model,snapshot_json,created_at)
+      VALUES (?,?,1,'角色参考','image','reference','reference',1,?,?)`).run(jobId, assetId, JSON.stringify({ asset_id: assetId, alias: '角色参考', type: 'image', local_path: 'projects/replay/role.png', send_to_model: true }), now);
+    db.prepare('UPDATE assets SET local_path=? WHERE id=?').run('projects/replay/current-role.png', assetId);
+    db.prepare(`INSERT INTO omni_video_job_assets
+      (omni_job_id,asset_id,ordinal,alias,media_type,role,usage,send_to_model,snapshot_json,created_at)
+      VALUES (?,NULL,2,'远程临时参考','image','reference','reference',1,?,?)`).run(jobId, JSON.stringify({ alias: '远程临时参考', type: 'image', url: 'https://supplier.example/signed.png' }), now);
+
+    const detail = operations.productionDetail(db, videoId);
+    assert.equal(detail.reproduction.prompt, '用户完整提示词 @角色参考');
+    assert.equal(detail.reproduction.provider_prompt, '实际提交提示词');
+    assert.equal(detail.reproduction.settings.model, 'seedance-replay');
+    assert.equal(detail.reproduction.materials[0].asset_id, assetId);
+    assert.equal(detail.reproduction.materials[0].local_path, 'projects/replay/role.png');
+    assert.equal(detail.reproduction.materials[0].send_to_model, true);
+    assert.equal(detail.reproduction.materials[1].local_path, null);
+    assert.equal(detail.reproduction.materials[1].available, false);
+    assert.equal(detail.reproduction.unavailable_material_count, 1);
+    assert.equal(detail.reproduction.can_open_workbench, true);
+    assert.equal(detail.reproduction.episode_id, episodeId);
+
+    closeDb();
+    db = getDb({ path: dbPath, type: 'sqlite' });
+    const restored = operations.productionDetail(db, videoId);
+    assert.equal(restored.reproduction.prompt, '用户完整提示词 @角色参考');
+    assert.equal(restored.reproduction.materials[0].local_path, 'projects/replay/role.png');
+    db.prepare('UPDATE storyboards SET deleted_at=? WHERE id=?').run(now, storyboardId);
+    assert.equal(operations.productionDetail(db, videoId).reproduction.can_open_workbench, true);
+  } finally {
+    closeDb();
+    for (const suffix of ['', '-wal', '-shm']) try { fs.unlinkSync(dbPath + suffix); } catch (_) {}
+  }
+});
+
 test('billing ledgers filter by Shanghai calendar day and user role without changing user scope', () => {
   const dbPath = path.join(os.tmpdir(), `lmd-billing-ledger-filters-${Date.now()}.db`);
   const db = getDb({ path: dbPath, type: 'sqlite' });

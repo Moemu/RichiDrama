@@ -65,7 +65,7 @@ function materializeStoryboard(db, storyboardId, settings, at) {
 
 function canonicalStoryboards(db, episodeId, columns = '*') {
   const rows = db.prepare(`SELECT ${columns} FROM storyboards WHERE episode_id=? AND deleted_at IS NULL
-    ORDER BY sort_order ASC, storyboard_number ASC, id ASC`).all(Number(episodeId));
+    ORDER BY ${require('./storyboardIdentityService').orderSql(db)}`).all(Number(episodeId));
   // Keep this order identical to the storyboard list API: duplicate shot numbers
   // occupy their original visual slot, while the newest row is the visible one.
   const byNumber = new Map();

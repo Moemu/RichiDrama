@@ -346,6 +346,7 @@ function _doImport(db, storagePath, files, data, d, title, metaStr, now, log, ow
          VALUES (${sbCols.map(() => '?').join(', ')})`
       ).run(...sbVals);
       const sbId = sbInfo.lastInsertRowid;
+      try { require('./storyboardIdentityService').ensureIdentity(db, sbId, Math.max(0, Number(sb.storyboard_number || 1) - 1)); } catch (_) {}
 
       // 还原 storyboard_props（分镜与道具的关联）
       if (sbPropNewIds.length > 0) {

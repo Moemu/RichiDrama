@@ -289,6 +289,16 @@ function routes(db, log) {
         response.internalError(res, err.message);
       }
     },
+    copy: (req, res) => {
+      try {
+        const sb = storyboardService.copyStoryboard(db, log, req.params.id);
+        if (!sb) return response.notFound(res, '目标分镜不存在');
+        response.created(res, sb);
+      } catch (err) {
+        log.error('storyboards copy', { error: err.message, id: req.params.id });
+        response.internalError(res, err.message || '复制分镜失败');
+      }
+    },
     getOne: (req, res) => {
       try {
         const sb = storyboardService.getStoryboardById(db, req.params.id);
@@ -1119,7 +1129,7 @@ function routes(db, log) {
         if (!episodeId) return response.badRequest(res, 'episode_id 必填');
 
         const rows = db.prepare(
-          'SELECT id, angle_s, shot_type, atmosphere, time, description, action, movement, lighting_style, depth_of_field FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY storyboard_number ASC'
+          `SELECT id, angle_s, shot_type, atmosphere, time, description, action, movement, lighting_style, depth_of_field FROM storyboards WHERE episode_id = ? AND deleted_at IS NULL ORDER BY ${require('../services/storyboardIdentityService').orderSql(db)}`
         ).all(episodeId);
 
         let updated = 0;

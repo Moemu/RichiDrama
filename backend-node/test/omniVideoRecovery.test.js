@@ -13,6 +13,19 @@ const tenants = require('../src/services/tenantService');
 const billing = require('../src/services/billingService');
 const videoService = require('../src/services/videoService');
 
+test('only safe provider material-fetch timeouts enable failed-generation retry', () => {
+  const internalTimeout = 'Timeout while downloading url: https://ark-common-storage-prod-cn-beijing.tos-cn-beijing.volces.com/ark-async-gateway/cgt-test/2?x-tos-process=image%2Fformat%2Cjpg Request id: 021788';
+  const inputFetchTimeout = '火山 Seedance 全能创建失败: 400 - The parameter `content[1].image_url` specified in the request is not valid: timeout while fetching resource. Request id: 021788333812264a7468c13ae862cf181a1dbcac0db1f8247ce00';
+  assert.equal(omni.isProviderInternalMaterialTimeout(internalTimeout), true);
+  assert.equal(omni.isProviderInputImageFetchTimeout(inputFetchTimeout), true);
+  assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: internalTimeout }), true);
+  assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: inputFetchTimeout, provider_task_id: null }), true);
+  assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: inputFetchTimeout, provider_task_id: 'already-created' }), false);
+  assert.equal(omni.canRetryGeneration({ status: 'retryable', error_msg: 'restart recovery' }), true);
+  assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: 'failed to download input image https://customer.example/reference.png' }), false);
+  assert.equal(omni.canRetryGeneration({ status: 'failed', error_msg: 'Timeout while downloading url: https://example.com/image.jpg' }), false);
+});
+
 test('SD2 recovery marks an unrecoverable waiting job invalid instead of retrying forever', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'local-mini-drama-sd2-recovery-'));
   try {
@@ -63,8 +76,8 @@ test('SD2 waiting generation resumes after restart when an old snapshot has no i
     const now = new Date().toISOString();
     const pendingCertification = JSON.stringify({ status: 'processing', stage: 'processing', hub_asset_id: 'asset-pending', asset_url: 'asset://asset-pending' });
     const asset = db.prepare(`INSERT INTO assets
-      (owner_user_id, name, type, url, local_path, processing_status, requires_sd2_identity, seedance2_asset, created_at, updated_at)
-      VALUES (?, '真人参考图.png', 'image', '/static/library/identity.png', 'library/identity.png', 'ready', 1, ?, ?, ?)`)
+      (owner_user_id, name, type, url, local_path, width, height, file_size, processing_status, requires_sd2_identity, seedance2_asset, created_at, updated_at)
+      VALUES (?, '真人参考图.png', 'image', '/static/library/identity.png', 'library/identity.png', 12699, 7559, 30023620, 'ready', 1, ?, ?, ?)`)
       .run(admin.id, pendingCertification, now, now);
 
     const waiting = omni.create(db, log, {
@@ -74,6 +87,9 @@ test('SD2 waiting generation resumes after restart when an old snapshot has no i
     }, admin);
     assert.equal(waiting.status, 'sd2_waiting');
     const storedJob = db.prepare('SELECT id, request_snapshot_json FROM omni_video_jobs WHERE video_generation_id=?').get(waiting.video_generation_id);
+    assert.deepEqual(videoService.loadOmniReferenceImageInputs(db, waiting.video_generation_id, ['https://cdn.example/identity.png']), [{
+      url: 'https://cdn.example/identity.png', local_path: 'library/identity.png', width: 12699, height: 7559, file_size: 30023620,
+    }]);
     const storedSnapshot = JSON.parse(storedJob.request_snapshot_json);
     assert.equal(storedSnapshot.idempotency_key, 'client-sd2-waiting-1');
     assert.equal(omni.get(db, storedJob.id).request_snapshot.idempotency_key, undefined);
@@ -109,11 +125,21 @@ test('SD2 waiting generation resumes after restart when an old snapshot has no i
     assert.equal(authorization.idempotency_key, `omni-video:sd2-resume:${waiting.video_generation_id}`);
 
     billing.voidAuthorization(db, admin, resumed.billing_authorization_id, 'SD2 recovery retry test');
-    db.prepare("UPDATE video_generations SET status='retryable' WHERE id=?").run(waiting.video_generation_id);
+    const internalTimeout = 'Timeout while downloading url: https://ark-common-storage-prod-cn-beijing.tos-cn-beijing.volces.com/ark-async-gateway/cgt-test/2?x-tos-process=image%2Fformat%2Cjpg Request id: 021788';
+    db.prepare("UPDATE video_generations SET status='failed', error_msg=? WHERE id=?").run(internalTimeout, waiting.video_generation_id);
+    const retrySnapshot = JSON.parse(db.prepare('SELECT request_snapshot_json FROM omni_video_jobs WHERE id=?').get(storedJob.id).request_snapshot_json);
+    retrySnapshot.original_prompt = '真人参考镜头';
+    retrySnapshot.prompt = 'processed-prompt-must-not-be-reused';
+    db.prepare('UPDATE omni_video_jobs SET request_snapshot_json=? WHERE id=?').run(JSON.stringify(retrySnapshot), storedJob.id);
+    assert.equal(omni.get(db, storedJob.id).can_retry_generation, true);
+    assert.equal(omni.list(db, { owner_user_id: admin.id }).find((item) => item.id === storedJob.id)?.can_retry_generation, true);
     const retried = omni.retry(db, log, storedJob.id, admin);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(retried.status, 'processing');
     assert.notEqual(retried.video_generation_id, waiting.video_generation_id);
+    const retriedSnapshot = JSON.parse(db.prepare('SELECT request_snapshot_json FROM omni_video_jobs WHERE id=?').get(retried.omni_job_id).request_snapshot_json);
+    assert.equal(retriedSnapshot.original_prompt, '真人参考镜头');
+    assert.doesNotMatch(retriedSnapshot.prompt, /processed-prompt-must-not-be-reused/);
     const retryGeneration = db.prepare('SELECT billing_authorization_id FROM video_generations WHERE id=?').get(retried.video_generation_id);
     const retryAuthorization = db.prepare("SELECT idempotency_key FROM billing_transactions WHERE id=? AND type='authorization'").get(retryGeneration.billing_authorization_id);
     assert.equal(retryAuthorization.idempotency_key, `omni-video:retry:${storedJob.id}`);
