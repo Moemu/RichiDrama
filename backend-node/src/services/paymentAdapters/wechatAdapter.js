@@ -46,14 +46,24 @@ class WechatAdapter {
     const raw = await response.text();
     const headers = Object.fromEntries(response.headers.entries());
     const responseSignature = headers['wechatpay-signature'];
+    let data = {};
+    try { data = raw ? JSON.parse(raw) : {}; } catch (_) {}
     if (this.publicKey() && responseSignature && !this.verifySignature(headers, raw)) {
-      throw Object.assign(new Error('微信支付响应验签失败'), { code: 'WECHAT_RESPONSE_SIGNATURE_INVALID' });
+      throw Object.assign(new Error('微信支付响应验签失败'), { status: 502, code: 'WECHAT_RESPONSE_SIGNATURE_INVALID' });
     }
     if (this.publicKey() && raw && !responseSignature) {
-      throw Object.assign(new Error('微信支付响应缺少签名'), { code: 'WECHAT_RESPONSE_SIGNATURE_MISSING' });
+      if (!response.ok) {
+        const providerCode = String(data.code || '').replace(/[\r\n]/g, ' ').slice(0, 80);
+        const providerMessage = String(data.message || '').replace(/[\r\n]/g, ' ').slice(0, 200);
+        const detail = [providerCode, providerMessage].filter(Boolean).join('：');
+        throw Object.assign(
+          new Error(`微信支付返回未签名的 HTTP ${response.status}${detail ? `（${detail}）` : ''}`),
+          { status: 502, code: 'WECHAT_UNSIGNED_HTTP_ERROR', providerStatus: response.status, providerCode }
+        );
+      }
+      throw Object.assign(new Error('微信支付响应缺少签名'), { status: 502, code: 'WECHAT_RESPONSE_SIGNATURE_MISSING' });
     }
-    let data = {}; try { data = raw ? JSON.parse(raw) : {}; } catch (_) {}
-    if (!response.ok) throw Object.assign(new Error(data.message || '微信支付接口失败'), { code: data.code || `WECHAT_HTTP_${response.status}` });
+    if (!response.ok) throw Object.assign(new Error(data.message || '微信支付接口失败'), { status: 502, code: data.code || `WECHAT_HTTP_${response.status}` });
     return data;
   }
 

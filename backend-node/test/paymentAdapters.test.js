@@ -58,3 +58,48 @@ test('WeChat requests identify the configured verification public key', async ()
     global.fetch = originalFetch;
   }
 });
+
+test('WeChat reports an unsigned provider error without accepting its response', async () => {
+  const merchant = keyPair(); const platform = keyPair();
+  const adapter = new WechatAdapter({ mch_id: 'mch-1', merchant_serial_no: 'merchant-serial', merchant_private_key: merchant.privateKey, wechatpay_public_key_id: 'PUB_KEY_ID_3000000001', wechatpay_public_key: platform.publicKey }, 'https://example.test/wechat');
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async () => ({
+      ok: false,
+      status: 401,
+      headers: new Map([['content-type', 'application/json']]),
+      text: async () => JSON.stringify({ code: 'SIGN_ERROR', message: 'sign not match' }),
+    });
+    await assert.rejects(
+      adapter.request('POST', '/v3/pay/transactions/native', { mchid: 'mch-1' }),
+      (error) => error.code === 'WECHAT_UNSIGNED_HTTP_ERROR'
+        && error.status === 502
+        && error.providerStatus === 401
+        && error.providerCode === 'SIGN_ERROR'
+        && /HTTP 401/.test(error.message)
+        && /SIGN_ERROR/.test(error.message)
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('WeChat rejects an unsigned successful response', async () => {
+  const merchant = keyPair(); const platform = keyPair();
+  const adapter = new WechatAdapter({ mch_id: 'mch-1', merchant_serial_no: 'merchant-serial', merchant_private_key: merchant.privateKey, wechatpay_public_key_id: 'PUB_KEY_ID_3000000001', wechatpay_public_key: platform.publicKey }, 'https://example.test/wechat');
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: new Map([['content-type', 'application/json']]),
+      text: async () => JSON.stringify({ code_url: 'weixin://wxpay/test' }),
+    });
+    await assert.rejects(
+      adapter.request('POST', '/v3/pay/transactions/native', { mchid: 'mch-1' }),
+      (error) => error.code === 'WECHAT_RESPONSE_SIGNATURE_MISSING' && error.status === 502
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
