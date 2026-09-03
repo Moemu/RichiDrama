@@ -8,7 +8,7 @@ const { runMigrationsAndEnsure } = require('../src/db/migrate');
 const auth = require('../src/services/authService');
 const billing = require('../src/services/billingService');
 const organizations = require('../src/services/customerOrganizationService');
-const { createPaymentService, paymentNotifyUrl } = require('../src/services/paymentService');
+const { createPaymentService, paymentConfig, paymentNotifyUrl, parseAmountFen } = require('../src/services/paymentService');
 
 function setup() {
   const dbPath = path.join(os.tmpdir(), `minidrama-payments-${Date.now()}-${Math.random()}.db`);
@@ -56,6 +56,12 @@ test('payment amount validation uses exact fen boundaries', () => {
     assert.equal(service.parseAmountFen('10.25'), 1025);
     for (const value of ['0.99', '5000.01', '1.001', '-1', 'abc']) assert.throws(() => service.parseAmountFen(value));
   } finally { teardown(dbPath); }
+});
+
+test('preview configuration can lower the payment minimum to one fen', () => {
+  const config = paymentConfig({ payments: { min_amount_fen: 1, max_amount_fen: 500000 } });
+  assert.equal(parseAmountFen('0.01', config), 1);
+  assert.throws(() => parseAmountFen('0.001', config));
 });
 
 test('payment creation is idempotent and paid notifications credit once', async () => {

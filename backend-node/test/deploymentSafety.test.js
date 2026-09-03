@@ -33,6 +33,7 @@ test('preview deployment is production-identical except dataset and title', () =
   assert.match(library, /\/data\/minidrama-config\/\.\$\{profile\}\.env/);
   assert.match(library, /\/data\/minidrama-config\/minidrama\.oss\.env/);
   assert.match(source, /MINIDRAMA_PROFILE=preview/);
+  assert.match(source, /CFG_PAYMENTS__MIN_AMOUNT_FEN=1/);
   assert.doesNotMatch(source, /MINIDRAMA_STORAGE_TYPE|static_missing_mode|remote_read_base/);
   // The retired security-theatre machinery must stay retired.
   assert.doesNotMatch(source + library, /media-proxy|nginx-preview-edge/);

@@ -32,7 +32,7 @@
             <button v-for="amount in paymentOptions.preset_amounts_yuan || []" :key="amount" type="button" role="radio" :aria-checked="rechargeAmountChoice === amount" :class="{active: rechargeAmountChoice === amount}" @click="selectRechargeAmount(amount)">¥{{ Number(amount) }}</button>
             <button type="button" role="radio" :aria-checked="rechargeAmountChoice === 'custom'" :class="{active: rechargeAmountChoice === 'custom'}" @click="selectRechargeAmount('custom')">自定义</button>
           </div>
-          <label v-if="rechargeAmountChoice === 'custom'" class="custom-amount"><span>输入自定义金额</span><el-input ref="customAmountInput" v-model="customRechargeAmount" inputmode="decimal" placeholder="1.00–5000.00"><template #prepend>¥</template></el-input><small>1 元兑换 100 积分。金额最多保留两位小数。</small></label>
+          <label v-if="rechargeAmountChoice === 'custom'" class="custom-amount"><span>输入自定义金额</span><el-input ref="customAmountInput" v-model="customRechargeAmount" inputmode="decimal" :placeholder="rechargeAmountRange"><template #prepend>¥</template></el-input><small>允许 {{ rechargeAmountRange }} 元。1 元兑换 100 积分，金额最多保留两位小数。</small></label>
           <div class="payment-channels"><button v-for="channel in paymentOptions.channels || []" :key="channel.id" type="button" :disabled="!channel.enabled" :class="{active: rechargeChannel === channel.id}" @click="rechargeChannel = channel.id"><b>{{ channel.id === 'alipay' ? '支付宝' : '微信支付' }}</b><small>{{ channel.enabled ? '扫码支付' : '暂未开放' }}</small></button></div>
           <div class="recharge-submit"><span>{{ paymentSubmitHint }}</span><el-button type="primary" size="large" :disabled="!canCreatePayment" :loading="creatingPayment" @click="createPayment">提交充值订单</el-button></div>
         </section>
@@ -152,16 +152,22 @@ const paymentTick = ref(Date.now())
 let paymentPollTimer = null
 let paymentSyncCounter = 0
 const rechargeAmount = computed(() => rechargeAmountChoice.value === 'custom' ? customRechargeAmount.value : rechargeAmountChoice.value)
+const rechargeAmountRange = computed(() => `${paymentOptions.value.min_amount_yuan || '1.00'}–${paymentOptions.value.max_amount_yuan || '5000.00'}`)
+const rechargeAmountValid = computed(() => {
+  if (!/^\d+(?:\.\d{1,2})?$/.test(rechargeAmount.value)) return false
+  const amount = Number(rechargeAmount.value)
+  return amount >= Number(paymentOptions.value.min_amount_yuan) && amount <= Number(paymentOptions.value.max_amount_yuan)
+})
 const rechargeCredits = computed(() => {
   const amount = Number(rechargeAmount.value)
   return Number.isFinite(amount) && amount > 0 ? new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(amount * 100) : 0
 })
-const canCreatePayment = computed(() => paymentOptions.value.enabled && paymentOptions.value.personal_recharge_allowed && paymentOptions.value.channels?.some((item) => item.id === rechargeChannel.value && item.enabled) && /^\d+(?:\.\d{1,2})?$/.test(rechargeAmount.value))
+const canCreatePayment = computed(() => paymentOptions.value.enabled && paymentOptions.value.personal_recharge_allowed && paymentOptions.value.channels?.some((item) => item.id === rechargeChannel.value && item.enabled) && rechargeAmountValid.value)
 const paymentSubmitHint = computed(() => {
   if (!paymentOptions.value.enabled) return '支付配置完成后可以提交订单。'
   if (!paymentOptions.value.channels?.some((item) => item.enabled)) return '当前没有可用支付渠道。'
   if (!rechargeChannel.value) return '请选择支付渠道。'
-  if (!/^\d+(?:\.\d{1,2})?$/.test(rechargeAmount.value)) return '请输入有效的充值金额。'
+  if (!rechargeAmountValid.value) return `请输入 ${rechargeAmountRange.value} 元之间的金额。`
   return `将充值 ¥${Number(rechargeAmount.value).toFixed(2)}，预计到账 ${rechargeCredits.value} 积分。`
 })
 const countdownText = computed(() => {

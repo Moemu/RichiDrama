@@ -42,7 +42,7 @@ async function main() {
   const options = await request('/api/v1/payments/options');
   assert(options.response.status === 200 && options.body?.success, 'Payment options API failed.');
   const data = options.body.data;
-  assert(data.min_amount_yuan === '1.00', 'Payment minimum amount is incorrect.');
+  assert(data.min_amount_yuan === '0.01', 'Preview payment minimum amount must be one fen.');
   assert(data.max_amount_yuan === '5000.00', 'Payment maximum amount is incorrect.');
   assert(data.credits_per_yuan === 100, 'Payment exchange ratio is incorrect.');
   assert(data.order_expire_minutes === 15, 'Payment expiry is incorrect.');

@@ -27,6 +27,9 @@ preview 使用隔离数据库。它不会修改生产余额。
 
 preview 优先读取 `/data/minidrama-config/.preview.env`。
 
+Preview 部署把最小充值金额固定为 0.01 元。该设置只用于真实渠道的小额验收。
+生产环境仍使用 1 元最小金额。
+
 旧服务器没有该文件时，会回退到 `minidrama.oss.env`。回退期间必须保持支付关闭。
 
 不要在 preview 使用生产支付密钥或生产支付二维码。
