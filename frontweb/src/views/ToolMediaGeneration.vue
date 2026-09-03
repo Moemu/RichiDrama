@@ -15,24 +15,24 @@
 
     <div class="tool-content">
       <section class="workflow-banner" aria-labelledby="tool-title">
-        <div><span>AI 单项工具</span><h1 id="tool-title">{{ media === 'image' ? '生成单张图片' : '直接生成单个视频' }}</h1><p>{{ media === 'image' ? '输入提示词并选择素材，完成一张图片。' : '无需新建项目。输入长提示词，引用已有素材，然后生成成片。' }}</p></div>
+        <div><span>AI 单项工具</span><h1 id="tool-title">{{ media === 'image' ? '生成单张图片' : '直接生成单个视频' }}</h1></div>
         <ul v-if="media === 'video'" aria-label="工作流特点"><li>无需项目</li><li>支持 @ 素材</li><li>支持拖入素材</li></ul>
       </section>
 
       <section id="media-tool-input" class="control-panel" aria-label="创作输入与生成设置">
         <section v-if="media === 'image'" class="input-section project-section">
-          <div class="section-heading"><div><h2>选择项目</h2><p>项目只用于图片计费和素材归属。</p></div></div>
+          <div class="section-heading"><div><h2>选择项目</h2></div></div>
           <label class="field-label">计费归属项目
             <el-select v-model="dramaId" filterable placeholder="选择项目后读取项目素材" aria-label="计费归属项目">
               <el-option v-for="project in projects" :key="project.id" :label="project.title" :value="project.id" />
             </el-select>
           </label>
-          <p class="project-note" :class="{ ready: dramaId }"><span aria-hidden="true">{{ dramaId ? '✓' : '!' }}</span>{{ dramaId ? '上传的新素材会进入当前项目素材库。' : '先选择项目，才能提交生成任务。' }}</p>
+          <p class="project-note" :class="{ ready: dramaId }"><span aria-hidden="true">{{ dramaId ? '✓' : '!' }}</span>{{ dramaId ? '新素材会进入该项目素材库。' : '先选择项目，才能提交生成任务。' }}</p>
         </section>
 
         <div class="setup-grid">
         <section class="input-section mode-section">
-          <div class="section-heading"><div><h2>生成方式</h2><p>选择与素材输入匹配的模式。</p></div></div>
+          <div class="section-heading"><div><h2>生成方式</h2></div></div>
           <div class="mode-grid" role="radiogroup" aria-label="创作模式">
             <button v-for="item in modes" :key="item.value" type="button" role="radio" :aria-checked="String(mode === item.value)" :class="{ active: mode === item.value }" :disabled="!modeAvailable(item.value)" @click="selectMode(item.value)">
               <b>{{ item.label }}</b><small>{{ modeAvailable(item.value) ? item.hint : '当前模型不支持' }}</small>
@@ -41,7 +41,7 @@
         </section>
 
         <section v-if="media === 'video' || !['text', 'batch'].includes(mode)" class="input-section asset-section">
-          <div class="section-heading"><div><h2>素材库</h2><p>{{ media === 'video' ? '点击选用素材，或把素材卡拖到下方提示词中的准确位置。' : selectedMode.rule }}</p></div></div>
+          <div class="section-heading"><div><h2>素材库</h2><p>{{ media === 'video' ? '点击选用素材，或拖到提示词中的指定位置。' : selectedMode.rule }}</p></div></div>
           <template v-if="mode === 'first_last'">
             <div class="frame-selectors">
               <ToolAssetSelector v-model="firstFrameAssetId" :drama-id="media === 'image' ? Number(dramaId) || null : null" :types="['image']" :prompt-draggable="media === 'video'" label="首帧（必选）" @selected="applyFirstFrame" @assets-loaded="mergeLibraryAssets" />
@@ -75,7 +75,7 @@
         </div>
 
         <section class="input-section prompt-section">
-          <div class="section-heading"><div><h2>{{ media === 'image' ? '图片提示词' : '视频提示词' }}</h2><p>{{ media === 'video' ? '支持上千字内容。输入 @ 选择素材，也可从上方直接拖入。' : '描述主体、构图和画面风格。' }}</p></div></div>
+          <div class="section-heading"><div><h2>{{ media === 'image' ? '图片提示词' : '视频提示词' }}</h2></div></div>
           <OmniAssetPromptEditor v-if="media === 'video'" ref="promptEditorRef" v-model="prompt" :assets="libraryAssets" :chosen-ids="chosenAssetIds" :reference-document="promptDocument" placeholder="描述视频内容；输入 @ 引用素材，或把上方素材卡拖入此处" @pick="onPromptAssetPick" @references="setPromptReferences" />
           <el-input v-else v-model="prompt" type="textarea" :autosize="{ minRows: 12, maxRows: 24 }" name="generation_prompt" autocomplete="off" placeholder="描述主体、构图和画面风格…" />
         </section>
@@ -201,7 +201,7 @@ const submitHint = computed(() => {
   const fallback = materialRouting.value.preprocessedVideos ? `；${materialRouting.value.preprocessedVideos} 个视频仅提取关键帧` : ''
   return `已就绪 · 预计向模型发送 ${materialRouting.value.sent.total} 项${fallback}`
 })
-const statusText = (status) => ({ pending: '排队中', processing: '生成中', sd2_waiting: '素材准备中', upscale_pending: '等待超分', upscaling: '超分中', interpolation_pending: '等待插帧', interpolating: '插帧中', persisting: '保存成片', billing_reconciliation: '等待对账', completed: '已完成', failed: '生成失败', retryable: '可重试' }[status] || status || '草稿')
+const statusText = (status) => ({ pending: '排队中', processing: '生成中', sd2_waiting: '素材准备中', upscale_pending: '等待画质增强', upscaling: '画质增强中', interpolation_pending: '等待补帧', interpolating: '画面补帧中', persisting: '保存成片', billing_reconciliation: '等待结算', completed: '已完成', failed: '生成失败', retryable: '可重试' }[status] || status || '草稿')
 const mediaUrl = (item) => item?.local_path ? `/static/${String(item.local_path).replace(/^\/+/, '')}` : item?.video_url || ''
 const assetUrl = (asset) => asset?.local_path || asset?.url || ''
 const applySelectedAsset = (asset) => { selectedAsset.value = asset || null }

@@ -182,7 +182,7 @@
             </div>
           </div>
         </div>
-        <div v-if="!charLibraryLoading && charLibraryList.length === 0" class="library-empty">素材库暂无角色，可在项目中将角色「加入素材库」后在此查看</div>
+        <div v-if="!charLibraryLoading && charLibraryList.length === 0" class="library-empty">暂无角色。可在项目中将角色「加入素材库」。</div>
       </div>
       <div class="library-pagination">
         <el-pagination v-model:current-page="charLibraryPage" v-model:page-size="charLibraryPageSize" :total="charLibraryTotal" :page-sizes="[10, 20, 50]" layout="total, sizes, prev, pager, next" @current-change="loadCharLibraryList" @size-change="loadCharLibraryList" />
@@ -236,7 +236,7 @@
             </div>
           </div>
         </div>
-        <div v-if="!sceneLibraryLoading && sceneLibraryList.length === 0" class="library-empty">素材库暂无场景，可在项目中将场景「加入素材库」后在此查看</div>
+        <div v-if="!sceneLibraryLoading && sceneLibraryList.length === 0" class="library-empty">暂无场景。可在项目中将场景「加入素材库」。</div>
       </div>
       <div class="library-pagination">
         <el-pagination v-model:current-page="sceneLibraryPage" v-model:page-size="sceneLibraryPageSize" :total="sceneLibraryTotal" :page-sizes="[10, 20, 50]" layout="total, sizes, prev, pager, next" @current-change="loadSceneLibraryList" @size-change="loadSceneLibraryList" />
@@ -291,7 +291,7 @@
             </div>
           </div>
         </div>
-        <div v-if="!propLibraryLoading && propLibraryList.length === 0" class="library-empty">素材库暂无道具，可在项目中将道具「加入素材库」后在此查看</div>
+        <div v-if="!propLibraryLoading && propLibraryList.length === 0" class="library-empty">暂无道具。可在项目中将道具「加入素材库」。</div>
       </div>
       <div class="library-pagination">
         <el-pagination v-model:current-page="propLibraryPage" v-model:page-size="propLibraryPageSize" :total="propLibraryTotal" :page-sizes="[10, 20, 50]" layout="total, sizes, prev, pager, next" @current-change="loadPropLibraryList" @size-change="loadPropLibraryList" />
@@ -1067,7 +1067,7 @@ async function manageDeletedOmniProjects() {
     const projects = await omniVideoAPI.listDeletedSequences()
     if (!projects.length) return ElMessage.info('没有已删除的全能项目')
     const lines = projects.map((item) => `${item.id}：${item.name || '未命名全能项目'}（${item.shot_count || 0} 个镜头）`).join('\n')
-    const { value } = await ElMessageBox.prompt(`${lines}\n\n输入项目 ID 恢复；输入 purge:ID 永久清理。永久清理只删除项目编排，保留成片、素材与任务历史。`, '已删除全能项目', { inputPlaceholder: '例如：12 或 purge:12' })
+    const { value } = await ElMessageBox.prompt(`${lines}\n\n输入项目 ID 恢复；输入 purge:ID 永久清理。永久清理保留成片、素材与任务历史。`, '已删除全能项目', { inputPlaceholder: '例如：12 或 purge:12' })
     const valueText = String(value || '').trim()
     if (!valueText) return
     const purge = valueText.startsWith('purge:'); const id = Number(purge ? valueText.slice(6) : valueText)

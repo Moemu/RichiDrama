@@ -43,11 +43,11 @@
 
       <ol class="creation-track" aria-label="短剧创作流程">
         <li v-for="(step, index) in creationSteps" :key="step.label" :class="{ active: activeStep === index }">
-          <button type="button" :aria-label="`查看${step.label}阶段`" @click="activeStep = index">
+          <button type="button" :aria-label="`查看「${step.label}」`" @click="activeStep = index">
             <span class="track-index">0{{ index + 1 }}</span>
             <span class="track-copy">
               <strong>{{ step.label }}</strong>
-              <small>{{ step.detail }}</small>
+              <small v-if="step.detail">{{ step.detail }}</small>
             </span>
           </button>
         </li>
@@ -212,9 +212,9 @@ const form = reactive({ username: '', password: '', display_name: '' })
 const { isDark, toggle: toggleTheme } = useTheme()
 
 const creationSteps = [
-  { label: '灵感成形', detail: '一句话长成完整故事', status: '灵感引擎在线 · 等待你的第一句话' },
-  { label: '世界建立', detail: '角色与场景保持一致', status: '角色与场景系统就绪 · 连续性已锁定' },
-  { label: '镜头开拍', detail: '分镜自然流向成片', status: '生成片场就绪 · 下一镜由你决定' },
+  { label: '一句话长成完整故事', detail: '', status: '等待你的第一句话' },
+  { label: '角色与场景保持一致', detail: '', status: '连续性已锁定' },
+  { label: '分镜自然流向成片', detail: '', status: '下一镜由你决定' },
 ]
 
 const spotlightStyle = computed(() => ({

@@ -8,12 +8,12 @@
     <UiChoiceField label="智能插帧（按需）" :model-value="value.target_fps || ''" :options="fpsOptions" @update:model-value="set('target_fps', $event || null)" />
     <UiChoiceField label="宽高比" :model-value="value.aspect_ratio || '16:9'" :options="aspectRatioOptions" @update:model-value="set('aspect_ratio', $event)" />
     <div class="postprocess-quote" role="status" aria-live="polite" :aria-busy="quoteLoading">
-      <b>产出链路：</b>{{ quote?.chain || localChain }}
-      <span v-if="quoteLoading"> · 正在核算</span>
-      <span v-else-if="quote"> · 预计 {{ formatPoints(quote.estimated_total_points) }} 积分</span>
-      <span v-else-if="quoteError"> · {{ quoteError }}</span>
-      <span v-else-if="includeGenerationQuote && !value.video_model"> · 选择视频模型后显示预计积分</span>
-      <small>最终按本地成片实测时长、分辨率和帧率结算；未选择的阶段不预授权、不调用、不扣费。</small>
+      <b>预计积分：</b>
+      <span v-if="quoteLoading">正在核算…</span>
+      <span v-else-if="quote">{{ formatPoints(quote.estimated_total_points) }}</span>
+      <span v-else-if="quoteError">{{ quoteError }}</span>
+      <span v-else-if="includeGenerationQuote && !value.video_model">选择视频模型后显示</span>
+      <small>未选择的阶段不扣费。</small>
     </div>
   </section>
 </template>

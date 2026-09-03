@@ -99,7 +99,7 @@
             <div class="script-pane-inner">
               <div class="script-sub-block script-story-block">
                 <h2 class="section-title">故事生成</h2>
-                <p class="section-desc">输入一段故事梗概，AI 帮你扩写成完整剧本，或直接导入小说章节</p>
+                <p class="section-desc">输入故事梗概生成剧本，或导入小说章节</p>
                 <el-input
                   v-model="storyInput"
                   type="textarea"
@@ -184,7 +184,7 @@
           </el-tab-pane>
           <el-tab-pane label="选择剧本" name="select">
             <p class="section-desc script-mode-hint">
-              从剧本库选择后，仅把「故事梗概」与「各集剧本正文」写入当前工程，不会导入角色、分镜、图片或视频。
+              仅导入「故事梗概」与「各集剧本正文」。
             </p>
             <el-button type="primary" @click="openSelectScriptDialog">
               <el-icon><Document /></el-icon>
@@ -366,7 +366,6 @@
         <div class="resource-center-heading">
           <div>
             <h2 class="section-title">统一资源管理</h2>
-            <p class="section-desc">先准备角色、场景、道具和上传媒体；分镜阶段只从这里选择并引用，不再重复建库。</p>
           </div>
           <el-button type="primary" plain :loading="resourceMediaUploading" @click="openResourceMediaUpload"><el-icon><Upload /></el-icon>上传媒体素材</el-button>
         </div>
@@ -435,7 +434,7 @@
           </article>
         </div>
         <div class="resource-media-library">
-          <header><div><b>媒体素材库</b><small>上传的图片、视频、音频会在分镜引用区统一可用。</small></div><div class="resource-media-header-actions"><el-button size="small" type="danger" plain :disabled="!unifiedResourceSelection.media.size" @click="batchDeleteUnifiedResources('media')">批量删除{{ unifiedResourceSelection.media.size ? `（${unifiedResourceSelection.media.size}）` : '' }}</el-button><el-button size="small" @click="openProjectMediaLibrary">管理当前项目素材</el-button><span>{{ universalLibraryAssets.length }} 项</span></div></header>
+          <header><div><b>媒体素材库</b></div><div class="resource-media-header-actions"><el-button size="small" type="danger" plain :disabled="!unifiedResourceSelection.media.size" @click="batchDeleteUnifiedResources('media')">批量删除{{ unifiedResourceSelection.media.size ? `（${unifiedResourceSelection.media.size}）` : '' }}</el-button><el-button size="small" @click="openProjectMediaLibrary">管理当前项目素材</el-button><span>{{ universalLibraryAssets.length }} 项</span></div></header>
           <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card" :class="{ selected: isUnifiedResourceSelected('media', asset.id) }"><el-checkbox class="resource-media-select" :model-value="isUnifiedResourceSelected('media', asset.id)" :aria-label="`选择媒体素材 ${asset.name || asset.id}`" @click.stop @change="toggleUnifiedResourceSelection('media', asset.id)" /><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><el-button class="resource-media-delete" size="small" type="danger" circle :aria-label="asset.source_type === 'project_resource' ? '解除项目素材' : asset.library_scope === 'global' ? '删除全局素材' : '删除项目素材'" @click="deleteResourceMedia(asset)">×</el-button><small>{{ asset.name || `素材 ${asset.id}` }}</small><small>{{ asset.library_scope === 'global' ? '我的全局素材' : '当前项目素材' }}</small><div class="resource-media-card-actions"><el-button size="small" text @click="renameResourceMedia(asset)">重命名</el-button><el-button size="small" type="danger" text @click="deleteResourceMedia(asset)">{{ asset.source_type === 'project_resource' ? '解除素材' : '删除' }}</el-button></div><small v-if="asset.source_type === 'project_resource'">关联资源：解除后不会被自动重建</small></article></div>
           <div v-if="detachedResourceLinks.length" class="resource-media-grid"><article v-for="link in detachedResourceLinks" :key="`detached-${link.id}`" class="resource-media-card"><span>已解除</span><small>{{ link.asset_name || `${link.resource_type} #${link.resource_id}` }}</small><small>历史分镜引用仍保留</small><el-button size="small" type="primary" text @click="restoreResourceMedia(link)">恢复关联</el-button></article></div>
           <p v-else class="resource-center-empty">还没有上传媒体素材。</p>
@@ -499,7 +498,7 @@
               <span class="sb-omni-left-sb-name">{{ activeSb.title || '未命名分镜' }}</span>
             </div>
             <div class="sb-omni-material-panel">
-              <div class="sb-omni-material-note">统一资源库：媒体素材 + 本镜关联的场景/角色/道具图；点击选用，拖到提示词框直接引用。</div>
+              <div class="sb-omni-material-note">点击选用素材，或拖到提示词框直接引用。</div>
               <div v-if="(sbOmniAssetIds[activeSb.id] || []).length" class="sb-omni-material-summary">
                 已选 {{ (sbOmniAssetIds[activeSb.id] || []).length }}/{{ sbOmniShotLimits.total }}；图片 {{ sbOmniSelectedCounts(activeSb).image }}/{{ sbOmniShotLimits.image }}，视频 {{ sbOmniSelectedCounts(activeSb).video }}/{{ sbOmniShotLimits.video }}，音频 {{ sbOmniSelectedCounts(activeSb).audio }}/{{ sbOmniShotLimits.audio }}
               </div>
@@ -975,11 +974,9 @@
                   @blur="() => onSaveSbNarrationField(sb)"
                 />
                 <div v-if="(sbNarration[sb.id] || sb.narration || '').toString().trim()" class="sb-narration-actions">
-                  <el-tooltip content="解说旁白配音（TTS）" placement="top">
-                    <el-button size="small" :loading="ttsSbNarrationIds.has(sb.id)" @click="onTtsSbNarration(sb)">
-                      解说配音
-                    </el-button>
-                  </el-tooltip>
+                  <el-button size="small" :loading="ttsSbNarrationIds.has(sb.id)" @click="onTtsSbNarration(sb)">
+                    解说配音
+                  </el-button>
                   <el-tooltip v-if="sbNarrationAudioRelPath(sb)" content="播放解说旁白配音" placement="top">
                     <el-button size="small" @click="playSbNarrationTts(sb)">
                       <el-icon><VideoPlay /></el-icon>
@@ -1188,7 +1185,7 @@
                       </div>
                       <div class="sb-fl-slot-actions">
                         <el-button type="primary" size="small" :loading="generatingSbFirstImageIds.has(sb.id)" @click="onGenerateSbFrameImage(sb, 'first')">生成</el-button>
-                        <el-tooltip v-if="canUsePrevTailAsFirst(sb)" content="直接使用上一分镜的尾帧图片（高清原图）替换本首帧，画面更清晰" placement="top">
+                        <el-tooltip v-if="canUsePrevTailAsFirst(sb)" content="用上一分镜的尾帧作为本镜首帧" placement="top">
                           <el-button size="small" :loading="usingPrevTailAsFirstIds.has(sb.id)" @click="onUsePrevTailAsFirst(sb)">上镜尾帧</el-button>
                         </el-tooltip>
                         <el-button size="small" :loading="uploadingSbImageSlot(sb.id) === 'first'" @click="onUploadSbImageClick(sb, 'first')">上传</el-button>
@@ -1231,7 +1228,7 @@
                     </div>
                   </div>
                   <div v-if="getStripItems(sb.id).length" class="sb-imgs-strip">
-                    <el-tooltip content="历史图：点击设为首帧或尾帧，左上角放大预览，右上角删除" placement="top" :show-arrow="false">
+                    <el-tooltip content="点击设为首帧或尾帧" placement="top" :show-arrow="false">
                       <el-icon class="sb-strip-hint-icon"><InfoFilled /></el-icon>
                     </el-tooltip>
                     <div
@@ -1289,9 +1286,6 @@
                   </template>
                 </div>
                 <div v-if="getStripItems(sb.id).length" class="sb-imgs-strip">
-                  <el-tooltip content="历史图：点击设为主图，左上角放大预览，右上角删除" placement="top" :show-arrow="false">
-                    <el-icon class="sb-strip-hint-icon"><InfoFilled /></el-icon>
-                  </el-tooltip>
                   <div
                     v-for="item in getStripItems(sb.id)"
                     :key="item.key"
@@ -1408,7 +1402,7 @@
               </div>
               <div v-if="getSbVideo(sb.id)" class="sb-video-actions">
                 <el-button size="small" :loading="isSbVideoGenerating(sb.id)" :disabled="!sbCanSubmitVideo(sb) || isSbVideoGenerating(sb.id)" @click="onGenerateSbVideo(sb)">重新生成</el-button>
-                <el-tooltip v-if="getNextStoryboard(sb.id)" content="提取本视频尾帧，设为下一个分镜的首帧" placement="top">
+                <el-tooltip v-if="getNextStoryboard(sb.id)" content="提取尾帧作为下一分镜首帧" placement="top">
                   <el-button size="small" :loading="linkingTailFrameIds.has(sb.id)" @click="onLinkTailFrameToNext(sb)">尾帧衔接</el-button>
                 </el-tooltip>
                 <el-tooltip v-if="sb.dialogue" content="对白配音（TTS）" placement="top">
@@ -1449,15 +1443,15 @@
       </div>
 
       <div v-show="workflowStage === 'storyboard'" class="workflow-next-action sb-stage-actions">
-        <span>{{ storyboards.length ? `已有 ${storyboards.length} 个分镜；生成完成后即可检查并合成。` : '请先生成至少一个分镜。' }}</span>
+        <span>{{ storyboards.length ? `已有 ${storyboards.length} 个分镜，生成完成后可合成。` : '请先生成至少一个分镜。' }}</span>
         <div class="sb-stage-gen-group">
-          <span class="sb-stage-gen-label" title="留空由 AI 按剧本估算；填 1 会被当作明确只生成 1 镜">分镜数量</span>
+          <span class="sb-stage-gen-label" title="留空由 AI 按剧本估算">分镜数量</span>
           <el-input-number v-model="storyboardCount" :min="1" :max="200" :step="5" placeholder="自动" size="small" controls-position="right" style="width: 96px" />
-          <span class="sb-stage-gen-label" title="每镜时长以此为准(保存到项目设置,视频生成默认时长同源)；总时长与镜数仅作整体规划参考">每段(秒)</span>
+          <span class="sb-stage-gen-label" title="每段视频的时长">每段(秒)</span>
           <el-select v-model="videoClipDuration" size="small" style="width: 82px" @change="() => saveProjectSettings(false)">
             <el-option v-for="sec in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]" :key="sec" :label="`${sec} 秒`" :value="sec" />
           </el-select>
-          <span class="sb-stage-gen-label" :title="`当前每段 ${videoClipDuration} 秒优先生效；总时长留空由 AI 估算，填了也只作整体参考，不会把每镜压短`">总时长(秒)</span>
+          <span class="sb-stage-gen-label" title="总时长仅作参考">总时长(秒)</span>
           <el-input-number v-model="videoDuration" :min="10" :max="600" :step="5" placeholder="自动" size="small" controls-position="right" style="width: 96px" />
           <el-button
             type="success"
@@ -1560,8 +1554,7 @@
         <div class="merge-readiness" :class="{ ready: mergeReadiness.total > 0 && mergeReadiness.missing === 0 }">
           <b>镜头就绪：{{ mergeReadiness.ready }} / {{ mergeReadiness.total }}</b>
           <span v-if="mergeReadiness.missing">还有 {{ mergeReadiness.missing }} 个分镜没有可用于合成的视频。</span>
-          <span v-else-if="mergeReadiness.total">全部分镜视频已就绪，可以合成当前集。</span>
-          <span v-else>请先在分镜管理中生成镜头视频。</span>
+          <span v-else>请先在分镜管理中生成视频。</span>
         </div>
         <div v-if="storyboards.length" class="merge-shot-grid" aria-label="分镜视频就绪状态">
           <button v-for="(shot, index) in storyboards" :key="shot.id" type="button" :class="{ ready: getSbAllVideos(shot.id).length > 0 }" :title="`镜头 ${index + 1}：${getSbAllVideos(shot.id).length > 0 ? '已就绪' : '缺少视频'}`" @click="getSbAllVideos(shot.id).length === 0 && setWorkflowStage('storyboard')"><span>{{ String(index + 1).padStart(2, '0') }}</span><i></i></button>
@@ -1625,7 +1618,7 @@
           <el-input v-model="addPropForm.description" type="textarea" :rows="3" placeholder="描述" />
         </el-form-item>
         <el-form-item label="图生提示词">
-          <el-input v-model="addPropForm.prompt" type="textarea" :rows="2" placeholder="用于 AI 生成图片的提示词" />
+          <el-input v-model="addPropForm.prompt" type="textarea" :rows="2" placeholder="画面描述提示词" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -1678,18 +1671,17 @@
         </el-form-item>
         <el-form-item label="外貌描述">
           <div class="character-field-stack">
-            <el-input v-model="editCharacterForm.appearance" type="textarea" :autosize="{ minRows: 4, maxRows: 10 }" placeholder="用于 AI 生成图像的外貌描述，尽量详细" />
+            <el-input v-model="editCharacterForm.appearance" type="textarea" :autosize="{ minRows: 4, maxRows: 10 }" placeholder="外貌描述（尽量详细）" />
             <div class="character-field-actions">
               <el-button v-if="characterDescriptionSourceLabel" size="small" :loading="extractingCharAppearance" @click="extractEditCharacterDescription">{{ characterDescriptionSourceLabel }}</el-button>
             </div>
           </div>
         </el-form-item>
         <el-form-item label="简介">
-          <el-input v-model="editCharacterForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="角色背景简介，供剧本生成参考" />
+          <el-input v-model="editCharacterForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="角色背景简介" />
         </el-form-item>
         <el-form-item v-if="editCharacterForm.id" label="音色参考">
           <div class="character-inline-control">
-            <small class="character-field-help">音色仅用于支持该能力的视频模型。</small>
             <div class="character-field-actions">
               <el-button size="small" :loading="sd2VoiceUploadingId === editCharacterForm.id" @click="onEditCharacterVoiceAction">{{ editCharacterForm.seedance2_voice_asset?.status === 'active' ? '音色已绑定' : '绑定音色' }}</el-button>
               <el-button v-if="editCharacterForm.seedance2_voice_asset?.status === 'active'" size="small" @click="onEditCharacterVoiceReplace">更换音色</el-button>
@@ -1702,7 +1694,7 @@
             <span style="font-size:12px;line-height:1.4;white-space:normal;word-break:break-all;display:inline-block;width:90px">图生提示词</span>
           </template>
           <div style="width:100%">
-            <div class="character-field-help">AI 润色后的最终提示词，生成四视图图片时直接使用；可手动修改</div>
+            <div class="character-field-help">最终提示词，可修改</div>
             <el-input
               v-model="editCharacterForm.polished_prompt"
               type="textarea"
@@ -1719,7 +1711,7 @@
         <!-- P0-2: 视觉锚点（identity_anchors） -->
         <el-form-item v-if="editCharacterForm.id" label="视觉锚点">
           <div style="width:100%">
-            <div class="character-field-help">AI 从外貌描述提炼的6层视觉特征，用于保持生成图片角色一致性</div>
+            <div class="character-field-help">角色的关键外观特征，用于保持形象一致</div>
             <el-input
               v-if="editCharacterForm.identity_anchors"
               :value="typeof editCharacterForm.identity_anchors === 'string'
@@ -1740,9 +1732,6 @@
         <!-- P1-3: 多阶段造型（stages） -->
         <el-form-item v-if="editCharacterForm.id" label="多阶段造型">
           <div style="width:100%">
-            <div style="font-size:12px;color:#909399;margin-bottom:6px">
-              不同集次的角色造型变化，格式：JSON 数组 [{"episode_range":[1,3],"appearance":"..."}]
-            </div>
             <el-input
               v-model="editCharacterForm.stages"
               type="textarea"
@@ -1966,7 +1955,7 @@
                 </div>
               </div>
             </div>
-            <div v-if="!charLibraryLoading && charLibraryList.length === 0" class="library-empty">暂无本剧角色库记录，可将本剧角色「加入本剧库」后在此查看</div>
+            <div v-if="!charLibraryLoading && charLibraryList.length === 0" class="library-empty">暂无本剧角色，可在项目中将角色「加入本剧库」。</div>
           </div>
           <div class="library-pagination">
             <el-pagination
@@ -2067,7 +2056,7 @@
                 </div>
               </div>
             </div>
-            <div v-if="!propLibraryLoading && propLibraryList.length === 0" class="library-empty">暂无本剧道具库记录，可将本剧道具「加入本剧库」后在此查看</div>
+            <div v-if="!propLibraryLoading && propLibraryList.length === 0" class="library-empty">暂无本剧道具，可在项目中将道具「加入本剧库」。</div>
           </div>
           <div class="library-pagination">
             <el-pagination v-model:current-page="propLibraryPage" v-model:page-size="propLibraryPageSize" :total="propLibraryTotal" :page-sizes="[10, 20, 50]" layout="total, sizes, prev, pager, next" @current-change="loadPropLibraryList" @size-change="loadPropLibraryList" />
@@ -2147,7 +2136,7 @@
                 </div>
               </div>
             </div>
-            <div v-if="!sceneLibraryLoading && sceneLibraryList.length === 0" class="library-empty">暂无本剧场景库记录，可将本剧场景「加入本剧库」后在此查看</div>
+            <div v-if="!sceneLibraryLoading && sceneLibraryList.length === 0" class="library-empty">暂无本剧场景，可在项目中将场景「加入本剧库」。</div>
           </div>
           <div class="library-pagination">
             <el-pagination v-model:current-page="sceneLibraryPage" v-model:page-size="sceneLibraryPageSize" :total="sceneLibraryTotal" :page-sizes="[10, 20, 50]" layout="total, sizes, prev, pager, next" @current-change="loadSceneLibraryList" @size-change="loadSceneLibraryList" />
@@ -2231,7 +2220,6 @@
               v-model="sbPromptImageText"
               type="textarea"
               :rows="4"
-              placeholder="分镜生成时由 AI 写入的原始描述"
             />
           </div>
         </el-form-item>
@@ -2251,7 +2239,7 @@
               v-model="sbPromptPolishedText"
               type="textarea"
               :rows="5"
-              placeholder="点击「立即生成」润色通用优化提示词（仅更新本字段，不影响首尾帧专用提示词）"
+              placeholder="点击「立即生成」后由 AI 润色，可再编辑"
             />
           </div>
         </el-form-item>
@@ -2281,12 +2269,12 @@
     >
       <div class="frame-prompt-editor-body">
         <div class="frame-prompt-editor-hint">
-          此提示词将直接发给AI生成首/尾帧图片。支持编辑后保存，保存后点击「生成」即可使用新提示词。
+          此提示词将直接发给 AI 生成。
         </div>
 
         <!-- 空间布局锚点（生成分镜时 AI 输出的最高优先级站位合同） -->
         <div v-if="editingFramePromptSb?.layout_description" class="frame-layout-anchor">
-          <div class="frame-layout-anchor-label">本分镜空间布局锚点（首尾帧强制一致合同，最高优先级）</div>
+          <div class="frame-layout-anchor-label">本分镜空间布局（首尾帧保持一致）</div>
           <div class="frame-layout-anchor-text">{{ editingFramePromptSb.layout_description }}</div>
           <div class="frame-layout-anchor-note">首帧必须严格按此生成初始站位；尾帧必须在完全相同的左右位置、距离、构图下仅演化姿态/表情/结果。</div>
         </div>
@@ -2476,9 +2464,6 @@
               AI 重新生成/优化
             </el-button>
           </div>
-          <div style="font-size:11px;color:#64748b;margin-top:4px;line-height:1.35">
-            最高优先级空间合同（用于首尾帧站位锁定）。AI 可参考上下分镜一键重新生成/优化，点击右侧按钮触发。
-          </div>
         </el-form-item>
 
         <el-form-item label="动作">
@@ -2493,7 +2478,7 @@
         <el-form-item v-if="canSplitSbByAudio(videoParamsTarget)" label="多角色对白">
           <div class="sb-split-audio-row">
             <p class="sb-split-audio-tip">
-              本镜含多句对白或「对白+旁白」，Seedance 同镜易串音。可拆成多条分镜（每条仅一人说话或仅旁白），再分别生视频。
+              本镜有多句对白时，建议拆成多条分镜（每条仅一人说话或仅旁白），再分别生视频。
             </p>
             <el-button
               type="warning"
@@ -6580,7 +6565,7 @@ async function batchDeleteUnifiedResources(type) {
 async function deleteResourceMedia(asset) {
   try {
     const globalAsset = asset.library_scope === 'global'
-    await ElMessageBox.confirm(`确定归档“${asset.name || `素材 ${asset.id}`}”？它将不再供新镜头选择；已有镜头引用和生成记录保持不变。`, globalAsset ? '归档全局素材' : '归档项目素材', { type: 'warning' })
+    await ElMessageBox.confirm(`确定归档“${asset.name || `素材 ${asset.id}`}”？归档后新镜头不能再选用；已有镜头不受影响。`, globalAsset ? '归档全局素材' : '归档项目素材', { type: 'warning' })
     await omniVideoAPI.deleteAsset(asset.id)
     universalLibraryAssets.value = universalLibraryAssets.value.filter((item) => Number(item.id) !== Number(asset.id))
     ElMessage.success('已归档；已有镜头引用保持不变')

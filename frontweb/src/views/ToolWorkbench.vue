@@ -2,7 +2,7 @@
   <main class="tool-workbench">
     <header class="workbench-header"><div><el-button text @click="$router.push('/ai-tools')">← AI 工具箱</el-button><p class="breadcrumb">独立运行 · 自动保存 · 按需导入项目</p></div><div class="workbench-title"><span class="title-mark">{{ config.symbol }}</span><div><h1>{{ config.title }}</h1><p>{{ config.description }}</p></div></div><AccountBalanceBadge /></header>
     <section class="tool-layout">
-      <form class="tool-form" @submit.prevent="run"><div class="panel-kicker"><span>01</span><div><b>创作输入</b><small>运行参数会随历史记录保存</small></div></div>
+      <form class="tool-form" @submit.prevent="run"><div class="panel-kicker"><span>01</span><div><b>创作输入</b></div></div>
         <label>运行标题<el-input v-model="title" :placeholder="`${config.title} · ${formatChinaDate(new Date())}`" /></label>
         <label>计费归属项目<el-select v-model="dramaId" filterable placeholder="请选择项目"><el-option v-for="project in projects" :key="project.id" :label="project.title" :value="project.id" /></el-select><small>本次运行、续写与实际积分只归属此项目。</small></label>
         <label>语言<el-select v-model="language"><el-option label="中文" value="zh"/><el-option label="English" value="en"/><el-option v-if="kind === 'reverse_prompt'" label="双语" value="bilingual"/></el-select></label>
@@ -11,7 +11,7 @@
         <label v-if="kind === 'script_analysis' || kind === 'script_analysis_stream'">剧本资料<el-input v-model="content" type="textarea" :rows="12" placeholder="粘贴 UTF-8 剧本文本。流式分析可逐步保存输出。" /></label>
         <label v-if="kind === 'script_analysis_stream'">导入 UTF-8 TXT（≤2MB）<input type="file" accept="text/plain,.txt" @change="readTxt" /></label>
         <template v-else-if="kind === 'script_writing'"><label>创意／故事梗概<el-input v-model="content" type="textarea" :rows="8" placeholder="主角、冲突、世界观……" /></label><label>题材<el-input v-model="genre" placeholder="例如：都市悬疑" /></label><label>集数<el-input-number v-model="episodeCount" :min="1" :max="100" /></label></template>
-        <template v-else><ToolAssetSelector v-model="assetId" label="反推素材" /><small>可从素材库直接选择，或本地上传后自动选中。图片直接分析；视频仅提取首、中、尾代表帧后交给视觉模型，不会上传完整视频。</small></template>
+        <template v-else><ToolAssetSelector v-model="assetId" label="反推素材" /><small>可从素材库选择或本地上传；视频只分析首、中、尾帧，不上传完整视频。</small></template>
         <el-button native-type="submit" type="primary" :loading="running">{{ config.action }}</el-button>
       </form>
       <aside class="run-history"><div class="panel-kicker"><span>02</span><div><b>运行历史</b><small>{{ runs.length }} 条独立记录</small></div><el-button text @click="load">刷新</el-button></div><button v-for="runItem in runs" :key="runItem.id" class="run-item" :class="{active:active?.id===runItem.id}" @click="open(runItem)"><span :class="`dot ${runItem.status}`"></span><div><b>{{ runItem.title || `运行 #${runItem.id}` }}</b><small>{{ statusText(runItem.status) }} · {{ formatChinaDateTime(runItem.updated_at) }}</small></div></button><p v-if="!runs.length" class="history-empty">没有运行记录。首次运行后会出现在这里。</p></aside>

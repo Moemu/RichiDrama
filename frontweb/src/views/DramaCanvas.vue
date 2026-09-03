@@ -127,7 +127,6 @@
         >
           批量生视频
         </el-button>
-        <span class="gen-hint" title="完整创作流水线">剧本 → 提取角色/场景/道具 → 分镜 → 生图 → 视频</span>
       </div>
       <div v-if="episodeGenProgress" class="workflow-progress episode-gen">{{ episodeGenProgress }}</div>
     </header>
@@ -139,7 +138,7 @@
             <span>📜 剧本</span>
             <el-button link size="small" type="warning" @click="focusScriptNode">编辑</el-button>
           </div>
-          <p class="sidebar-script-tip">从头创作：先写剧本，再提取左侧素材</p>
+          <p class="sidebar-script-tip">从头创作：先写剧本</p>
         </div>
         <div class="sidebar-title">
           素材库
@@ -206,7 +205,7 @@
           <div v-if="!workflowGroups.length" class="sidebar-empty">框选分镜后点「创建工作流」</div>
         </div>
 
-        <p class="sidebar-tip">经典模式流水线：分镜 → 脚本摘要 → 分镜图 → 视频。摘要节点是画布可视化，列表里合并在分镜编辑区。顶栏「本集生成」可 AI 批量操作；单击分镜可单镜生图/生视频。</p>
+        <p class="sidebar-tip">单击分镜可单镜生图/生视频；顶栏「本集生成」可批量操作。</p>
       </aside>
 
       <div ref="canvasMainRef" class="canvas-main">

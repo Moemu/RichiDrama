@@ -88,7 +88,7 @@
               :value="k.value"
             />
           </el-select>
-          <p class="field-tip">用于在代码中标识业务场景，选择后会自动设置对应的服务类型</p>
+          <p class="field-tip">选择后自动设置对应服务类型</p>
         </el-form-item>
 
         <el-form-item prop="service_type" label="服务类型">

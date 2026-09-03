@@ -4,7 +4,6 @@
       <div>
         <p class="eyebrow">运营报表</p>
         <h1>运营告警与报表</h1>
-        <p class="muted">数据只来自本地任务、归档和账本；不会查询供应商。</p>
       </div>
       <div class="actions">
         <el-button @click="$router.push('/')">返回主页</el-button>

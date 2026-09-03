@@ -7,7 +7,7 @@
           <el-icon><ArrowLeft /></el-icon>
           返回
         </el-button>
-        <div><p class="library-kicker">素材 · {{ total }} 项</p><h2 class="page-title">{{ projectDramaId ? '项目媒体素材库' : '媒体素材库' }}</h2><p class="library-subtitle">{{ projectDramaId ? '仅显示当前项目可用素材' : '图片 · 视频 · 音频' }}</p></div>
+        <div><h2 class="page-title">{{ projectDramaId ? '项目媒体素材库' : '媒体素材库' }}</h2><p class="library-subtitle">{{ projectDramaId ? '仅显示当前项目可用素材' : '图片 · 视频 · 音频' }}</p></div>
       </div>
       <div class="header-actions">
         <AccountBalanceBadge />
@@ -100,7 +100,7 @@
 
       <div v-if="!loading && mediaItems.length === 0" class="empty-media">
         <el-icon class="empty-icon"><Files /></el-icon>
-        <div><b>素材库还是空的</b><p>上传图片、视频或音频后，可在自由创作和项目分镜中直接复用。</p></div>
+        <div><b>素材库还是空的</b><p>上传后可在创作与分镜中使用。</p></div>
         <div class="empty-media-actions"><el-button type="primary" @click="triggerUpload"><el-icon><Upload /></el-icon>上传首个素材</el-button><el-button @click="$router.push('/free-create')">先去自由创作</el-button></div>
       </div>
     </div>
@@ -147,7 +147,7 @@
         <div class="meta-row"><span>创建时间：</span>{{ previewItem?.created_at }}</div>
         <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔，例如：人物, 夜景" @change="saveTags" /></div>
         <section v-if="previewItem" class="remote-library-row">
-          <div><b>上传到素材库</b><small>系统按单个素材上传。角色可使用多份图片。普通图片、视频和音频也可独立上传。</small></div>
+          <div><b>上传到素材库</b></div>
           <span class="remote-library-status" :class="sd2Status(previewItem)">{{ sd2Label(previewItem) }}</span>
           <el-button
             size="small"
@@ -427,7 +427,7 @@ async function toggleFavorite(item) {
 }
 
 async function deleteItem(item) {
-  await ElMessageBox.confirm('确定归档该素材？它将不再供新镜头选择；已有镜头和生成记录保持不变。', '归档确认', { type: 'warning' })
+  await ElMessageBox.confirm('确定归档该素材？归档后新镜头不能再选用；已有镜头不受影响。', '归档确认', { type: 'warning' })
   try {
     await request.delete(`/assets/${item.id}`)
     ElMessage.success('已归档；已有镜头引用保持不变')
@@ -502,7 +502,7 @@ async function setIdentity(item, value) {
 async function batchDelete() {
   const count = selectedIds.size
   const scopeLabel = projectDramaId.value ? '当前项目' : '全局素材库'
-  await ElMessageBox.confirm(`确定归档选中的 ${count} 个素材？它们将不再供新镜头选择；已有镜头及生成记录保持不变。范围：${scopeLabel}。`, '批量归档', { type: 'warning', confirmButtonText: '归档选中素材', cancelButtonText: '取消' })
+  await ElMessageBox.confirm(`确定归档选中的 ${count} 个素材？归档后新镜头不能再选用；已有镜头不受影响。范围：${scopeLabel}。`, '批量归档', { type: 'warning', confirmButtonText: '归档选中素材', cancelButtonText: '取消' })
   try {
     const result = await request.post('/assets/batch-delete', { ids: [...selectedIds], scope: assetScope.value, ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}) })
     selectedIds.clear()
@@ -533,8 +533,8 @@ async function clearLibrary() {
     const isProjectLibrary = Boolean(projectDramaId.value)
     await ElMessageBox.confirm(
       isProjectLibrary
-        ? '将归档当前筛选范围内的项目素材。全局素材及其他项目素材不会受到影响；新镜头不可再选，已有镜头和历史记录保持不变。'
-        : '将归档当前筛选范围内的“我的全局素材”。项目素材不会受到影响；新镜头不可再选，已有镜头和历史记录保持不变。',
+        ? '将归档当前筛选范围内的项目素材。全局素材及其他项目素材不受影响。'
+        : '将归档当前筛选范围内的“我的全局素材”。项目素材不受影响。',
       isProjectLibrary ? '一键归档项目素材' : '一键归档素材库',
       { type: 'warning', confirmButtonText: '确认归档', cancelButtonText: '取消' }
     )

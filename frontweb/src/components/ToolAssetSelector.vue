@@ -85,8 +85,8 @@ const selectedIds = computed(() => props.multiple
 const selectedAssets = computed(() => selectedIds.value.map((id) => assets.value.find((asset) => Number(asset.id) === id)).filter(Boolean))
 const libraryHint = computed(() => props.dramaId ? '当前项目素材和个人素材' : '可引用项目素材和个人素材')
 const uploadHint = computed(() => props.dramaId
-  ? '文件会保存到当前项目素材库。上传后可立即引用。'
-  : '文件会保存到个人素材库。上传后可立即引用。')
+  ? '上传后保存到当前项目素材库，可立即引用。'
+  : '上传后保存到个人素材库，可立即引用。')
 const accept = computed(() => props.types.map((type) => type === 'image' ? 'image/*' : type === 'video' ? 'video/*' : type === 'audio' ? 'audio/*' : '').filter(Boolean).join(','))
 const acceptedLabel = computed(() => props.types.map(typeLabel).join('、'))
 const assetUrl = (asset) => asset?.local_path ? `/static/${String(asset.local_path).replace(/^\/+/, '')}` : asset?.url || ''

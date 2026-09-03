@@ -6,7 +6,7 @@ const STATUS_LABELS = {
   retryable: '可重试',
   invalid: '状态异常',
   cancelled: '已取消',
-  reconciliation_required: '待对账',
+  reconciliation_required: '等待结算',
   awaiting_source: '等待源视频',
   pending: '等待处理',
   skipped: '已跳过',
@@ -14,10 +14,10 @@ const STATUS_LABELS = {
   local: '本地就绪',
   local_ready: '本地就绪',
   oss_synced: '已归档',
-  upscale_pending: '等待超分',
-  upscaling: '超分中',
-  interpolation_pending: '等待插帧',
-  interpolating: '插帧中',
+  upscale_pending: '等待画质增强',
+  upscaling: '画质增强中',
+  interpolation_pending: '等待补帧',
+  interpolating: '画面补帧中',
 }
 
 const FAILURE_STATUSES = new Set(['failed', 'retryable', 'invalid', 'cancelled', 'reconciliation_required'])

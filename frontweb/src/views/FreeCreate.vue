@@ -48,7 +48,7 @@
           <template v-else-if="activeJob && ['failed','retryable','invalid','billing_reconciliation','unknown'].includes(activeJob.status)"><div class="generation-error-copy"><el-icon class="stage-warning"><WarningFilled /></el-icon><GenerationFailureDetails :job="activeJob" /></div><div class="failure-actions"><el-button v-if="activeJob.status === 'unknown' || activeJob.status === 'billing_reconciliation'" type="primary" @click="refreshUnknownJob(activeJob)">手动刷新状态</el-button><el-button v-if="canAdoptSource(activeJob)" type="primary" @click="adoptSource(activeJob)">采用已生成原片</el-button><el-button v-if="canRetryPostprocess(activeJob)" :type="canAdoptSource(activeJob) ? 'default' : 'primary'" @click="retryPostprocess(activeJob)">仅重试{{ activeJob.upscale_status === 'failed' ? '超分' : '插帧' }}</el-button><el-button v-else-if="activeJob.status === 'retryable' || activeJob.can_retry_generation" type="primary" @click="retry(activeJob)">{{ activeJob.can_retry_generation ? '使用原配置重试' : '重新生成' }}</el-button></div></template>
           <template v-else><b>尚未生成视频</b><small>完成生成后，播放器和成片操作将在这里显示。</small><div v-if="videoStatusPreviewEnabled" class="failure-actions"><el-button size="small" plain @click="previewVideoProgress = true; previewVideoError = false">预览生成进度</el-button><el-button size="small" plain @click="previewVideoError = true; previewVideoProgress = false">预览错误状态</el-button></div></template>
         </section>
-        <div class="shot-tabs"><span class="active">镜头提示词</span><span>输入或拖入 @ 素材</span><span>镜头 {{ activeShotIndex + 1 }} / {{ shots.length }}</span></div>
+        <div class="shot-tabs"><span class="active">镜头提示词</span><span>镜头 {{ activeShotIndex + 1 }} / {{ shots.length }}</span></div>
         <!-- 提示词渲染只读取当前镜头工作集。项目库素材必须先“加入本镜”，
              才能成为 @ 引用候选，绝不能借用其他镜头的同名素材。 -->
         <div class="shot-script"><OmniAssetPromptEditor ref="promptEditorRef" v-model="prompt" :assets="promptAssets" :chosen-ids="selected" :reference-document="promptDocument" @pick="onPickFromEditor" @references="setPromptReferences" /></div>
@@ -58,14 +58,14 @@
         <div class="panel-title"><b>视频生成方式</b><el-tag size="small" type="info">{{ creationMode === 'first_last_frame' ? '首尾帧生视频' : '多参考生视频' }}</el-tag></div>
         <el-radio-group v-model="creationMode" size="small" class="mode-switch"><el-radio-button value="multi_reference">多参考生视频</el-radio-button><el-radio-button value="first_last_frame">首尾帧生视频</el-radio-button></el-radio-group>
         <section v-if="!isProjectMode" class="billing-project-field" aria-labelledby="billing-project-title">
-          <div><b id="billing-project-title">计费归属项目</b><small>{{ sequence?.drama_id ? '本全能创作已锁定此项目，后续生成与积分均归属这里。' : '请选择本次全能创作的计费项目。首次生成后将锁定，避免跨项目混账。' }}</small></div>
+          <div><b id="billing-project-title">计费归属项目</b><small>{{ sequence?.drama_id ? '已锁定计费项目，后续生成归属此项目。' : '请选择计费项目，首次生成后将锁定。' }}</small></div>
           <el-select v-model="freeProjectId" filterable :disabled="!!sequence?.drama_id" placeholder="选择计费项目" aria-label="选择计费归属项目"><el-option v-for="project in projects" :key="project.id" :label="project.title" :value="project.id"/></el-select>
         </section>
-        <small class="mode-note">{{ creationMode === 'first_last_frame' ? '必须设置一张首帧（必填），尾帧可选；模型不支持时不可提交。' : '图片、视频、音频可按用途自由编排，按模型能力自动路由。' }}</small>
+        <small class="mode-note">{{ creationMode === 'first_last_frame' ? '首帧必填，尾帧可选。' : '图片、视频、音频可自由编排。' }}</small>
         <div v-if="workspaceReady && videoModelState !== 'ready'" class="model-config-alert" :class="`is-${videoModelState}`" role="alert">
           <template v-if="videoModelState === 'required'">
             <b>请选择视频模型</b>
-            <span>请在下方“生成参数”中选择一个视频模型。选择后，系统会显示对应的素材能力与生成限制。</span>
+            <span>请在下方“生成参数”中选择一个视频模型。选择后显示对应的素材要求与限制。</span>
           </template>
           <template v-else-if="videoModelState === 'invalid'">
             <b>当前视频模型不可用</b>
@@ -109,9 +109,9 @@
         </section>
 
         <details class="creation-secondary-section">
-          <summary><b>当前镜头素材</b><small>已加入 {{ chosenAssets.length }} 个 · 按需展开</small></summary>
+          <summary><b>当前镜头素材</b><small>已加入 {{ chosenAssets.length }} 个</small></summary>
           <div class="creation-secondary-body">
-        <div class="materials-title"><div><b>素材与引用</b><small>{{ reproductionMode ? '只读展示失败任务保存的素材快照。' : '仅显示本镜已加入的素材；上传后会自动加入本镜。' }}</small></div><div v-if="!reproductionMode"><el-button text size="small" @click="projectLibraryOpen = true">从项目素材库加入</el-button><el-button text size="small" @click="openMediaLibrary">管理素材</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
+        <div class="materials-title"><div><small v-if="reproductionMode">失败任务的素材快照（只读）。</small></div><div v-if="!reproductionMode"><el-button text size="small" @click="projectLibraryOpen = true">从项目素材库加入</el-button><el-button text size="small" @click="openMediaLibrary">管理素材</el-button><el-button text size="small" @click="pickFiles">上传素材</el-button></div></div>
         <input ref="fileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="uploadFiles" />
         <div v-if="!reproductionMode" class="dropzone" @click="pickFiles" @dragover.prevent @drop.prevent="dropFiles"><el-icon><Upload /></el-icon>拖入图片、视频或音频</div>
         <small v-if="!reproductionMode" class="upload-limit-note">{{ limitSummary }}</small>
@@ -123,13 +123,12 @@
         <div class="selected-assets">
           <article v-for="asset in referencedAssets" :key="asset.id" draggable="true" @dragstart="draggedAssetId = asset.id" @dragover.prevent @drop="dropSelectedAsset(asset.id)"><span class="drag-handle">⠿</span><span class="asset-name"><b>@{{ promptAssetFor(asset).alias }}</b><small class="asset-route-hint">{{ assetRouteHint(asset) }}</small></span><el-select v-model="asset.usage" size="small" @change="onUsageChange(asset)"><el-option v-for="usage in usages(asset.type)" :key="usage.value" :label="usage.label" :value="usage.value"/></el-select><el-button text size="small" @click="remove(asset.id)">移除</el-button></article>
         </div>
-        <div class="selection-actions"><small class="selection-limit-note">{{ selectionSummary }} · {{ reproductionMode ? '快照素材不会提交' : '已引用的素材会随本次生成发送' }}</small><el-button v-if="chosenAssets.length && !reproductionMode" text size="small" @click="clearSelectedAssets">清空本镜素材</el-button></div><small v-if="creationMode === 'first_last_frame'" class="selection-limit-note">首帧 {{ firstFrameCount }}/1，尾帧 {{ lastFrameCount }}/1</small>
+        <div class="selection-actions"><small class="selection-limit-note">{{ selectionSummary }} · {{ reproductionMode ? '快照素材不会提交' : '已引用素材将随生成发送' }}</small><el-button v-if="chosenAssets.length && !reproductionMode" text size="small" @click="clearSelectedAssets">清空本镜素材</el-button></div><small v-if="creationMode === 'first_last_frame'" class="selection-limit-note">首帧 {{ firstFrameCount }}/1，尾帧 {{ lastFrameCount }}/1</small>
         <div v-if="chosenImageAssets.length" class="identity-options">
-          <div class="identity-heading"><b>素材声明</b><small>只需勾选含真人；未勾选即为不含真人，不再需要额外认证。</small></div>
+          <div class="identity-heading"><b>素材声明</b><small>仅勾选含真人的素材。</small></div>
           <div v-for="asset in chosenImageAssets" :key="asset.id" class="identity-row">
             <el-checkbox :model-value="asset.requires_sd2_identity" :disabled="reproductionMode" @change="setRealPerson(asset, $event)">{{ assetDisplayName(asset) }}</el-checkbox>
             <small v-if="asset.requires_sd2_identity" class="identity-help">系统将自动完成真人素材准备。</small>
-            <small v-else class="identity-help">不含真人素材。</small>
           </div>
         </div>
         <div v-if="audioStrategy === 'post_mix'" class="audio-options"><el-checkbox v-model="keepOriginalAudio">保留原声</el-checkbox><el-slider v-model="audioVolume" :min="0" :max="2" :step="0.1"/><el-input-number v-model="audioFadeSeconds" :min="0" :max="10" size="small"/></div>
@@ -137,7 +136,7 @@
           </div>
         </details>
         <details class="creation-secondary-section creation-history-section">
-          <summary><b>本镜生成记录</b><small>{{ shotHistory.length }} 个版本 · 按需展开</small></summary>
+          <summary><b>本镜生成记录</b><small>{{ shotHistory.length }} 个版本</small></summary>
           <div class="creation-secondary-body">
         <section class="generation-history">
           <div class="generation-history-grid">
@@ -147,7 +146,7 @@
               <span :class="['history-dot', job.status]"></span>
             </article>
           </div>
-          <p v-if="!shotHistory.length" class="generation-history-empty">尚无生成记录。每次生成都会保留为独立版本。</p>
+          <p v-if="!shotHistory.length" class="generation-history-empty">尚无生成记录。</p>
         </section>
           </div>
         </details>
@@ -181,7 +180,7 @@
         <el-input v-model="projectLibraryKeyword" clearable placeholder="搜索图片、视频或音频素材" aria-label="搜索项目素材" />
         <el-select v-model="assetScope" size="default" class="asset-scope" :aria-label="isProjectMode ? '筛选当前项目或全局素材' : '选择素材来源'"><template v-if="isProjectMode"><el-option label="全部素材（本项目 + 全局）" value="all"/><el-option label="本项目素材" value="project"/><el-option label="我的全局素材" value="global"/></template><template v-else><el-option label="我的全局素材" value="global"/><el-option label="项目素材" value="project"/></template></el-select>
       </div>
-      <p class="project-asset-library-note">点击素材即可加入或移出当前镜头；加入后可拖到提示词中的具体位置形成 @ 引用。</p>
+      <p class="project-asset-library-note">点击素材加入或移出本镜；可拖到提示词中引用。</p>
       <div class="project-asset-library-grid">
         <button v-for="asset in filteredProjectLibraryAssets" :key="asset.id" type="button" class="project-asset-library-card" :class="{ added: selectedOrder.includes(asset.id), selected: selected.has(asset.id) }" :aria-pressed="selected.has(asset.id)" @click="toggleProjectLibraryAsset(asset)">
           <img v-if="asset.type === 'image'" :src="assetUrl(asset)" :alt="assetDisplayName(asset) || '图片素材'" />
@@ -554,17 +553,17 @@ async function adoptVersion(job) {
   } catch (error) { ElMessage.error(error.message || '设置当前成片失败') }
   finally { retryingJobIds.delete(actionKey) }
 }
-const stageLabel = computed(() => reproductionMode.value ? '失败快照' : (({ completed: '成片完成', sd2_waiting: '真人素材认证准备中', processing: '生成中', upscale_pending: '等待超分', upscaling: 'AI 超分中', interpolation_pending: '等待插帧', interpolating: '智能插帧中', persisting: '成片持久化中', billing_reconciliation: '等待计费对账', failed: failureLabel(activeJob.value), retryable: '可重试', invalid: '无效任务', unknown: '状态暂不可用' })[activeJob.value?.status] || '镜头草稿'))
+const stageLabel = computed(() => reproductionMode.value ? '失败快照' : (({ completed: '成片完成', sd2_waiting: '真人素材认证准备中', processing: '生成中', upscale_pending: '等待画质增强', upscaling: '画质增强中', interpolation_pending: '等待补帧', interpolating: '画面补帧中', persisting: '保存中', billing_reconciliation: '等待结算', failed: failureLabel(activeJob.value), retryable: '可重试', invalid: '无效任务', unknown: '状态暂不可用' })[activeJob.value?.status] || '镜头草稿'))
 const stageTagType = computed(() => reproductionMode.value ? 'danger' : (({ completed: 'success', failed: 'danger', retryable: 'warning', invalid: 'info' })[activeJob.value?.status] || 'info'))
 const generationProgress = computed(() => Math.max(0, Math.min(100, Number(activeJob.value?.task_progress || 0))))
 const generationProgressIndeterminate = computed(() => activeJob.value?.status === 'processing' && !!String(activeJob.value?.provider_task_id || '').trim() && generationProgress.value < 70)
-const generationProgressLabel = computed(() => ['upscale_pending','upscaling'].includes(activeJob.value?.status) ? '正在进行 AI 超分' : activeJob.value?.status === 'interpolating' ? '正在进行智能插帧' : activeJob.value?.status === 'persisting' ? '正在持久化最终成片' : (stagePhase.value || '正在生成当前镜头'))
+const generationProgressLabel = computed(() => ['upscale_pending','upscaling'].includes(activeJob.value?.status) ? '正在进行画质增强' : activeJob.value?.status === 'interpolating' ? '正在画面补帧' : activeJob.value?.status === 'persisting' ? '正在保存成片' : (stagePhase.value || '正在生成当前镜头'))
 const generationStallMinutes = computed(() => {
   const updatedAt = activeJob.value?.task_updated_at || activeJob.value?.updated_at || activeJob.value?.created_at
   const elapsed = generationClock.value - new Date(updatedAt || 0).getTime()
   return Number.isFinite(elapsed) && elapsed > 8 * 60 * 1000 ? Math.floor(elapsed / 60000) : 0
 })
-const generationProgressMessage = computed(() => generationStallMinutes.value ? `已 ${generationStallMinutes.value} 分钟未收到新状态，仍在持续查询；可继续编辑其他镜头。` : (activeJob.value?.task_message || '任务已提交，正在等待下一次状态更新'))
+const generationProgressMessage = computed(() => generationStallMinutes.value ? '任务仍在进行，可先编辑其他镜头。' : (activeJob.value?.task_message || '任务已提交，正在等待下一次状态更新'))
 const estimatedPoints = ref(null), quotingEstimate = ref(false)
 const requestPreview = computed(() => ({ prompt: prompt.value, asset_selection_policy: 'prompt_references', creation_mode: creationMode.value, model: currentCapability.value?.model || model.value, aspect_ratio: aspectRatio.value, duration_seconds: normalizeDuration(duration.value), resolution: resolution.value, upscale_resolution: upscaleResolution.value, target_fps: targetFps.value, audio_strategy: audioStrategy.value, assets: requestAssets.value.map((asset, index) => ({ ordinal: index + 1, name: promptAssetFor(asset).alias, type: asset.type, usage: asset.usage, routing: assetRouteHint(asset) })) }))
 const requestMaterialRouting = computed(() => materialRoutingPreview(requestAssets.value, currentCapability.value, { audioStrategy: audioStrategy.value }))
@@ -606,8 +605,8 @@ function assetRouteHint(asset) {
   if (asset.type === 'audio') return supports.audio_reference && audioStrategy.value !== 'post_mix' ? '发送给模型：音频参考' : '生成后处理：成片混音'
   return '按当前模型能力处理'
 }
-function shotState(shot) { return ({ completed:'已完成',sd2_waiting:'真人素材认证中',processing:'生成中',upscale_pending:'等待超分',upscaling:'超分中',interpolation_pending:'等待插帧',interpolating:'插帧中',persisting:'持久化中',billing_reconciliation:'待对账',failed:'失败',retryable:'可重试',invalid:'无效',draft:'草稿' })[shot.status] || '草稿' }
-function historyStatus(status) { return ({ completed: '已完成', sd2_waiting: '真人素材认证中', processing: '生成中', upscale_pending: '等待超分', upscaling: 'AI 超分中', interpolation_pending: '等待插帧', interpolating: '智能插帧中', persisting: '成片持久化中', billing_reconciliation: '等待计费对账', failed: '失败', retryable: '可重试', invalid: '无效' })[status] || '状态未知' }
+function shotState(shot) { return ({ completed:'已完成',sd2_waiting:'真人素材认证中',processing:'生成中',upscale_pending:'等待画质增强',upscaling:'画质增强中',interpolation_pending:'等待补帧',interpolating:'画面补帧中',persisting:'保存中',billing_reconciliation:'等待结算',failed:'失败',retryable:'可重试',invalid:'无效',draft:'草稿' })[shot.status] || '草稿' }
+function historyStatus(status) { return ({ completed: '已完成', sd2_waiting: '真人素材认证中', processing: '生成中', upscale_pending: '等待画质增强', upscaling: '画质增强中', interpolation_pending: '等待补帧', interpolating: '画面补帧中', persisting: '保存中', billing_reconciliation: '等待结算', failed: '失败', retryable: '可重试', invalid: '无效' })[status] || '状态未知' }
 function postprocessSummary(job) {
   if (job?.upscale_status === 'source_fallback' || job?.interpolation_status === 'source_fallback') {
     const resolution = job.output_resolution || job.resolution || '原始规格'
@@ -1006,7 +1005,7 @@ async function exitReproduction() {
 }
 async function hideHistoryJob(job) {
   try {
-    await ElMessageBox.confirm('隐藏后该版本不会再出现在本镜生成记录中；成片、积分账本和已采用的项目成片不会被删除。', '隐藏生成记录', { type: 'warning', confirmButtonText: '隐藏记录', cancelButtonText: '保留' })
+    await ElMessageBox.confirm('隐藏后不再出现在生成记录中；成片与积分不受影响。', '隐藏生成记录', { type: 'warning', confirmButtonText: '隐藏记录', cancelButtonText: '保留' })
     await omniVideoAPI.hide(job.id)
     shotHistory.value = shotHistory.value.filter((item) => String(item.id) !== String(job.id))
     jobs.value = jobs.value.filter((item) => String(item.id) !== String(job.id))

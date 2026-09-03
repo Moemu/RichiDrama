@@ -1,7 +1,7 @@
 <template>
   <main class="page">
     <header class="account-header">
-      <div><p class="eyebrow">账户与用量</p><h1>我的账户</h1><p class="account-intro">管理创作额度、账单和登录资料。</p></div>
+      <div><p class="eyebrow">账户与用量</p><h1>我的账户</h1></div>
       <div class="header-actions">
         <AccountBalanceBadge />
         <el-button @click="returnToSource">返回创作台</el-button>
@@ -13,8 +13,8 @@
     <div v-show="accountTab === 'overview'" class="account-view overview-view">
       <section class="cards">
         <article><span>{{ account.account_scope === 'organization' ? '企业共享额度' : '可用积分' }}</span><strong>{{ account.available ?? 0 }}</strong><small>{{ account.account_name || '可立即用于新的生成任务' }}</small></article>
-        <article><span>冻结积分</span><strong>{{ account.frozen ?? 0 }}</strong><small>生成时先冻结额度上限。完成后按实际用量结算，失败则自动释放。</small></article>
-        <article><span>累计消费</span><strong>{{ account.total_consumed ?? 0 }}</strong><small>{{ account.account_scope === 'organization' ? '统计该客户账户的全部实际扣费' : '仅统计已经完成的实际扣费' }}</small></article>
+        <article><span>冻结积分</span><strong>{{ account.frozen ?? 0 }}</strong><small>按实际用量结算；失败自动退还。</small></article>
+        <article><span>累计消费</span><strong>{{ account.total_consumed ?? 0 }}</strong><small>{{ account.account_scope === 'organization' ? '该客户账户的全部实际扣费' : '仅统计已完成的实际扣费' }}</small></article>
       </section>
       <section class="overview-links" aria-label="账户快捷入口">
         <button type="button" @click="accountTab = 'models'"><span>可用模型</span><b>{{ models.length }} 个</b><small>查看已启用的模型</small></button>
@@ -52,7 +52,7 @@
     </el-dialog>
     <div v-show="accountTab === 'security'" class="account-view security-view">
       <section class="panel security-card security-card--password">
-        <div class="security-card-heading"><small>登录凭据</small><h2>修改密码</h2><p>更新后，请使用新密码完成下一次登录。</p></div>
+        <div class="security-card-heading"><small>登录凭据</small><h2>修改密码</h2></div>
         <el-form label-position="top" class="security-form">
           <div class="security-form-fields security-form-fields--password">
             <el-form-item label="当前密码"><el-input v-model="password.old_password" type="password" show-password autocomplete="current-password" /></el-form-item>
@@ -62,14 +62,14 @@
         </el-form>
       </section>
       <section class="panel security-card">
-        <div class="security-card-heading"><small>登录标识</small><h2>修改用户名</h2><p>支持 1–64 个字符。保存后会刷新当前登录会话。</p></div>
+        <div class="security-card-heading"><small>登录标识</small><h2>修改用户名</h2><p>1–64 个字符。</p></div>
         <el-form label-position="top" class="security-form">
           <el-form-item label="用户名"><el-input v-model="username" maxlength="64" /></el-form-item>
           <el-button type="primary" @click="changeUsername">保存用户名</el-button>
         </el-form>
       </section>
       <section class="panel security-card">
-        <div class="security-card-heading"><small>展示资料</small><h2>修改显示名</h2><p>显示名最长 64 个字符。留空时显示用户名。</p></div>
+        <div class="security-card-heading"><small>展示资料</small><h2>修改显示名</h2><p>最长 64 字符；留空显示用户名。</p></div>
         <el-form label-position="top" class="security-form">
           <el-form-item label="显示名"><el-input v-model="displayName" maxlength="64" placeholder="留空则展示用户名" /></el-form-item>
           <el-button type="primary" @click="changeDisplayName">保存显示名</el-button>
