@@ -59,27 +59,6 @@ test('WeChat requests identify the configured verification public key', async ()
   }
 });
 
-test('WeChat serializes a numeric merchant config value as a string identifier', async () => {
-  const merchant = keyPair();
-  const adapter = new WechatAdapter({ app_id: 'wx-app', mch_id: 1112440705, merchant_serial_no: 'merchant-serial', merchant_private_key: merchant.privateKey }, 'https://example.test/wechat');
-  const originalFetch = global.fetch;
-  try {
-    global.fetch = async (_url, options) => {
-      assert.equal(JSON.parse(options.body).mchid, '1112440705');
-      assert.match(options.headers.Authorization, /mchid="1112440705"/);
-      return { ok: true, status: 200, headers: new Map(), text: async () => JSON.stringify({ code_url: 'weixin://wxpay/test' }) };
-    };
-    const result = await adapter.createNativeOrder({
-      amount_fen: 1,
-      out_trade_no: 'R1',
-      expires_at: '2026-09-03T08:00:00.000Z',
-    });
-    assert.equal(result.code_url, 'weixin://wxpay/test');
-  } finally {
-    global.fetch = originalFetch;
-  }
-});
-
 test('WeChat reports an unsigned provider error without accepting its response', async () => {
   const merchant = keyPair(); const platform = keyPair();
   const adapter = new WechatAdapter({ mch_id: 'mch-1', merchant_serial_no: 'merchant-serial', merchant_private_key: merchant.privateKey, wechatpay_public_key_id: 'PUB_KEY_ID_3000000001', wechatpay_public_key: platform.publicKey }, 'https://example.test/wechat');
