@@ -62,15 +62,15 @@ Nginx 不能修改请求正文。不要配置 `sub_filter`、请求体转换或�
 
 真实付款前，回调需要先进入 PR 22 的隔离数据库。
 
-验收期间，把上述 `proxy_pass` 和 `Host` 临时改为：
+验收期间，把上述 `proxy_pass` 和 `Host` 临时改为。网关保留原始外部路径：
 
 ```nginx
-proxy_pass http://host.docker.internal:5410/api/v1/payments/callbacks/wechat;
+proxy_pass http://host.docker.internal:5410;
 proxy_set_header Host pr-22.preview.drama.richbest.cn;
 ```
 
-端口 `5410` 是现有 LocalMiniDrama HTTP 入口。PR 22 的微信回调路径已关闭
-Basic Auth。其他 Preview 路径仍使用 Basic Auth。
+端口 `5410` 是现有 LocalMiniDrama HTTP 入口。外部微信回调路径会在该入口
+改写为应用路径，并绕过 Basic Auth。其他 Preview 路径仍使用 Basic Auth。
 
 验收完成并合并 PR 22 后，必须切回第 3 节的生产目标。不要把 PR 编号作为
 长期配置。

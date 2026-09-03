@@ -84,6 +84,12 @@ test('preview vhost authenticates and routes like production would', () => {
   assert.ok(wechatCallback, 'Preview must define an exact WeChat callback location.');
   assert.match(wechatCallback[1], /auth_basic off/);
   assert.match(wechatCallback[1], /proxy_pass http:\/\/pr-\$preview_pr:5679/);
+  const gatewayCallback = vhost.match(/location = \/minidrama\/payments\/callbacks\/wechat \{([\s\S]*?)\n    \}/);
+  assert.ok(gatewayCallback, 'Preview must define the fixed HTTPS gateway callback path.');
+  assert.match(gatewayCallback[1], /auth_basic off/);
+  assert.match(gatewayCallback[1], /proxy_pass http:\/\/pr-\$preview_pr:5679\/api\/v1\/payments\/callbacks\/wechat/);
+  assert.match(source, /minidrama\/payments\/callbacks\/wechat/);
+  assert.match(source, /WWW-Authenticate/);
   assert.match(vhost, /location \/ \{/);
   assert.match(vhost, /resolver 127\.0\.0\.11/);
   // The routed hostname carries the literal pr- prefix; a digits-only match

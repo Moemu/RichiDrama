@@ -104,6 +104,14 @@ wait_container_ready "$APP_CONTAINER" "$SHA" 90 || fail 'Preview application did
 curl -fsS --max-time 15 --resolve "$HOST:80:127.0.0.1" -u "preview:$PASSWORD" "http://$HOST/ready" | \
   grep -q "\"revision\":\"$SHA\"" || fail 'External preview readiness check failed.'
 
+CALLBACK_RESPONSE="$(curl -sS -D - --max-time 15 --resolve "$HOST:80:127.0.0.1" \
+  -H 'Content-Type: application/json' --data '{}' \
+  "http://$HOST/minidrama/payments/callbacks/wechat")"
+! grep -qi '^WWW-Authenticate:' <<<"$CALLBACK_RESPONSE" || \
+  fail 'Preview HTTPS gateway callback path still requires Basic Auth.'
+grep -q '"code":' <<<"$CALLBACK_RESPONSE" || \
+  fail 'Preview HTTPS gateway callback path did not bypass Basic Auth.'
+
 bash "$SOURCE_DIR/deploy/preview-payment-smoke" "$APP_CONTAINER" || \
   fail 'Preview payment smoke check failed.'
 

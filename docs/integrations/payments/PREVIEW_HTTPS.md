@@ -57,11 +57,14 @@ LocalMiniDrama 不得执行以下操作：
 
 Preview 页面继续使用 Basic Auth。
 
-当前高优验收只对以下精确路径关闭 Basic Auth：
+当前高优验收只对以下两个精确路径关闭 Basic Auth：
 
 ```text
 /api/v1/payments/callbacks/wechat
+/minidrama/payments/callbacks/wechat
 ```
+
+第二个路径供固定 HTTPS 网关使用。Preview 入口会把它改写为第一个应用路径。
 
 支付宝路径继续使用 Basic Auth，直到支付宝验收开始。
 
