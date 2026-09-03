@@ -4,19 +4,25 @@ const { AlipayAdapter } = require('./paymentAdapters/alipayAdapter');
 const { WechatAdapter } = require('./paymentAdapters/wechatAdapter');
 
 const CREDIT_MICRO_PER_FEN = 10000;
+const DEFAULT_PRESET_AMOUNTS_FEN = [3900, 19900, 59900];
 function now() { return new Date().toISOString(); }
 function json(value) { return JSON.stringify(value == null ? {} : value); }
 function parse(value, fallback = {}) { try { return value ? JSON.parse(value) : fallback; } catch (_) { return fallback; } }
 
 function paymentConfig(cfg) {
   const raw = cfg?.payments || {};
+  const minAmountFen = Number(raw.min_amount_fen) || 100;
+  const maxAmountFen = Number(raw.max_amount_fen) || 500000;
+  const configuredPresets = Array.isArray(raw.preset_amounts_fen)
+    ? raw.preset_amounts_fen.map(Number).filter((value) => Number.isSafeInteger(value) && value >= minAmountFen && value <= maxAmountFen)
+    : [];
   return {
     ...raw,
     enabled: raw.enabled === true,
     order_expire_minutes: Math.max(1, Math.min(120, Number(raw.order_expire_minutes) || 15)),
-    min_amount_fen: Number(raw.min_amount_fen) || 100,
-    max_amount_fen: Number(raw.max_amount_fen) || 500000,
-    preset_amounts_fen: Array.isArray(raw.preset_amounts_fen) ? raw.preset_amounts_fen.map(Number).filter(Number.isSafeInteger) : [1000, 5000, 10000, 50000],
+    min_amount_fen: minAmountFen,
+    max_amount_fen: maxAmountFen,
+    preset_amounts_fen: configuredPresets.length ? configuredPresets : [...DEFAULT_PRESET_AMOUNTS_FEN],
   };
 }
 

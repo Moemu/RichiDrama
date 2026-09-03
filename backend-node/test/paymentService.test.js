@@ -26,7 +26,7 @@ function setup() {
   };
   const cfg = { payments: {
     enabled: true, public_base_url: 'https://pay.example.test', order_expire_minutes: 15,
-    min_amount_fen: 100, max_amount_fen: 500000, preset_amounts_fen: [1000, 5000, 10000, 50000],
+    min_amount_fen: 100, max_amount_fen: 500000, preset_amounts_fen: [3900, 19900, 59900],
     alipay: { app_id: 'app', seller_id: 'merchant' }, wechat: { app_id: 'app', mch_id: 'merchant' },
   } };
   const service = createPaymentService(db, cfg, log, { alipay: adapter, wechat: adapter });
@@ -62,6 +62,12 @@ test('preview configuration can lower the payment minimum to one fen', () => {
   const config = paymentConfig({ payments: { min_amount_fen: 1, max_amount_fen: 500000 } });
   assert.equal(parseAmountFen('0.01', config), 1);
   assert.throws(() => parseAmountFen('0.001', config));
+});
+
+test('payment package prices use configurable fen values', () => {
+  assert.deepEqual(paymentConfig({ payments: {} }).preset_amounts_fen, [3900, 19900, 59900]);
+  assert.deepEqual(paymentConfig({ payments: { preset_amounts_fen: [9900, 29900, 99900] } }).preset_amounts_fen, [9900, 29900, 99900]);
+  assert.deepEqual(paymentConfig({ payments: { min_amount_fen: 100, max_amount_fen: 500000, preset_amounts_fen: [0, 3900, 600000] } }).preset_amounts_fen, [3900]);
 });
 
 test('payment creation is idempotent and paid notifications credit once', async () => {

@@ -19,7 +19,8 @@ payments:
   order_expire_minutes: 15
   min_amount_fen: 100
   max_amount_fen: 500000
-  preset_amounts_fen: [1000, 5000, 10000, 50000]
+  # Recharge package prices. Override with CFG_PAYMENTS__PRESET_AMOUNTS_FEN.
+  preset_amounts_fen: [3900, 19900, 59900]
   alipay:
     enabled: false
     endpoint: https://openapi.alipay.com/gateway.do

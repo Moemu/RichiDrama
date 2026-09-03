@@ -46,7 +46,7 @@ async function main() {
   assert(data.max_amount_yuan === '5000.00', 'Payment maximum amount is incorrect.');
   assert(data.credits_per_yuan === 100, 'Payment exchange ratio is incorrect.');
   assert(data.order_expire_minutes === 15, 'Payment expiry is incorrect.');
-  assert(JSON.stringify(data.preset_amounts_yuan) === JSON.stringify(['10.00', '50.00', '100.00', '500.00']), 'Payment presets are incorrect.');
+  assert(JSON.stringify(data.preset_amounts_yuan) === JSON.stringify(['39.00', '199.00', '599.00']), 'Payment presets are incorrect.');
 
   const orders = await request('/api/v1/payments/orders');
   assert(orders.response.status === 200 && orders.body?.success, 'User payment orders API failed.');
