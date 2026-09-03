@@ -42,8 +42,12 @@
       </template>
     </div>
     <div v-show="accountTab === 'models'" class="account-view"><section class="panel"><h2>平台可用模型</h2><el-tag v-for="m in models" :key="`${m.service_type}-${m.model}`" class="tag">{{ m.service_type }} · {{ m.model }}</el-tag><p v-if="!models.length" class="muted">管理员尚未配置可计费模型。</p></section></div>
-    <el-dialog v-model="paymentDialog" width="min(92vw, 440px)" :close-on-click-modal="false" title="扫码完成支付" @closed="stopPaymentPolling">
-      <div v-if="activePayment" class="payment-dialog"><p>{{ activePayment.channel === 'alipay' ? '请使用支付宝扫码' : '请使用微信扫码' }}</p><img v-if="paymentQr" :src="paymentQr" alt="支付二维码"/><strong>¥{{ activePayment.amount_yuan }}</strong><span>预计到账 {{ activePayment.credits }} 积分</span><small v-if="activePayment.status === 'pending'">二维码剩余 {{ countdownText }}</small><el-result v-else-if="activePayment.status === 'paid'" icon="success" title="充值成功" sub-title="积分已经到账"/><el-alert v-else :title="paymentStatus(activePayment.status).label" type="warning" :closable="false"/></div>
+    <el-dialog v-model="paymentDialog" width="min(92vw, 440px)" :close-on-click-modal="false" :title="paymentDialogTitle" @closed="stopPaymentTracking">
+      <div v-if="activePayment" class="payment-dialog">
+        <template v-if="activePayment.status === 'pending'"><p>{{ activePayment.channel === 'alipay' ? '请使用支付宝扫码' : '请使用微信扫码' }}</p><img v-if="paymentQr" :src="paymentQr" alt="支付二维码"/><strong>¥{{ activePayment.amount_yuan }}</strong><span>预计到账 {{ activePayment.credits }} 积分</span><small>二维码剩余 {{ countdownText }}</small></template>
+        <el-result v-else-if="activePayment.status === 'paid'" icon="success" title="充值成功" :sub-title="`¥${activePayment.amount_yuan} 已支付，${activePayment.credits} 积分已经到账`"/>
+        <el-alert v-else :title="paymentStatus(activePayment.status).label" type="warning" :closable="false"/>
+      </div>
       <template #footer><el-button v-if="activePayment?.status === 'pending'" @click="closePayment">关闭订单</el-button><el-button type="primary" @click="paymentDialog = false">完成</el-button></template>
     </el-dialog>
     <div v-show="accountTab === 'security'" class="account-view security-view">
@@ -150,6 +154,7 @@ const activePayment = ref(null)
 const paymentQr = ref('')
 const paymentTick = ref(Date.now())
 let paymentPollTimer = null
+let paymentCountdownTimer = null
 let paymentSyncCounter = 0
 const rechargeAmount = computed(() => rechargeAmountChoice.value === 'custom' ? customRechargeAmount.value : rechargeAmountChoice.value)
 const rechargeAmountRange = computed(() => `${paymentOptions.value.min_amount_yuan || '1.00'}–${paymentOptions.value.max_amount_yuan || '5000.00'}`)
@@ -174,6 +179,7 @@ const countdownText = computed(() => {
   const seconds = Math.max(0, Math.ceil((Date.parse(activePayment.value?.expires_at || 0) - paymentTick.value) / 1000))
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 })
+const paymentDialogTitle = computed(() => activePayment.value?.status === 'paid' ? '支付完成' : activePayment.value?.status === 'pending' ? '扫码完成支付' : '订单状态')
 const PAYMENT_STATUS = { pending:{label:'等待支付',type:'warning'},paid:{label:'已到账',type:'success'},closed:{label:'已关闭',type:'info'},expired:{label:'已过期',type:'info'},review_required:{label:'需要核查',type:'danger'},failed:{label:'下单失败',type:'danger'} }
 function paymentStatus(status) { return PAYMENT_STATUS[status] || { label: status, type: 'info' } }
 function formatDate(value) { return value ? new Intl.DateTimeFormat('zh-CN', { timeZone:'Asia/Shanghai', dateStyle:'short', timeStyle:'medium' }).format(new Date(value)) : '—' }
@@ -182,18 +188,20 @@ function selectRechargeAmount(value) { rechargeAmountChoice.value = value; if (v
 async function loadAccount() { account.value = await accountAPI.me() }
 async function loadPaymentOrders() { const result = await accountAPI.paymentOrders({ page: 1, page_size: 20 }); paymentOrders.value = result.items || [] }
 function stopPaymentPolling() { if (paymentPollTimer) window.clearInterval(paymentPollTimer); paymentPollTimer = null; paymentSyncCounter = 0 }
+function stopPaymentCountdown() { if (paymentCountdownTimer) window.clearInterval(paymentCountdownTimer); paymentCountdownTimer = null }
+function stopPaymentTracking() { stopPaymentPolling(); stopPaymentCountdown() }
 async function updateActivePayment(sync = false) {
   if (!activePayment.value?.id) return
   try {
     activePayment.value = sync ? await accountAPI.syncPaymentOrder(activePayment.value.id) : await accountAPI.paymentOrder(activePayment.value.id)
-    paymentTick.value = Date.now()
     if (activePayment.value.status === 'paid') {
-      stopPaymentPolling(); await Promise.all([loadAccount(), loadPaymentOrders(), loadTransactions()]); window.dispatchEvent(new Event('lmd:balance-changed')); ElMessage.success('充值积分已到账')
-    } else if (activePayment.value.status !== 'pending') stopPaymentPolling()
+      paymentQr.value = ''; stopPaymentTracking(); await Promise.all([loadAccount(), loadPaymentOrders(), loadTransactions()]); window.dispatchEvent(new Event('lmd:balance-changed')); ElMessage.success('充值积分已到账')
+    } else if (activePayment.value.status !== 'pending') { paymentQr.value = ''; stopPaymentTracking() }
   } catch (_) {}
 }
-function startPaymentPolling() { stopPaymentPolling(); paymentPollTimer = window.setInterval(() => { paymentTick.value = Date.now(); paymentSyncCounter += 1; updateActivePayment(paymentSyncCounter % 5 === 0) }, 3000) }
-async function showPayment(order) { activePayment.value = order; paymentQr.value = order.code_url ? await QRCode.toDataURL(order.code_url, { width: 280, margin: 1 }) : ''; paymentDialog.value = true; startPaymentPolling() }
+function startPaymentPolling() { stopPaymentPolling(); paymentPollTimer = window.setInterval(() => { paymentSyncCounter += 1; updateActivePayment(paymentSyncCounter % 5 === 0) }, 3000) }
+function startPaymentCountdown() { stopPaymentCountdown(); paymentTick.value = Date.now(); paymentCountdownTimer = window.setInterval(() => { paymentTick.value = Date.now() }, 1000) }
+async function showPayment(order) { activePayment.value = order; paymentQr.value = order.status === 'pending' && order.code_url ? await QRCode.toDataURL(order.code_url, { width: 280, margin: 1 }) : ''; paymentDialog.value = true; if (order.status === 'pending') { startPaymentCountdown(); startPaymentPolling() } }
 async function createPayment() {
   creatingPayment.value = true
   try { const clientId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`; const order = await accountAPI.createPaymentOrder({ channel: rechargeChannel.value, amount_yuan: rechargeAmount.value, client_request_id: clientId }); await loadPaymentOrders(); await showPayment(order) }
@@ -201,7 +209,7 @@ async function createPayment() {
   finally { creatingPayment.value = false }
 }
 async function openPayment(row) { try { await showPayment(await accountAPI.paymentOrder(row.id)) } catch (error) { ElMessage.error(error.message || '订单读取失败') } }
-async function closePayment() { try { activePayment.value = await accountAPI.closePaymentOrder(activePayment.value.id); stopPaymentPolling(); await loadPaymentOrders() } catch (error) { ElMessage.error(error.message || '订单关闭失败') } }
+async function closePayment() { try { activePayment.value = await accountAPI.closePaymentOrder(activePayment.value.id); paymentQr.value = ''; stopPaymentTracking(); await loadPaymentOrders() } catch (error) { ElMessage.error(error.message || '订单关闭失败') } }
 const isOrganizationAdmin = computed(() => account.value.account_scope === 'organization' && account.value.organization_role === 'organization_admin')
 
 function returnToSource() {
@@ -264,7 +272,7 @@ onMounted(async () => {
   if (isOrganizationAdmin.value) detailLoads.push(accountAPI.usageMembers().then((items) => { usageMembers.value = items || [] }))
   await Promise.allSettled(detailLoads)
 })
-onBeforeUnmount(stopPaymentPolling)
+onBeforeUnmount(stopPaymentTracking)
 </script>
 
 <style scoped>
@@ -326,6 +334,7 @@ onBeforeUnmount(stopPaymentPolling)
 .recharge-view{display:grid;grid-template-columns:minmax(0,1fr);gap:2.25rem;align-content:start}.recharge-checkout{display:grid;gap:1.25rem;padding:clamp(1.4rem,3vw,2.4rem);border:1px solid var(--border-subtle);background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 9%,var(--bg-surface)),var(--bg-surface))}.recharge-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem}.recharge-heading h2{margin:0;font-size:clamp(1.5rem,2.5vw,2.2rem)}.recharge-heading strong{font-size:1.7rem;font-variant-numeric:tabular-nums;color:var(--accent)}.recharge-heading strong small{font-size:.75rem;color:var(--text-muted)}.amount-presets{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.55rem}.amount-presets button,.payment-channels button{border:1px solid var(--border-subtle);background:var(--bg-surface);color:var(--text-primary);cursor:pointer}.amount-presets button{min-height:3.2rem;border-radius:var(--radius-sm);font-size:1rem}.amount-presets button.active,.payment-channels button.active{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--bg-surface))}.custom-amount{display:grid;grid-template-columns:minmax(9rem,.35fr) minmax(16rem,.65fr);align-items:center;gap:.55rem 1rem;padding:.9rem 1rem;border-left:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 5%,transparent)}.custom-amount>span{font-size:.84rem;font-weight:650}.custom-amount small{grid-column:2;color:var(--text-muted);font-size:.75rem}.payment-channels{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}.payment-channels button{display:grid;gap:.2rem;min-height:4rem;padding:.75rem;border-radius:var(--radius-sm);text-align:left}.payment-channels button:disabled{opacity:.5;cursor:not-allowed}.payment-channels small{color:var(--text-muted)}.recharge-submit{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding-top:.25rem}.recharge-submit>span{color:var(--text-muted);font-size:.8rem}.recharge-submit .el-button{min-width:10rem}.payment-history{min-width:0;margin:0;padding:1.5rem clamp(1rem,2vw,1.5rem) 1.25rem;border:1px solid var(--border-subtle)}.payment-history .panel-title{display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:1rem}.recharge-blocked{max-width:42rem;margin:0}.recharge-blocked p,.recharge-blocked small{color:var(--text-muted)}.payment-dialog{display:grid;justify-items:center;gap:.65rem;text-align:center}.payment-dialog>p{margin:0;color:var(--text-muted)}.payment-dialog>img{width:min(17.5rem,75vw);height:auto;padding:.5rem;background:#fff;border-radius:.5rem}.payment-dialog>strong{font-size:1.8rem}.payment-dialog>span,.payment-dialog>small{color:var(--text-muted)}
 @media(max-width:45rem){.amount-presets{grid-template-columns:repeat(2,1fr)}.amount-presets button:last-child{grid-column:1/-1}.custom-amount{grid-template-columns:1fr}.custom-amount small{grid-column:1}.payment-channels{grid-template-columns:1fr}.recharge-submit{align-items:stretch;flex-direction:column}.recharge-submit .el-button{width:100%}.recharge-checkout{padding:1.15rem}.recharge-heading{align-items:flex-start;flex-direction:column}.recharge-view{gap:1.5rem}}
 @media(max-height:48rem) and (min-width:45.01rem){.recharge-checkout{gap:.7rem;padding:1rem 1.4rem}.recharge-heading h2{font-size:1.55rem}.amount-presets button{min-height:2.75rem}.payment-channels button{min-height:3.35rem;padding:.55rem .7rem}.recharge-submit{min-height:2.5rem}}
+@media(max-height:48rem) and (min-width:45.01rem){.payment-dialog{gap:.45rem}.payment-dialog>img{width:min(14.5rem,65vh)}}
 @media(max-width:45rem){.billing-heading{display:grid}.billing-view-switch{justify-self:start}.usage-filters{align-items:stretch;flex-direction:column}.usage-filters :deep(.el-date-editor),.usage-filters :deep(.el-select){width:100%}}
 @media(max-width:60rem){.security-card--password{grid-template-columns:1fr}.security-form-fields--password{grid-template-columns:1fr 1fr}}
 @media(max-width:45rem){.security-view{grid-template-columns:1fr}.security-card--password{grid-column:auto}.security-form-fields--password{grid-template-columns:1fr}.security-card{padding:1.1rem!important}}
