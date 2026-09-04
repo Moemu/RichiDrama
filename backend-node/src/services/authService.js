@@ -147,7 +147,11 @@ function register(db, input) {
 function authenticate(db, token) {
   const claims = jwt.verify(token, jwtSecret(db));
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(claims.sub);
-  if (!user || !user.is_active) throw new Error('账号不可用');
+  if (!user || !user.is_active) {
+    const error = new Error('账号不可用');
+    error.code = 'ACCOUNT_DISABLED';
+    throw error;
+  }
   return publicUser(user);
 }
 

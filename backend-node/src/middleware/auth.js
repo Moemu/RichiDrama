@@ -1,5 +1,8 @@
 const response = require('../response');
 const authService = require('../services/authService');
+const logger = require('../logger');
+const crypto = require('crypto');
+const { TokenExpiredError, JsonWebTokenError } = require('jsonwebtoken');
 
 function readCookie(req, name) {
   const encoded = String(req.headers.cookie || '').split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
@@ -14,8 +17,30 @@ function requireAuth(db) {
     // X-LMD-Session carries the same token for browsers sitting behind a
     // reverse proxy with HTTP Basic Auth (nginx rejects non-Basic
     // Authorization headers before the app ever sees them).
-    const token = match?.[1] || req.headers['x-lmd-session'] || readCookie(req, 'lmd_session');
-    if (!token) return response.error(res, 401, 'UNAUTHORIZED', '请先登录');
+    const bearerToken = match?.[1] || null;
+    const headerToken = req.headers['x-lmd-session'] || null;
+    const cookieToken = readCookie(req, 'lmd_session');
+    const token = bearerToken || headerToken || cookieToken;
+    const credentialSource = bearerToken ? 'bearer' : headerToken ? 'x-lmd-session' : cookieToken ? 'cookie' : 'none';
+    const credentialFingerprint = token
+      ? crypto.createHash('sha256').update(String(token)).digest('hex').slice(0, 12)
+      : null;
+    const clientIp = String(req.get?.('x-real-ip') || req.ip || '').split(',')[0].trim() || null;
+    const rejectAuth = (status, code, message, err) => {
+      res.locals.authErrorCode = code;
+      logger.warn('Authentication rejected', {
+        request_id: req.requestId,
+        path: req.originalUrl,
+        client_ip: clientIp,
+        credential_source: credentialSource,
+        credential_fingerprint: credentialFingerprint,
+        auth_error_code: code,
+        error_name: err?.name || null,
+        error_code: err?.code || null,
+      });
+      return response.error(res, status, code, message);
+    };
+    if (!token) return rejectAuth(401, 'UNAUTHORIZED', '请先登录');
     try {
       req.auth = authService.authenticate(db, token);
       // Keep the authenticated credential available to routes that need to
@@ -23,7 +48,24 @@ function requireAuth(db) {
       req.authToken = token;
       return next();
     }
-    catch (_) { return response.error(res, 401, 'UNAUTHORIZED', '登录已过期，请重新登录'); }
+    catch (err) {
+      // Only invalid credentials are authentication failures. Temporary
+      // database errors must not log every open browser tab out.
+      if (err instanceof TokenExpiredError) return rejectAuth(401, 'TOKEN_EXPIRED', '登录已过期，请重新登录', err);
+      if (err instanceof JsonWebTokenError) return rejectAuth(401, 'INVALID_TOKEN', '登录状态无效，请重新登录', err);
+      if (err?.code === 'ACCOUNT_DISABLED') return rejectAuth(401, 'ACCOUNT_DISABLED', err.message, err);
+      res.locals.authErrorCode = 'SERVICE_BUSY';
+      logger.error('Authentication skipped by non-auth error', {
+        request_id: req.requestId,
+        path: req.originalUrl,
+        client_ip: clientIp,
+        credential_source: credentialSource,
+        credential_fingerprint: credentialFingerprint,
+        error: err.message,
+        code: err.code,
+      });
+      return response.error(res, 503, 'SERVICE_BUSY', '服务繁忙，请稍后重试');
+    }
   };
 }
 
