@@ -343,15 +343,6 @@ function createWithSelected() {
   router.push({ path: '/free-create', query: ids.length ? { assets: ids.join(',') } : {} })
 }
 
-function createWithItem(item) {
-  if (!item?.id) return
-  router.push({ path: '/free-create', query: { assets: String(item.id) } })
-}
-
-function assetTypeLabel(type) {
-  return ({ image: '图片', video: '视频', audio: '音频' })[type] || '媒体'
-}
-
 async function openPreview(item) {
   previewItem.value = item
   editableTags.value = Array.isArray(item.tags) ? item.tags.join(', ') : ''

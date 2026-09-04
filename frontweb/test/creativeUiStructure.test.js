@@ -109,11 +109,8 @@ test('镜头素材仅移出本镜，项目素材归档与全局解除引用分�
     readSource('../src/api/omniVideo.js'),
   ])
 
-  assert.match(filmSource, /class="sb-omni-material-delete"/)
-  assert.match(filmSource, /v-if="item\.poolType === 'asset'"/)
-  assert.match(filmSource, /@click\.stop="deleteSbOmniPoolAsset\(activeSb, item\)"/)
-  assert.match(filmSource, /async function deleteSbOmniPoolAsset\(_sb, item\)/)
-  assert.match(filmSource, /await deleteResourceMedia\(item\)/)
+  // 旧分镜工作台已删除；「移出本镜 vs 归档/解除」的分离由 FreeCreate 与 MediaLibrary 承载。
+  assert.doesNotMatch(filmSource, /sb-omni-material-delete/)
   assert.match(freeSource, /class="material-delete"/)
   assert.match(freeSource, /title="移出当前镜头"/)
   assert.match(freeSource, /@click\.stop="remove\(asset\.id\)"/)
@@ -308,7 +305,7 @@ test('主工作台使用真实媒体主舞台和可搜索创作档案而不是�
   for (const marker of [
     'class="media-stage"',
     'class="media-canvas"',
-    'class="records-workspace"',
+    'class="records-panel"',
     'class="record-search"',
     'class="record-list"',
     'class="media-filmstrip"',
@@ -504,7 +501,7 @@ test('project storyboard generation settings include the video generation quote'
     readSource('../src/views/FreeCreate.vue'),
   ])
   const legacySettingsTags = filmCreate.match(/<GenerationSettings\b[\s\S]*?\/>/g) || []
-  assert.equal(legacySettingsTags.length, 3)
+  assert.equal(legacySettingsTags.length, 2)
   for (const tag of legacySettingsTags) assert.match(tag, /include-generation-quote/)
   assert.match(filmCreate, /<FreeCreate[\s\S]*embedded/)
   assert.match(freeCreate, /<GenerationSettings[\s\S]*include-generation-quote[\s\S]*:has-video-input="quoteHasVideoInput"[\s\S]*:has-audio-input="quoteHasAudioInput"/)

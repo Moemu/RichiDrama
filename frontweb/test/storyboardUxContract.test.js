@@ -130,12 +130,12 @@ test('project storyboard history opens a complete detail page with the original 
   assert.match(historyDetail, /请求分辨率/)
   assert.match(historyDetail, /输出分辨率/)
   assert.match(historyDetail, /omniVideoAPI\.historyDetail\(route\.params\.id\)/)
-  assert.match(filmCreate, />复制当前分镜<\/el-button>/)
-  assert.match(filmCreate, /storyboardsAPI\.copy\(sb\.id\)/)
+  // 旧工作台的「复制当前分镜」按钮已随死模板删除；复制能力由 FreeCreate 镜头卡承载。
+  assert.doesNotMatch(filmCreate, />复制当前分镜<\/el-button>/)
+  assert.match(filmCreate, /storyboardsAPI\.copy\(/)
   assert.match(filmCreate, /生成结果和历史记录未复制/)
   assert.match(filmCreate, /function getDisplayedSbVideoPrompt\(sb\)/)
   assert.match(filmCreate, /getSbVideo\(sb\.id\)\?\.prompt \|\| sb\.video_prompt/)
-  assert.match(filmCreate, /item\.video\?\.prompt \? `生成提示词：\$\{item\.video\.prompt\}`/)
 })
 
 test('storyboard media management keeps project scope and returns to its source page', () => {

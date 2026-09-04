@@ -178,11 +178,8 @@ const rules = {
   key: [{ required: true, message: '请输入场景键', trigger: 'blur' }]
 }
 
-// 预定义场景键及其对应的服务类型
 const predefinedKeys = [
   { value: 'image_polish', label: 'image_polish - 分镜图提示词润色', service_type: 'text' },
-  // 目前程序里只内置了一个场景键：image_polish
-  // 以下为新增的场景键，已添加到对应的接口里
   { value: 'role_image_polish', label: 'role_image_polish - 角色图提示词润色', service_type: 'text' },
   { value: 'prop_image_polish', label: 'prop_image_polish - 道具图提示词润色', service_type: 'text' },
   { value: 'scene_image_polish', label: 'scene_image_polish - 场景图提示词润色', service_type: 'text' },
@@ -194,14 +191,6 @@ const predefinedKeys = [
   { value: 'frame_prompt', label: 'frame_prompt - 帧提示词生成', service_type: 'text' },
   { value: 'novel_import', label: 'novel_import - 小说导入改写', service_type: 'text' },
   { value: 'story_generation', label: 'story_generation - 故事生成', service_type: 'text' },
-  //  以下是其他服务类型...未实现
-  // 图片生成
-  // { value: 'role_image_gen', label: 'role_image_gen - 角色图片生成', service_type: 'image' },
-  // { value: 'prop_image_gen', label: 'prop_image_gen - 道具图片生成', service_type: 'image' },
-  // { value: 'scene_image_gen', label: 'scene_image_gen - 场景图片生成', service_type: 'image' },
-  // { value: 'storyboard_image_gen', label: 'storyboard_image_gen - 分镜图片生成', service_type: 'image' },
-  // { value: 'video_frame_gen', label: 'video_frame_gen - 视频帧生成', service_type: 'video' },// 首尾帧视频生成
-  // { value: 'video_full_gen', label: 'video_full_gen - 全能视频生成', service_type: 'video' },// 全能模式视频生成
 ]
 
 // 根据服务类型筛选配置

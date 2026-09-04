@@ -66,7 +66,6 @@ const upscaleOptions = computed(() => {
   else if (resolution === '720p') items.push({ label: '超分至 1080p', value: '1080p' })
   return items
 })
-const localChain = computed(() => ['生成原片', value.value.upscale_resolution ? `AI 超分 ${value.value.upscale_resolution}` : '', value.value.target_fps ? `AI 插帧 ${value.value.target_fps}fps` : '', `本地规范 ${value.value.aspect_ratio || '16:9'}`, '最终成片'].filter(Boolean).join(' → '))
 const quote = ref(null), quoteLoading = ref(false), quoteError = ref('')
 let quoteTimer = null, quoteRevision = 0
 function formatPoints(value) { return Number(value || 0).toFixed(4).replace(/\.?(?:0+)$/, '') }
@@ -104,7 +103,7 @@ function scheduleQuote() {
     return
   }
   if (!includeGeneration && !upscale && !fps) {
-    quote.value = { chain: localChain.value, estimated_total_points: 0, stages: [] }
+    quote.value = { estimated_total_points: 0 }
     quoteError.value = ''
     quoteLoading.value = false
     return
@@ -122,12 +121,10 @@ function scheduleQuote() {
         has_video_input: props.hasVideoInput,
         has_audio: props.hasAudioInput,
       }).then((result) => ({ kind: 'generation', points: Number(result?.amount || 0) })))
-      if (upscale || fps) requests.push(videosAPI.postprocessQuote({ duration: duration.value, resolution: value.value.resolution || '720p', aspect_ratio: value.value.aspect_ratio || '16:9', upscale_resolution: upscale, target_fps: fps, source_fps: 30 }).then((result) => ({ kind: 'postprocess', points: Number(result?.estimated_total_points || 0), stages: result?.stages || [] })))
+      if (upscale || fps) requests.push(videosAPI.postprocessQuote({ duration: duration.value, resolution: value.value.resolution || '720p', aspect_ratio: value.value.aspect_ratio || '16:9', upscale_resolution: upscale, target_fps: fps, source_fps: 30 }).then((result) => ({ kind: 'postprocess', points: Number(result?.estimated_total_points || 0) })))
       const results = await Promise.all(requests)
       if (revision === quoteRevision) quote.value = {
-        chain: localChain.value,
         estimated_total_points: results.reduce((sum, item) => sum + item.points, 0),
-        stages: results.flatMap((item) => item.stages || []),
       }
     } catch (_) {
       if (revision === quoteRevision) {

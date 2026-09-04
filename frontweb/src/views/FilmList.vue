@@ -75,40 +75,6 @@
           </aside>
         </section>
 
-        <section v-if="false && allRecords.length" ref="recordsSection" class="records-workspace" aria-labelledby="records-title">
-          <header class="records-heading">
-            <div><h2 id="records-title">创作记录</h2></div>
-            <label class="record-search"><input v-model.trim="recordQuery" type="search" placeholder="搜索项目名称或描述" /></label>
-            <button type="button" class="records-close" aria-label="关闭创作记录" @click="recordsOpen = false">×</button>
-          </header>
-          <div class="record-filters" role="group" aria-label="记录类型筛选">
-            <button v-for="filter in recordFilters" :key="filter.value" type="button" :class="{ active: recordFilter === filter.value }" @click="recordFilter = filter.value">{{ filter.label }}</button>
-          </div>
-          <div v-if="filteredRecords.length" class="record-list">
-            <article v-for="(record, index) in filteredRecords" :key="`${record.type}-${record.id}`" class="record-row">
-              <button type="button" class="record-open" @click="openRecord(record)">
-                <span class="record-index">{{ String(index + 1).padStart(2, '0') }}</span>
-                <span class="record-thumb" :class="{ 'has-image': recordCover(record) }">
-                  <img v-if="recordCover(record)" :src="recordCover(record)" alt="" loading="lazy" decoding="async" />
-                  <i v-else>{{ record.type === 'drama' ? '剧' : '片' }}</i>
-                </span>
-                <span class="record-title"><small>{{ record.label }}</small><b>{{ record.title }}</b><em>{{ record.description }}</em></span>
-                <span class="record-meta">{{ record.meta }}</span>
-                <time>{{ formatDate(record.updatedAt) }}</time>
-                <span class="record-arrow">→</span>
-              </button>
-              <div class="record-actions">
-                <template v-if="record.type === 'drama'">
-                  <el-button circle :icon="Download" title="导出项目" :loading="exportingId === record.source.id" @click="onExport(record.source)" />
-                  <el-button circle :icon="Edit" title="编辑" @click="openEditDialog(record.source)" />
-                  <el-button circle type="danger" plain :icon="Delete" title="删除" @click="onDelete(record.source)" />
-                </template>
-                <el-button v-else circle type="danger" plain :icon="Delete" title="删除" @click="deleteOmniProject(record.source)" />
-              </div>
-            </article>
-          </div>
-          <div v-else class="record-no-result"><b>没有匹配的创作记录</b><span>换一个关键词或筛选类型。</span></div>
-        </section>
 
         <section v-if="!recordsOpen && heroMedia.length" class="media-showcase" aria-labelledby="media-showcase-title">
           <header class="section-heading"><div><h2 id="media-showcase-title">镜头素材</h2></div><button type="button" @click="$router.push('/media-library')">查看全部素材 →</button></header>
@@ -373,7 +339,6 @@ import { imagesAPI } from '@/api/images'
 import { taskAPI } from '@/api/task'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { videosAPI } from '@/api/videos'
-import { formatChinaDateTime } from '@/utils/time'
 
 const router = useRouter()
 const { toggle: toggleTheme } = useTheme()
@@ -476,7 +441,6 @@ const total = ref(0)
 const recordQuery = ref('')
 const recordFilter = ref('all')
 const recordsOpen = ref(false)
-const recordsSection = ref(null)
 const heroVideoFailed = ref(false)
 const heroVideoIndex = ref(0)
 /** 主页背景展示模式：default=系统默认兜底；recent=自己的最近作品。默认兜底，切换才显示最近。 */
@@ -881,29 +845,6 @@ const isAdmin = JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').consol
 const importing = ref(false)
 const importFileInput = ref(null)
 
-const exampleList = ref([])
-const importingExample = ref(null)
-
-function loadExamples() {
-  dramaAPI.listExamples()
-    .then(res => { exampleList.value = Array.isArray(res) ? res : (res?.data ?? []) })
-    .catch(() => { exampleList.value = [] })
-}
-
-async function onImportExample(ex) {
-  importingExample.value = ex.filename
-  try {
-    const data = await dramaAPI.importExample(ex.filename)
-    ElMessage.success(`示例导入成功：${data?.title || ex.name}`)
-    loadList()
-  } catch (e) {
-    const msg = e.response?.data?.message || e.message || '导入失败'
-    ElMessage.error(msg)
-  } finally {
-    importingExample.value = null
-  }
-}
-
 const showEditDialog = ref(false)
 const editForm = ref({ id: null, title: '', description: '' })
 const editSaving = ref(false)
@@ -924,61 +865,9 @@ function loadList() {
     .finally(() => { loading.value = false })
 }
 
-function formatDate(val) {
-  return formatChinaDateTime(val, '')
-}
-
 function formatStatus(status) {
   const map = { draft: '草稿', published: '已发布', archived: '已归档', generating: '生成中' }
   return map[status] || status || '草稿'
-}
-
-function formatStyle(style) {
-  const map = {
-    // 写实 / 影视
-    realistic: '写实',
-    cinematic: '电影感',
-    documentary: '纪录片',
-    noir: '黑色电影',
-    'retro film': '复古胶片',
-    horror: '恐怖',
-    // 动漫 / 卡通
-    'anime style': '日本动漫',
-    anime: '日本动漫',
-    'comic style': '欧美漫画',
-    cartoon: '卡通',
-    // 中国风格
-    'ink wash': '国画水墨',
-    'chinese style': '中国风',
-    historical: '古装',
-    wuxia: '武侠',
-    // 绘画艺术
-    watercolor: '水彩',
-    'oil painting': '油画',
-    sketch: '素描',
-    'woodblock print': '版画',
-    impressionist: '印象派',
-    // 幻想 / 科幻
-    fantasy: '奇幻',
-    'dark fantasy': '暗黑奇幻',
-    'sci-fi': '科幻',
-    sci_fi: '科幻',
-    cyberpunk: '赛博朋克',
-    steampunk: '蒸汽朋克',
-    'post-apocalyptic': '末世废土',
-    // 数字 / 现代
-    '3d render': '3D渲染',
-    'pixel art': '像素风',
-    'low poly': '低多边形',
-    minimalist: '极简',
-    dreamy: '唯美梦幻',
-  }
-  return map[style] || style
-}
-
-function formatGenre(genre) {
-  const map = { drama: '剧情', comedy: '喜剧', adventure: '冒险', romance: '爱情', thriller: '悬疑', action: '动作', horror: '恐怖' }
-  return map[genre] || genre
 }
 
 function totalStoryboards(d) {
@@ -1147,7 +1036,6 @@ async function onDelete(d) {
 
 onMounted(async () => {
   loadList()
-  loadExamples()
   // 供应商锁仅属于运营配置；普通创作账号不应请求管理员端点。
   if (!isAdmin) return
   try {
@@ -2082,7 +1970,6 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 .recent-thumb { display:grid; width:3.25rem; height:3.25rem; place-items:center; overflow:hidden; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.07); color:rgba(255,255,255,.52); font:700 .62rem/1 ui-monospace,monospace; }.recent-thumb img,.recent-thumb video{width:100%;height:100%;object-fit:cover;display:block}.recent-thumb i{font-style:normal}
 .recent-stack div{min-width:0}.recent-stack small,.recent-stack b,.recent-stack em{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recent-stack small{color:#9ff6df;font-size:.55rem;letter-spacing:.11em}.recent-stack b{margin:.28rem 0;font-size:.82rem}.recent-stack em{color:rgba(255,255,255,.48);font-size:.6rem;font-style:normal}.recent-stack>button>i{color:rgba(255,255,255,.55);font-style:normal;transition:transform var(--motion-fast) var(--motion-ease)}.recent-stack button:hover>i{transform:translateX(.25rem)}
 @keyframes recent-in{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
-.records-workspace { scroll-margin-top: 4.5rem; padding: clamp(4rem, 7vw, 7rem) clamp(1.25rem, 5vw, 5rem); border-bottom: 1px solid var(--border-subtle); }
 .records-heading { display: grid; grid-template-columns: minmax(0,1fr) minmax(15rem, 25rem); gap: 3rem; align-items: end; }
 .records-heading p { margin: 0 0 .6rem; color: var(--accent-teal); font-size: .64rem; font-weight: 700; letter-spacing: .17em; }.records-heading h2 { margin: 0; font-size: clamp(3.4rem, 6vw, 7rem); line-height: .9; letter-spacing: -.075em; }.records-heading > div > span { display: block; margin-top: 1.1rem; color: var(--text-muted); font-size: .82rem; }
 .record-search { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 1rem; align-items: center; padding-bottom: .7rem; border-bottom: 1px solid var(--border-strong); color: var(--text-faint); font-size: .7rem; }
@@ -2116,7 +2003,7 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 @media (max-width: 32rem) {
   .media-stage { min-height: 39rem; }.media-stage-content { width:100%; padding:4.5rem 1rem 8.5rem; }.media-stage-content h2 { font-size:clamp(3.4rem,16vw,4.35rem); }.media-stage-content .stage-lede { max-width:22rem; font-size:.82rem; line-height:1.65; }.records-jump { top:1rem; right:1rem; width:7.2rem; }.records-jump b { font-size:1.5rem; }
   .continue-strip { right:1rem; left:1rem; bottom:1.2rem; }.command-dock button { grid-template-columns:1fr; grid-template-rows:auto auto auto; }.command-dock span { grid-row:auto; }.command-dock b { white-space:nowrap; }.command-dock small { max-width:none; }
-  .records-workspace { padding:3.5rem 1rem; }.records-heading h2 { font-size:3.3rem; }.record-open { grid-template-columns:1.5rem 3.8rem minmax(0,1fr) .8rem; gap:.55rem; }.record-thumb { width:3.8rem; height:3.25rem; }.record-title em { max-width:12rem; }.record-filters { margin-top:1.8rem; }
+  .records-heading h2 { font-size:3.3rem; }.record-open { grid-template-columns:1.5rem 3.8rem minmax(0,1fr) .8rem; gap:.55rem; }.record-thumb { width:3.8rem; height:3.25rem; }.record-title em { max-width:12rem; }.record-filters { margin-top:1.8rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   .media-frame img,.records-jump i,.record-thumb img,.record-arrow,.film-frame img,.film-frame > span,.recent-stack button { transition-duration:1ms !important; animation:none!important; opacity:1; transform:none !important; }
@@ -2143,10 +2030,10 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 .media-showcase { display: none; }
 .empty-workspace { position: absolute; z-index: 3; inset: 0; display: grid; min-height: 0; place-content: center; background: rgba(5,7,11,.72); }
 @media (max-width: 70rem) {
-  .records-workspace { width: min(50rem,82vw); }.records-heading { grid-template-columns:1fr; gap:1.3rem; }
+  .records-heading { grid-template-columns:1fr; gap:1.3rem; }
 }
 @media (max-width: 52rem) {
-  .header { height: 3.7rem; }.main { height: calc(100vh - 3.7rem); height: calc(100dvh - 3.7rem); }.records-workspace { width:100%; padding:2rem 1.2rem 1.2rem; }
+  .header { height: 3.7rem; }.main { height: calc(100vh - 3.7rem); height: calc(100dvh - 3.7rem); }
   .media-stage-content { padding-bottom: 8rem; }.continue-strip { bottom: 5.8rem; }
   .command-dock { display:flex; min-height:4.9rem; overflow-x:auto; }.command-dock button { flex:1 0 10.5rem; grid-template-columns:auto 1fr auto; grid-template-rows:auto; min-height:4.9rem; padding:.8rem 1rem; border-bottom:0!important; }.command-dock span { grid-row:auto; }.command-dock b { align-self:center; }.command-dock small { display:none; }.command-dock i { grid-row:auto; }
   .record-open { grid-template-columns:1.6rem 4.2rem minmax(0,1fr) .8rem; min-height:5.7rem; padding-right:.4rem; }.record-thumb { width:4.2rem; height:3.2rem; }
@@ -2175,7 +2062,7 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 @media(prefers-reduced-motion:reduce){.media-canvas>video,.media-canvas>img,.media-empty-motion i{animation:none!important;transform:none!important}}
 
 /* Shared desktop header + in-page archive: records no longer cover the stage. */
-.film-list>.main{height:calc(100vh - var(--ui-header-height));height:calc(100dvh - var(--ui-header-height))}.projects-wrap.showing-records{overflow:auto;background:var(--ui-canvas)}.records-workspace{position:relative;top:auto;right:auto;bottom:auto;display:grid;width:min(1180px,calc(100% - 64px));min-height:100%;margin:0 auto;padding:clamp(32px,5vw,72px) 0;overflow:visible;border:0;background:transparent;box-shadow:none;transform:none;visibility:visible;transition:none}.records-heading{grid-template-columns:minmax(0,1fr) minmax(14rem,22rem)}.record-list{max-height:none;overflow:visible}.records-close{position:static;justify-self:end;grid-column:3;grid-row:1}.records-heading{grid-template-columns:minmax(0,1fr) minmax(14rem,22rem) auto}.records-workspace .record-open{padding-right:8rem}.records-workspace .record-actions{opacity:1}.records-workspace .record-row:hover .record-actions{opacity:1}
+.film-list>.main{height:calc(100vh - var(--ui-header-height));height:calc(100dvh - var(--ui-header-height))}.projects-wrap.showing-records{overflow:auto;background:var(--ui-canvas)}.records-heading{grid-template-columns:minmax(0,1fr) minmax(14rem,22rem)}.record-list{max-height:none;overflow:visible}.records-close{position:static;justify-self:end;grid-column:3;grid-row:1}.records-heading{grid-template-columns:minmax(0,1fr) minmax(14rem,22rem) auto}
 
 /* The home is a real moving-video stage. The project rail is intentionally quiet. */
 .media-stage-content{width:min(38rem,44vw);padding:clamp(3rem,7vh,6rem) clamp(2.5rem,5vw,5.5rem)}.media-stage-content h2{max-width:none;font-size:clamp(3.5rem,5.3vw,6.15rem);line-height:.94;white-space:nowrap}.focus-current{display:grid;gap:.22rem;max-width:25rem;margin:1rem 0 1.35rem}.focus-current span{color:#9ff6df;font-size:.6rem;font-weight:750;letter-spacing:.12em}.focus-current b{overflow:hidden;color:rgba(255,255,255,.92);font-size:1rem;text-overflow:ellipsis;white-space:nowrap}.focus-current em{color:rgba(255,255,255,.55);font-size:.68rem;font-style:normal}.focus-current--empty{display:block;color:rgba(255,255,255,.64);font-size:.8rem}.stage-actions{margin-top:0}.stage-data{gap:2rem;margin-top:1.35rem;padding-top:.8rem}.stage-data dt{font-size:1.25rem}
