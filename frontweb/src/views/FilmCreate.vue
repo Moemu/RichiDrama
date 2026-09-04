@@ -392,7 +392,7 @@
               <el-button v-else-if="resourceCatalogType === 'scene'" size="small" @click="openAddScene">添加场景</el-button>
               <el-button v-else-if="resourceCatalogType === 'prop'" size="small" @click="showAddProp = true">添加道具</el-button>
               <el-button v-if="resourceCatalogType !== 'media' && resourceCatalogItems.length" size="small" type="primary" plain :loading="resourceBatchGenerating === resourceCatalogType" @click="onGenerateMissingResourceImages(resourceCatalogType)">生成缺图</el-button>
-              <el-button v-if="resourceCatalogType === 'media'" size="small" @click="openProjectMediaLibrary">管理项目素材</el-button>
+              <el-button v-if="resourceCatalogType === 'media'" size="small" @click="projectLibraryDialogOpen = true">管理项目素材</el-button>
               <el-button v-if="resourceCatalogSelectedCount" size="small" type="danger" plain @click="batchDeleteUnifiedResources(resourceCatalogType)">批量删除（{{ resourceCatalogSelectedCount }}）</el-button>
             </div>
           </header>
@@ -434,7 +434,7 @@
           </article>
         </div>
         <div class="resource-media-library">
-          <header><div><b>媒体素材库</b></div><div class="resource-media-header-actions"><el-button size="small" type="danger" plain :disabled="!unifiedResourceSelection.media.size" @click="batchDeleteUnifiedResources('media')">批量删除{{ unifiedResourceSelection.media.size ? `（${unifiedResourceSelection.media.size}）` : '' }}</el-button><el-button size="small" @click="openProjectMediaLibrary">管理当前项目素材</el-button><span>{{ universalLibraryAssets.length }} 项</span></div></header>
+          <header><div><b>媒体素材库</b></div><div class="resource-media-header-actions"><el-button size="small" type="danger" plain :disabled="!unifiedResourceSelection.media.size" @click="batchDeleteUnifiedResources('media')">批量删除{{ unifiedResourceSelection.media.size ? `（${unifiedResourceSelection.media.size}）` : '' }}</el-button><el-button size="small" @click="projectLibraryDialogOpen = true">管理当前项目素材</el-button><span>{{ universalLibraryAssets.length }} 项</span></div></header>
           <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card" :class="{ selected: isUnifiedResourceSelected('media', asset.id) }"><el-checkbox class="resource-media-select" :model-value="isUnifiedResourceSelected('media', asset.id)" :aria-label="`选择媒体素材 ${asset.name || asset.id}`" @click.stop @change="toggleUnifiedResourceSelection('media', asset.id)" /><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><el-button class="resource-media-delete" size="small" type="danger" circle :aria-label="asset.source_type === 'project_resource' ? '解除项目素材' : asset.library_scope === 'global' ? '删除全局素材' : '删除项目素材'" @click="deleteResourceMedia(asset)">×</el-button><small>{{ asset.name || `素材 ${asset.id}` }}</small><small>{{ asset.library_scope === 'global' ? '我的全局素材' : '当前项目素材' }}</small><div class="resource-media-card-actions"><el-button size="small" text @click="renameResourceMedia(asset)">重命名</el-button><el-button size="small" type="danger" text @click="deleteResourceMedia(asset)">{{ asset.source_type === 'project_resource' ? '解除素材' : '删除' }}</el-button></div><small v-if="asset.source_type === 'project_resource'">关联资源：解除后不会被自动重建</small></article></div>
           <div v-if="detachedResourceLinks.length" class="resource-media-grid"><article v-for="link in detachedResourceLinks" :key="`detached-${link.id}`" class="resource-media-card"><span>已解除</span><small>{{ link.asset_name || `${link.resource_type} #${link.resource_id}` }}</small><small>历史分镜引用仍保留</small><el-button size="small" type="primary" text @click="restoreResourceMedia(link)">恢复关联</el-button></article></div>
           <p v-else class="resource-center-empty">还没有上传媒体素材。</p>
@@ -2259,6 +2259,15 @@
         <el-button type="primary" :loading="sbPromptSaving" @click="onSaveSbPromptDialog">保存</el-button>
       </template>
     </el-dialog>
+    <ProjectAssetLibraryDialog
+      v-model="projectLibraryDialogOpen"
+      v-model:keyword="projectLibraryKeyword"
+      :assets="projectLibraryDialogAssets"
+      title="项目素材库"
+      :joinable="false"
+      @upload="onProjectLibraryUpload"
+      @open-full="openProjectMediaLibrary"
+    />
 
     <!-- 首尾帧提示词编辑器（显示最终发给AI的完整提示词，支持编辑保存） -->
     <el-dialog
@@ -2625,6 +2634,7 @@ import { setTransparentDragPreview } from '@/utils/dragPreview'
 import StylePickerButton from '@/components/StylePickerButton.vue'
 import AIConfigContent from '@/components/AIConfigContent.vue'
 import UniversalSegmentOmniAtEditor from '@/components/UniversalSegmentOmniAtEditor.vue'
+import ProjectAssetLibraryDialog from '@/components/ProjectAssetLibraryDialog.vue'
 import FreeCreate from '@/views/FreeCreate.vue'
 import { clearPromptDraft, currentDraftUserId, readPromptDraft, shouldRestorePromptDraft, writePromptDraft } from '@/utils/promptDraft'
 import {
@@ -2668,6 +2678,15 @@ function openProjectMediaLibrary() {
     query: { drama_id: dramaId.value, return_to: route.fullPath },
   })
 }
+
+const projectLibraryDialogOpen = ref(false)
+const projectLibraryKeyword = ref('')
+const projectLibraryDialogAssets = computed(() => {
+  const keyword = projectLibraryKeyword.value.trim().toLowerCase()
+  if (!keyword) return universalLibraryAssets.value
+  return universalLibraryAssets.value.filter((asset) => `${asset.name || ''} ${asset.description || ''}`.toLowerCase().includes(keyword))
+})
+function onProjectLibraryUpload(files) { onResourceMediaFileChange({ target: { files } }) }
 
 
 const showAiConfigDialog = ref(false)

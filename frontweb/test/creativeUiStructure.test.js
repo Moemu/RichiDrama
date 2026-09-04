@@ -227,18 +227,20 @@ test('统一资源中心以可搜索的单一资源浏览器代替三列长列�
 })
 
 test('分镜素材区默认只展示本镜工作集，项目素材通过检索面板按需加入', async () => {
-  const source = await readSource('../src/views/FreeCreate.vue')
+  const [source, libraryDialog] = await Promise.all([
+    readSource('../src/views/FreeCreate.vue'),
+    readSource('../src/components/ProjectAssetLibraryDialog.vue'),
+  ])
 
-  assert.match(source, /仅显示本镜已加入的素材；上传后会自动加入本镜/)
   assert.match(source, /v-for="asset in chosenAssets"/)
   assert.match(source, /current-shot-material-pool/)
   assert.match(source, /projectLibraryOpen = ref\(false\)/)
-  assert.match(source, /从项目素材库加入本镜/)
+  assert.match(source, /<ProjectAssetLibraryDialog/)
   assert.match(source, /const filteredProjectLibraryAssets = computed/)
-  assert.match(source, /\$\{typeName\(asset\.type\)\}/)
-  assert.match(source, /v-for="asset in filteredProjectLibraryAssets"/)
-  assert.match(source, /点击素材即可加入或移出当前镜头/)
-  assert.match(source, /project-asset-library-grid/)
+  assert.match(source, /:assets="filteredProjectLibraryAssets"/)
+  assert.match(libraryDialog, /点击素材加入或移出本镜/)
+  assert.match(libraryDialog, /v-for="asset in assets"/)
+  assert.match(libraryDialog, /project-asset-library-grid/)
 })
 
 test('提示词引用只改变勾选态，不清空已加入本镜的素材', async () => {
@@ -340,9 +342,9 @@ test('workbench and media library expose the premium entry surfaces', async () =
   assert.doesNotMatch(tools, /灵感不该|困在工具里/)
   assert.doesNotMatch(tools, /class="tool-grid"/)
   assert.match(library, /class="page-header library-header"/)
-  assert.match(library, /素材 · \{\{ total \}\} 项/)
-  assert.match(library, /<b>上传到素材库<\/b>/)
-  assert.match(library, /角色可使用多份图片。普通图片、视频和音频也可独立上传/)
+  assert.match(library, /\{\{ projectDramaId \? '项目媒体素材库' : '媒体素材库' \}\}/)
+  assert.match(library, /上传素材/)
+  assert.match(library, /上传限制：图片/)
   assert.match(library, /omniVideoAPI\.refreshAssetCertification/)
   assert.match(library, /class="media-preview-dialog"/)
   assert.match(library, /\.media-preview-dialog \.el-dialog__body\)[^}]*overflow-y: auto/)
@@ -372,7 +374,7 @@ test('单视频工具直达生成并引用账号全部素材', async () => {
     readSource('../src/components/ToolAssetSelector.vue'),
   ])
 
-  assert.match(media, /无需新建项目。输入长提示词，引用已有素材，然后生成成片。/)
+  assert.match(media, /<li>无需项目<\/li><li>支持 @ 素材<\/li><li>支持拖入素材<\/li>/)
   assert.match(media, /source_context: 'single_video_tool'/)
   assert.match(media, /media === 'image' && !Number\(dramaId\.value\)/)
   assert.match(media, /omniVideoAPI\.create\(\{/)
@@ -428,7 +430,7 @@ test('单视频工具直达生成并引用账号全部素材', async () => {
   assert.match(selector, /class="source-tabs"/)
   assert.match(selector, /min-height: 44px/)
   assert.match(selector, /source === 'library' \? label : '上传到素材库'/)
-  assert.match(selector, /文件会保存到个人素材库。上传后可立即引用。/)
+  assert.match(selector, /上传后保存到个人素材库，可立即引用。/)
   assert.doesNotMatch(selector, /我的全部素材（含项目素材）/)
   assert.match(selector, /draggable="false"/)
   assert.match(selector, /@dragstart\.prevent/)
@@ -452,7 +454,7 @@ test('剧本工具与自由全能生成仍要求并传递唯一的计费归属�
   assert.doesNotMatch(media, /source_context: 'single_video_tool',[^}]*drama_id:/)
   assert.match(freeCreate, /placeholder="选择计费项目" aria-label="选择计费归属项目"/)
   assert.match(freeCreate, /class="billing-project-field" aria-labelledby="billing-project-title"/)
-  assert.match(freeCreate, /首次生成后将锁定，避免跨项目混账/)
+  assert.match(freeCreate, /请选择计费项目，首次生成后将锁定。/)
   assert.match(freeCreate, /drama_id:\s*Number\(freeProjectId\.value\)/)
   assert.match(freeCreate, /:disabled="!!sequence\?\.drama_id"/)
   assert.match(freeCreate, /if \(Number\(seq\?\.drama_id\)\) freeProjectId\.value = Number\(seq\.drama_id\)/)
@@ -475,7 +477,7 @@ test('generation settings use model capabilities to filter source resolutions', 
   assert.match(source, /resolutionOptions = computed/)
   assert.match(source, /当前模型不支持/)
   assert.match(source, /需要 1080p 成片时可启用 AI 超分/)
-  assert.match(config, /models 可按模型 ID 覆盖/)
+  assert.match(config, /"models":\{"模型 ID"/)
   assert.doesNotMatch(config, /duration_seconds/)
 })
 
@@ -636,7 +638,8 @@ test('账户和运营页面使用工作台层级而非传统驾驶舱卡片墙',
 
   assert.match(account, /账户与用量/)
   assert.match(account, /我的账户/)
-  assert.match(account, /class="account-intro"/)
+  assert.match(account, /class="account-header"/)
+  assert.match(account, /class="account-tabs"/)
   assert.match(account, /Account workspace: calm ledger hierarchy/)
   assert.match(admin, /<h1>运营工作台<\/h1>/)
   assert.match(admin, /当前待办/)
@@ -670,9 +673,9 @@ test('账户安全表单使用收缩安全布局并把冻结说明放入额度�
   const account = await readSource('../src/views/AccountCenter.vue')
 
   assert.doesNotMatch(account, /账单怎么看/)
-  assert.match(account, /完成后按实际用量结算，失败则自动释放/)
+  assert.match(account, /按实际用量结算；失败自动退还。/)
   assert.match(account, /class="panel security-card security-card--password"/)
-  assert.match(account, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
+  assert.match(account, /security-view \{ display:grid; grid-template-columns:1fr 1fr/)
   assert.match(account, /security-form-fields--password/)
   assert.doesNotMatch(account, /<el-form inline>/)
 })
@@ -761,7 +764,7 @@ test('视频创作界面展示已持久化的任务进度和最近状态说明',
   assert.match(source, /状态连接暂不可用，正在重试/)
   assert.match(source, /activeGenerationStatuses\.has\(job\.status\)/)
   assert.match(source, /generationStallMinutes/)
-  assert.match(source, /分钟未收到新状态，仍在持续查询/)
+  assert.match(source, /任务仍在进行，可先编辑其他镜头。/)
 })
 
 test('成片操作栏不会覆盖视频，嵌入分镜保持三栏创作节奏', async () => {
