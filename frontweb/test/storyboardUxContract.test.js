@@ -200,9 +200,10 @@ test('long prompt text keeps an independently scrollable textarea', () => {
 })
 
 test('project settings communicate first-shot master, inherited and override states', () => {
-  assert.match(freeCreate, /首镜母版/)
-  assert.match(freeCreate, /跟随首镜/)
-  assert.match(freeCreate, /当前镜头覆盖/)
+  // 继承首镜是默认行为，不再常驻三态标签与说明；覆盖态仅保留「同首镜同步」入口。
+  assert.doesNotMatch(freeCreate, /首镜母版|跟随首镜|当前镜头覆盖/)
+  assert.match(freeCreate, /同首镜同步/)
+  assert.match(freeCreate, /restoreCurrentShotMaster/)
   assert.match(freeCreate, /updateGenerationSettings/)
 })
 

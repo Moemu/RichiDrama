@@ -18,7 +18,7 @@
 
     <section class="workbench" :class="`mobile-${mobileWorkspaceTab}`">
       <aside class="panel shot-panel" aria-label="镜头导航">
-        <div class="shot-heading"><b>镜头列表</b><small>{{ shots.length }} 个 · 滚轮切镜</small></div>
+        <div class="shot-heading"><b>镜头列表</b><small>{{ shots.length }} 个</small></div>
         <div class="shot-actions"><el-button size="small" type="primary" plain :disabled="reproductionMode" @click="addShot(false)">+ 尾部添加</el-button><el-button size="small" :disabled="!currentShot || reproductionMode" @click="addShot(true)">当前镜头后添加</el-button></div>
         <div ref="shotListRef" class="shot-list" tabindex="0" aria-label="镜头列表，可用上下方向键或滚轮切换镜头" @keydown.up.prevent="selectRelative(-1)" @keydown.down.prevent="selectRelative(1)" @wheel.prevent="onShotListWheel">
           <article v-for="(shot, index) in shots" :key="shot.id" class="shot-card" :class="{ active: shot.id === activeShotId, dragging: draggedShotId === shot.id }" :aria-current="shot.id === activeShotId ? 'true' : undefined" draggable="true" @dragstart="draggedShotId = shot.id" @dragend="draggedShotId = null" @dragover.prevent @drop="dropShot(shot.id)" @click="selectShot(shot)">
@@ -118,8 +118,7 @@
           </div>
         </details>
         <details open class="t0-generation-settings" aria-label="生成参数">
-          <summary class="t0-settings-summary"><b>生成参数</b><div v-if="isProjectMode" class="template-status"><el-tag size="small" :type="currentGenerationMode === 'custom' ? 'warning' : 'info'">{{ currentGenerationMode === 'master' ? '首镜母版' : currentGenerationMode === 'custom' ? '当前镜头覆盖' : '跟随首镜' }}</el-tag><el-button v-if="currentGenerationMode === 'custom'" text size="small" @click="restoreCurrentShotMaster">恢复跟随首镜</el-button></div></summary>
-          <div class="t0-settings-heading"><small>{{ currentGenerationMode === 'master' ? '调整后同步所有跟随镜头' : currentGenerationMode === 'custom' ? '本镜独立，不受首镜变化影响' : '默认采用第一个镜头参数，可单独覆盖' }}</small></div>
+          <summary class="t0-settings-summary"><b>生成参数</b><el-button v-if="isProjectMode && currentGenerationMode === 'custom'" class="t0-sync-button" size="small" @click.stop="restoreCurrentShotMaster">同首镜同步</el-button></summary>
           <GenerationSettings
             v-model="generationSettings"
             :max-duration="maxDuration"
@@ -756,8 +755,8 @@ async function restoreCurrentShotMaster() {
     const result = await storyboardsAPI.clearGenerationSettingsOverrides(currentShot.value.id)
     applyGenerationContract(await storyboardsAPI.getEpisodeGenerationSettings(projectEpisodeId.value))
     loadShot(shots.value.find((shot) => Number(shot.id) === Number(result.id)) || currentShot.value)
-    ElMessage.success('当前镜头已恢复跟随首镜')
-  } catch (error) { ElMessage.error(error.message || '恢复首镜参数失败') }
+    ElMessage.success('已同步为首镜参数')
+  } catch (error) { ElMessage.error(error.message || '同步首镜参数失败') }
 }
 function backToProject() {
   if (reproductionMode.value?.standalone) return router.push({ path: '/admin', query: { tab: 'production' } })
@@ -1600,7 +1599,7 @@ defineExpose({ refreshProjectShots })
 .creation-generate-dock{position:sticky;bottom:0;z-index:12;display:grid;gap:8px;margin:auto -2px 0;padding:10px;border:1px solid #69655e;border-radius:8px;background:#181818f2;box-shadow:0 -6px 18px #0006;backdrop-filter:blur(8px)}.creation-generate-summary{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.creation-generate-summary b{color:#f5f3ee;font-size:13px}.creation-generate-summary small{color:#c4c1ba;font-size:11px;white-space:nowrap}.creation-generate-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:7px}.creation-generate-actions .generate-button{margin:0!important;min-width:0}.project-storyboard-page .creation-generate-dock{bottom:-1px;background:#181f29f5;border-color:#3c4958}.project-storyboard-page .creation-generate-summary b{color:#f2f0ea}.project-storyboard-page .creation-generate-summary small{color:#aab4c0}@media(max-width:720px){.creation-generate-dock{position:sticky;bottom:0;margin-left:0;margin-right:0}.creation-generate-summary{align-items:flex-start;flex-direction:column;gap:3px}.creation-generate-summary small{white-space:normal}}
 @media(max-width:960px){.omni-page.embedded.project-storyboard-page{position:static!important;height:auto!important;min-height:0!important;overflow:visible!important}.omni-page.embedded.project-storyboard-page .workbench,.omni-page.embedded.is-reproduction .workbench{height:auto!important;min-height:520px}.reproduction-banner{align-items:stretch;flex-direction:column}.reproduction-banner>div:last-child{flex-wrap:wrap}}
 .t0-generation-settings{display:grid;gap:10px;margin:12px -2px 14px;padding:12px;border:1px solid #88837a;border-radius:8px;background:#252525}
-.t0-generation-settings>summary{display:flex;flex-wrap:wrap;align-items:center;gap:8px;cursor:pointer;list-style:none}.t0-generation-settings>summary::-webkit-details-marker{display:none}.t0-generation-settings>summary::after{content:'展开';flex:none;color:#c4c1ba;font-size:10px}.t0-generation-settings[open]>summary::after{content:'收起'}.t0-generation-settings>summary b{font-size:14px;color:#f5f3ee}.t0-generation-settings[open]>.t0-settings-heading{padding-bottom:2px}.t0-settings-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.t0-settings-heading b{font-size:14px;color:#f5f3ee}.t0-settings-heading small{font-size:11px;color:#c4c1ba}.center-stage{grid-template-rows:42px minmax(170px,.8fr) 42px 38px minmax(235px,1fr)}.shot-script{min-height:235px;border-top:2px solid #88837a}.project-storyboard-page .t0-generation-settings{background:#202934;border-color:#506174}.project-storyboard-page .t0-settings-heading b{color:#f2f0ea}.project-storyboard-page .t0-settings-heading small{color:#aab4c0}@media(max-width:760px){.center-stage{grid-template-rows:42px minmax(200px,.8fr) 42px 38px minmax(260px,1fr)}.t0-settings-heading{align-items:flex-start;flex-direction:column;gap:3px}}
+.t0-generation-settings>summary{display:flex;flex-wrap:wrap;align-items:center;gap:8px;cursor:pointer;list-style:none}.t0-generation-settings>summary::-webkit-details-marker{display:none}.t0-generation-settings>summary::after{content:'展开';flex:none;margin-left:auto;color:#c4c1ba;font-size:10px}.t0-generation-settings[open]>summary::after{content:'收起'}.t0-generation-settings>summary b{font-size:14px;color:#f5f3ee}.t0-generation-settings[open]>.t0-settings-heading{padding-bottom:2px}.t0-settings-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.t0-settings-heading b{font-size:14px;color:#f5f3ee}.t0-settings-heading small{font-size:11px;color:#c4c1ba}.center-stage{grid-template-rows:42px minmax(170px,.8fr) 42px 38px minmax(235px,1fr)}.shot-script{min-height:235px;border-top:2px solid #88837a}.project-storyboard-page .t0-generation-settings{background:#202934;border-color:#506174}.project-storyboard-page .t0-settings-heading b{color:#f2f0ea}.project-storyboard-page .t0-settings-heading small{color:#aab4c0}@media(max-width:760px){.center-stage{grid-template-rows:42px minmax(200px,.8fr) 42px 38px minmax(260px,1fr)}.t0-settings-heading{align-items:flex-start;flex-direction:column;gap:3px}}
 .template-status{display:flex;align-items:center;gap:3px;margin-left:auto}.template-status+small{max-width:46%;text-align:right}.shot-preview img{display:block;background:#111820}
 /* 2026-08 usability pass: readable T0 controls, wheel navigation, and media-light lists. */
 /* Keep the right-hand shot list as the only scrolling surface in the desktop storyboard workspace. */
