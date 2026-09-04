@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="header-left">
         <p class="page-desc">
-          配置不同业务场景使用的 AI 模型路由。当调用 generateText 时传入 scene_key，系统会优先使用此处配置的模型。
+          配置不同业务场景使用的 AI 模型路由，对应场景的生成会优先使用此处配置的模型。
         </p>
       </div>
       <div class="header-right">
@@ -22,7 +22,7 @@
         stripe
         style="width: 100%"
       >
-        <el-table-column prop="key" label="场景键 (scene_key)" min-width="220">
+        <el-table-column prop="key" label="场景键" min-width="220">
           <template #default="{ row }">
             <div class="">
               <code class="scene-key">{{ row.key }}</code>
@@ -99,14 +99,13 @@
             <el-option label="视频生成" value="video" />
             <el-option label="语音合成 TTS" value="tts" />
           </el-select>
-          <p class="field-tip">由场景键自动决定，不可更改</p>
         </el-form-item>
 
         <el-form-item label="AI 配置">
           <el-select
             v-model="form.config_id"
             clearable
-            placeholder="选择 AI 配置（留空使用默认）"
+            placeholder="留空使用该服务的默认配置"
             style="width: 100%"
             @change="onConfigChange"
           >
@@ -117,14 +116,13 @@
               :value="c.id"
             />
           </el-select>
-          <p class="field-tip">指定具体的 AI 服务配置，不选则使用该类服务的默认配置</p>
         </el-form-item>
 
         <el-form-item label="模型覆盖">
           <el-select
             v-model="form.model_override"
             clearable
-            placeholder="选择模型（留空使用配置默认）"
+            placeholder="留空使用配置默认"
             style="width: 100%"
             :disabled="!selectedConfigModels.length"
           >
@@ -135,9 +133,6 @@
               :value="m"
             />
           </el-select>
-          <p class="field-tip">
-            {{ selectedConfigModels.length ? '从该配置的可用模型中选择' : '请先选择 AI 配置' }}
-          </p>
         </el-form-item>
         <el-form-item prop="description" label="描述">
           <el-input
@@ -180,8 +175,7 @@ const form = ref({
 })
 
 const rules = {
-  key: [{ required: true, message: '请输入场景键', trigger: 'blur' }],
-  service_type: [{ required: true, message: '请选择服务类型', trigger: 'change' }]
+  key: [{ required: true, message: '请输入场景键', trigger: 'blur' }]
 }
 
 // 预定义场景键及其对应的服务类型
@@ -213,14 +207,7 @@ const predefinedKeys = [
 // 根据服务类型筛选配置
 const filteredConfigs = computed(() => {
   const currentServiceType = form.value.service_type
-  console.log('filteredConfigs computed, service_type:', currentServiceType, 'configs:', configs.value.length)
-  const filtered = configs.value.filter(c => {
-    const match = c.service_type === currentServiceType && c.is_active
-    console.log('  config:', c.name, 'service_type:', c.service_type, 'match:', match)
-    return match
-  })
-  console.log('  filtered result:', filtered.length)
-  return filtered
+  return configs.value.filter(c => c.service_type === currentServiceType && c.is_active)
 })
 
 // 获取选中配置的可用模型列表
@@ -262,12 +249,9 @@ function getSceneKeyLabel(key) {
 
 // 场景键改变时自动设置服务类型
 function onKeyChange(key) {
-  console.log('onKeyChange called with key:', key)
   const matched = predefinedKeys.find(k => k.value === key)
-  console.log('matched predefined key:', matched)
   if (matched) {
     form.value.service_type = matched.service_type
-    console.log('service_type set to:', form.value.service_type)
   }
   // 重置配置和模型选择
   form.value.config_id = null
@@ -287,8 +271,7 @@ async function load() {
       aiAPI.list()
     ])
     configs.value = configsData || []
-    console.log('Loaded configs:', configs.value.map(c => ({ id: c.id, name: c.name, service_type: c.service_type, is_active: c.is_active })))
-    
+
     // 合并配置名称
     list.value = (mapsData || []).map(item => {
       const config = configs.value.find(c => c.id === item.config_id)

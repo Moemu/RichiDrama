@@ -80,7 +80,7 @@
           <el-option
             v-for="g in workflowGroups"
             :key="g.id"
-            :label="`${g.title} (${(g.storyboard_ids || []).length}镜)`"
+            :label="g.title"
             :value="g.id"
           />
         </el-select>
@@ -138,7 +138,6 @@
             <span>📜 剧本</span>
             <el-button link size="small" type="warning" @click="focusScriptNode">编辑</el-button>
           </div>
-          <p class="sidebar-script-tip">从头创作：先写剧本</p>
         </div>
         <div class="sidebar-title">
           素材库
@@ -204,8 +203,6 @@
           </div>
           <div v-if="!workflowGroups.length" class="sidebar-empty">框选分镜后点「创建工作流」</div>
         </div>
-
-        <p class="sidebar-tip">单击分镜可单镜生图/生视频；顶栏「本集生成」可批量操作。</p>
       </aside>
 
       <div ref="canvasMainRef" class="canvas-main">
@@ -693,7 +690,7 @@ async function onAlignNodes() {
       }
     }
     await persistCanvasState({ layoutOnly: true })
-    ElMessage.success('节点已按规则对齐并适配当前视图')
+    ElMessage.success('已对齐')
   } catch (e) {
     ElMessage.error(e?.message || '对齐失败')
   } finally {
@@ -722,7 +719,7 @@ async function loadDrama(silent = false) {
 
 async function onCreateWorkflowGroup() {
   if (!selectedStoryboardIds.value.length) {
-    ElMessage.warning('请先框选或 Ctrl 点击选择分镜节点')
+    ElMessage.warning('请先选择分镜')
     return
   }
   try {

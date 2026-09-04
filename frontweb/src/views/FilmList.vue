@@ -20,10 +20,9 @@
           </div>
           <div class="media-stage-shade"></div>
           <div class="media-stage-content">
-            <p class="stage-kicker"><span></span> 创作中心</p>
             <h2 id="media-stage-title">项目工作台</h2>
             <template v-if="focusRecord">
-              <p class="focus-current"><span>继续创作</span><b :title="focusRecord.title">{{ focusRecord.title }}</b><em>{{ focusRecord.meta }}</em></p>
+              <p class="focus-current"><span>继续制作</span><b :title="focusRecord.title">{{ focusRecord.title }}</b><em>{{ focusRecord.meta }}</em></p>
             </template>
             <p v-else class="focus-current focus-current--empty">从新建短剧开始你的项目。</p>
           <div class="stage-actions">
@@ -42,7 +41,7 @@
             </dl>
           </div>
           <button type="button" class="records-jump" :aria-expanded="recordsOpen" aria-controls="creation-records" @click="recordsOpen = !recordsOpen">
-            <span>{{ recordsOpen ? '收起记录' : '全部记录' }}</span><b>{{ allRecords.length }}</b><i>{{ recordsOpen ? '收起 ←' : '查看 →' }}</i>
+            <span>{{ recordsOpen ? '收起记录' : '全部记录' }}</span><b>{{ allRecords.length }}</b>
           </button>
           <aside v-if="allRecords.length" class="recent-stack" aria-label="最近项目">
             <p>最近项目</p>
@@ -53,11 +52,11 @@
           <aside v-if="recordsOpen" id="creation-records" class="records-panel" aria-labelledby="records-title">
             <header class="records-heading">
               <div><p>创作记录</p><h2 id="records-title">全部项目</h2></div>
-              <label class="record-search"><span>搜索</span><input v-model.trim="recordQuery" type="search" placeholder="项目名称或描述" /></label>
+              <label class="record-search"><input v-model.trim="recordQuery" type="search" placeholder="搜索项目名称或描述" /></label>
               <button type="button" class="records-close" aria-label="关闭创作记录" @click="recordsOpen = false">×</button>
             </header>
             <div class="record-filters" role="group" aria-label="记录类型筛选">
-              <button v-for="filter in recordFilters" :key="filter.value" type="button" :class="{ active: recordFilter === filter.value }" @click="recordFilter = filter.value">{{ filter.label }} <span>{{ filter.count }}</span></button>
+              <button v-for="filter in recordFilters" :key="filter.value" type="button" :class="{ active: recordFilter === filter.value }" @click="recordFilter = filter.value">{{ filter.label }}</button>
             </div>
             <div v-if="filteredRecords.length" class="record-list">
               <article v-for="(record, index) in filteredRecords" :key="`${record.type}-${record.id}`" class="record-row">
@@ -79,11 +78,11 @@
         <section v-if="false && allRecords.length" ref="recordsSection" class="records-workspace" aria-labelledby="records-title">
           <header class="records-heading">
             <div><h2 id="records-title">创作记录</h2></div>
-            <label class="record-search"><span>搜索</span><input v-model.trim="recordQuery" type="search" placeholder="项目名称或描述" /></label>
+            <label class="record-search"><input v-model.trim="recordQuery" type="search" placeholder="搜索项目名称或描述" /></label>
             <button type="button" class="records-close" aria-label="关闭创作记录" @click="recordsOpen = false">×</button>
           </header>
           <div class="record-filters" role="group" aria-label="记录类型筛选">
-            <button v-for="filter in recordFilters" :key="filter.value" type="button" :class="{ active: recordFilter === filter.value }" @click="recordFilter = filter.value">{{ filter.label }} <span>{{ filter.count }}</span></button>
+            <button v-for="filter in recordFilters" :key="filter.value" type="button" :class="{ active: recordFilter === filter.value }" @click="recordFilter = filter.value">{{ filter.label }}</button>
           </div>
           <div v-if="filteredRecords.length" class="record-list">
             <article v-for="(record, index) in filteredRecords" :key="`${record.type}-${record.id}`" class="record-row">
@@ -134,10 +133,10 @@
     >
       <el-form :model="newForm" label-width="80px" label-position="top">
         <el-form-item label="标题" required>
-          <el-input v-model="newForm.title" placeholder="输入项目标题" maxlength="100" show-word-limit />
+          <el-input v-model="newForm.title" maxlength="100" show-word-limit />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="newForm.description" type="textarea" :rows="3" placeholder="输入项目描述（选填）" />
+          <el-input v-model="newForm.description" type="textarea" :rows="3" placeholder="选填" />
         </el-form-item>
         <el-form-item label="画面比例">
           <el-select v-model="newForm.aspect_ratio" style="width: 100%">
@@ -342,7 +341,7 @@
     >
       <el-form :model="editForm" label-width="80px" label-position="top">
         <el-form-item label="标题" required>
-          <el-input v-model="editForm.title" placeholder="输入项目标题" maxlength="100" show-word-limit />
+          <el-input v-model="editForm.title" maxlength="100" show-word-limit />
         </el-form-item>
         <el-form-item label="故事">
           <el-input v-model="editForm.description" type="textarea" :rows="3" placeholder="输入故事梗概（选填）" />
@@ -1055,9 +1054,9 @@ function openOmniProject(id) {
 
 async function deleteOmniProject(project) {
   try {
-    await ElMessageBox.confirm(`删除“${project.name || '未命名全能项目'}”？已生成成片和素材会保留，进行中的供应商任务不会被取消。`, '删除全能项目', { type: 'warning' })
+    await ElMessageBox.confirm(`删除“${project.name || '未命名全能项目'}”？已生成成片和素材会保留，正在生成的任务会继续完成。`, '删除全能项目', { type: 'warning' })
     await omniVideoAPI.deleteSequence(project.id)
-    ElMessage.success('全能项目已删除，可在后续恢复列表中找回')
+    ElMessage.success('全能项目已删除，可在账户菜单「已删除项目」中找回')
     loadList()
   } catch (_) {}
 }
@@ -1067,7 +1066,7 @@ async function manageDeletedOmniProjects() {
     const projects = await omniVideoAPI.listDeletedSequences()
     if (!projects.length) return ElMessage.info('没有已删除的全能项目')
     const lines = projects.map((item) => `${item.id}：${item.name || '未命名全能项目'}（${item.shot_count || 0} 个镜头）`).join('\n')
-    const { value } = await ElMessageBox.prompt(`${lines}\n\n输入项目 ID 恢复；输入 purge:ID 永久清理。永久清理保留成片、素材与任务历史。`, '已删除全能项目', { inputPlaceholder: '例如：12 或 purge:12' })
+    const { value } = await ElMessageBox.prompt(`${lines}\n\n输入项目 ID 恢复；输入 purge:ID 永久清理（成片与素材保留）。`, '已删除全能项目', { inputPlaceholder: '例如：12 或 purge:12' })
     const valueText = String(value || '').trim()
     if (!valueText) return
     const purge = valueText.startsWith('purge:'); const id = Number(purge ? valueText.slice(6) : valueText)

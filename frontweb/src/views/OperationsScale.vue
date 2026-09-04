@@ -6,9 +6,9 @@
         <h1>运营告警与报表</h1>
       </div>
       <div class="actions">
-        <el-button @click="$router.push('/')">返回主页</el-button>
         <el-button @click="$router.push('/admin')">返回运营台</el-button>
-        <el-button type="primary" :loading="exporting" @click="downloadProduction">导出生产 CSV</el-button>
+        <el-button @click="load">刷新检测</el-button>
+        <el-button type="primary" :loading="exporting" @click="downloadProduction">导出生产 CSV（全量）</el-button>
       </div>
     </header>
 
@@ -16,7 +16,7 @@
       <template #title>{{ alertLabel(alert) }}</template>
     </el-alert>
     <section v-if="overview && !(overview.alerts || []).length" class="quiet-status" aria-live="polite">
-      <span aria-hidden="true">✓</span><div><b>当前没有触发的运营告警</b><small>生产、归档和账务阈值均在安全范围内。</small></div><button type="button" @click="load">刷新检测</button>
+      <span aria-hidden="true">✓</span><div><b>当前没有触发的运营告警</b><small>生产、归档和账务阈值均在安全范围内。</small></div>
     </section>
 
     <section class="card">
@@ -34,16 +34,12 @@
     <section class="card" :class="{ 'is-sparse': reports.length <= 3 }">
       <h2>运营日报</h2>
       <el-table :data="reports" size="small">
-        <el-table-column prop="report_date" label="上海日期" width="140" />
+        <el-table-column prop="report_date" label="日期（北京时间）" width="140" />
         <el-table-column label="生成时间" min-width="180"><template #default="{ row }">{{ formatChinaDateTime(row.generated_at) }}</template></el-table-column>
         <el-table-column label="视频生产数" width="130"><template #default="{ row }">{{ row.summary?.production?.total || 0 }}</template></el-table-column>
         <el-table-column label="待对账" width="120"><template #default="{ row }">{{ row.summary?.billing?.pending_reconciliations || 0 }}</template></el-table-column>
         <el-table-column label="告警数" width="100"><template #default="{ row }">{{ row.summary?.alerts?.length || 0 }}</template></el-table-column>
       </el-table>
-      <div v-if="reports.length > 0 && reports.length <= 3" class="snapshot-insight">
-        <div><p>日报归档</p><h3>{{ reports.length }} 份运营日报</h3></div>
-        <dl><div><dt>视频生产</dt><dd>{{ reports[0]?.summary?.production?.total || 0 }}</dd></div><div><dt>待对账</dt><dd>{{ reports[0]?.summary?.billing?.pending_reconciliations || 0 }}</dd></div><div><dt>运营告警</dt><dd>{{ reports[0]?.summary?.alerts?.length || 0 }}</dd></div></dl>
-      </div>
     </section>
   </main>
 </template>

@@ -505,16 +505,17 @@ test('project storyboard generation settings include the video generation quote'
   assert.match(freeCreate, /quoteHasAudioInput = computed\(\(\) => requestMaterialRouting\.value\.sent\.audio > 0\)/)
 })
 
-test('运营页面始终提供返回主页入口', async () => {
+test('运营页面始终提供单一路径返回', async () => {
   const [consoleSource, reportsSource] = await Promise.all([
     readSource('../src/views/AdminConsole.vue'),
     readSource('../src/views/OperationsScale.vue'),
   ])
 
-  for (const source of [consoleSource, reportsSource]) {
-    assert.match(source, /返回主页/)
-    assert.match(source, /\$router\.push\('\/'\)/)
-  }
+  // 运营台自身返回主页；告警报表返回运营台，不并排两个返回按钮。
+  assert.match(consoleSource, /返回主页/)
+  assert.match(reportsSource, /返回运营台/)
+  assert.match(reportsSource, /\$router\.push\('\/admin'\)/)
+  assert.doesNotMatch(reportsSource, /返回主页/)
 })
 
 test('运营账本提供日期和角色筛选，列表操作保持中性层级', async () => {
@@ -544,12 +545,12 @@ test('运营模型用量同时显示账号与显示名，避免把账号误认�
 test('运营价目表展示条件费率，支持审计带视频和不带视频输入', async () => {
   const source = await readSource('../src/views/AdminConsole.vue')
 
-  assert.match(source, /条件费率与审计说明/)
-  assert.match(source, /priceConditions\(row\)\.default_rate_id/)
+  // 审计实现字段（default_rate_id/来源/核验时间）不进入运营 UI，仅保留条件费率与计价说明。
+  assert.match(source, /label="条件费率"/)
+  assert.doesNotMatch(source, /默认命中：/)
   assert.match(source, /has_video_input: \{ true: '带视频', false: '不带视频' \}/)
   assert.match(source, /fps_tier: '帧率档'/)
   assert.match(source, /pricing_note/)
-  assert.match(source, /来源：/)
 })
 
 test('运营后台支持查看和调整用户项目分组', async () => {

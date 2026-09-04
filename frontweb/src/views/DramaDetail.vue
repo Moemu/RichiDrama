@@ -39,7 +39,7 @@
             </el-col>
             <el-col :span="12">
               <el-form-item label="图片/视频风格">
-                <el-select v-model="infoForm.style" placeholder="选择全剧统一风格" clearable style="width: 100%" @change="saveInfo">
+                <el-select v-model="infoForm.style" clearable style="width: 100%" @change="saveInfo">
                   <el-option-group label="写实 / 影视">
                     <el-option label="写实" value="realistic" />
                     <el-option label="电影感" value="cinematic" />
@@ -115,14 +115,13 @@
             <el-icon><Plus /></el-icon>新增一集
           </el-button>
         </div>
-        <div v-if="episodes.length === 0" class="empty-tip">暂无分集，点击「新增一集」开始创作</div>
+        <div v-if="episodes.length === 0" class="empty-tip">暂无分集</div>
         <div v-else class="episode-stage">
           <div class="episode-grid">
             <div
               v-for="ep in episodes"
               :key="ep.id"
               class="episode-card"
-              title="点击进入制作页"
               @click="goEpisode(ep.id)"
             >
               <div class="episode-card-header">
@@ -152,9 +151,7 @@
             </div>
           </div>
           <aside v-if="episodes.length <= 3" class="episode-next-step" aria-labelledby="episode-progress-title">
-            <header class="episode-progress-heading"><div><p>制作概览</p><h3 id="episode-progress-title">第 {{ episodes[0]?.episode_number ?? episodes[0]?.number ?? 1 }} 集进度</h3><span>从剧本开始，逐步完成资源、分镜与成片。</span></div><span class="episode-progress-state">{{ episodes[0]?.status ? epStatusLabel(episodes[0].status) : '待制作' }}</span></header>
-            <div class="episode-pipeline"><i class="done">01 剧本</i><b></b><i>02 资源</i><b></b><i>03 分镜</i><b></b><i>04 成片</i></div>
-            <dl><div><dt>当前分集</dt><dd>{{ episodes[0]?.title || '未命名' }}</dd></div><div><dt>分镜数量</dt><dd>{{ episodes[0]?.storyboards?.length ?? 0 }}</dd></div><div><dt>画面比例</dt><dd>{{ infoForm.aspect_ratio || '16:9' }}</dd></div></dl>
+            <header class="episode-progress-heading"><div><p>制作概览</p><h3 id="episode-progress-title">第 {{ episodes[0]?.episode_number ?? episodes[0]?.number ?? 1 }} 集进度</h3></div><span class="episode-progress-state">{{ episodes[0]?.status ? epStatusLabel(episodes[0].status) : '待制作' }}</span></header>
             <div class="episode-next-actions"><button type="button" @click="workspaceTab = 'resources'">准备角色与场景</button><button type="button" class="primary" @click="goEpisode(episodes[0].id)">继续第 {{ episodes[0]?.episode_number ?? episodes[0]?.number ?? 1 }} 集 ↗</button></div>
           </aside>
         </div>
@@ -203,7 +200,7 @@
                 </div>
               </div>
             </div>
-            <div v-if="!charLoading && charList.length === 0" class="library-empty">暂无本剧角色库记录，可在制作页面「加入本剧库」</div>
+            <div v-if="!charLoading && charList.length === 0" class="library-empty">暂无本剧角色，可在制作页将角色「加入本剧库」</div>
           </div>
           <div class="library-pagination">
             <el-pagination v-model:current-page="charPage" v-model:page-size="charPageSize" :total="charTotal" :page-sizes="[10,20,50]" layout="total, sizes, prev, pager, next" @current-change="loadCharList" @size-change="loadCharList" />
@@ -231,7 +228,7 @@
                 </div>
               </div>
             </div>
-            <div v-if="!sceneLoading && sceneList.length === 0" class="library-empty">暂无本剧场景库记录，可在制作页面「加入本剧库」</div>
+            <div v-if="!sceneLoading && sceneList.length === 0" class="library-empty">暂无本剧场景，可在制作页将场景「加入本剧库」</div>
           </div>
           <div class="library-pagination">
             <el-pagination v-model:current-page="scenePage" v-model:page-size="scenePageSize" :total="sceneTotal" :page-sizes="[10,20,50]" layout="total, sizes, prev, pager, next" @current-change="loadSceneList" @size-change="loadSceneList" />
@@ -259,7 +256,7 @@
                 </div>
               </div>
             </div>
-            <div v-if="!propLoading && propList.length === 0" class="library-empty">暂无本剧道具库记录，可在制作页面「加入本剧库」</div>
+            <div v-if="!propLoading && propList.length === 0" class="library-empty">暂无本剧道具，可在制作页将道具「加入本剧库」</div>
           </div>
           <div class="library-pagination">
             <el-pagination v-model:current-page="propPage" v-model:page-size="propPageSize" :total="propTotal" :page-sizes="[10,20,50]" layout="total, sizes, prev, pager, next" @current-change="loadPropList" @size-change="loadPropList" />
@@ -286,7 +283,7 @@
                 </div>
               </div>
             </template>
-            <div v-else class="library-empty">本剧暂无制作角色，请前往剧集制作页面创建</div>
+            <div v-else class="library-empty">本剧暂无制作角色，在制作页创建后可在此管理</div>
           </div>
         </template>
 
@@ -311,7 +308,7 @@
                 </div>
               </div>
             </template>
-            <div v-else class="library-empty">本剧暂无制作场景，请前往剧集制作页面创建</div>
+            <div v-else class="library-empty">本剧暂无制作场景，在制作页创建后可在此管理</div>
           </div>
         </template>
 
@@ -336,7 +333,7 @@
                 </div>
               </div>
             </template>
-            <div v-else class="library-empty">本剧暂无制作道具，请前往剧集制作页面创建</div>
+            <div v-else class="library-empty">本剧暂无制作道具，在制作页创建后可在此管理</div>
           </div>
         </template>
       </section>
@@ -522,8 +519,7 @@
     >
       <div class="library-toolbar">
         <el-input v-model="importKw" placeholder="搜索关键词" clearable style="width: 220px" @input="onImportKwInput" />
-        <span class="import-tip">点击「导入」将素材复制到本剧资源库</span>
-      </div>
+              </div>
       <div v-loading="importLoading" class="library-list import-list">
         <div v-for="item in importList" :key="item.id" class="library-item">
           <div class="library-item-cover" @click="openPreview(assetImageUrl(item))">
