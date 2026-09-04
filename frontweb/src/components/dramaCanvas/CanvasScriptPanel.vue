@@ -15,8 +15,6 @@
       </div>
     </div>
 
-    <p class="flow-hint">创作起点：编写剧本 → 提取角色/场景/道具 → AI 生成分镜 → 生图/生视频</p>
-
     <el-form label-position="left" label-width="44px" size="small" class="compact-form">
       <el-form-item label="集标题">
         <el-input v-model="form.title" placeholder="第 N 集" />

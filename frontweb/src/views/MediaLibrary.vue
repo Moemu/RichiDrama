@@ -1,13 +1,12 @@
 <template>
   <div class="media-library-page">
-    <div v-if="canConcatSelected" class="concat-bar"><el-button @click="concatSelectedVideos">拼接选中的视频</el-button></div>
     <div class="page-header library-header">
       <div class="header-left">
         <el-button text @click="returnToSource">
           <el-icon><ArrowLeft /></el-icon>
           返回
         </el-button>
-        <div><p class="library-kicker">素材 · {{ total }} 项</p><h2 class="page-title">{{ projectDramaId ? '项目媒体素材库' : '媒体素材库' }}</h2><p class="library-subtitle">{{ projectDramaId ? '仅显示当前项目可用素材' : '图片 · 视频 · 音频' }}</p></div>
+        <div><h2 class="page-title">{{ projectDramaId ? '项目媒体素材库' : '媒体素材库' }}</h2><p class="library-subtitle">{{ projectDramaId ? '仅显示当前项目可用素材' : '图片 · 视频 · 音频' }}</p></div>
       </div>
       <div class="header-actions">
         <AccountBalanceBadge />
@@ -20,8 +19,6 @@
         <input ref="uploadInput" type="file" accept="image/*,video/*,audio/*" multiple style="display:none" @change="onUpload" />
       </div>
     </div>
-
-    <div class="upload-limits">上传限制：图片 ≤30MB（JPG/PNG/GIF/WebP） · 视频 ≤50MB（MP4/WebM/MOV/M4V） · 音频 ≤15MB（MP3/WAV/M4A/OGG/WebM）</div>
 
     <!-- 筛选栏 -->
     <div class="filter-bar">
@@ -100,7 +97,7 @@
 
       <div v-if="!loading && mediaItems.length === 0" class="empty-media">
         <el-icon class="empty-icon"><Files /></el-icon>
-        <div><b>素材库还是空的</b><p>上传图片、视频或音频后，可在自由创作和项目分镜中直接复用。</p></div>
+        <div><b>素材库还是空的</b><p>上传后可在创作与分镜中使用。</p></div>
         <div class="empty-media-actions"><el-button type="primary" @click="triggerUpload"><el-icon><Upload /></el-icon>上传首个素材</el-button><el-button @click="$router.push('/free-create')">先去自由创作</el-button></div>
       </div>
     </div>
@@ -119,10 +116,11 @@
     <!-- 批量操作 -->
     <div v-if="selectedIds.size > 0" class="batch-bar">
       <span>已选 {{ selectedIds.size }} 项</span>
-      <el-button size="small" @click="selectCurrentPage">全选当前页素材</el-button>
+      <el-button size="small" @click="selectAllFiltered">选中全部筛选结果</el-button>
       <el-button size="small" @click="selectedIds.clear()">取消选择</el-button>
+      <el-button v-if="canConcatSelected" size="small" @click="concatSelectedVideos">拼接选中视频</el-button>
       <el-button size="small" type="primary" plain @click="batchCertifyRealPeople">批量标记含真人并认证</el-button>
-      <el-button size="small" type="danger" plain @click="batchDelete">批量删除</el-button>
+      <el-button size="small" type="danger" plain @click="batchDelete">批量归档</el-button>
       <el-button size="small" type="primary" @click="createWithSelected">用选中素材创作</el-button>
     </div>
 
@@ -145,9 +143,9 @@
         <div class="meta-row"><span>名称：</span>{{ previewItem?.name || '未命名' }}</div>
         <div class="meta-row"><span>大小：</span>{{ formatSize(previewItem?.size) }}</div>
         <div class="meta-row"><span>创建时间：</span>{{ previewItem?.created_at }}</div>
-        <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔，例如：人物, 夜景" @change="saveTags" /></div>
+        <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔" @change="saveTags" /></div>
         <section v-if="previewItem" class="remote-library-row">
-          <div><b>上传到素材库</b><small>系统按单个素材上传。角色可使用多份图片。普通图片、视频和音频也可独立上传。</small></div>
+          <div><b>上传到素材库</b></div>
           <span class="remote-library-status" :class="sd2Status(previewItem)">{{ sd2Label(previewItem) }}</span>
           <el-button
             size="small"
@@ -158,7 +156,7 @@
           >{{ libraryActionLabel(previewItem) }}</el-button>
           <p v-if="previewItem?.seedance2_asset?.error" class="remote-library-error">{{ previewItem.seedance2_asset.error }}</p>
         </section>
-        <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人</el-checkbox><span v-if="previewItem?.requires_sd2_identity">{{ sd2Label(previewItem) }}，系统自动准备，生成会自动等待。</span><span v-else>未勾选即为不含真人</span></div>
+        <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人</el-checkbox><span v-if="previewItem?.requires_sd2_identity">{{ sd2Label(previewItem) }}，系统自动准备，生成会自动等待。</span></div>
         <section v-if="previewItem" class="asset-lineage">
           <div class="asset-lineage-title"><span>版本与来源</span><el-button text size="small" :loading="lineageLoading" @click="loadLineage(previewItem.id)">刷新</el-button></div>
           <div v-if="lineageLoading" class="asset-lineage-empty">正在加载素材谱系…</div>
@@ -345,15 +343,6 @@ function createWithSelected() {
   router.push({ path: '/free-create', query: ids.length ? { assets: ids.join(',') } : {} })
 }
 
-function createWithItem(item) {
-  if (!item?.id) return
-  router.push({ path: '/free-create', query: { assets: String(item.id) } })
-}
-
-function assetTypeLabel(type) {
-  return ({ image: '图片', video: '视频', audio: '音频' })[type] || '媒体'
-}
-
 async function openPreview(item) {
   previewItem.value = item
   editableTags.value = Array.isArray(item.tags) ? item.tags.join(', ') : ''
@@ -427,7 +416,7 @@ async function toggleFavorite(item) {
 }
 
 async function deleteItem(item) {
-  await ElMessageBox.confirm('确定归档该素材？它将不再供新镜头选择；已有镜头和生成记录保持不变。', '归档确认', { type: 'warning' })
+  await ElMessageBox.confirm('确定归档该素材？归档后新镜头不能再选用；已有镜头不受影响。', '归档确认', { type: 'warning' })
   try {
     await request.delete(`/assets/${item.id}`)
     ElMessage.success('已归档；已有镜头引用保持不变')
@@ -502,7 +491,7 @@ async function setIdentity(item, value) {
 async function batchDelete() {
   const count = selectedIds.size
   const scopeLabel = projectDramaId.value ? '当前项目' : '全局素材库'
-  await ElMessageBox.confirm(`确定归档选中的 ${count} 个素材？它们将不再供新镜头选择；已有镜头及生成记录保持不变。范围：${scopeLabel}。`, '批量归档', { type: 'warning', confirmButtonText: '归档选中素材', cancelButtonText: '取消' })
+  await ElMessageBox.confirm(`确定归档选中的 ${count} 个素材？归档后新镜头不能再选用；已有镜头不受影响。范围：${scopeLabel}。`, '批量归档', { type: 'warning', confirmButtonText: '归档选中素材', cancelButtonText: '取消' })
   try {
     const result = await request.post('/assets/batch-delete', { ids: [...selectedIds], scope: assetScope.value, ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}) })
     selectedIds.clear()
@@ -511,15 +500,28 @@ async function batchDelete() {
   } catch (error) { ElMessage.error(error.message || '批量删除失败') }
 }
 
-function selectCurrentPage() {
-  mediaItems.value.forEach((item) => selectedIds.add(item.id))
+async function selectAllFiltered() {
+  const params = {
+    page: 1,
+    page_size: 500,
+    scope: assetScope.value,
+    ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}),
+  }
+  if (mediaType.value !== 'all') params.type = mediaType.value
+  if (keyword.value) params.keyword = keyword.value
+  if (favoriteOnly.value) params.favorite = 1
+  const res = await request.get('/assets', { params })
+  const ids = (res?.items || []).map((item) => Number(item?.id)).filter(Number.isFinite)
+  ids.forEach((id) => selectedIds.add(id))
+  if (Number(res?.pagination?.total ?? 0) > 500) ElMessage.info('素材较多，已选中前 500 项')
+  else ElMessage.success(`已选中 ${ids.length} 项`)
 }
 
 async function batchCertifyRealPeople() {
   const ids = mediaItems.value.filter((item) => selectedIds.has(item.id) && item.type === 'image').map((item) => item.id)
   if (!ids.length) return ElMessage.warning('请选择至少一张图片素材')
   try {
-    await ElMessageBox.confirm(`将 ${ids.length} 张图片标记为含真人，并在后台按受控并发自动认证。生成会等待认证完成后自动续跑。`, '批量真人认证', { type: 'info' })
+    await ElMessageBox.confirm(`将 ${ids.length} 张图片标记为含真人并自动认证；生成会等待认证完成后继续。`, '批量真人认证', { type: 'info' })
     const result = await omniVideoAPI.certifyAssetsBatch(ids)
     ElMessage.success(result?.message || `已排队 ${ids.length} 张素材认证`)
     await loadMedia()
@@ -533,8 +535,8 @@ async function clearLibrary() {
     const isProjectLibrary = Boolean(projectDramaId.value)
     await ElMessageBox.confirm(
       isProjectLibrary
-        ? '将归档当前筛选范围内的项目素材。全局素材及其他项目素材不会受到影响；新镜头不可再选，已有镜头和历史记录保持不变。'
-        : '将归档当前筛选范围内的“我的全局素材”。项目素材不会受到影响；新镜头不可再选，已有镜头和历史记录保持不变。',
+        ? '将归档当前筛选范围内的项目素材。全局素材及其他项目素材不受影响。'
+        : '将归档当前筛选范围内的“我的全局素材”。项目素材不受影响。',
       isProjectLibrary ? '一键归档项目素材' : '一键归档素材库',
       { type: 'warning', confirmButtonText: '确认归档', cancelButtonText: '取消' }
     )

@@ -63,7 +63,6 @@
               一键换Key
             </el-button>
           </div>
-          <p class="default-tip">每种服务类型仅有一个默认配置。素材库上传优先使用 Richbest v3。仅在远端写入前允许回退旧服务。</p>
           <el-table
             v-loading="loading"
             :data="list"
@@ -126,7 +125,7 @@
       <el-tab-pane v-if="!tenantId" label="生成设置" name="generation">
         <div class="tab-content generation-settings">
           <div class="gs-section-title">⚡ 一键生成并发设置</div>
-          <p class="gs-desc">控制「一键生成视频」和「补全并生成」流水线中，各类任务同时并行生成的数量。并发数越高速度越快，但过高可能触发 API 限流（429 错误）。建议根据你的 API 额度选择。</p>
+          <p class="gs-desc">控制一键生成时各类任务同时并行的数量；过高可能触发 API 限流。</p>
 
           <div class="gs-row">
             <span class="gs-label">图片并发数</span>
@@ -495,7 +494,7 @@ input_reference = (图片文件，可选)</pre>
               <el-collapse-item name="jimeng-ai-api-vid">
                 <template #title><span class="ph-tag ph-tag-vid">视频</span> Jimeng AI API（自建服务）</template>
                 <div class="ph-body">
-                  <b>说明：</b>需自行部署 <code>jimeng-free-api-all</code> 等即梦 OpenAI 兼容服务并启动（如 <code>http://127.0.0.1:8000</code>）。本系统仅作为客户端转发请求。<br>
+                  <b>说明：</b>需自行部署 <code>jimeng-free-api-all</code> 等即梦 OpenAI 兼容服务并启动（如 <code>http://127.0.0.1:8000</code>）。<br>
                   <b>Base URL：</b>填你的服务根地址，无尾斜杠。<br>
                   <b>API Key：</b>填即梦网页 <b>Session</b>；多个账号用<b>英文逗号</b>分隔，由对方服务轮询使用。<br>
                   <b>默认路径：</b><code>POST /v1/videos/generations</code>（可在「Endpoint」覆盖）。Seedance 多图需分镜参考图；响应为同步 <code>data[0].url</code>。
@@ -510,12 +509,12 @@ input_reference = (图片文件，可选)</pre>
         <el-form-item prop="name">
           <template #label>
             <span class="form-label-tip">名称
-              <el-tooltip content="配置的显示名，用于在列表中区分不同配置，选择厂商后可自动生成。" placement="top" popper-class="cfg-tip-popper">
+              <el-tooltip content="用于区分不同配置；选择厂商后自动生成。" placement="top" popper-class="cfg-tip-popper">
                 <el-icon class="tip-icon"><QuestionFilled /></el-icon>
               </el-tooltip>
             </span>
           </template>
-          <el-input v-model="form.name" placeholder="如：OpenAI 图文，可自动生成" />
+          <el-input v-model="form.name" placeholder="如：OpenAI 图文" />
         </el-form-item>
         <el-form-item prop="base_url">
           <template #label>
@@ -598,7 +597,6 @@ input_reference = (图片文件，可选)</pre>
           show-icon
           style="margin-bottom: 12px"
           title="用于素材库「上传到素材库」"
-          description="系统从本地持久化角色主图执行上传、登记和后台状态恢复。业务 API Key 只在后端使用。"
         />
         <el-alert
           v-else-if="form.service_type === 'jimeng2_character_auth'"
@@ -607,7 +605,6 @@ input_reference = (图片文件，可选)</pre>
           show-icon
           style="margin-bottom: 12px"
           title="旧角色素材服务"
-          description="系统保留此配置用于兼容历史记录和安全回退。"
         />
         <template v-if="form.service_type === 'video' && form.api_protocol === 'kling_omni'">
           <el-form-item>
@@ -867,7 +864,7 @@ input_reference = (图片文件，可选)</pre>
         <el-form-item>
           <template #label>
             <span class="form-label-tip">{{ form.service_type === 'video_postprocess' ? '默认后处理能力（不决定镜头链路）' : '默认模型' }}
-              <el-tooltip content="有多个模型时，实际调用哪个进行生成。建议选响应快、效果好的那个。" placement="top" popper-class="cfg-tip-popper">
+              <el-tooltip content="有多个模型时实际使用的模型。" placement="top" popper-class="cfg-tip-popper">
                 <el-icon class="tip-icon"><QuestionFilled /></el-icon>
               </el-tooltip>
             </span>
@@ -880,12 +877,12 @@ input_reference = (图片文件，可选)</pre>
           >
             <el-option v-for="m in formModelList" :key="m" :label="m" :value="m" />
           </el-select>
-          <p class="field-tip">{{ form.service_type === 'video_postprocess' ? 'AI MediaKit 的超分与插帧共用此连接。新镜头是否超分、是否插帧由项目/分镜设置决定；此项只用于连接配置展示。' : '该配置被选为「默认」时，生成故事/图片/视频将使用此处指定的模型。' }}</p>
+          <p v-if="form.service_type === 'video_postprocess'" class="field-tip">超分与插帧共用此连接；是否启用由镜头设置决定。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type !== 'video_postprocess'">
           <template #label><span class="form-label-tip">计费键</span></template>
           <el-input v-model="form.billing_key" placeholder="可选；自定义 API 建议填写独立 SKU，如 custom-video-pro" />
-          <p class="field-tip">仅用于匹配价目表，不会发送给供应商。留空时沿用模型名；同名模型走不同渠道时必须填写不同计费键。</p>
+          <p class="field-tip">用于匹配价目表；同名模型走不同渠道时须填不同计费键。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video_postprocess'">
           <template #label><span class="form-label-tip">新镜头默认超分目标</span></template>
@@ -893,22 +890,22 @@ input_reference = (图片文件，可选)</pre>
             <el-option label="720p" value="720p" />
             <el-option label="1080p（推荐）" value="1080p" />
           </el-select>
-          <p class="field-tip">新镜头默认勾选 1080p 超分，创作时可取消；超分保持原画幅与原帧率，不再固定放大到 2K。插帧默认关闭，仅在镜头中显式选择后调用。</p>
+          <p class="field-tip">新镜头默认 1080p 超分，创作时可取消。插帧默认关闭。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video_postprocess'">
           <template #label><span class="form-label-tip">插帧供应商兜底帧率</span></template>
           <el-input-number v-model="form.interpolation_target_fps" :min="15" :max="120" :step="1" :precision="0" controls-position="right" style="width: 240px" />
-          <p class="field-tip">只有镜头显式选择插帧时才会使用；新镜头默认关闭插帧。镜头指定帧率时优先使用镜头值，建议不超过源视频帧率的 4 倍。</p>
+          <p class="field-tip">仅镜头显式选择插帧时使用；镜头指定帧率时优先使用镜头值。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video'">
           <template #label><span class="form-label-tip">视频单次冻结上限（token）</span></template>
           <el-input-number v-model="form.billing_reserve_output_tokens" :min="1" :step="1000" :precision="0" controls-position="right" style="width: 240px" placeholder="例如 216216" />
-          <p class="field-tip">仅用于本系统生成前冻结积分，不会发送给供应商；完成后仍以供应商返回的实际 token 结算。Fast 在“无视频输入”场景若最多冻结 800 积分，填 216216。</p>
+          <p class="field-tip">用于生成前冻结积分（如 Fast 无视频输入场景填 216216）。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video'">
           <template #label><span class="form-label-tip">全能能力</span></template>
           <el-input v-model="form.video_capabilities" type="textarea" :rows="5" placeholder='可选 JSON，例如：{"supports":{"image_reference":{"max":9}},"limits":{"duration":{"min":4,"max":15},"resolutions":["480p","720p"]},"models":{"模型 ID":{"limits":{"resolutions":["480p","720p"]}}}}' />
-          <p class="field-tip">留空使用系统默认能力。limits 作用于此配置的全部模型；models 可按模型 ID 覆盖。前后端共同使用该限制。</p>
+          <p class="field-tip">留空使用系统默认能力。</p>
         </el-form-item>
         <el-form-item v-if="isDeepSeekOfficialForm">
           <template #label>
@@ -944,7 +941,7 @@ input_reference = (图片文件，可选)</pre>
         <el-form-item>
           <template #label>
             <span class="form-label-tip">优先级
-              <el-tooltip content="同一服务类型有多个配置时，数字越大越优先被调用。默认 0，一般设为 10 即可。" placement="top" popper-class="cfg-tip-popper">
+              <el-tooltip content="数字越大越优先，一般设为 10。" placement="top" popper-class="cfg-tip-popper">
                 <el-icon class="tip-icon"><QuestionFilled /></el-icon>
               </el-tooltip>
             </span>
@@ -1165,7 +1162,7 @@ input_reference = (图片文件，可选)</pre>
           v-if="testServiceType === 'image' || testServiceType === 'storyboard_image' || testServiceType === 'video'"
           type="success"
           title="连接成功"
-          description="API Key 有效，网络已连通。提示：测试仅验证 Key 合法性，不实际生成图片/视频，模型名填错、账号未开通该功能或配额不足时实际生成仍可能报错。"
+          description="API Key 有效，网络已连通。"
           show-icon
           :closable="false"
         />

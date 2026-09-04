@@ -80,7 +80,7 @@
           <el-option
             v-for="g in workflowGroups"
             :key="g.id"
-            :label="`${g.title} (${(g.storyboard_ids || []).length}镜)`"
+            :label="g.title"
             :value="g.id"
           />
         </el-select>
@@ -127,7 +127,6 @@
         >
           批量生视频
         </el-button>
-        <span class="gen-hint" title="完整创作流水线">剧本 → 提取角色/场景/道具 → 分镜 → 生图 → 视频</span>
       </div>
       <div v-if="episodeGenProgress" class="workflow-progress episode-gen">{{ episodeGenProgress }}</div>
     </header>
@@ -139,7 +138,6 @@
             <span>📜 剧本</span>
             <el-button link size="small" type="warning" @click="focusScriptNode">编辑</el-button>
           </div>
-          <p class="sidebar-script-tip">从头创作：先写剧本，再提取左侧素材</p>
         </div>
         <div class="sidebar-title">
           素材库
@@ -205,8 +203,6 @@
           </div>
           <div v-if="!workflowGroups.length" class="sidebar-empty">框选分镜后点「创建工作流」</div>
         </div>
-
-        <p class="sidebar-tip">经典模式流水线：分镜 → 脚本摘要 → 分镜图 → 视频。摘要节点是画布可视化，列表里合并在分镜编辑区。顶栏「本集生成」可 AI 批量操作；单击分镜可单镜生图/生视频。</p>
       </aside>
 
       <div ref="canvasMainRef" class="canvas-main">
@@ -694,7 +690,7 @@ async function onAlignNodes() {
       }
     }
     await persistCanvasState({ layoutOnly: true })
-    ElMessage.success('节点已按规则对齐并适配当前视图')
+    ElMessage.success('已对齐')
   } catch (e) {
     ElMessage.error(e?.message || '对齐失败')
   } finally {
@@ -723,7 +719,7 @@ async function loadDrama(silent = false) {
 
 async function onCreateWorkflowGroup() {
   if (!selectedStoryboardIds.value.length) {
-    ElMessage.warning('请先框选或 Ctrl 点击选择分镜节点')
+    ElMessage.warning('请先选择分镜')
     return
   }
   try {
@@ -986,13 +982,6 @@ onBeforeUnmount(() => {
   margin-right: 4px;
 }
 
-.gen-hint {
-  font-size: 11px;
-  color: #52525b;
-  flex: 1;
-  min-width: 200px;
-}
-
 .logo {
   margin: 0;
   cursor: pointer;
@@ -1145,7 +1134,7 @@ onBeforeUnmount(() => {
 @media(min-width:961px){
   .drama-canvas-page{background:var(--bg-page);background-image:radial-gradient(42% 34% at 6% -4%,color-mix(in srgb,var(--accent) 16%,transparent),transparent 72%),radial-gradient(32% 30% at 96% 6%,color-mix(in srgb,var(--accent-teal) 9%,transparent),transparent 70%)}
   .header{background:color-mix(in srgb,var(--bg-surface) 92%,transparent);border-bottom-color:var(--border-subtle);box-shadow:var(--shadow-sm);backdrop-filter:blur(20px) saturate(130%)}.header-inner{padding:12px 22px 8px;gap:11px}.logo{flex-direction:row;align-items:center;gap:8px}.logo-main{color:var(--text-primary);font-size:15px}.logo-sub{color:var(--text-muted);font-size:10px}.page-title{padding:5px 10px;border:1px solid var(--border-subtle);border-radius:9px;background:color-mix(in srgb,var(--bg-raised) 74%,transparent);color:var(--text-regular)}.header-actions{gap:6px}
-  .workflow-bar,.generate-bar{padding-inline:22px;background:color-mix(in srgb,var(--bg-page) 30%,transparent)}.workflow-bar{padding-block:7px;border-bottom:1px solid var(--border-subtle)}.generate-bar{margin-top:0;padding-block:9px;border-top:0}.wf-hint,.gen-label{font-size:11px;font-weight:750;letter-spacing:.08em;color:var(--text-faint)}.gen-label{color:var(--accent)}.gen-hint{color:var(--text-muted)}.wf-steps :deep(.el-checkbox-button__inner){border-radius:8px!important}
+  .workflow-bar,.generate-bar{padding-inline:22px;background:color-mix(in srgb,var(--bg-page) 30%,transparent)}.workflow-bar{padding-block:7px;border-bottom:1px solid var(--border-subtle)}.generate-bar{margin-top:0;padding-block:9px;border-top:0}.wf-hint,.gen-label{font-size:11px;font-weight:750;letter-spacing:.08em;color:var(--text-faint)}.gen-label{color:var(--accent)}.wf-steps :deep(.el-checkbox-button__inner){border-radius:8px!important}
   .canvas-sidebar{width:260px;padding:18px 14px;background:color-mix(in srgb,var(--bg-surface) 96%,transparent);border-right-color:var(--border-subtle);box-shadow:10px 0 30px rgba(0,0,0,.11);z-index:3}.canvas-sidebar::before{content:'素材';display:block;margin:0 0 13px;color:var(--text-faint);font-size:10px;font-weight:800;letter-spacing:.18em}.sidebar-title{padding-bottom:12px;border-bottom:1px solid var(--border-subtle);font-size:14px}.sidebar-section{margin-bottom:18px}.sec-label{color:var(--text-faint);font-size:10px;font-weight:800;letter-spacing:.11em}.sidebar-item{margin-block:2px;padding:8px 9px;border:1px solid transparent;border-radius:9px;color:var(--text-regular)}.sidebar-item:hover{border-color:var(--border-subtle);background:color-mix(in srgb,var(--accent) 8%,transparent)}.sidebar-item.active{border-color:color-mix(in srgb,var(--accent-teal) 48%,var(--border-color));background:color-mix(in srgb,var(--accent-teal) 11%,transparent);color:var(--text-primary)}.sidebar-script{border-bottom-color:var(--border-subtle)}.sidebar-script-tip,.sidebar-tip,.wf-item-meta,.sidebar-empty{color:var(--text-muted)}
   .canvas-main{background:radial-gradient(circle at 50% 45%,color-mix(in srgb,var(--accent) 7%,transparent),transparent 35%),linear-gradient(135deg,#070a11,#0b101a 48%,#080b12)}.vue-flow-canvas{background:transparent}.canvas-main :deep(.vue-flow__background){opacity:.72}.canvas-main :deep(.vue-flow__controls){overflow:hidden;border-color:var(--border-subtle);border-radius:10px;background:color-mix(in srgb,var(--bg-surface) 88%,transparent);box-shadow:var(--shadow-sm)}.canvas-main :deep(.vue-flow__controls button){background:transparent;border-color:var(--border-subtle);color:var(--text-primary)}.canvas-main :deep(.vue-flow__controls button:hover){background:color-mix(in srgb,var(--accent) 13%,transparent)}.canvas-main :deep(.vue-flow__minimap){border-color:var(--border-subtle);border-radius:12px;background:color-mix(in srgb,var(--bg-surface) 88%,transparent);box-shadow:var(--shadow-sm)}.canvas-main :deep(.el-empty){position:absolute;inset:0;display:grid;place-content:center;min-height:0;background:radial-gradient(circle at 50% 43%,color-mix(in srgb,var(--accent) 13%,transparent),transparent 25%)}.canvas-main :deep(.el-empty__image){filter:drop-shadow(0 16px 32px rgba(0,0,0,.35))}.canvas-main :deep(.el-empty__description p){color:var(--text-muted);font-size:14px;letter-spacing:.06em}
 }

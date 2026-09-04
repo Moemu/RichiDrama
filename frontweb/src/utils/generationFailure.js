@@ -44,7 +44,7 @@ export function presentGenerationFailure(job = {}) {
   const requestId = String(job.provider_request_id || job.request_id || extractRequestId(rawReason)).trim()
   let result
   if (job.status === 'unknown' && !rawReason) result = { title: '任务状态暂不可用', message: '系统暂时不能取得最新任务状态。', action: '请手动刷新状态。问题持续时，请联系管理员。' }
-  else if (job.status === 'billing_reconciliation' && !rawReason) result = { title: '任务等待计费对账', message: '生成状态需要后台确认。', action: '请手动刷新状态。确认完成前不要重复提交。' }
+  else if (job.status === 'billing_reconciliation' && !rawReason) result = { title: '任务等待结算', message: '生成状态需要后台确认。', action: '请手动刷新状态。确认完成前不要重复提交。' }
   else if (job.status === 'invalid' && !rawReason) result = { title: '任务信息无效', message: '当前任务缺少继续处理所需的信息。', action: '请联系管理员检查任务记录。' }
   else if (job.upscale_status === 'failed') result = { title: '视频超分失败', message: '原始视频已保留。', action: '你可以仅重试超分，或直接采用原始视频。' }
   else if (job.interpolation_status === 'failed') result = { title: '视频插帧失败', message: '上一阶段的视频已保留。', action: '你可以仅重试插帧，或采用已生成的视频。' }

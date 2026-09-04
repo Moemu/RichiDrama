@@ -68,7 +68,7 @@
             <div><dt>实际时长</dt><dd>{{ outputDuration }}</dd></div>
             <div><dt>超分状态</dt><dd>{{ value(detail.output.upscale_status) }}</dd></div>
             <div><dt>插帧状态</dt><dd>{{ value(detail.output.interpolation_status) }}</dd></div>
-            <div><dt>本地持久化</dt><dd>{{ detail.output.persisted_locally ? '已完成' : '无本地文件' }}</dd></div>
+            <div><dt>本地文件</dt><dd>{{ detail.output.persisted_locally ? '已保存' : '无本地文件' }}</dd></div>
             <div><dt>归档状态</dt><dd>{{ value(detail.output.archive_status) }}</dd></div>
           </dl>
           <p v-if="detail.output.archive_error" class="inline-error">{{ detail.output.archive_error }}</p>
@@ -159,7 +159,7 @@ function unit(input, suffix) { return input === null || input === undefined || i
 function formatNumber(input, digits) { return Number(input).toFixed(digits).replace(/0+$/, '').replace(/\.$/, '') }
 function formatTime(input) { return formatChinaDateTime(input, '—') }
 function prettyJson(input) { return JSON.stringify(input, null, 2) }
-function statusLabel(status) { return ({ completed:'已完成',sd2_waiting:'真人素材认证中',processing:'生成中',upscale_pending:'等待超分',upscaling:'超分中',interpolation_pending:'等待插帧',interpolating:'插帧中',persisting:'持久化中',billing_reconciliation:'待对账',failed:'失败',retryable:'可重试',invalid:'无效' })[status] || value(status) }
+function statusLabel(status) { return ({ completed:'已完成',sd2_waiting:'真人素材认证中',processing:'生成中',upscale_pending:'等待画质增强',upscaling:'画质增强中',interpolation_pending:'等待补帧',interpolating:'画面补帧中',persisting:'保存中',billing_reconciliation:'等待结算',failed:'失败',retryable:'可重试',invalid:'无效' })[status] || value(status) }
 function statusType(status) { return status === 'completed' ? 'success' : ['failed','invalid'].includes(status) ? 'danger' : status === 'retryable' ? 'warning' : 'info' }
 function creationMode(mode) { return ({ multi_reference:'多参考图',first_last_frame:'首尾帧',single_reference:'单参考图' })[mode] || value(mode) }
 function audioStrategy(strategy) { return ({ reference_only:'音频参考',post_mix:'生成后混音' })[strategy] || value(strategy) }

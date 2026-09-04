@@ -3,7 +3,7 @@
     <div class="selector-heading">
       <div>
         <b>{{ source === 'library' ? label : '上传到素材库' }}</b>
-        <small>{{ source === 'library' ? libraryHint : uploadHint }}</small>
+        <small v-if="source === 'library'">{{ libraryHint }}</small>
       </div>
       <el-radio-group v-model="source" class="source-tabs" aria-label="素材来源">
         <el-radio-button value="library">从项目素材库导入</el-radio-button>
@@ -50,7 +50,7 @@
       <input ref="fileInput" hidden type="file" :accept="accept" :aria-label="`上传${acceptedLabel}`" @change="upload" />
     </template>
 
-    <div v-if="selectedAssets.length" class="selected-summary" role="status" aria-live="polite">
+    <div v-if="selectedAssets.length && props.multiple" class="selected-summary" role="status" aria-live="polite">
       <span>已选 {{ selectedAssets.length }} 项</span>
       <button type="button" @click="clear">清空</button>
     </div>
@@ -85,8 +85,8 @@ const selectedIds = computed(() => props.multiple
 const selectedAssets = computed(() => selectedIds.value.map((id) => assets.value.find((asset) => Number(asset.id) === id)).filter(Boolean))
 const libraryHint = computed(() => props.dramaId ? '当前项目素材和个人素材' : '可引用项目素材和个人素材')
 const uploadHint = computed(() => props.dramaId
-  ? '文件会保存到当前项目素材库。上传后可立即引用。'
-  : '文件会保存到个人素材库。上传后可立即引用。')
+  ? '上传后保存到当前项目素材库，可立即引用。'
+  : '上传后保存到个人素材库，可立即引用。')
 const accept = computed(() => props.types.map((type) => type === 'image' ? 'image/*' : type === 'video' ? 'video/*' : type === 'audio' ? 'audio/*' : '').filter(Boolean).join(','))
 const acceptedLabel = computed(() => props.types.map(typeLabel).join('、'))
 const assetUrl = (asset) => asset?.local_path ? `/static/${String(asset.local_path).replace(/^\/+/, '')}` : asset?.url || ''
@@ -105,6 +105,7 @@ async function load() {
     const available = results.filter((result) => result.status === 'fulfilled').flatMap((result) => result.value.items || [])
     if (!available.length && results.every((result) => result.status === 'rejected')) throw results[0].reason
     if (results.some((result) => result.status === 'rejected')) ElMessage.warning('部分素材库加载失败，已显示可用素材')
+    if (results.some((result) => result.status === 'fulfilled' && result.value.truncated)) ElMessage.info('素材较多，仅显示前 300 项；请用搜索查找更多')
     const unique = new Map(available.map((asset) => [Number(asset.id), asset]))
     assets.value = [...unique.values()]
     emit('assets-loaded', assets.value)
@@ -112,18 +113,20 @@ async function load() {
   } catch (error) { ElMessage.error(error.message || '素材库加载失败') }
   finally { if (revision === loadRevision) loading.value = false }
 }
+// 素材库很大时全量分页拉取代价过高：上限 300 条，更多用搜索。
+const MAX_LOADED_ASSETS = 300
 async function loadScope(params) {
   const first = await omniVideoAPI.assets({ ...params, page: 1, page_size: 100 })
   const items = [...(first.items || [])]
   const total = Number(first.total || items.length)
-  const pageCount = Math.ceil(total / 100)
+  const pageCount = Math.min(Math.ceil(total / 100), Math.ceil(MAX_LOADED_ASSETS / 100))
   for (let page = 2; items.length < total && page <= pageCount; page += 1) {
     const result = await omniVideoAPI.assets({ ...params, page, page_size: 100 })
     const pageItems = result.items || []
     items.push(...pageItems)
     if (!pageItems.length) break
   }
-  return { items }
+  return { items, truncated: total > items.length }
 }
 function emitSelection() { emit('selection-change', selectedAssets.value) }
 function selectGuarded(asset) { if (!shouldSuppressAssetClick()) select(asset) }
