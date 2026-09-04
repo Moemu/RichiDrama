@@ -14,6 +14,7 @@
 
     <el-alert v-for="alert in overview?.alerts || []" :key="`${alert.key}-${alert.model || ''}`" type="warning" :closable="false" show-icon class="alert">
       <template #title>{{ alertLabel(alert) }}</template>
+      <router-link class="alert-link" :to="alertTarget(alert)">去处置 →</router-link>
     </el-alert>
     <section v-if="overview && !(overview.alerts || []).length" class="quiet-status" aria-live="polite">
       <span aria-hidden="true">✓</span><div><b>当前没有触发的运营告警</b><small>生产、归档和账务阈值均在安全范围内。</small></div>
@@ -61,6 +62,13 @@ function alertLabel(alert) {
   return `${labels[alert.key] || alert.key}：${alert.count} 条${alert.model ? `（${alert.model}）` : ''}`
 }
 
+function alertTarget(alert) {
+  if (alert.key === 'pending_reconciliation') return { path: '/admin', query: { tab: 'reconciliations', status: 'pending' } }
+  if (alert.key === 'archive_failed') return { path: '/admin', query: { tab: 'archives', status: 'failed' } }
+  if (alert.key === 'continuous_failures') return { path: '/admin', query: { tab: 'production', status: 'failed' } }
+  return { path: '/admin', query: { tab: 'production' } }
+}
+
 async function load() {
   const [nextOverview, nextSettings, nextReports] = await Promise.all([adminAPI.overview(), adminAPI.operationAlertSettings(), adminAPI.operationReports({ page: 1, page_size: 30 })])
   overview.value = nextOverview
@@ -99,6 +107,8 @@ h2 { font-size: 18px; margin-bottom: 16px; }
 .muted { color: var(--text-muted); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .alert { margin-bottom: 10px; }
+.alert-link { color: var(--accent-teal, #0e9d74); font-size: 13px; font-weight: 600; text-decoration: none; }
+.alert-link:hover { text-decoration: underline; }
 .quiet-status { display:flex; align-items:center; gap:1rem; min-height:4.5rem; padding:.8rem 1rem; border-top:1px solid var(--border-color); border-bottom:1px solid var(--border-color); }.quiet-status>span { display:grid; width:2.2rem; height:2.2rem; place-items:center; border-radius:50%; background:color-mix(in srgb,var(--accent-teal) 18%,var(--bg-raised)); color:var(--accent-teal); font-weight:900; }.quiet-status div { display:grid; gap:.2rem; flex:1; }.quiet-status small { color:var(--text-muted); }.quiet-status button { padding:.55rem 0; border:0; border-bottom:1px solid var(--border-strong); background:transparent; color:var(--text-regular); cursor:pointer; }
 .card { min-height:0; margin:0; padding:1rem 1.2rem; overflow:hidden; border: 1px solid var(--border-color, #e5e7eb); border-width:1px 0; border-radius:0; background:transparent; }
 .card:last-child { display:flex; flex-direction:column; }.card:last-child :deep(.el-table){flex:1;min-height:0;overflow:auto}.card:last-child :deep(.el-table__inner-wrapper){height:100%}

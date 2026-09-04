@@ -521,10 +521,11 @@ test('运营页面始终提供单一路径返回', async () => {
 test('运营账本提供日期和角色筛选，列表操作保持中性层级', async () => {
   const source = await readSource('../src/views/AdminConsole.vue')
 
-  assert.match(source, /按日期筛选资金流水/)
+  // 资金流水与模型用量共享同一条筛选工具栏，aria-label 使用中性表述。
+  assert.match(source, /aria-label="按日期筛选账务"/)
   assert.match(source, /label="管理员" value="admin"/)
   assert.match(source, /label="普通用户" value="user"/)
-  assert.match(source, /按具体用户筛选资金流水/)
+  assert.match(source, /aria-label="按用户筛选"/)
   assert.match(source, /filteredBillingUsers/)
   assert.match(source, /billingUserLabel/)
   assert.match(source, /user_id: null/)
