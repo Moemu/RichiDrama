@@ -135,7 +135,11 @@ test('角色资源卡和编辑器按图片、内容与底部操作分层', async
   const cardBranch = source.match(/<template v-else-if="resourceCatalogType === 'character'">(.+?)<\/template>/)?.[1] || ''
   assert.match(cardBranch, /class="character-card-edit"[\s\S]*>编辑<\/el-button>/)
   assert.match(cardBranch, /class="character-card-delete"[\s\S]*type="danger"[\s\S]*>删除<\/el-button>/)
-  assert.doesNotMatch(cardBranch, /素材库|生成图|绑定音色|更换音色|试听/)
+  // 资源浏览器是唯一管理面：上传图/认证/生成图必须在卡片直达；音色与试听仍只在编辑器内。
+  assert.match(cardBranch, /onUploadResourceClick/)
+  assert.match(cardBranch, /onSd2PrimaryAction/)
+  assert.match(cardBranch, /generateResourceCatalogItem/)
+  assert.doesNotMatch(cardBranch, /素材库|绑定音色|更换音色|试听/)
   assert.match(source, /class="resource-hosting-status"/)
   assert.match(source, /resourceHostingStatusClass\(item\)/)
   assert.match(source, /class="ref-image-remove" aria-label="移除参考图"/)

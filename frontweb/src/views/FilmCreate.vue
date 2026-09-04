@@ -12,23 +12,6 @@
         </h1>
         <span class="breadcrumb-sep">›</span>
         <span class="page-title">{{ dramaId ? (store.drama?.title || '项目') : '新建故事' }}</span>
-        <el-select
-          v-if="dramaId"
-          v-model="selectedEpisodeId"
-          class="header-episode-select"
-          placeholder="选择集数"
-          clearable
-          size="small"
-          style="width: 130px"
-          @change="onEpisodeSelect"
-        >
-          <el-option
-            v-for="ep in (store.drama?.episodes || [])"
-            :key="ep.id"
-            :label="ep.title || '第' + (ep.episode_number || 0) + '集'"
-            :value="ep.id"
-          />
-        </el-select>
         <el-button v-if="dramaId" class="btn-back-drama" @click="router.push('/drama/' + dramaId)">
           <el-icon><ArrowLeft /></el-icon>
           返回剧集
@@ -176,16 +159,13 @@
                     :disabled="!!dramaId && (store.drama?.episodes?.length > 0) && !currentEpisodeId"
                     @click="onGenerateScript"
                   >
-                    保存当前集
+                    保存剧本
                   </el-button>
                 </div>
               </div>
             </div>
           </el-tab-pane>
           <el-tab-pane label="选择剧本" name="select">
-            <p class="section-desc script-mode-hint">
-              仅导入「故事梗概」与「各集剧本正文」。
-            </p>
             <el-button type="primary" @click="openSelectScriptDialog">
               <el-icon><Document /></el-icon>
               从已有剧本中选择…
@@ -237,7 +217,6 @@
         </el-tabs>
       </section>
       <div v-show="workflowStage === 'script'" class="workflow-next-action">
-        <span>剧本确认后，再集中准备可复用资源。</span>
         <el-button type="primary" :disabled="!scriptContent?.trim()" @click="setWorkflowStage('resources')">进入统一资源管理</el-button>
       </div>
 
@@ -406,39 +385,14 @@
               <div class="resource-browser-card-copy"><b>{{ resourceCatalogItemName(item) }}</b><small>{{ resourceCatalogItemDescription(item) }}</small></div>
               <div class="resource-browser-card-actions" :class="{ 'character-card-actions': resourceCatalogType === 'character' }">
                 <template v-if="resourceCatalogType === 'media'"><el-button size="small" text @click="renameResourceMedia(item)">重命名</el-button><el-button size="small" type="warning" text @click="deleteResourceMedia(item)">归档</el-button></template>
-                <template v-else-if="resourceCatalogType === 'character'"><el-button class="character-card-edit" size="small" @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button class="character-card-delete" size="small" type="danger" plain @click="deleteResourceCatalogItem(item)">删除</el-button></template>
-                <template v-else><el-button size="small" text @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker(resourceCatalogType, item)">素材库</el-button><el-button size="small" type="primary" text :loading="resourceCatalogGenerating(item)" @click="generateResourceCatalogItem(item)">生成图</el-button><el-button size="small" type="danger" text @click="deleteResourceCatalogItem(item)">删除</el-button></template>
+                <template v-else-if="resourceCatalogType === 'character'"><el-button class="character-card-edit" size="small" @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button size="small" text :loading="uploadingResourceId === `character-${item.id}`" @click="onUploadResourceClick('character', item.id)">上传图</el-button><el-button size="small" type="primary" text :loading="sd2CertifyingId === item.id" @click="onSd2PrimaryAction(item)">{{ sd2ActionLabel(item) }}</el-button><el-button size="small" type="primary" text :loading="resourceCatalogGenerating(item)" @click="generateResourceCatalogItem(item)">生成图</el-button><el-button class="character-card-delete" size="small" type="danger" plain @click="deleteResourceCatalogItem(item)">删除</el-button></template>
+                <template v-else><el-button size="small" text @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker(resourceCatalogType, item)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `${resourceCatalogType}-${item.id}`" @click="onUploadResourceClick(resourceCatalogType, item.id)">上传图</el-button><el-button size="small" type="primary" text :loading="resourceCatalogGenerating(item)" @click="generateResourceCatalogItem(item)">生成图</el-button><el-button size="small" type="danger" text @click="deleteResourceCatalogItem(item)">删除</el-button></template>
               </div>
             </article>
           </div>
           <div v-else class="resource-browser-empty"><b>暂无匹配的{{ resourceCatalogMeta.label }}</b><p>{{ resourceCatalogKeyword ? '请清空搜索词或调整筛选条件。' : resourceCatalogMeta.empty }}</p></div>
+          <div v-if="resourceCatalogType === 'media' && detachedResourceLinks.length" class="resource-media-grid"><article v-for="link in detachedResourceLinks" :key="`detached-${link.id}`" class="resource-media-card"><span>已解除</span><small>{{ link.asset_name || `${link.resource_type} #${link.resource_id}` }}</small><small>历史分镜引用仍保留</small><el-button size="small" type="primary" text @click="restoreResourceMedia(link)">恢复关联</el-button></article></div>
         </section>
-        <div class="resource-center-grid">
-          <article class="resource-center-group">
-            <header><b>角色</b><span>{{ characters.length }}</span></header>
-            <div class="resource-center-actions"><el-button size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button><el-button size="small" @click="openAddCharacter">添加角色</el-button><el-button v-if="characters.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'character'" @click="onGenerateMissingResourceImages('character')">生成缺图</el-button><el-button v-if="characters.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.character.size" @click="batchDeleteUnifiedResources('character')">批量删除{{ unifiedResourceSelection.character.size ? `（${unifiedResourceSelection.character.size}）` : '' }}</el-button></div>
-            <div v-if="characters.length" class="resource-center-list"><div v-for="char in characters" :key="char.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('character', char.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('character', char.id)" :aria-label="`选择角色 ${char.name || char.id}`" @click.stop @change="toggleUnifiedResourceSelection('character', char.id)" /><img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" alt="" /><span v-else class="resource-center-placeholder">角色</span><div><b>{{ char.name }}</b><small>{{ char.appearance || char.description || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editCharacter(char)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('character', char)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `char-${char.id}`" @click="onUploadResourceClick('character', char.id)">上传图</el-button><el-button size="small" type="primary" text :loading="sd2CertifyingId === char.id" @click="onSd2PrimaryAction(char)">{{ sd2ActionLabel(char) }}</el-button><el-button size="small" type="primary" text :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char, undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteCharacter(char)">删除</el-button></div></div></div>
-            <p v-else class="resource-center-empty">从剧本提取角色，或手动添加。</p>
-          </article>
-          <article class="resource-center-group">
-            <header><b>场景</b><span>{{ scenes.length }}</span></header>
-            <div class="resource-center-actions"><el-button size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button><el-button size="small" @click="openAddScene">添加场景</el-button><el-button v-if="scenes.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'scene'" @click="onGenerateMissingResourceImages('scene')">生成缺图</el-button><el-button v-if="scenes.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.scene.size" @click="batchDeleteUnifiedResources('scene')">批量删除{{ unifiedResourceSelection.scene.size ? `（${unifiedResourceSelection.scene.size}）` : '' }}</el-button></div>
-            <div v-if="scenes.length" class="resource-center-list"><div v-for="scene in scenes" :key="scene.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('scene', scene.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('scene', scene.id)" :aria-label="`选择场景 ${scene.location || scene.id}`" @click.stop @change="toggleUnifiedResourceSelection('scene', scene.id)" /><img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" alt="" /><span v-else class="resource-center-placeholder">场景</span><div><b>{{ scene.location }}</b><small>{{ scene.description || scene.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editScene(scene)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('scene', scene)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `scene-${scene.id}`" @click="onUploadResourceClick('scene', scene.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene, sceneUseQuadGrid, undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteScene(scene)">删除</el-button></div></div></div>
-            <p v-else class="resource-center-empty">从当前剧本提取场景。</p>
-          </article>
-          <article class="resource-center-group">
-            <header><b>道具</b><span>{{ props.length }}</span></header>
-            <div class="resource-center-actions"><el-button size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button><el-button size="small" @click="showAddProp = true">添加道具</el-button><el-button v-if="props.length" size="small" type="primary" plain :loading="resourceBatchGenerating === 'prop'" @click="onGenerateMissingResourceImages('prop')">生成缺图</el-button><el-button v-if="props.length" size="small" type="danger" plain :disabled="!unifiedResourceSelection.prop.size" @click="batchDeleteUnifiedResources('prop')">批量删除{{ unifiedResourceSelection.prop.size ? `（${unifiedResourceSelection.prop.size}）` : '' }}</el-button></div>
-            <div v-if="props.length" class="resource-center-list"><div v-for="prop in props" :key="prop.id" class="resource-center-item" :class="{ selected: isUnifiedResourceSelected('prop', prop.id) }"><el-checkbox class="resource-select" :model-value="isUnifiedResourceSelected('prop', prop.id)" :aria-label="`选择道具 ${prop.name || prop.id}`" @click.stop @change="toggleUnifiedResourceSelection('prop', prop.id)" /><img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" alt="" /><span v-else class="resource-center-placeholder">道具</span><div><b>{{ prop.name }}</b><small>{{ prop.description || prop.prompt || '待补充描述' }}</small></div><div class="resource-center-item-actions"><el-button size="small" text @click="editProp(prop)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker('prop', prop)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `prop-${prop.id}`" @click="onUploadResourceClick('prop', prop.id)">上传图</el-button><el-button size="small" type="primary" text :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop, propUseQuadGrid, undefined)">生成图</el-button><el-button size="small" type="danger" text @click="onDeleteProp(prop)">删除</el-button></div></div></div>
-            <p v-else class="resource-center-empty">从当前剧本提取道具。</p>
-          </article>
-        </div>
-        <div class="resource-media-library">
-          <header><div><b>媒体素材库</b></div><div class="resource-media-header-actions"><el-button size="small" type="danger" plain :disabled="!unifiedResourceSelection.media.size" @click="batchDeleteUnifiedResources('media')">批量删除{{ unifiedResourceSelection.media.size ? `（${unifiedResourceSelection.media.size}）` : '' }}</el-button><el-button size="small" @click="projectLibraryDialogOpen = true">管理当前项目素材</el-button><span>{{ universalLibraryAssets.length }} 项</span></div></header>
-          <div v-if="universalLibraryAssets.length" class="resource-media-grid"><article v-for="asset in universalLibraryAssets" :key="asset.id" class="resource-media-card" :class="{ selected: isUnifiedResourceSelected('media', asset.id) }"><el-checkbox class="resource-media-select" :model-value="isUnifiedResourceSelected('media', asset.id)" :aria-label="`选择媒体素材 ${asset.name || asset.id}`" @click.stop @change="toggleUnifiedResourceSelection('media', asset.id)" /><img v-if="asset.type === 'image'" :src="sbOmniAssetUrl(asset)" alt="" /><span v-else>{{ asset.type === 'audio' ? '音频' : '视频' }}</span><el-button class="resource-media-delete" size="small" type="danger" circle :aria-label="asset.source_type === 'project_resource' ? '解除项目素材' : asset.library_scope === 'global' ? '删除全局素材' : '删除项目素材'" @click="deleteResourceMedia(asset)">×</el-button><small>{{ asset.name || `素材 ${asset.id}` }}</small><small>{{ asset.library_scope === 'global' ? '我的全局素材' : '当前项目素材' }}</small><div class="resource-media-card-actions"><el-button size="small" text @click="renameResourceMedia(asset)">重命名</el-button><el-button size="small" type="danger" text @click="deleteResourceMedia(asset)">{{ asset.source_type === 'project_resource' ? '解除素材' : '删除' }}</el-button></div><small v-if="asset.source_type === 'project_resource'">关联资源：解除后不会被自动重建</small></article></div>
-          <div v-if="detachedResourceLinks.length" class="resource-media-grid"><article v-for="link in detachedResourceLinks" :key="`detached-${link.id}`" class="resource-media-card"><span>已解除</span><small>{{ link.asset_name || `${link.resource_type} #${link.resource_id}` }}</small><small>历史分镜引用仍保留</small><el-button size="small" type="primary" text @click="restoreResourceMedia(link)">恢复关联</el-button></article></div>
-          <p v-else class="resource-center-empty">还没有上传媒体素材。</p>
-        </div>
       </section>
 
       <el-dialog v-model="showResourceBatchImageDialog" title="生成缺图" class="resource-batch-image-dialog" width="min(520px, calc(100vw - 32px))" append-to-body>
@@ -479,7 +433,6 @@
       </el-dialog>
 
       <div v-show="workflowStage === 'resources'" class="workflow-next-action">
-        <span>资源会在分镜中按需选择、拖入提示词并形成 @ 引用。</span>
         <el-button type="primary" :disabled="!currentEpisodeId" @click="setWorkflowStage('storyboard')">进入分镜管理</el-button>
       </div>
 
@@ -1488,7 +1441,7 @@
       <section v-show="workflowStage === 'merge'" class="section card merge-settings">
         <h2 class="section-title">视频配置</h2>
         <div class="config-grid">
-          <el-form-item label="分辨率">
+          <el-form-item label="分辨率（新分镜默认）">
             <el-select v-model="videoResolution" style="width: 160px">
               <el-option label="480p" value="480p" />
               <el-option label="720p" value="720p" />
@@ -1516,13 +1469,13 @@
           <el-form-item label="字幕">
             <div class="video-option-row">
               <el-switch v-model="videoSubtitle" />
-              <span v-if="videoSubtitle" class="video-option-hint">开启后，合成整集时会检测解说旁白：若有文案则自动生成 SRT、按分镜时长合成旁白语音（过长加速 / 过短补静音）、与成片对齐后烧录字幕并混音。</span>
+              <span v-if="videoSubtitle" class="video-option-hint">开启后按解说旁白自动生成字幕并烧录到成片。</span>
             </div>
           </el-form-item>
           <el-form-item label="对白烧录">
             <div class="video-option-row">
               <el-switch v-model="videoBurnDialogue" />
-              <span v-if="videoBurnDialogue" class="video-option-hint">开启后，将把各镜「配音」生成的对白 TTS 按分镜时长对齐并混入整集成片（无对白音频的分镜为静音）。可与「字幕」旁白同时开启，两条音轨会叠混。</span>
+              <span v-if="videoBurnDialogue" class="video-option-hint">开启后把各镜「配音」生成的对白混入成片；可与字幕同时开启，两条音轨会同时出现。</span>
             </div>
           </el-form-item>
           <el-form-item label="水印">
@@ -1544,7 +1497,6 @@
         <p class="config-tip" v-else>文本、图片和视频模型由项目分组统一配置；请联系组管理员或运营管理员调整。</p>
         <div class="merge-format-preview" aria-label="输出格式预览">
           <div class="merge-format-frame" :class="{ landscape: ['16:9', '4:3', '3:2', '21:9'].includes(projectAspectRatio), square: projectAspectRatio === '1:1' }"><span>{{ projectAspectRatio }}</span><b>{{ videoResolution }}</b></div>
-          <dl><div><dt>字幕</dt><dd>{{ videoSubtitle ? '开启' : '关闭' }}</dd></div><div><dt>对白</dt><dd>{{ videoBurnDialogue ? '开启' : '关闭' }}</dd></div><div><dt>水印</dt><dd>{{ videoWatermark ? '开启' : '关闭' }}</dd></div></dl>
         </div>
       </section>
 
@@ -6553,7 +6505,7 @@ async function batchDeleteUnifiedResources(type) {
     : 0
   try {
     await ElMessageBox.confirm(
-      `确定删除选中的 ${ids.length} 个${label}？系统会自动从可编辑镜头及对应 @ 引用中移除它们。${globalMediaCount ? `其中 ${globalMediaCount} 个为全局素材，删除后其他项目也将不可见。` : ''}历史分镜与已生成作品保持可追溯。`,
+      `确定删除选中的 ${ids.length} 个${label}？${globalMediaCount ? `其中 ${globalMediaCount} 个为全局素材，删除后其他项目也将不可见。` : '相关镜头引用会同步移除。'}`,
       `批量删除${label}`,
       { type: 'warning', confirmButtonText: '删除选中项', cancelButtonText: '取消' }
     )
