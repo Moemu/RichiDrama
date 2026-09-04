@@ -49,9 +49,8 @@ function requireAuth(db) {
       return next();
     }
     catch (err) {
-      // 只有 JWT 自身失效或账号被停用才是真正的登录态问题。数据库繁忙等
-      // 瞬时故障必须与登录态区分：前端对任何 401 都会清除会话并跳转登录页，
-      // 把瞬时错误误报成 401 会把所有已登录标签页同时强制下线。
+      // Only invalid credentials are authentication failures. Temporary
+      // database errors must not log every open browser tab out.
       if (err instanceof TokenExpiredError) return rejectAuth(401, 'TOKEN_EXPIRED', '登录已过期，请重新登录', err);
       if (err instanceof JsonWebTokenError) return rejectAuth(401, 'INVALID_TOKEN', '登录状态无效，请重新登录', err);
       if (err?.code === 'ACCOUNT_DISABLED') return rejectAuth(401, 'ACCOUNT_DISABLED', err.message, err);
