@@ -58,3 +58,21 @@ test('ownership guard resolves a project asset through its project owner before 
   assert.equal(nextCalled, true);
   assert.match(queriedSql, /COALESCE\(d\.owner_user_id, a\.owner_user_id\)/);
 });
+
+test('ownership guard protects video frame extraction routes', () => {
+  for (const routePath of ['/video-generations/907/extract-frame', '/omni-video-jobs/81/extract-frame']) {
+    const allowed = request({ id: 42, role: 'user' }, 42);
+    allowed.path = routePath;
+    let allowedNext = false;
+    ownershipGuard(database(42))(allowed, responseRecorder(), () => { allowedNext = true; });
+    assert.equal(allowedNext, true);
+
+    const denied = request({ id: 7, role: 'user' }, 42);
+    denied.path = routePath;
+    const res = responseRecorder();
+    let deniedNext = false;
+    ownershipGuard(database(42))(denied, res, () => { deniedNext = true; });
+    assert.equal(deniedNext, false);
+    assert.equal(res.statusCode, 404);
+  }
+});
