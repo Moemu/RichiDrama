@@ -138,6 +138,8 @@ function createApp() {
         path: req.path,
         status_code: res.statusCode,
         duration_ms: Math.round(durationMs * 100) / 100,
+        ...(req.auth?.id ? { user_id: Number(req.auth.id) } : {}),
+        ...(res.locals.authErrorCode ? { auth_error_code: res.locals.authErrorCode } : {}),
       });
     });
     next();
