@@ -1,6 +1,5 @@
 <template>
   <div class="media-library-page">
-    <div v-if="canConcatSelected" class="concat-bar"><el-button @click="concatSelectedVideos">拼接选中的视频</el-button></div>
     <div class="page-header library-header">
       <div class="header-left">
         <el-button text @click="returnToSource">
@@ -20,8 +19,6 @@
         <input ref="uploadInput" type="file" accept="image/*,video/*,audio/*" multiple style="display:none" @change="onUpload" />
       </div>
     </div>
-
-    <div class="upload-limits">上传限制：图片 ≤30MB（JPG/PNG/GIF/WebP） · 视频 ≤50MB（MP4/WebM/MOV/M4V） · 音频 ≤15MB（MP3/WAV/M4A/OGG/WebM）</div>
 
     <!-- 筛选栏 -->
     <div class="filter-bar">
@@ -119,10 +116,11 @@
     <!-- 批量操作 -->
     <div v-if="selectedIds.size > 0" class="batch-bar">
       <span>已选 {{ selectedIds.size }} 项</span>
-      <el-button size="small" @click="selectCurrentPage">全选当前页素材</el-button>
+      <el-button size="small" @click="selectAllFiltered">选中全部筛选结果</el-button>
       <el-button size="small" @click="selectedIds.clear()">取消选择</el-button>
+      <el-button v-if="canConcatSelected" size="small" @click="concatSelectedVideos">拼接选中视频</el-button>
       <el-button size="small" type="primary" plain @click="batchCertifyRealPeople">批量标记含真人并认证</el-button>
-      <el-button size="small" type="danger" plain @click="batchDelete">批量删除</el-button>
+      <el-button size="small" type="danger" plain @click="batchDelete">批量归档</el-button>
       <el-button size="small" type="primary" @click="createWithSelected">用选中素材创作</el-button>
     </div>
 
@@ -145,7 +143,7 @@
         <div class="meta-row"><span>名称：</span>{{ previewItem?.name || '未命名' }}</div>
         <div class="meta-row"><span>大小：</span>{{ formatSize(previewItem?.size) }}</div>
         <div class="meta-row"><span>创建时间：</span>{{ previewItem?.created_at }}</div>
-        <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔，例如：人物, 夜景" @change="saveTags" /></div>
+        <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔" @change="saveTags" /></div>
         <section v-if="previewItem" class="remote-library-row">
           <div><b>上传到素材库</b></div>
           <span class="remote-library-status" :class="sd2Status(previewItem)">{{ sd2Label(previewItem) }}</span>
@@ -158,7 +156,7 @@
           >{{ libraryActionLabel(previewItem) }}</el-button>
           <p v-if="previewItem?.seedance2_asset?.error" class="remote-library-error">{{ previewItem.seedance2_asset.error }}</p>
         </section>
-        <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人</el-checkbox><span v-if="previewItem?.requires_sd2_identity">{{ sd2Label(previewItem) }}，系统自动准备，生成会自动等待。</span><span v-else>未勾选即为不含真人</span></div>
+        <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人</el-checkbox><span v-if="previewItem?.requires_sd2_identity">{{ sd2Label(previewItem) }}，系统自动准备，生成会自动等待。</span></div>
         <section v-if="previewItem" class="asset-lineage">
           <div class="asset-lineage-title"><span>版本与来源</span><el-button text size="small" :loading="lineageLoading" @click="loadLineage(previewItem.id)">刷新</el-button></div>
           <div v-if="lineageLoading" class="asset-lineage-empty">正在加载素材谱系…</div>
@@ -511,15 +509,28 @@ async function batchDelete() {
   } catch (error) { ElMessage.error(error.message || '批量删除失败') }
 }
 
-function selectCurrentPage() {
-  mediaItems.value.forEach((item) => selectedIds.add(item.id))
+async function selectAllFiltered() {
+  const params = {
+    page: 1,
+    page_size: 500,
+    scope: assetScope.value,
+    ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}),
+  }
+  if (mediaType.value !== 'all') params.type = mediaType.value
+  if (keyword.value) params.keyword = keyword.value
+  if (favoriteOnly.value) params.favorite = 1
+  const res = await request.get('/assets', { params })
+  const ids = (res?.items || []).map((item) => Number(item?.id)).filter(Number.isFinite)
+  ids.forEach((id) => selectedIds.add(id))
+  if (Number(res?.pagination?.total ?? 0) > 500) ElMessage.info('素材较多，已选中前 500 项')
+  else ElMessage.success(`已选中 ${ids.length} 项`)
 }
 
 async function batchCertifyRealPeople() {
   const ids = mediaItems.value.filter((item) => selectedIds.has(item.id) && item.type === 'image').map((item) => item.id)
   if (!ids.length) return ElMessage.warning('请选择至少一张图片素材')
   try {
-    await ElMessageBox.confirm(`将 ${ids.length} 张图片标记为含真人，并在后台按受控并发自动认证。生成会等待认证完成后自动续跑。`, '批量真人认证', { type: 'info' })
+    await ElMessageBox.confirm(`将 ${ids.length} 张图片标记为含真人并自动认证；生成会等待认证完成后继续。`, '批量真人认证', { type: 'info' })
     const result = await omniVideoAPI.certifyAssetsBatch(ids)
     ElMessage.success(result?.message || `已排队 ${ids.length} 张素材认证`)
     await loadMedia()

@@ -12,14 +12,9 @@
 
     <div v-show="accountTab === 'overview'" class="account-view overview-view">
       <section class="cards">
-        <article><span>{{ account.account_scope === 'organization' ? '企业共享额度' : '可用积分' }}</span><strong>{{ account.available ?? 0 }}</strong><small>{{ account.account_name || '可立即用于新的生成任务' }}</small></article>
+        <article><span>{{ account.account_scope === 'organization' ? '企业共享额度' : '可用积分' }}</span><strong>{{ account.available ?? 0 }}</strong></article>
         <article><span>冻结积分</span><strong>{{ account.frozen ?? 0 }}</strong><small>按实际用量结算；失败自动退还。</small></article>
-        <article><span>累计消费</span><strong>{{ account.total_consumed ?? 0 }}</strong><small>{{ account.account_scope === 'organization' ? '该客户账户的全部实际扣费' : '仅统计已完成的实际扣费' }}</small></article>
-      </section>
-      <section class="overview-links" aria-label="账户快捷入口">
-        <button type="button" @click="accountTab = 'models'"><span>可用模型</span><b>{{ models.length }} 个</b><small>查看已启用的模型</small></button>
-        <button type="button" @click="accountTab = 'billing'"><span>账单记录</span><b>{{ transactionPage.total }} 条</b><small>查看冻结和结算明细</small></button>
-        <button type="button" @click="accountTab = 'security'"><span>账户安全</span><b>登录资料</b><small>修改密码和用户名</small></button>
+        <article><span>累计消费</span><strong>{{ account.total_consumed ?? 0 }}</strong></article>
       </section>
     </div>
     <div v-show="accountTab === 'recharge'" class="account-view recharge-view">
@@ -32,11 +27,11 @@
             <button v-for="amount in paymentOptions.preset_amounts_yuan || []" :key="amount" type="button" role="radio" :aria-checked="rechargeAmountChoice === amount" :class="{active: rechargeAmountChoice === amount}" @click="selectRechargeAmount(amount)">¥{{ Number(amount) }}</button>
             <button type="button" role="radio" :aria-checked="rechargeAmountChoice === 'custom'" :class="{active: rechargeAmountChoice === 'custom'}" @click="selectRechargeAmount('custom')">自定义充值</button>
           </div>
-          <label v-if="rechargeAmountChoice === 'custom'" class="custom-amount"><span>输入自定义金额</span><el-input ref="customAmountInput" v-model="customRechargeAmount" inputmode="decimal" :placeholder="rechargeAmountRange"><template #prepend>¥</template></el-input><small>允许 {{ rechargeAmountRange }} 元。1 元兑换 100 积分，金额最多保留两位小数。</small></label>
+          <label v-if="rechargeAmountChoice === 'custom'" class="custom-amount"><span>输入自定义金额</span><el-input ref="customAmountInput" v-model="customRechargeAmount" inputmode="decimal" :placeholder="rechargeAmountRange"><template #prepend>¥</template></el-input><small>1 元 = 100 积分</small></label>
           <div class="payment-channels"><button v-for="channel in paymentOptions.channels || []" :key="channel.id" type="button" :disabled="!channel.enabled" :class="{active: rechargeChannel === channel.id}" @click="rechargeChannel = channel.id"><b>{{ channel.id === 'alipay' ? '支付宝' : '微信支付' }}</b><small>{{ channel.enabled ? '扫码支付' : '暂未开放' }}</small></button></div>
           <div class="recharge-submit"><span>{{ paymentSubmitHint }}</span><el-button type="primary" size="large" :disabled="!canCreatePayment" :loading="creatingPayment" @click="createPayment">提交充值订单</el-button></div>
         </section>
-        <section class="panel payment-history"><div class="panel-title"><div><h2>充值订单</h2><p>支付成功后，积分会自动到账。</p></div><el-button text @click="loadPaymentOrders">刷新</el-button></div>
+        <section class="panel payment-history"><div class="panel-title"><div><h2>充值订单</h2></div><el-button text @click="loadPaymentOrders">刷新</el-button></div>
           <div class="billing-table-scroll"><el-table :data="paymentOrders" empty-text="暂无充值订单"><el-table-column label="时间" min-width="170"><template #default="{row}">{{ formatDate(row.created_at) }}</template></el-table-column><el-table-column label="渠道" width="100"><template #default="{row}">{{ row.channel === 'alipay' ? '支付宝' : '微信' }}</template></el-table-column><el-table-column prop="amount_yuan" label="金额（元）" width="110"/><el-table-column prop="credits" label="积分" width="110"/><el-table-column label="状态" width="120"><template #default="{row}"><el-tag :type="paymentStatus(row.status).type">{{ paymentStatus(row.status).label }}</el-tag></template></el-table-column><el-table-column label="操作" width="110" fixed="right"><template #default="{row}"><el-button v-if="row.status === 'pending'" link type="primary" @click="openPayment(row)">继续支付</el-button></template></el-table-column></el-table></div>
         </section>
       </template>
@@ -52,7 +47,7 @@
     </el-dialog>
     <div v-show="accountTab === 'security'" class="account-view security-view">
       <section class="panel security-card security-card--password">
-        <div class="security-card-heading"><small>登录凭据</small><h2>修改密码</h2></div>
+        <div class="security-card-heading"><h2>修改密码</h2></div>
         <el-form label-position="top" class="security-form">
           <div class="security-form-fields security-form-fields--password">
             <el-form-item label="当前密码"><el-input v-model="password.old_password" type="password" show-password autocomplete="current-password" /></el-form-item>
@@ -62,14 +57,14 @@
         </el-form>
       </section>
       <section class="panel security-card">
-        <div class="security-card-heading"><small>登录标识</small><h2>修改用户名</h2><p>1–64 个字符。</p></div>
+        <div class="security-card-heading"><h2>修改用户名</h2><p>1–64 个字符。</p></div>
         <el-form label-position="top" class="security-form">
           <el-form-item label="用户名"><el-input v-model="username" maxlength="64" /></el-form-item>
           <el-button type="primary" @click="changeUsername">保存用户名</el-button>
         </el-form>
       </section>
       <section class="panel security-card">
-        <div class="security-card-heading"><small>展示资料</small><h2>修改显示名</h2><p>最长 64 字符；留空显示用户名。</p></div>
+        <div class="security-card-heading"><h2>修改显示名</h2><p>最长 64 字符。</p></div>
         <el-form label-position="top" class="security-form">
           <el-form-item label="显示名"><el-input v-model="displayName" maxlength="64" placeholder="留空则展示用户名" /></el-form-item>
           <el-button type="primary" @click="changeDisplayName">保存显示名</el-button>
@@ -79,7 +74,7 @@
     <div v-show="accountTab === 'billing'" class="account-view">
       <section class="panel bills">
         <div class="panel-title billing-heading">
-          <div><h2>账单记录</h2><p>消费明细只显示实际结算。资金流水保留冻结、释放和充值记录。</p></div>
+          <div><h2>账单记录</h2></div>
           <div class="billing-view-switch" role="tablist" aria-label="账单视图">
             <button type="button" :class="{ active: billingView === 'usage' }" @click="billingView = 'usage'">消费明细</button>
             <button type="button" :class="{ active: billingView === 'transactions' }" @click="billingView = 'transactions'">资金流水</button>

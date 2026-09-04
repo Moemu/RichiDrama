@@ -348,7 +348,8 @@ test('workbench and media library expose the premium entry surfaces', async () =
   assert.match(library, /class="page-header library-header"/)
   assert.match(library, /\{\{ projectDramaId \? '项目媒体素材库' : '媒体素材库' \}\}/)
   assert.match(library, /上传素材/)
-  assert.match(library, /上传限制：图片/)
+  // 上传限制改为失败时按需提示，不再常驻占一行版面。
+  assert.doesNotMatch(library, /上传限制：图片/)
   assert.match(library, /omniVideoAPI\.refreshAssetCertification/)
   assert.match(library, /class="media-preview-dialog"/)
   assert.match(library, /\.media-preview-dialog \.el-dialog__body\)[^}]*overflow-y: auto/)
@@ -378,7 +379,9 @@ test('单视频工具直达生成并引用账号全部素材', async () => {
     readSource('../src/components/ToolAssetSelector.vue'),
   ])
 
-  assert.match(media, /<li>无需项目<\/li><li>支持 @ 素材<\/li><li>支持拖入素材<\/li>/)
+  // 拖拽与 @ 能力由提示词编辑器承载，banner 只保留「无需项目」。
+  assert.match(media, /<li>无需项目<\/li>/)
+  assert.doesNotMatch(media, /支持 @ 素材|支持拖入素材/)
   assert.match(media, /source_context: 'single_video_tool'/)
   assert.match(media, /media === 'image' && !Number\(dramaId\.value\)/)
   assert.match(media, /omniVideoAPI\.create\(\{/)
@@ -414,10 +417,10 @@ test('单视频工具直达生成并引用账号全部素材', async () => {
   assert.match(media, /include-generation-quote/)
   assert.match(media, /:has-video-input="quoteHasVideoInput"/)
   assert.match(media, /:has-audio-input="quoteHasAudioInput"/)
-  assert.match(media, /Seedance 2\.0\/2\.5 支持图片、视频和音频全模态参考/)
-  assert.match(media, /平台接入：当前适配层尚未发送视频本体/)
+  // 素材路由压缩为单行结果描述，适配层实现细节不再暴露给用户。
+  assert.match(media, /视频参考仅取画面帧，动作与节奏不会保留/)
+  assert.doesNotMatch(media, /平台接入：当前适配层/)
   assert.match(media, /materialRouting\.value\.sent\.video > 0/)
-  assert.match(media, /当前平台预计发送/)
   assert.match(media, /@pick="onPromptAssetPick"/)
   assert.match(selector, /beginAssetPointerDrag/)
   assert.match(selector, /assets-loaded/)
