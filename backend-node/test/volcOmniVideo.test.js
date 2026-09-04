@@ -39,6 +39,52 @@ test('Seedance omni sends a valid text-only video request without reference mate
   }
 });
 
+test('Seedance omni maps project-only portrait ratio before an r2v request', async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return { ok: true, text: async () => JSON.stringify({ id: 'task-ratio-map', status: 'processing' }) };
+  };
+  try {
+    const output = await callVolcengineOmniVideoApi({
+      base_url: 'https://video.example.test', api_key: 'test-key',
+      model: ['doubao-seedance-2-0-mini-260615'], default_model: 'doubao-seedance-2-0-mini-260615',
+    }, log, {
+      prompt: '竖屏产品视频', model: 'doubao-seedance-2-0-mini-260615', duration: 15, aspect_ratio: '2:3',
+      reference_urls: ['https://assets.example.test/product.jpg'], video_gen_id: 1280,
+    });
+
+    assert.equal(output.task_id, 'task-ratio-map');
+    assert.equal(calls[0].body.ratio, '3:4');
+    assert.equal(calls[0].body.task_type, 'i2v');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Seedance omni maps project-only landscape ratio to the nearest Ark ratio', async () => {
+  const originalFetch = global.fetch;
+  let body;
+  global.fetch = async (url, init) => {
+    body = JSON.parse(init.body);
+    return { ok: true, text: async () => JSON.stringify({ id: 'task-landscape-map' }) };
+  };
+  try {
+    await callVolcengineOmniVideoApi({
+      base_url: 'https://video.example.test', api_key: 'test-key',
+      model: ['doubao-seedance-2-0-mini-260615'], default_model: 'doubao-seedance-2-0-mini-260615',
+    }, log, {
+      prompt: '横屏产品视频', model: 'doubao-seedance-2-0-mini-260615', duration: 8, aspect_ratio: '3:2',
+      reference_urls: [], video_gen_id: 1281,
+    });
+
+    assert.equal(body.ratio, '4:3');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('Seedance omni request carries image, native video, and audio references', async () => {
   const originalFetch = global.fetch;
   const calls = [];

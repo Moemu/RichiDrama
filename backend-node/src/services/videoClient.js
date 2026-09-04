@@ -623,6 +623,33 @@ function normalizeVolcOmniDuration(modelName, durationNum) {
   return normalizeVolcengineDuration(modelName, durationNum);
 }
 
+const VOLCENGINE_VIDEO_RATIOS = new Set(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive']);
+
+/**
+ * Ark video models do not accept the project's 3:2 and 2:3 aspect ratios.
+ * Use the nearest Ark ratio for generation. The local post-process keeps the
+ * requested project ratio as the final output contract.
+ */
+function resolveVolcengineVideoRatio(rawRatio, log, videoGenId) {
+  const raw = String(rawRatio || '16:9')
+    .trim()
+    .toLowerCase()
+    .replace(/\uFF1A/g, ':')
+    .replace(/[×xX＊*]/g, ':')
+    .replace(/\s+/g, '');
+  if (VOLCENGINE_VIDEO_RATIOS.has(raw)) return raw;
+
+  const mapped = raw === '2:3' ? '3:4' : raw === '3:2' ? '4:3' : '16:9';
+  if (log?.warn) {
+    log.warn('[VolcOmni] ratio 不在火山视频支持列表，使用兼容比例', {
+      video_gen_id: videoGenId,
+      requested_ratio: raw || null,
+      provider_ratio: mapped,
+    });
+  }
+  return mapped;
+}
+
 /**
  * 火山引擎方舟 — Seedance 2.0 等「全能/多参考图」视频
  * 与标准 volcengine 共用：POST {base}/contents/generations/tasks，GET {base}/contents/generations/tasks/{id}
@@ -650,7 +677,7 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
   const url = buildVideoUrl(config, { defaultEndpoint: '/v1/videos/generations' });
   const model = getModelFromConfig(config, preferredModel);
   const finalModel = normalizeVolcModel(model);
-  const ratio = aspect_ratio || '16:9';
+  const ratio = resolveVolcengineVideoRatio(aspect_ratio, log, video_gen_id);
   const effectiveDuration = normalizeVolcOmniDuration(finalModel, duration);
 
   const refList = Array.isArray(reference_urls) ? reference_urls.filter(Boolean) : [];
@@ -3949,9 +3976,11 @@ async function callVideoApi(db, log, opts) {
 
   const url = buildVideoUrl(config);
   const dur = duration ? Number(duration) : 5;
-  const ratio = aspect_ratio || '16:9';
 
   const isVolc = protocol === 'volcengine';
+  const ratio = isVolc
+    ? resolveVolcengineVideoRatio(aspect_ratio, log, video_gen_id)
+    : (aspect_ratio || '16:9');
   // ???? model ???????????? API ?? ID?
   const finalModel = isVolc ? normalizeVolcModel(model) : model;
 
