@@ -11,6 +11,7 @@ const {
   clampToViduAspectRatio,
   pickViduResolutionParam,
   isGeminiOfficialHost,
+  VOLCENGINE_VIDEO_ASPECT_RATIOS,
 } = require('./mediaAspectRatioSpec');
 const {
   signKlingOfficialJwt,
@@ -623,6 +624,17 @@ function normalizeVolcOmniDuration(modelName, durationNum) {
   return normalizeVolcengineDuration(modelName, durationNum);
 }
 
+function requireVolcengineVideoRatio(rawRatio) {
+  const raw = String(rawRatio || '16:9')
+    .trim()
+    .toLowerCase()
+    .replace(/\uFF1A/g, ':')
+    .replace(/[×xX＊*]/g, ':')
+    .replace(/\s+/g, '');
+  if (VOLCENGINE_VIDEO_ASPECT_RATIOS.includes(raw)) return raw;
+  throw new Error(`火山视频模型不支持 ${raw || '空'} 画幅。请选择 ${VOLCENGINE_VIDEO_ASPECT_RATIOS.join('、')}。`);
+}
+
 /**
  * 火山引擎方舟 — Seedance 2.0 等「全能/多参考图」视频
  * 与标准 volcengine 共用：POST {base}/contents/generations/tasks，GET {base}/contents/generations/tasks/{id}
@@ -650,7 +662,7 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
   const url = buildVideoUrl(config, { defaultEndpoint: '/v1/videos/generations' });
   const model = getModelFromConfig(config, preferredModel);
   const finalModel = normalizeVolcModel(model);
-  const ratio = aspect_ratio || '16:9';
+  const ratio = requireVolcengineVideoRatio(aspect_ratio);
   const effectiveDuration = normalizeVolcOmniDuration(finalModel, duration);
 
   const refList = Array.isArray(reference_urls) ? reference_urls.filter(Boolean) : [];
@@ -3949,9 +3961,11 @@ async function callVideoApi(db, log, opts) {
 
   const url = buildVideoUrl(config);
   const dur = duration ? Number(duration) : 5;
-  const ratio = aspect_ratio || '16:9';
 
   const isVolc = protocol === 'volcengine';
+  const ratio = isVolc
+    ? requireVolcengineVideoRatio(aspect_ratio)
+    : (aspect_ratio || '16:9');
   // ???? model ???????????? API ?? ID?
   const finalModel = isVolc ? normalizeVolcModel(model) : model;
 

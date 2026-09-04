@@ -39,6 +39,50 @@ test('Seedance omni sends a valid text-only video request without reference mate
   }
 });
 
+test('Seedance omni rejects a project-only portrait ratio before an r2v request', async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return { ok: true, text: async () => JSON.stringify({ id: 'task-ratio-map', status: 'processing' }) };
+  };
+  try {
+    await assert.rejects(() => callVolcengineOmniVideoApi({
+      base_url: 'https://video.example.test', api_key: 'test-key',
+      model: ['doubao-seedance-2-0-mini-260615'], default_model: 'doubao-seedance-2-0-mini-260615',
+    }, log, {
+      prompt: '竖屏产品视频', model: 'doubao-seedance-2-0-mini-260615', duration: 15, aspect_ratio: '2:3',
+      reference_urls: ['https://assets.example.test/product.jpg'], video_gen_id: 1280,
+    }), /不支持 2:3 画幅/);
+
+    assert.equal(calls.length, 0);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Seedance omni rejects a project-only landscape ratio', async () => {
+  const originalFetch = global.fetch;
+  let body;
+  global.fetch = async (url, init) => {
+    body = JSON.parse(init.body);
+    return { ok: true, text: async () => JSON.stringify({ id: 'task-landscape-map' }) };
+  };
+  try {
+    await assert.rejects(() => callVolcengineOmniVideoApi({
+      base_url: 'https://video.example.test', api_key: 'test-key',
+      model: ['doubao-seedance-2-0-mini-260615'], default_model: 'doubao-seedance-2-0-mini-260615',
+    }, log, {
+      prompt: '横屏产品视频', model: 'doubao-seedance-2-0-mini-260615', duration: 8, aspect_ratio: '3:2',
+      reference_urls: [], video_gen_id: 1281,
+    }), /不支持 3:2 画幅/);
+
+    assert.equal(body, undefined);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('Seedance omni request carries image, native video, and audio references', async () => {
   const originalFetch = global.fetch;
   const calls = [];

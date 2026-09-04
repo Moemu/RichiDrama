@@ -84,3 +84,37 @@ test('omni video rejects an unsupported source resolution before billing authori
     for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(dbPath + suffix); } catch (_) {} }
   }
 });
+
+test('omni video rejects an unsupported Volcengine aspect ratio before billing authorization', () => {
+  const dbPath = path.join(os.tmpdir(), `omni-video-aspect-${Date.now()}-${Math.random()}.db`);
+  const db = getDb({ path: dbPath, type: 'sqlite' });
+  const billing = require('../src/services/billingService');
+  const originalCreateAuthorization = billing.createAuthorization;
+  let authorizationCalls = 0;
+  try {
+    runMigrationsAndEnsure(db);
+    const log = { info() {}, warn() {}, error() {} };
+    const admin = auth.ensureBootstrapAdmin(db, log);
+    const model = 'doubao-seedance-2-0-mini-260615';
+    const tenant = tenants.tenantForUser(db, admin.id);
+    const config = aiConfigs.createConfig(db, log, {
+      service_type: 'video', provider: 'volcengine', api_protocol: 'volcengine_omni',
+      name: 'Seedance aspect test', base_url: 'https://example.invalid', api_key: 'test',
+      model: [model], default_model: model, is_default: true,
+      settings: JSON.stringify({ billing_reserve_output_tokens: 1000000 }), owner_tenant_id: tenant.id,
+    });
+    tenants.bindOwnedConfig(db, tenant.id, config, { is_default: true });
+    billing.createAuthorization = (...args) => { authorizationCalls += 1; return originalCreateAuthorization(...args); };
+
+    assert.throws(() => create(db, log, {
+      model, prompt: '测试镜头', resolution: '720p', aspect_ratio: '2:3', duration: 15,
+      owner_user_id: admin.id, tenant_id: tenant.id, idempotency_key: 'unsupported-aspect-test',
+    }, admin), /不支持 2:3 画幅/);
+    assert.equal(authorizationCalls, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM video_generations').get().count, 0);
+  } finally {
+    billing.createAuthorization = originalCreateAuthorization;
+    closeDb();
+    for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(dbPath + suffix); } catch (_) {} }
+  }
+});

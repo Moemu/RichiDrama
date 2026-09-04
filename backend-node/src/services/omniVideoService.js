@@ -132,6 +132,7 @@ function create(db, log, body, billingUser) {
   const capability = capabilityService.resolve(db, body.model, assets, tenantOptions);
   if (!capability.model) throw new Error('请先在 AI 配置中启用视频模型');
   capabilityService.validateResolution(capability, body.resolution);
+  capabilityService.validateAspectRatio(capability, body.aspect_ratio);
   validateShotAssetLimits(assets, capability);
   body.duration = Math.min(maxDurationForModel(capability.model), Math.max(4, Math.round(Number(body.duration) || 15)));
   const creationMode = body.creation_mode || body.settings?.creation_mode || 'multi_reference';

@@ -4,6 +4,7 @@ const {
   configuredModelLimits,
   modelLimits,
   validateResolution,
+  validateAspectRatio,
 } = require('../src/services/videoModelCapabilities');
 
 const FAST_MODEL = 'doubao-seedance-2-0-fast-260128';
@@ -16,6 +17,14 @@ test('Seedance 2.0 Fast rejects unsupported 1080p source output', () => {
     () => validateResolution({ model: FAST_MODEL, limits }, '1080p'),
     /不支持 1080p 原片.*720p 原片并启用 AI 超分至 1080p/,
   );
+});
+
+test('Volcengine capabilities reject project-only aspect ratios', () => {
+  const model = 'doubao-seedance-2-0-mini-260615';
+  const limits = modelLimits({}, {}, model, { api_protocol: 'volcengine_omni' });
+  assert.deepEqual(limits.aspect_ratios, ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive']);
+  assert.equal(validateAspectRatio({ model, limits }, '9:16'), '9:16');
+  assert.throws(() => validateAspectRatio({ model, limits }, '2:3'), /不支持 2:3 画幅/);
 });
 
 test('an exact video_capabilities model entry overrides the built-in model registry', () => {
