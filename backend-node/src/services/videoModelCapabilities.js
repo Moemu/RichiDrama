@@ -1,4 +1,5 @@
 const aiConfigService = require('./aiConfigService');
+const { VOLCENGINE_VIDEO_ASPECT_RATIOS } = require('./mediaAspectRatioSpec');
 
 const DEFAULT_CAPABILITIES = {
   text_to_video: true,
@@ -38,7 +39,7 @@ function list(db, options = {}) {
       model,
       provider: item.provider || '',
       supports: normalizeSupports(item, declared.supports || declared, model),
-      limits: modelLimits(settings, declared, model),
+      limits: modelLimits(settings, declared, model, item),
       is_default: !!item.is_default && model === item.default_model,
       priority: item.priority || 0,
     }));
@@ -69,15 +70,23 @@ function configuredModelLimits(settings, model) {
   return configured && typeof configured === 'object' && !Array.isArray(configured) ? configured : {};
 }
 
-function modelLimits(settings, declared, model) {
+function modelLimits(settings, declared, model, config = null) {
   const shared = declared.limits || settings.video_limits || {};
-  return {
+  const limits = {
     ...DEFAULT_LIMITS,
     ...shared,
     ...seedance25Limits(model),
     ...seedance20FastLimits(model),
     ...configuredModelLimits(settings, model),
   };
+  if (Array.isArray(limits.aspect_ratios) && limits.aspect_ratios.length) return limits;
+  const protocol = String(config?.api_protocol || '').trim().toLowerCase();
+  const provider = String(config?.provider || '').trim().toLowerCase();
+  const usesVolcengineApi = protocol === 'volcengine' || protocol === 'volcengine_omni'
+    || (!protocol && ['volces', 'volcengine', 'volc'].includes(provider));
+  return usesVolcengineApi
+    ? { ...limits, aspect_ratios: [...VOLCENGINE_VIDEO_ASPECT_RATIOS] }
+    : limits;
 }
 
 function validateResolution(capability, requestedResolution) {
@@ -91,6 +100,15 @@ function validateResolution(capability, requestedResolution) {
     ? '需要 1080p 成片时，请选择 720p 原片并启用 AI 超分至 1080p。'
     : '';
   throw new Error(`模型 ${capability?.model || '当前模型'} 不支持 ${requested} 原片，可选分辨率：${choices}。${upscaleHint}`);
+}
+
+function validateAspectRatio(capability, requestedAspectRatio) {
+  const requested = String(requestedAspectRatio || '').trim().replace(/\uFF1A/g, ':').replace(/\s+/g, '');
+  const allowed = Array.isArray(capability?.limits?.aspect_ratios)
+    ? capability.limits.aspect_ratios.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  if (!requested || !allowed.length || allowed.includes(requested)) return requested || null;
+  throw new Error(`模型 ${capability?.model || '当前模型'} 不支持 ${requested} 画幅。请选择 ${allowed.join('、')}。`);
 }
 
 function normalizeSupports(config, declared = {}, selectedModel = '') {
@@ -148,4 +166,5 @@ module.exports = {
   configuredModelLimits,
   modelLimits,
   validateResolution,
+  validateAspectRatio,
 };

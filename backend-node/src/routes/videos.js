@@ -41,6 +41,7 @@ function routes(db, log) {
           storyboardId: body.storyboard_id,
         })) return response.badRequest(res, '当前镜头已有视频生成任务，请等待任务结束后再生成');
         const billing = require('../services/billingService');
+        const dramaId = Number(body.drama_id) || 0;
         const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id);
         const aiOptions = tenant ? { tenant_id: tenant.id } : {};
         const videoConfig = require('../services/aiConfigService').listConfigs(db, body.service_type || 'video', aiOptions)[0];
@@ -50,6 +51,21 @@ function routes(db, log) {
         const capability = capabilityService.resolve(db, modelForBilling, [], aiOptions);
         if (!capability.model || capability.model !== modelForBilling) return response.badRequest(res, '所选视频模型不可用');
         try { capabilityService.validateResolution(capability, policy.resolution); }
+        catch (error) { return response.badRequest(res, error.message); }
+        let aspectRatio = null;
+        if (body.aspect_ratio != null && String(body.aspect_ratio).trim() !== '') {
+          aspectRatio = normalizeAspectRatioForApi(body.aspect_ratio);
+        }
+        if (!aspectRatio && dramaId) {
+          try {
+            const dramaRow = db.prepare('SELECT metadata FROM dramas WHERE id = ? AND deleted_at IS NULL').get(dramaId);
+            if (dramaRow?.metadata) {
+              const meta = typeof dramaRow.metadata === 'string' ? JSON.parse(dramaRow.metadata) : dramaRow.metadata;
+              if (meta?.aspect_ratio) aspectRatio = normalizeAspectRatioForApi(meta.aspect_ratio);
+            }
+          } catch (_) {}
+        }
+        try { capabilityService.validateAspectRatio(capability, aspectRatio); }
         catch (error) { return response.badRequest(res, error.message); }
         const billingTarget = require('../services/aiConfigService').resolveBillingTarget(db, body.service_type || 'video', modelForBilling, body.ai_config_id, aiOptions);
         const configForBilling = require('../services/aiConfigService').getConfig(db, billingTarget.config_id) || videoConfig;
@@ -77,7 +93,6 @@ function routes(db, log) {
         });
         const task = taskService.createTask(db, log, 'video_generation', String(body.drama_id || ''), req.auth.id, tenant?.id || null);
         const now = new Date().toISOString();
-        const dramaId = Number(body.drama_id) || 0;
         const storyboardId = body.storyboard_id != null ? Number(body.storyboard_id) : null;
         const provider = body.provider || 'chatfire';
         let prompt = body.prompt || '';
@@ -91,20 +106,6 @@ function routes(db, log) {
         }
         const model = modelForBilling;
         const duration = body.duration ?? 15;
-        // 画幅：请求体归一化（全角冒号等）后写入 DB；未传则从 drama.metadata 读取并同样归一化
-        let aspectRatio = null;
-        if (body.aspect_ratio != null && String(body.aspect_ratio).trim() !== '') {
-          aspectRatio = normalizeAspectRatioForApi(body.aspect_ratio);
-        }
-        if (!aspectRatio && dramaId) {
-          try {
-            const dramaRow = db.prepare('SELECT metadata FROM dramas WHERE id = ? AND deleted_at IS NULL').get(dramaId);
-            if (dramaRow && dramaRow.metadata) {
-              const meta = typeof dramaRow.metadata === 'string' ? JSON.parse(dramaRow.metadata) : dramaRow.metadata;
-              if (meta && meta.aspect_ratio) aspectRatio = normalizeAspectRatioForApi(meta.aspect_ratio);
-            }
-          } catch (_) {}
-        }
         const resolution = policy.resolution;
         const upscaleResolution = policy.upscale_resolution;
         const targetFps = policy.target_fps;

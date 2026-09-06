@@ -6,7 +6,7 @@
     <UiChoiceField label="分辨率" :model-value="value.resolution || '720p'" :options="resolutionOptions" :invalid="resolutionInvalid" :error="resolutionError" @update:model-value="set('resolution', $event)" />
     <UiChoiceField label="AI 超分（新镜头默认 1080p）" :model-value="value.upscale_resolution || ''" :options="upscaleOptions" @update:model-value="set('upscale_resolution', $event || null)" />
     <UiChoiceField label="智能插帧（按需）" :model-value="value.target_fps || ''" :options="fpsOptions" @update:model-value="set('target_fps', $event || null)" />
-    <UiChoiceField label="宽高比" :model-value="value.aspect_ratio || '16:9'" :options="aspectRatioOptions" @update:model-value="set('aspect_ratio', $event)" />
+    <UiChoiceField label="宽高比" :model-value="value.aspect_ratio || '16:9'" :options="aspectRatioOptions" :invalid="aspectRatioInvalid" :error="aspectRatioError" @update:model-value="set('aspect_ratio', $event)" />
     <div class="postprocess-quote" role="status" aria-live="polite" :aria-busy="quoteLoading">
       <b>预计积分：</b>
       <span v-if="quoteLoading">正在核算…</span>
@@ -58,7 +58,16 @@ const resolutionError = computed(() => resolutionInvalid.value
   ? `当前模型不支持 ${value.value.resolution} 原片。请选择 ${allowedResolutions.value.join(' 或 ')}${allowedResolutions.value.includes('720p') ? '；需要 1080p 成片时可启用 AI 超分' : ''}。`
   : '')
 const fpsOptions = [{ label: '不插帧', description: '保持原始帧率', value: '' }, { label: '60 fps', value: 60 }, { label: '120 fps', value: 120 }]
-const aspectRatioOptions = ['16:9', '9:16', '1:1', '3:4', '4:3', '3:2', '2:3', '21:9'].map((item) => ({ label: item, value: item }))
+const allAspectRatioOptions = ['16:9', '9:16', '1:1', '3:4', '4:3', '3:2', '2:3', '21:9'].map((item) => ({ label: item, value: item }))
+const allowedAspectRatios = computed(() => {
+  const configured = selectedVideoCapability.value?.limits?.aspect_ratios
+  return Array.isArray(configured) && configured.length ? configured : allAspectRatioOptions.map((item) => item.value)
+})
+const aspectRatioOptions = computed(() => allAspectRatioOptions.filter((item) => allowedAspectRatios.value.includes(item.value)))
+const aspectRatioInvalid = computed(() => !!selectedVideoCapability.value && !allowedAspectRatios.value.includes(value.value.aspect_ratio || '16:9'))
+const aspectRatioError = computed(() => aspectRatioInvalid.value
+  ? `当前模型不支持 ${value.value.aspect_ratio} 画幅。请选择 ${allowedAspectRatios.value.join('、')}。`
+  : '')
 const upscaleOptions = computed(() => {
   const resolution = String(value.value.resolution || '720p').toLowerCase()
   const items = [{ label: '不超分（保持原分辨率）', value: '' }]

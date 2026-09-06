@@ -510,6 +510,14 @@ test('generation settings use model capabilities to filter source resolutions', 
   assert.doesNotMatch(config, /duration_seconds/)
 })
 
+test('generation settings hide aspect ratios that the selected model cannot use', async () => {
+  const source = await readSource('../src/components/GenerationSettings.vue')
+  assert.match(source, /limits\?\.aspect_ratios/)
+  assert.match(source, /aspectRatioOptions = computed/)
+  assert.match(source, /aspectRatioInvalid/)
+  assert.match(source, /当前模型不支持.*画幅/)
+})
+
 test('generation settings refresh the full video quote when billable inputs change', async () => {
   const source = await readSource('../src/components/GenerationSettings.vue')
   assert.match(source, /omniVideoAPI\.quoteBilling\(\{/)

@@ -33,6 +33,9 @@ const GEMINI_IMAGE_ASPECT_RATIOS = new Set([
 /** Vidu 文生视频文档列出的 aspect_ratio（21:9 以项目 UI 为准，官方文挡以接口返回为准） */
 const VIDU_ASPECT_RATIOS = new Set(['16:9', '9:16', '3:4', '4:3', '1:1', '21:9']);
 
+/** 火山方舟视频生成 API 支持的 ratio 枚举。 */
+const VOLCENGINE_VIDEO_ASPECT_RATIOS = Object.freeze(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive']);
+
 /**
  * 将任意比例标签限制在 Gemini 图片官方枚举内（未知则 16:9）
  */
@@ -95,6 +98,7 @@ function isGeminiOfficialHost(baseUrl) {
 module.exports = {
   GEMINI_IMAGE_ASPECT_RATIOS,
   VIDU_ASPECT_RATIOS,
+  VOLCENGINE_VIDEO_ASPECT_RATIOS,
   clampToGeminiImageAspectRatio,
   clampToViduAspectRatio,
   aspectRatioLabelFromPixelSize,
