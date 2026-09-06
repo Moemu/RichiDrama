@@ -224,6 +224,7 @@
         </el-tabs>
       </section>
       <div v-show="workflowStage === 'script'" class="workflow-next-action">
+        <span>剧本确认后，再集中准备可复用资源。</span>
         <el-button type="primary" :disabled="!scriptContent?.trim()" @click="setWorkflowStage('resources')">进入统一资源管理</el-button>
       </div>
 
@@ -422,6 +423,7 @@
       </el-dialog>
 
       <div v-show="workflowStage === 'resources'" class="workflow-next-action">
+        <span>资源会在分镜中按需选择、拖入提示词并形成 @ 引用。</span>
         <el-button type="primary" :disabled="!currentEpisodeId" @click="setWorkflowStage('storyboard')">进入分镜管理</el-button>
       </div>
 
