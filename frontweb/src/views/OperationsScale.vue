@@ -4,20 +4,20 @@
       <div>
         <p class="eyebrow">运营报表</p>
         <h1>运营告警与报表</h1>
-        <p class="muted">数据只来自本地任务、归档和账本；不会查询供应商。</p>
       </div>
       <div class="actions">
-        <el-button @click="$router.push('/')">返回主页</el-button>
         <el-button @click="$router.push('/admin')">返回运营台</el-button>
-        <el-button type="primary" :loading="exporting" @click="downloadProduction">导出生产 CSV</el-button>
+        <el-button @click="load">刷新检测</el-button>
+        <el-button type="primary" :loading="exporting" @click="downloadProduction">导出生产 CSV（全量）</el-button>
       </div>
     </header>
 
     <el-alert v-for="alert in overview?.alerts || []" :key="`${alert.key}-${alert.model || ''}`" type="warning" :closable="false" show-icon class="alert">
       <template #title>{{ alertLabel(alert) }}</template>
+      <router-link class="alert-link" :to="alertTarget(alert)">去处置 →</router-link>
     </el-alert>
     <section v-if="overview && !(overview.alerts || []).length" class="quiet-status" aria-live="polite">
-      <span aria-hidden="true">✓</span><div><b>当前没有触发的运营告警</b><small>生产、归档和账务阈值均在安全范围内。</small></div><button type="button" @click="load">刷新检测</button>
+      <span aria-hidden="true">✓</span><div><b>当前没有触发的运营告警</b><small>生产、归档和账务阈值均在安全范围内。</small></div>
     </section>
 
     <section class="card">
@@ -35,16 +35,12 @@
     <section class="card" :class="{ 'is-sparse': reports.length <= 3 }">
       <h2>运营日报</h2>
       <el-table :data="reports" size="small">
-        <el-table-column prop="report_date" label="上海日期" width="140" />
+        <el-table-column prop="report_date" label="日期（北京时间）" width="140" />
         <el-table-column label="生成时间" min-width="180"><template #default="{ row }">{{ formatChinaDateTime(row.generated_at) }}</template></el-table-column>
         <el-table-column label="视频生产数" width="130"><template #default="{ row }">{{ row.summary?.production?.total || 0 }}</template></el-table-column>
         <el-table-column label="待对账" width="120"><template #default="{ row }">{{ row.summary?.billing?.pending_reconciliations || 0 }}</template></el-table-column>
         <el-table-column label="告警数" width="100"><template #default="{ row }">{{ row.summary?.alerts?.length || 0 }}</template></el-table-column>
       </el-table>
-      <div v-if="reports.length > 0 && reports.length <= 3" class="snapshot-insight">
-        <div><p>日报归档</p><h3>{{ reports.length }} 份运营日报</h3></div>
-        <dl><div><dt>视频生产</dt><dd>{{ reports[0]?.summary?.production?.total || 0 }}</dd></div><div><dt>待对账</dt><dd>{{ reports[0]?.summary?.billing?.pending_reconciliations || 0 }}</dd></div><div><dt>运营告警</dt><dd>{{ reports[0]?.summary?.alerts?.length || 0 }}</dd></div></dl>
-      </div>
     </section>
   </main>
 </template>
@@ -64,6 +60,13 @@ const settings = reactive({ stale_minutes: 30, failed_count: 3, failed_window_ho
 function alertLabel(alert) {
   const labels = { stale_production: '生产任务长时间未更新', continuous_failures: '模型连续失败', pending_reconciliation: '存在待对账案件', archive_failed: '存在归档失败' }
   return `${labels[alert.key] || alert.key}：${alert.count} 条${alert.model ? `（${alert.model}）` : ''}`
+}
+
+function alertTarget(alert) {
+  if (alert.key === 'pending_reconciliation') return { path: '/admin', query: { tab: 'reconciliations', status: 'pending' } }
+  if (alert.key === 'archive_failed') return { path: '/admin', query: { tab: 'archives', status: 'failed' } }
+  if (alert.key === 'continuous_failures') return { path: '/admin', query: { tab: 'production', status: 'failed' } }
+  return { path: '/admin', query: { tab: 'production' } }
 }
 
 async function load() {
@@ -104,6 +107,8 @@ h2 { font-size: 18px; margin-bottom: 16px; }
 .muted { color: var(--text-muted); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .alert { margin-bottom: 10px; }
+.alert-link { color: var(--accent-teal, #0e9d74); font-size: 13px; font-weight: 600; text-decoration: none; }
+.alert-link:hover { text-decoration: underline; }
 .quiet-status { display:flex; align-items:center; gap:1rem; min-height:4.5rem; padding:.8rem 1rem; border-top:1px solid var(--border-color); border-bottom:1px solid var(--border-color); }.quiet-status>span { display:grid; width:2.2rem; height:2.2rem; place-items:center; border-radius:50%; background:color-mix(in srgb,var(--accent-teal) 18%,var(--bg-raised)); color:var(--accent-teal); font-weight:900; }.quiet-status div { display:grid; gap:.2rem; flex:1; }.quiet-status small { color:var(--text-muted); }.quiet-status button { padding:.55rem 0; border:0; border-bottom:1px solid var(--border-strong); background:transparent; color:var(--text-regular); cursor:pointer; }
 .card { min-height:0; margin:0; padding:1rem 1.2rem; overflow:hidden; border: 1px solid var(--border-color, #e5e7eb); border-width:1px 0; border-radius:0; background:transparent; }
 .card:last-child { display:flex; flex-direction:column; }.card:last-child :deep(.el-table){flex:1;min-height:0;overflow:auto}.card:last-child :deep(.el-table__inner-wrapper){height:100%}

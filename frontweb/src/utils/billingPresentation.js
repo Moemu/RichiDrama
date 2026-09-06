@@ -50,21 +50,10 @@ export function transactionAmount(row) {
 
 export function transactionDescription(row) {
   const snapshot = row.snapshot || {}
-  const service = modelName(row)
   const actualUsage = usageText(snapshot.actual_usage)
-
-  if (row.type === 'authorization') {
-    return `已为 ${service} 暂时冻结 ${number(row.amount)} 积分上限；完成后只按实际用量扣除。`
-  }
-  if (row.type === 'settlement' || row.type === 'charge') {
-    return actualUsage
-      ? `${service} 已完成，按实际 ${actualUsage} 结算。`
-      : `${service} 已完成并结算。`
-  }
-  if (row.type === 'void') return row.reason || '调用未完成，冻结积分已全部释放。'
-  if (row.type === 'recharge') return row.reason || '充值积分已到账。'
-  if (row.type === 'adjustment') return row.reason || '管理员已调整账户余额。'
-  return row.reason || '账户积分发生变动。'
+  if (row.reason) return row.reason
+  const service = modelName(row)
+  return actualUsage ? `${service} · ${actualUsage}` : service
 }
 
 export function formatCredits(value) {

@@ -69,6 +69,8 @@ export const adminAPI = {
   retryProductionPostprocess: (id, data) => request.post(`/admin/production/${id}/retry-postprocess`, data),
   adoptProductionSource: (id, data) => request.post(`/admin/production/${id}/adopt-source`, data),
   retryProductionArchive: (id, data) => request.post(`/admin/production/${id}/retry-archive`, data),
+  /** 复用用户端按快照重试端点；服务端对 admin 角色放行归属校验 */
+  retryGeneration: (omniJobId, data) => request.post(`/omni-video-jobs/${omniJobId}/retry`, data),
   mediaArchives: (params) => request.get('/admin/media-archives', { params }),
   richbestRebindCandidates: (params) => request.get('/admin/richbest-asset-rebind-candidates', { params }),
   createRichbestRebind: (data) => request.post('/admin/richbest-asset-rebinds', data),

@@ -634,7 +634,6 @@ html body #app .drama-canvas-page .header,
 html body #app .drama-canvas-page .canvas-sidebar { background: var(--bg-surface) !important; border-color: var(--border-color) !important; }
 html body #app .drama-canvas-page .vue-flow-canvas { background: var(--canvas-grid-bg) !important; }
 html body #app .drama-canvas-page .wf-hint,
-html body #app .drama-canvas-page .gen-hint,
 html body #app .drama-canvas-page .sec-label,
 html body #app .drama-canvas-page .sidebar-script-tip,
 html body #app .drama-canvas-page .sidebar-tip,
@@ -781,7 +780,7 @@ html.light body #app .film-create :is(.card, .storyboard-row, .asset-item):hover
   border-color: var(--border-strong) !important;
   box-shadow: var(--shadow-md) !important;
 }
-html.light body #app .film-create :is(.nav-sub-list, .sb-ctrl-bar--active, .nav-sub-item:hover, .segment-header-inner) {
+html.light body #app .film-create :is(.nav-sub-list, .nav-sub-item:hover, .segment-header-inner) {
   background: var(--bg-hover) !important;
   background-image: none !important;
 }
@@ -816,7 +815,7 @@ html body #app :is(.page > main, .film-list main, .tools-page > *, .media-librar
   animation: surface-reveal var(--motion-standard) var(--motion-spring) both;
 }
 html body #app :is(input, textarea, .el-input__wrapper, .el-select__wrapper) { transition: border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease) !important; }
-html body #app :is(.el-drawer, .el-dialog, .records-workspace) { will-change: transform, opacity; }
+html body #app :is(.el-drawer, .el-dialog) { will-change: transform, opacity; }
 html body #app :is(.el-table__row, .record-row, .history-item, .library-item, .media-card) { transition: background-color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-spring) !important; }
 html body #app :is(.el-table__row, .record-row, .history-item, .library-item, .media-card):hover { transform: translateY(-1px); }
 @keyframes surface-reveal { from { opacity: 0; transform: translateY(8px) scale(.995); } to { opacity: 1; transform: translateY(0) scale(1); } }

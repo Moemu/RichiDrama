@@ -7,7 +7,7 @@ import { productionStatusLabel, productionStatusTone, productionTimelineType } f
 test('production status presentation uses readable labels and matching tones', () => {
   assert.equal(productionStatusLabel('completed'), '已完成')
   assert.equal(productionStatusLabel('not_selected'), '未选择')
-  assert.equal(productionStatusLabel('reconciliation_required'), '待对账')
+  assert.equal(productionStatusLabel('reconciliation_required'), '等待结算')
   assert.equal(productionStatusTone('failed'), 'bad')
   assert.equal(productionStatusTone('local_ready'), 'good')
   assert.equal(productionTimelineType('processing'), 'primary')

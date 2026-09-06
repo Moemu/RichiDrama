@@ -38,7 +38,7 @@ const ERROR_MESSAGES = {
 
 async function probeCookieSession() {
   try {
-    const response = await axios.post('/api/v1/auth/session-cookie', null, {
+    const response = await axios.post('/api/v1/auth/session-cookie', {}, {
       timeout: 10000,
       withCredentials: true,
       validateStatus: () => true,

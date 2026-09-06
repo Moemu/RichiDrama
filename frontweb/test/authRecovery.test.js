@@ -13,6 +13,8 @@ test('a stale 401 cannot remove a newer shared browser session', () => {
 })
 
 test('a current-token 401 verifies the HttpOnly cookie before logout', () => {
+  assert.match(source, /axios\.post\('\/api\/v1\/auth\/session-cookie', \{\}, \{/)
+  assert.doesNotMatch(source, /axios\.post\('\/api\/v1\/auth\/session-cookie', null, \{/)
   assert.match(source, /await probeCookieSession\(\)/)
   assert.match(source, /_lmdUseCookieOnly: true/)
   assert.match(source, /_lmdAuthRecovery: true/)
