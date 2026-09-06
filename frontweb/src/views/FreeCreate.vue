@@ -217,7 +217,6 @@ import { findAssetMentions, promptAliasForAsset } from '@/utils/assetMentions'
 import GenerationSettings from '@/components/GenerationSettings.vue'
 import { clearPromptDraft, currentDraftUserId, readPromptDraft, shouldRestorePromptDraft, writePromptDraft } from '@/utils/promptDraft'
 import { createShotSaveQueue, findShotById, mergeSavedShot } from '@/utils/shotSaveCoordinator'
-import { formatChinaDateTime } from '@/utils/time'
 import { isSeedanceOmniReferenceModel, materialRoutingPreview } from '@/utils/mediaRoutingPreview'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import GenerationFailureDetails from '@/components/GenerationFailureDetails.vue'
@@ -625,7 +624,6 @@ function postprocessSummary(job) {
     : '保持原片'
   return `${stageText}${resolutionText ? ` · ${resolutionText}` : ''} · ${fpsText}`
 }
-function formatHistoryTime(value) { return formatChinaDateTime(value) }
 function selectHistoryJob(job) { playOnSelection.value = true; selectedHistoryJobId.value = job.id }
 function openHistoryDetail(job) {
   const generationId = Number(job?.video_generation_id || job?.generation?.id)
@@ -666,14 +664,6 @@ function containWorkbenchScroll(event) {
 }
 function sd2Status(asset) { return String(asset?.seedance2_asset?.status || 'none').toLowerCase() }
 function sd2Pending(asset) { return ['queued', 'uploading', 'registering', 'processing', 'reconciling'].includes(sd2Status(asset)) }
-function sd2StatusLabel(asset) { return ({ none: '未认证', processing: '认证中', active: '可用', invalid: '已失效', failed: '认证失败' })[sd2Status(asset)] || '认证状态未知' }
-function sd2ActionLabel(asset) {
-  const status = sd2Status(asset)
-  if (status === 'active') return '刷新状态'
-  if (status === 'processing') return '刷新状态'
-  if (status === 'invalid' || status === 'failed' || status === 'stale') return '重新认证'
-  return '认证'
-}
 function localVideoUrl(video) {
   // A post-processing failure can still leave a valid original/upscaled file.
   // Prefer the final file, then the best retained source so storyboard cards
@@ -1216,7 +1206,6 @@ async function removeShot(shot) {
 }
 async function persistShotOrder(list) { const previous = shots.value; shots.value = list; try { const result = isProjectMode.value ? await storyboardsAPI.reorder({ episode_id: projectEpisodeId.value, ids: list.map((shot) => shot.id) }) : await omniVideoAPI.reorderShots(sequence.value.id, list.map((shot) => shot.id)); shots.value = isProjectMode.value ? (result?.storyboards || []).map((item) => { const remote = projectShot(item); const local = list.find((shot) => Number(shot.id) === Number(remote.id)); if (!local) return remote; const localAssets = new Map((local.assets || []).map((asset) => [Number(asset.asset_id), asset])); return { ...remote, video_url: local.video_url || remote.video_url, poster_local_path: local.poster_local_path || remote.poster_local_path, status: local.video_url && ['pending', 'draft', '', null, undefined].includes(remote.status) ? 'completed' : remote.status, prompt: local.prompt, prompt_document: local.prompt_document, settings: local.settings, assets: remote.assets.map((asset) => ({ ...asset, ...localAssets.get(Number(asset.asset_id)) })) } }) : result; if (isProjectMode.value) emit('reordered') } catch (error) { shots.value = previous; ElMessage.error(error.message || '镜头排序保存失败') } }
 async function dropShot(targetId) { if (!draggedShotId.value || draggedShotId.value === targetId) return; const list = [...shots.value]; const from = list.findIndex((shot) => shot.id === draggedShotId.value), to = list.findIndex((shot) => shot.id === targetId); const [moved] = list.splice(from, 1); list.splice(to, 0, moved); draggedShotId.value = null; await persistShotOrder(list) }
-async function moveShot(index, offset) { const target = index + offset; if (target < 0 || target >= shots.value.length) return; const list = [...shots.value]; [list[index], list[target]] = [list[target], list[index]]; await persistShotOrder(list) }
 function selectRelative(offset) { const target = shots.value[activeShotIndex.value + offset]; if (target) selectShot(target) }
 function onShotListWheel(event) {
   if (!event.deltaY || wheelShotLocked || shots.value.length < 2) return
@@ -1351,24 +1340,6 @@ function pickFiles() { fileInput.value?.click() }
 function dropFiles(event) { upload(event.dataTransfer.files) }
 function uploadFiles(event) { upload(event.target.files); event.target.value = '' }
 async function upload(files) { for (const file of Array.from(files || [])) { try { const targetDramaId = isProjectMode.value ? projectDramaId.value : (assetScope.value === 'project' ? activeProjectAssetId.value : null); const out = await omniVideoAPI.upload(file, { name: file.name, drama_id: targetDramaId || undefined }); if (out.asset) { const item = { ...out.asset, usage: out.asset.type === 'image' ? 'reference' : out.asset.type === 'video' ? 'motion' : 'ambience' }; assets.value.unshift(item); if (addShotMaterial(item)) scheduleSave() } } catch (error) { ElMessage.error(`${file.name}：${error.message || '上传失败'}`) } } }
-async function certify(asset) {
-  if (!asset || asset.type !== 'image' || certifyingId.value === asset.id) return
-  certifyingId.value = asset.id
-  try {
-    const status = sd2Status(asset)
-    const out = ['processing', 'active'].includes(status)
-      ? await omniVideoAPI.refreshAssetCertification(asset.id)
-      : await omniVideoAPI.certifyAsset(asset.id)
-    if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
-    if (sd2Pending(asset)) void refreshCertificationUntilSettled(asset).catch(showCertificationError)
-    ElMessage.success(`「${assetDisplayName(asset)}」SD2 认证状态：${sd2StatusLabel(asset)}`)
-  } catch (error) {
-    showCertificationError(error)
-  } finally {
-    certifyingId.value = null
-  }
-}
-
 function notifyBalanceChanged() { window.dispatchEvent(new CustomEvent('lmd:balance-changed')) }
 function replacePolledJob(id, job) { const index = jobs.value.findIndex((item) => String(item.id) === String(id)); const historyIndex = shotHistory.value.findIndex((item) => String(item.id) === String(id)); if (index >= 0) jobs.value[index] = job; if (historyIndex >= 0) shotHistory.value[historyIndex] = job }
 async function refreshUnknownJob(job) { try { const next = normalizeJob(await omniVideoAPI.get(job.id)); replacePolledJob(job.id, next); if (String(currentShot.value?.omni_job_id) === String(job.id)) currentShot.value.status = next.status; if (activeGenerationStatuses.has(next.status)) poll(next.id); else notifyBalanceChanged() } catch (error) { ElMessage.error(error.message || '状态刷新失败，请稍后重试') } }
@@ -1520,7 +1491,7 @@ defineExpose({ refreshProjectShots })
 .generation-actions{display:grid;grid-template-columns:1fr 1.6fr;gap:7px;margin-top:14px}.generation-actions .generate-button{margin-top:0}
 .identity-expired-warn{display:flex;align-items:flex-start;gap:7px;margin-top:10px;padding:8px 10px;border-radius:7px;background:#3a2a1c!important;border:1px solid #7a5430!important;color:#f0d9b5!important;font-size:12px;line-height:1.5}
 .identity-expired-warn .el-icon{color:#e6a23c;font-size:15px;flex-shrink:0;margin-top:1px}.request-preview-note{margin:0 0 10px;color:#9ca7bc;font-size:13px}.request-preview{max-height:440px;margin:0;overflow:auto;padding:12px;border:1px solid #39435a;border-radius:7px;background:#111621;color:#dce6ff;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.55}.request-preview-actions{display:flex;gap:8px;margin-top:10px}.polish-suggestion{margin-top:12px;padding:10px;border:1px solid #39435a;border-radius:7px;background:#151b24;color:#dce6ff;font-size:12px}.polish-suggestion b{display:block;margin-bottom:6px}.polish-suggestion pre{margin:0;white-space:pre-wrap;word-break:break-word}
-.frame-actions{display:flex;flex:0 0 auto;align-items:center;justify-content:flex-end;gap:6px;min-width:0;padding:8px 12px;border-top:1px solid #45433f;background:#181818;color:#dedbd4;overflow-x:auto;scrollbar-width:thin}.frame-actions .el-button{flex:0 0 auto;margin:0!important}.generation-history{display:grid;gap:7px;margin-top:12px;padding-top:10px;border-top:1px solid #45433f}.generation-history-head{display:flex;align-items:baseline;justify-content:space-between}.generation-history-head b{font-size:12px}.generation-history-head small,.generation-history-empty{margin:0;color:#aaa69e;font-size:11px}.generation-history-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.generation-history-item{position:relative;display:grid;grid-template-rows:92px auto;gap:5px;min-width:0;padding:4px;border:1px solid #4b4944;border-radius:6px;background:#202020;color:#dedbd4;text-align:left;cursor:pointer;font:inherit;overflow:hidden}.generation-history-item video,.history-video-empty{display:block;width:100%;height:92px;object-fit:cover;border-radius:4px;background:#0b0b0b}.history-video-empty{display:grid;place-items:center;color:#96928a;font-size:11px}.generation-history-item:hover,.generation-history-item.active{border-color:#f0eee8;background:#30302e}.generation-history-item.active{box-shadow:inset 0 0 0 1px #f0eee8}.history-card-meta{display:grid;gap:2px;min-width:0;padding:0 2px 2px}.history-card-meta b,.history-card-meta small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-card-meta b{font-size:10px}.history-card-meta small{color:#c4c1ba;font-size:10px}.history-dot{position:absolute;top:8px;right:8px;width:7px;height:7px;border:1px solid #111;border-radius:50%;background:#8b8983}.history-dot.completed{background:#7eae85}.history-dot.processing{background:#d6a854}.history-dot.failed,.history-dot.retryable{background:#d66b6b}@media(max-width:520px){.generation-history-grid{grid-template-columns:1fr}.frame-actions{gap:3px;padding:6px 8px}.frame-actions .el-button{font-size:11px}}
+.frame-actions{display:flex;flex:0 0 auto;align-items:center;justify-content:safe flex-end;gap:6px;min-width:0;padding:8px 12px;border-top:1px solid #45433f;background:#181818;color:#dedbd4;overflow-x:auto;scrollbar-width:thin}.frame-actions .el-button{flex:0 0 auto;margin:0!important}.generation-history{display:grid;gap:7px;margin-top:12px;padding-top:10px;border-top:1px solid #45433f}.generation-history-head{display:flex;align-items:baseline;justify-content:space-between}.generation-history-head b{font-size:12px}.generation-history-head small,.generation-history-empty{margin:0;color:#aaa69e;font-size:11px}.generation-history-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.generation-history-item{position:relative;display:grid;grid-template-rows:92px auto;gap:5px;min-width:0;padding:4px;border:1px solid #4b4944;border-radius:6px;background:#202020;color:#dedbd4;text-align:left;cursor:pointer;font:inherit;overflow:hidden}.generation-history-item video,.history-video-empty{display:block;width:100%;height:92px;object-fit:cover;border-radius:4px;background:#0b0b0b}.history-video-empty{display:grid;place-items:center;color:#96928a;font-size:11px}.generation-history-item:hover,.generation-history-item.active{border-color:#f0eee8;background:#30302e}.generation-history-item.active{box-shadow:inset 0 0 0 1px #f0eee8}.history-card-meta{display:grid;gap:2px;min-width:0;padding:0 2px 2px}.history-card-meta b,.history-card-meta small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-card-meta b{font-size:10px}.history-card-meta small{color:#c4c1ba;font-size:10px}.history-dot{position:absolute;top:8px;right:8px;width:7px;height:7px;border:1px solid #111;border-radius:50%;background:#8b8983}.history-dot.completed{background:#7eae85}.history-dot.processing{background:#d6a854}.history-dot.failed,.history-dot.retryable{background:#d66b6b}@media(max-width:520px){.generation-history-grid{grid-template-columns:1fr}.frame-actions{gap:3px;padding:6px 8px}.frame-actions .el-button{font-size:11px}}
 .asset-scope{width:92px;margin-right:4px}.material-card .asset-scope-label{position:absolute;left:3px;top:3px;padding:1px 3px;border-radius:3px;background:#111c;color:#dbe7f2;font-size:9px;font-style:normal;line-height:1.2}
 .material-card .insert-at-caret{position:absolute;right:5px;bottom:4px;z-index:2;border:1px solid color-mix(in srgb,var(--accent) 55%,var(--border-color));border-radius:999px;padding:2px 7px;background:color-mix(in srgb,var(--bg-elevated) 92%,transparent);color:var(--text-primary);font-size:10px;line-height:1.35;cursor:pointer;box-shadow:var(--shadow-sm)}
 .material-card .material-delete{position:absolute;right:5px;top:5px;z-index:3;display:grid;place-items:center;width:24px;height:24px;padding:0;border:1px solid rgba(255,255,255,.78);border-radius:50%;background:rgba(27,31,42,.9);color:#fff;font-size:17px;line-height:1;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.4)}
@@ -1731,7 +1702,6 @@ defineExpose({ refreshProjectShots })
   .project-storyboard-page .frame-actions .el-button{min-height:30px}
   .project-storyboard-page .time-ruler{height:40px}
   .project-storyboard-page .shot-tabs{height:34px}
-  .project-storyboard-page .shot-script{min-height:300px;padding:12px 16px 16px!important}
 }
 /* 分镜生成沿用 main 的紫色状态层级：可生成时给出明确的主操作，
    未满足素材条件时仍保留紫色轮廓，但不会伪装为可点击。 */

@@ -181,9 +181,6 @@ function positionPickerAndMention() {
   }
 }
 
-function referencesFromText(value) {
-  return [...new Set(findAssetMentions(value, props.assets).map((mention) => mention.alias))]
-}
 function assetMatchesAlias(asset, alias) {
   return assetAliasValues(asset).includes(alias)
 }

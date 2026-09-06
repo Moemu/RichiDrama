@@ -582,7 +582,6 @@ import { sceneAPI } from '@/api/scenes'
 import { propAPI } from '@/api/props'
 import { useGenerationTaskStore } from '@/stores/generationTaskStore'
 import { stylePromptMetadataForSave, backfillDramaStylePromptMetadataIfNeeded } from '@/constants/styleOptions'
-import { formatChinaDate } from '@/utils/time'
 
 const route = useRoute()
 const router = useRouter()
@@ -889,10 +888,6 @@ function assetImageUrl(item) {
   const lp = item.local_path && String(item.local_path).trim()
   if (lp) return '/static/' + lp.replace(/^\//, '')
   return item.image_url || ''
-}
-
-function formatDate(val) {
-  return formatChinaDate(val)
 }
 
 async function loadDrama() {

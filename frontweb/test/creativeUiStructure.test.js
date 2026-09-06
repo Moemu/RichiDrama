@@ -32,7 +32,7 @@ test('维护者工作流保留一键入口、缺图报价和分镜实时刷新',
     readSource('../src/composables/filmCreate/useProps.js'),
   ])
 
-  assert.match(film, /const showLegacyPipeline = ref\(true\)/)
+  assert.match(film, /v-if="workflowStage === 'script'" class="section card pipeline-section"/)
   assert.match(film, /const pipelinePanelExpanded = ref\(false\)/)
   assert.doesNotMatch(film, /v-model="resourceImageModel"/)
   assert.match(film, /批量上传至素材库/)
@@ -525,9 +525,7 @@ test('project storyboard generation settings include the video generation quote'
     readSource('../src/views/FilmCreate.vue'),
     readSource('../src/views/FreeCreate.vue'),
   ])
-  const legacySettingsTags = filmCreate.match(/<GenerationSettings\b[\s\S]*?\/>/g) || []
-  assert.equal(legacySettingsTags.length, 2)
-  for (const tag of legacySettingsTags) assert.match(tag, /include-generation-quote/)
+  assert.match(filmCreate, /<GenerationSettings :model-value="projectGenerationSettings"[^>]*include-generation-quote/)
   assert.match(filmCreate, /<FreeCreate[\s\S]*embedded/)
   assert.match(freeCreate, /<GenerationSettings[\s\S]*include-generation-quote[\s\S]*:has-video-input="quoteHasVideoInput"[\s\S]*:has-audio-input="quoteHasAudioInput"/)
   assert.match(freeCreate, /quoteHasVideoInput = computed\(\(\) => requestMaterialRouting\.value\.sent\.video > 0\)/)
@@ -739,7 +737,6 @@ test('主页使用本地完成视频组成可控轮播舞台', async () => {
 
   assert.match(source, /const heroVideos = computed/)
   assert.match(source, /const activeHeroVideo = computed/)
-  assert.match(source, /const nextHeroVideo = computed/)
   assert.match(source, /const heroVideoElements = new Map\(\)/)
   assert.match(source, /const incomingHeroVideoKey = ref\(''\)/)
   assert.match(source, /function revealHeroVideo\(video, element\)/)
@@ -822,7 +819,6 @@ test('成片操作栏不会覆盖视频，嵌入分镜保持三栏创作节奏',
   assert.match(free, /generation-error-copy/)
   assert.match(free, /video-stage\.has-video::before\{display:none!important\}/)
   assert.match(free, /generation-stage-status\.is-failed/)
-  assert.match(free, /shot-script\{min-height:300px/)
 })
 
 test('生产工作流保持稳定导航、比例预览和可展开的次要信息', async () => {

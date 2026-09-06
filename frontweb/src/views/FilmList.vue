@@ -75,7 +75,6 @@
           </aside>
         </section>
 
-
         <section v-if="!recordsOpen && heroMedia.length" class="media-showcase" aria-labelledby="media-showcase-title">
           <header class="section-heading"><div><h2 id="media-showcase-title">镜头素材</h2></div><button type="button" @click="$router.push('/media-library')">查看全部素材 →</button></header>
           <div class="media-filmstrip">
@@ -298,26 +297,7 @@
     </Teleport>
 
     <!-- 编辑项目：修改标题和故事 -->
-    <el-dialog
-      v-model="showEditDialog"
-      title="编辑项目"
-      width="480px"
-      :close-on-click-modal="false"
-      @closed="resetEditForm"
-    >
-      <el-form :model="editForm" label-width="80px" label-position="top">
-        <el-form-item label="标题" required>
-          <el-input v-model="editForm.title" maxlength="100" show-word-limit />
-        </el-form-item>
-        <el-form-item label="故事">
-          <el-input v-model="editForm.description" type="textarea" :rows="3" placeholder="输入故事梗概（选填）" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showEditDialog = false">取消</el-button>
-        <el-button type="primary" :loading="editSaving" :disabled="!editForm.title?.trim()" @click="submitEdit">保存</el-button>
-      </template>
-    </el-dialog>
+
   </div>
 </template>
 
@@ -325,7 +305,7 @@
 import { computed, ref, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit, Delete, Download, PictureFilled, QuestionFilled, FolderOpened, MagicStick } from '@element-plus/icons-vue'
+import { Delete, PictureFilled } from '@element-plus/icons-vue'
 import AppHeader from '@/components/ui/AppHeader.vue'
 import { useTheme } from '@/composables/useTheme'
 import { dramaAPI } from '@/api/drama'
@@ -498,7 +478,6 @@ const heroVideos = computed(() => {
   return heroMode.value === 'recent' ? (recentVideos.length ? recentVideos : defaults) : (defaults.length ? defaults : recentVideos)
 })
 const activeHeroVideo = computed(() => heroVideos.value[heroVideoIndex.value] || null)
-const nextHeroVideo = computed(() => heroVideos.value.length > 1 ? heroVideos.value[(heroVideoIndex.value + 1) % heroVideos.value.length] : null)
 function setHeroVideoElement(key, element) {
   if (element) heroVideoElements.set(key, element)
   else heroVideoElements.delete(key)
@@ -840,14 +819,9 @@ async function onDeletePropLibrary(item) {
 const showNewDialog = ref(false)
 const newForm = ref({ title: '', description: '', aspect_ratio: '16:9' })
 const newSaving = ref(false)
-const exportingId = ref(null)
 const isAdmin = JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').console_access === true
 const importing = ref(false)
 const importFileInput = ref(null)
-
-const showEditDialog = ref(false)
-const editForm = ref({ id: null, title: '', description: '' })
-const editSaving = ref(false)
 
 function loadList() {
   loading.value = true
@@ -899,31 +873,6 @@ async function submitNew() {
   }
 }
 
-function openEditDialog(d) {
-  editForm.value = { id: d.id, title: d.title || '', description: d.description || '' }
-  showEditDialog.value = true
-}
-
-function resetEditForm() {
-  editForm.value = { id: null, title: '', description: '' }
-}
-
-async function submitEdit() {
-  const title = editForm.value.title?.trim()
-  if (!title || editForm.value.id == null) return
-  editSaving.value = true
-  try {
-    await dramaAPI.update(editForm.value.id, { title, description: editForm.value.description?.trim() || undefined })
-    showEditDialog.value = false
-    ElMessage.success('已保存')
-    loadList()
-  } catch (e) {
-    ElMessage.error(e.message || '保存失败')
-  } finally {
-    editSaving.value = false
-  }
-}
-
 function openProject(id) {
   router.push('/drama/' + id)
 }
@@ -964,30 +913,6 @@ async function manageDeletedOmniProjects() {
     ElMessage.success(purge ? '项目编排已永久清理，成片与素材仍保留' : '全能项目已恢复')
     loadList()
   } catch (error) { if (error !== 'cancel') ElMessage.error(error.message || '操作失败') }
-}
-
-async function onExport(d) {
-  if (exportingId.value) return
-  exportingId.value = d.id
-  try {
-    const token = localStorage.getItem('lmd_auth_token')
-    const res = await fetch(`/api/v1/dramas/${d.id}/export`, { headers: { 'X-LMD-Session': token } })
-    if (!res.ok) throw new Error('导出失败')
-    const blob = await res.blob()
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `${d.title || 'drama'}.zip`
-    a.rel = 'noopener'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(a.href)
-    ElMessage.success('开始下载')
-  } catch (e) {
-    ElMessage.error(e.message || '导出失败')
-  } finally {
-    exportingId.value = null
-  }
 }
 
 function triggerImport() {

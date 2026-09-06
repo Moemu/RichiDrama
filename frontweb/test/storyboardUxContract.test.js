@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs'
 
 const freeCreate = readFileSync(new URL('../src/views/FreeCreate.vue', import.meta.url), 'utf8')
 const promptEditor = readFileSync(new URL('../src/components/OmniAssetPromptEditor.vue', import.meta.url), 'utf8')
-const universalEditor = readFileSync(new URL('../src/components/UniversalSegmentOmniAtEditor.vue', import.meta.url), 'utf8')
 const filmCreate = readFileSync(new URL('../src/views/FilmCreate.vue', import.meta.url), 'utf8')
 const adminConsole = readFileSync(new URL('../src/views/AdminConsole.vue', import.meta.url), 'utf8')
 const mediaLibrary = readFileSync(new URL('../src/views/MediaLibrary.vue', import.meta.url), 'utf8')
@@ -77,8 +76,6 @@ test('development mode can preview indeterminate provider progress without creat
 test('generation actions use a synchronous single-flight guard before requests', () => {
   assert.match(freeCreate, /if \(creating\.value \|\| hasActiveShotGeneration\.value\) return; creating\.value = true/)
   assert.match(freeCreate, /const hasActiveShotGeneration = computed/)
-  assert.match(filmCreate, /if \(isSbVideoGenerating\(sb\.id\)\) return\s+submittingSbVideoIds\.add\(sb\.id\)/)
-  assert.match(filmCreate, /if \(generatingSbImageIds\.has\(sb\.id\) \|\| genStore\.isRunning\(meta\)\) return/)
   assert.match(filmCreate, /if \(genStore\.isRunning\(meta\)\) return\s+genStore\.markRunning\(meta\)/)
 })
 
@@ -132,10 +129,6 @@ test('project storyboard history opens a complete detail page with the original 
   assert.match(historyDetail, /omniVideoAPI\.historyDetail\(route\.params\.id\)/)
   // 旧工作台的「复制当前分镜」按钮已随死模板删除；复制能力由 FreeCreate 镜头卡承载。
   assert.doesNotMatch(filmCreate, />复制当前分镜<\/el-button>/)
-  assert.match(filmCreate, /storyboardsAPI\.copy\(/)
-  assert.match(filmCreate, /生成结果和历史记录未复制/)
-  assert.match(filmCreate, /function getDisplayedSbVideoPrompt\(sb\)/)
-  assert.match(filmCreate, /getSbVideo\(sb\.id\)\?\.prompt \|\| sb\.video_prompt/)
 })
 
 test('storyboard media management keeps project scope and returns to its source page', () => {
@@ -208,11 +201,9 @@ test('project settings communicate first-shot master, inherited and override sta
 })
 
 test('asset mention menus are teleported translucent overlays with bounded internal scrolling', () => {
-  for (const source of [promptEditor, universalEditor]) {
-    assert.match(source, /teleport to="body"/i)
-    assert.match(source, /backdrop-filter:\s*blur/i)
-    assert.match(source, /260/)
-  }
+  assert.match(promptEditor, /teleport to="body"/i)
+  assert.match(promptEditor, /backdrop-filter:\s*blur/i)
+  assert.match(promptEditor, /260/)
   assert.match(promptEditor, /pickerMatches\.value\.slice\(0, 30\)/)
   assert.match(promptEditor, /pickerMatchCount > pickerAssets\.length/)
   assert.match(promptEditor, /loading="lazy" decoding="async"/)
@@ -233,7 +224,6 @@ test('asset drag shows an exact text-boundary caret and rejects whitespace-only 
   assert.match(pointerDrag, /setPointerCapture/)
   assert.match(promptEditor, /window\.addEventListener\(ASSET_POINTER_MOVE/)
   assert.match(promptEditor, /insertAsset\(detail\.asset, \{ offset: point\.offset \}\)/)
-  assert.match(filmCreate, /setTransparentDragPreview\(e\)/)
   assert.match(promptEditor, /caretRect = visualRectForCollapsedRange\(range\)/)
   assert.match(promptEditor, /function visualRectForCollapsedRange\(range\)/)
   assert.match(promptEditor, /function offsetForRange\(range\)/)
@@ -247,8 +237,6 @@ test('asset drag shows an exact text-boundary caret and rejects whitespace-only 
   assert.match(promptEditor, /rejected: true/)
   assert.match(promptEditor, /point && !point\.rejected/)
   assert.match(promptEditor, /source\[i\] === '\\n'/)
-  assert.match(universalEditor, /blankLineDropMeta/)
-  assert.match(universalEditor, /omni-drop-indicator/)
   assert.doesNotMatch(promptEditor, /class="mention-anchor"/)
   assert.doesNotMatch(promptEditor, /el-tag v-for="asset in referenced"/)
 })
