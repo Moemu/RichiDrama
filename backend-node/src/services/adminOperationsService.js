@@ -91,7 +91,7 @@ function stages(row) {
     { key: 'generation', status: row.status, provider_task_id: row.provider_task_id || row.task_id || null, started_at: row.created_at, updated_at: row.updated_at },
     { key: 'upscale', selected: !!row.upscale_status, status: row.upscale_status || 'not_selected', provider_task_id: row.upscale_provider_task_id || null, started_at: row.upscale_created_at || null, updated_at: row.upscale_updated_at || null },
     { key: 'interpolation', selected: !!row.interpolation_status, status: row.interpolation_status || 'not_selected', provider_task_id: row.interpolation_provider_task_id || null, started_at: row.interpolation_created_at || null, updated_at: row.interpolation_updated_at || null },
-    { key: 'archive', status: row.archive_status || 'local_ready', started_at: row.archive_created_at || null, updated_at: row.archive_updated_at || row.updated_at },
+    { key: 'archive', selected: !!(row.archive_record_status || row.archive_status), status: row.archive_record_status || row.archive_status || 'not_selected', started_at: row.archive_created_at || null, updated_at: row.archive_updated_at || null },
   ];
   return raw.map((stage) => {
     let { started_at: start, updated_at: end } = stage;
@@ -255,8 +255,23 @@ function overview(db, query = {}) {
   const failedSince = new Date(now.getTime() - settings.failed_window_hours * 60 * 60 * 1000).toISOString();
   const stale = db.prepare(`SELECT COUNT(*) count FROM video_generations
     WHERE deleted_at IS NULL AND status IN ('processing','persisting','upscale_pending','upscaling','interpolation_pending','interpolating') AND updated_at < ?`).get(staleBefore).count;
-  const failed = db.prepare(`SELECT model, COUNT(*) count FROM video_generations
-    WHERE deleted_at IS NULL AND status='failed' AND updated_at >= ? GROUP BY model HAVING COUNT(*) >= ? ORDER BY count DESC`).all(failedSince, settings.failed_count);
+  // Legacy projectless jobs have no sequence/shot link. Their retry fingerprint
+  // is owner + model + prompt, with a short window for prompts edited on retry.
+  const supersededFailure = `NOT EXISTS (
+    SELECT 1 FROM video_generations newer
+    LEFT JOIN omni_video_jobs newer_job ON newer_job.video_generation_id = newer.id
+    WHERE newer.deleted_at IS NULL AND newer.status = 'completed' AND newer.id > v.id
+      AND ((v.storyboard_id IS NOT NULL AND newer.storyboard_id = v.storyboard_id)
+        OR (failed_job.shot_id IS NOT NULL AND newer_job.sequence_id = failed_job.sequence_id AND newer_job.shot_id = failed_job.shot_id)
+        OR (v.storyboard_id IS NULL AND failed_job.shot_id IS NULL AND newer.storyboard_id IS NULL AND newer_job.shot_id IS NULL
+          AND newer.owner_user_id = v.owner_user_id AND COALESCE(newer.model, '') = COALESCE(v.model, '')
+          AND (COALESCE(newer.prompt, '') = COALESCE(v.prompt, '')
+            OR julianday(newer.created_at) <= julianday(v.created_at, '+30 minutes'))))
+  )`;
+  const failed = db.prepare(`SELECT v.model, COUNT(*) count FROM video_generations v
+    LEFT JOIN omni_video_jobs failed_job ON failed_job.video_generation_id = v.id
+    WHERE v.deleted_at IS NULL AND v.status='failed' AND v.updated_at >= ? AND ${supersededFailure}
+    GROUP BY v.model HAVING COUNT(*) >= ? ORDER BY count DESC`).all(failedSince, settings.failed_count);
   const archiveFailed = db.prepare("SELECT COUNT(*) count FROM media_archive_records WHERE archive_status='failed'").get().count;
   const stageSummary = {
     generation: db.prepare(`SELECT
@@ -289,7 +304,8 @@ function overview(db, query = {}) {
       ORDER BY v.updated_at ASC LIMIT 6`).all(staleBefore).map((row) => ({ ...row, kind: 'stalled', target: { tab: 'production', status: 'processing' } })),
     ...db.prepare(`SELECT v.id, v.status, v.updated_at, v.model, v.error_msg, d.title AS project_title
       FROM video_generations v LEFT JOIN dramas d ON d.id=v.drama_id
-      WHERE v.deleted_at IS NULL AND v.status IN ('failed','retryable','invalid')
+      LEFT JOIN omni_video_jobs failed_job ON failed_job.video_generation_id = v.id
+      WHERE v.deleted_at IS NULL AND v.status IN ('failed','retryable','invalid') AND ${supersededFailure}
       ORDER BY v.updated_at DESC LIMIT 6`).all().map((row) => ({ ...row, kind: 'failed', target: { tab: 'production', status: 'failed' } })),
   ].sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at))).slice(0, 8);
   return { generated_at:now.toISOString(), production, postprocess:{ upscale:postprocess, interpolation }, storage, billing:{...billing,...frozen,pending_reconciliations:reconciliation.count}, stage_summary:stageSummary, trend, alerts, action_queue:actionQueue, alert_settings:settings };

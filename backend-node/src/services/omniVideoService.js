@@ -190,7 +190,7 @@ function create(db, log, body, billingUser) {
   } else {
     const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, status, task_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`)
-      .run(Number(body.drama_id) || 0, body.storyboard_id ? Number(body.storyboard_id) : null, body.owner_user_id || payer.id, tenantId, authorization?.authorization_id || null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution,
+      .run(Number(body.drama_id) || null, body.storyboard_id ? Number(body.storyboard_id) : null, body.owner_user_id || payer.id, tenantId, authorization?.authorization_id || null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution,
         targetFps, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
         imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null,
         imageUrls.length ? JSON.stringify(imageUrls) : null, waitingForSd2 ? 'sd2_waiting' : 'processing', task.id, now, now);

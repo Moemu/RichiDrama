@@ -43,8 +43,14 @@ test('single-video route permits only the explicit projectless tool context', ()
 
     const normal = responseRecorder()
     routes.create({ auth: user, body: { prompt: 'test' } }, normal)
-    assert.equal(normal.statusCode, 400)
-    assert.match(normal.body.error.message, /计费归属项目/)
+    assert.equal(normal.statusCode, 201)
+    assert.equal(normal.body.data.drama_id, undefined)
+
+    const sequence = require('../src/services/omniSequenceService').ensureDefault(db, user.id)
+    const projectlessSequence = responseRecorder()
+    routes.create({ auth: user, body: { sequence_id: sequence.id, shot_id: sequence.shots[0].id, prompt: 'test' } }, projectlessSequence)
+    assert.equal(projectlessSequence.statusCode, 201)
+    assert.equal(db.prepare('SELECT drama_id FROM omni_video_sequences WHERE id=?').get(sequence.id).drama_id, null)
 
     const bound = responseRecorder()
     routes.create({ auth: user, body: { source_context: 'single_video_tool', storyboard_id: 9, prompt: 'test' } }, bound)

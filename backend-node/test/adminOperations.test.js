@@ -135,6 +135,34 @@ test('failed production detail returns the immutable prompt and material reprodu
   }
 });
 
+test('operations action queue excludes failed attempts replaced by a later successful retry', () => {
+  const dbPath = path.join(os.tmpdir(), `lmd-operations-retry-${Date.now()}.db`);
+  const db = getDb({ path: dbPath, type: 'sqlite' });
+  try {
+    runMigrationsAndEnsure(db);
+    const before = '2026-09-01T01:00:00.000Z';
+    const after = '2026-09-01T02:00:00.000Z';
+    db.prepare("INSERT INTO users (username,password_hash,role,is_active,created_at,updated_at) VALUES ('retry-owner','x','user',1,?,?)").run(before, before);
+    const ownerId = db.prepare("SELECT id FROM users WHERE username='retry-owner'").get().id;
+    const failedStoryboard = Number(db.prepare("INSERT INTO video_generations (owner_user_id,storyboard_id,model,status,error_msg,created_at,updated_at) VALUES (?,101,'seedance','failed','old failure',?,?)").run(ownerId, before, before).lastInsertRowid);
+    db.prepare("INSERT INTO video_generations (owner_user_id,storyboard_id,model,status,created_at,updated_at) VALUES (?,101,'seedance','completed',?,?)").run(ownerId, after, after);
+    const failedLegacy = Number(db.prepare("INSERT INTO video_generations (owner_user_id,model,prompt,status,error_msg,created_at,updated_at) VALUES (?,'seedance','legacy retry prompt','failed','old legacy failure',?,?)").run(ownerId, before, before).lastInsertRowid);
+    db.prepare("INSERT INTO video_generations (owner_user_id,model,prompt,status,created_at,updated_at) VALUES (?,'seedance','legacy retry prompt','completed',?,?)").run(ownerId, after, after);
+    const failedLegacyEdited = Number(db.prepare("INSERT INTO video_generations (owner_user_id,model,prompt,status,error_msg,created_at,updated_at) VALUES (?,'seedance-pro','draft before retry','failed','old edited failure','2026-09-01T03:00:00.000Z','2026-09-01T03:00:00.000Z')").run(ownerId).lastInsertRowid);
+    db.prepare("INSERT INTO video_generations (owner_user_id,model,prompt,status,created_at,updated_at) VALUES (?,'seedance-pro','edited retry prompt','completed','2026-09-01T03:12:00.000Z','2026-09-01T03:12:00.000Z')").run(ownerId);
+    const unrelatedFailure = Number(db.prepare("INSERT INTO video_generations (owner_user_id,storyboard_id,model,status,error_msg,created_at,updated_at) VALUES (?,202,'seedance','failed','still failed',?,?)").run(ownerId, after, after).lastInsertRowid);
+
+    const actionIds = operations.overview(db, {}).action_queue.map((item) => item.id);
+    assert.equal(actionIds.includes(failedStoryboard), false);
+    assert.equal(actionIds.includes(failedLegacy), false);
+    assert.equal(actionIds.includes(failedLegacyEdited), false);
+    assert.equal(actionIds.includes(unrelatedFailure), true);
+  } finally {
+    closeDb();
+    for (const suffix of ['', '-wal', '-shm']) try { fs.unlinkSync(dbPath + suffix); } catch (_) {}
+  }
+});
+
 test('billing ledgers filter by Shanghai calendar day and user role without changing user scope', () => {
   const dbPath = path.join(os.tmpdir(), `lmd-billing-ledger-filters-${Date.now()}.db`);
   const db = getDb({ path: dbPath, type: 'sqlite' });

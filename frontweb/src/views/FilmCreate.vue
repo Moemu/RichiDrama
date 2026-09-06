@@ -12,6 +12,22 @@
         </h1>
         <span class="breadcrumb-sep">›</span>
         <span class="page-title">{{ dramaId ? (store.drama?.title || '项目') : '新建故事' }}</span>
+        <el-select
+          v-if="dramaId && (store.drama?.episodes || []).length"
+          v-model="selectedEpisodeId"
+          class="header-episode-select"
+          size="small"
+          aria-label="切换当前剧集"
+          placeholder="选择剧集"
+          @change="onEpisodeSelect"
+        >
+          <el-option
+            v-for="ep in (store.drama?.episodes || [])"
+            :key="ep.id"
+            :label="ep.title || '第' + (ep.episode_number || 0) + '集'"
+            :value="ep.id"
+          />
+        </el-select>
         <el-button v-if="dramaId" class="btn-back-drama" @click="router.push('/drama/' + dramaId)">
           <el-icon><ArrowLeft /></el-icon>
           返回剧集
@@ -8761,6 +8777,7 @@ html.light .page-title {
 }
 .header-episode-select {
   flex-shrink: 0;
+  width: 168px;
 }
 .btn-back-drama {
   flex-shrink: 0;
@@ -11289,6 +11306,15 @@ html.light .frame-layout-anchor {
   .merge-stage-active .main>:is(.merge-settings,.merge-output){overflow-y:auto;overscroll-behavior-y:contain;scrollbar-width:thin}
 }
 @media(min-width:961px) and (max-width:1500px){.merge-stage-active .config-grid{grid-template-columns:minmax(0,1fr)}}
+@media(min-width:961px) and (max-height:1100px){
+  .script-stage-active>.main{display:block;overflow-y:auto}
+  .script-stage-active .workflow-shell,.script-stage-active .script-workbench-unified,.script-stage-active .workflow-next-action{margin-bottom:14px}
+  .script-stage-active .script-workbench-unified{min-height:30rem;overflow:visible}
+  .script-stage-active .script-workbench-tabs{height:auto;min-height:26rem}
+  .script-stage-active .script-workbench-tabs:deep(.el-tabs__content),.script-stage-active .script-workbench-tabs:deep(.el-tab-pane){height:auto;min-height:23rem}
+  .script-stage-active .script-pane-inner{height:auto;min-height:20rem;overflow:visible}
+  .script-stage-active .script-sub-block{min-height:20rem;overflow:visible}
+}
 .storyboard-stage-active .main{padding-top:8px;padding-bottom:2px}
 .storyboard-stage-active .workflow-shell{margin-bottom:6px}
 .storyboard-stage-active .workflow-next-action{margin-top:6px;margin-bottom:0;padding-block:7px}

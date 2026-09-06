@@ -445,7 +445,7 @@ test('单视频工具直达生成并引用账号全部素材', async () => {
   assert.match((await readSource('../src/views/ToolWorkbench.vue')), /row-gap:1rem;[\s\S]*height:100%;[\s\S]*overflow:hidden/)
 })
 
-test('剧本工具与自由全能生成仍要求并传递唯一的计费归属项目', async () => {
+test('剧本工具仍要求项目，自由全能生成允许可选的计费归属项目', async () => {
   const [workbench, media, freeCreate] = await Promise.all([
     readSource('../src/views/ToolWorkbench.vue'),
     readSource('../src/views/ToolMediaGeneration.vue'),
@@ -456,13 +456,38 @@ test('剧本工具与自由全能生成仍要求并传递唯一的计费归属�
   assert.match(workbench, /dramaAPI\.list\(\{\s*page_size:\s*100\s*\}\)/)
   assert.match(workbench, /drama_id:\s*Number\(dramaId\.value\)/)
   assert.doesNotMatch(media, /source_context: 'single_video_tool',[^}]*drama_id:/)
-  assert.match(freeCreate, /placeholder="选择计费项目" aria-label="选择计费归属项目"/)
+  assert.match(freeCreate, /计费归属项目（可选）/)
+  assert.match(freeCreate, /placeholder="不关联项目" aria-label="选择计费归属项目"/)
   assert.match(freeCreate, /class="billing-project-field" aria-labelledby="billing-project-title"/)
-  assert.match(freeCreate, /请选择计费项目，首次生成后将锁定。/)
-  assert.match(freeCreate, /drama_id:\s*Number\(freeProjectId\.value\)/)
+  assert.match(freeCreate, /仅用于账单归类；不选择也可生成。/)
+  assert.match(freeCreate, /\.\.\.\(optionalDramaId \? \{ drama_id: optionalDramaId \} : \{\}\)/)
   assert.match(freeCreate, /:disabled="!!sequence\?\.drama_id"/)
   assert.match(freeCreate, /if \(Number\(seq\?\.drama_id\)\) freeProjectId\.value = Number\(seq\.drama_id\)/)
-  assert.match(freeCreate, /请选择计费归属项目并补齐生成参数/)
+  assert.doesNotMatch(freeCreate, /请选择计费归属项目并补齐生成参数/)
+})
+
+test('film creation keeps an episode switcher in the global header', async () => {
+  const source = await readSource('../src/views/FilmCreate.vue')
+  assert.match(source, /class="header-episode-select"/)
+  assert.match(source, /aria-label="切换当前剧集"/)
+  assert.match(source, /@change="onEpisodeSelect"/)
+})
+
+test('brand marks and production summaries use the current product language', async () => {
+  const [freeCreate, filmList, admin, account] = await Promise.all([
+    readSource('../src/views/FreeCreate.vue'),
+    readSource('../src/views/FilmList.vue'),
+    readSource('../src/views/AdminConsole.vue'),
+    readSource('../src/views/AccountCenter.vue'),
+  ])
+  assert.match(freeCreate, /src="\/brand\/richi-logo-color\.png"/)
+  assert.doesNotMatch(freeCreate, /content:'◢'/)
+  assert.doesNotMatch(filmList, /content:'◢'/)
+  assert.match(admin, /latestExecutedStage\(row\)/)
+  assert.match(admin, /materialUsageLabel\(material\.usage\)/)
+  assert.doesNotMatch(admin, /素材可用于本地复现|打开制作台复现不会调用模型或产生计费/)
+  assert.match(account, /class="model-list" role="list"/)
+  assert.match(account, /max-width:none/)
 })
 
 test('generation settings keep configured model identifiers unchanged', async () => {
