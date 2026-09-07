@@ -1030,8 +1030,10 @@ async function processVideoGeneration(db, log, videoGenId) {
     let referenceVideoUrls = [];
     // 全能工作台的音频引用与图片一样从任务快照恢复，避免依赖角色专用音色字段。
     let voiceReferenceUrl = null;
+    let referenceAudioUrls;
+    let inputValidationVersion;
     try {
-      const omni = db.prepare('SELECT id FROM omni_video_jobs WHERE video_generation_id = ?').get(Number(videoGenId));
+      const omni = db.prepare('SELECT id, request_snapshot_json FROM omni_video_jobs WHERE video_generation_id = ?').get(Number(videoGenId));
       if (omni) {
         referenceImageInputs = loadOmniReferenceImageInputs(db, videoGenId, reference_urls || []);
         referenceVideoUrls = await loadOmniReferenceVideoUrls(db, cfg, storageLocalPath, videoGenId, log);
@@ -1040,6 +1042,18 @@ async function processVideoGeneration(db, log, videoGenId) {
         if (audio?.snapshot_json) {
           const snapshot = JSON.parse(audio.snapshot_json);
           voiceReferenceUrl = snapshot.local_path || snapshot.url || null;
+        }
+        const requestSnapshot = JSON.parse(omni.request_snapshot_json || '{}');
+        if (requestSnapshot.input_validation?.version) {
+          inputValidationVersion = requestSnapshot.input_validation.version;
+          referenceAudioUrls = db.prepare(`SELECT snapshot_json FROM omni_video_job_assets
+            WHERE omni_job_id = ? AND media_type = 'audio' AND send_to_model = 1 ORDER BY ordinal`).all(omni.id)
+            .map((item) => JSON.parse(item.snapshot_json))
+            .map((asset) => asset.model_url || asset.local_path || asset.url).filter(Boolean);
+          if (!referenceAudioUrls.length && requestSnapshot.input_validation.automatic_voice_url) {
+            referenceAudioUrls.push(requestSnapshot.input_validation.automatic_voice_url);
+          }
+          voiceReferenceUrl = referenceAudioUrls[0] || null;
         }
       }
     } catch (error) {
@@ -1075,7 +1089,7 @@ async function processVideoGeneration(db, log, videoGenId) {
       } catch (_) {}
     }
     const rowForAspect = { ...row, aspect_ratio: aspectForVideo || row.aspect_ratio };
-    const omniReferenceCount = Number(reference_urls?.length || 0) + referenceVideoUrls.length + (voiceReferenceUrl ? 1 : 0);
+    const omniReferenceCount = Number(reference_urls?.length || 0) + referenceVideoUrls.length + (referenceAudioUrls ? referenceAudioUrls.length : voiceReferenceUrl ? 1 : 0);
     const hasOmniRefs = omniReferenceCount > 0;
     if (row.task_id) {
       taskService.updateTaskStatus(
@@ -1105,6 +1119,8 @@ async function processVideoGeneration(db, log, videoGenId) {
       reference_video_urls: referenceVideoUrls,
       reference_image_inputs: referenceImageInputs,
       voice_reference_url: voiceReferenceUrl,
+      reference_audio_urls: referenceAudioUrls,
+      input_validation_version: inputValidationVersion,
       files_base_url: filesBaseUrl,
       storage_local_path: storageLocalPath,
       video_gen_id: videoGenId,

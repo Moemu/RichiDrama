@@ -753,19 +753,13 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
     });
   }
 
-  // Seedance 2.0 音色参考：本路径仅 volcengine_omni 调用；有 URL 即注入（网关别名如 mingiz-sd2 也要生效）
-  if (opts.voice_reference_url) {
-    let voiceUrl = String(opts.voice_reference_url).trim();
-    if (voiceUrl) {
-      voiceUrl = resolveLocalAudioToBase64(voiceUrl, files_base_url, storage_local_path, log, video_gen_id);
-      body.content.push({
-        type: 'audio_url',
-        audio_url: { url: voiceUrl },
-        role: 'reference_audio',
-      });
-      log.info('[VolcOmni] 已注入 Seedance 2.0 音色参考音频', { video_gen_id, voice_ref: String(opts.voice_reference_url).slice(0, 80) });
-    }
+  const audioUrls = Array.isArray(opts.reference_audio_urls)
+    ? opts.reference_audio_urls : opts.voice_reference_url ? [opts.voice_reference_url] : [];
+  for (const value of audioUrls) {
+    const voiceUrl = resolveLocalAudioToBase64(String(value).trim(), files_base_url, storage_local_path, log, video_gen_id);
+    if (voiceUrl) body.content.push({ type: 'audio_url', audio_url: { url: voiceUrl }, role: 'reference_audio' });
   }
+  if (opts.input_validation_version) require('./seedanceInputValidation').assertRequestSize(body);
 
   // ===== 全能模式（Seedance 2.0 / Omni）最终请求结构体日志 =====
   // 方便调试确认：图片参考 + 音色参考是否真正被加入 content 数组
@@ -3572,6 +3566,27 @@ function collectActiveCharacterVoiceRefs(db, dramaId) {
   return map;
 }
 
+function selectCharacterVoiceReference(db, dramaId, storyboardId) {
+  const voices = collectActiveCharacterVoiceRefs(db, dramaId);
+  if (!voices.size) return null;
+  let characters = [];
+  if (storyboardId) {
+    try {
+      const value = db.prepare('SELECT characters FROM storyboards WHERE id = ?').get(storyboardId)?.characters;
+      const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+      if (Array.isArray(parsed)) characters = parsed;
+    } catch (_) {}
+  }
+  if (characters.length) {
+    for (const character of characters) {
+      const voice = voices.get(Number(character?.id || character));
+      if (voice) return voice;
+    }
+    return null;
+  }
+  return voices.values().next().value || null;
+}
+
 function applySeedance2CertifiedAssetUrlsToVideoOpts(db, log, opts) {
   const out = { ...opts };
   const lookup = buildSd2ActiveAssetUrlLookup(db, opts.drama_id);
@@ -3735,57 +3750,9 @@ async function callVideoApi(db, log, opts) {
     opts = applySeedance2CertifiedAssetUrlsToVideoOpts(db, log, opts);
   }
 
-  // Seedance 2.0 自动注入角色音色参考（模型为 SD2 家族，或协议为 volcengine_omni；未显式指定 voice_reference_url 时）
-  const isSeedance2 =
-    isSeedance2FamilyModel(model) || protocol === 'volcengine_omni';
-  if (isSeedance2 && db && opts.drama_id && !opts.voice_reference_url) {
-    const voiceMap = collectActiveCharacterVoiceRefs(db, opts.drama_id);
-    if (voiceMap.size > 0) {
-      // 优先使用分镜显式指定的角色（如果有），否则取第一个
-      let chosen = null;
-      if (opts.storyboard_id) {
-        try {
-          const sbRow = db.prepare('SELECT characters FROM storyboards WHERE id = ?').get(opts.storyboard_id);
-          if (sbRow && sbRow.characters) {
-            const charList = typeof sbRow.characters === 'string' ? JSON.parse(sbRow.characters) : sbRow.characters;
-            const ids = Array.isArray(charList) ? charList.map(c => Number(c?.id || c)).filter(Boolean) : [];
-            for (const cid of ids) {
-              if (voiceMap.has(cid)) { chosen = voiceMap.get(cid); break; }
-            }
-          }
-        } catch (_) {}
-      }
-      let hasStoryboardCharacters = false;
-      if (opts.storyboard_id) {
-        try {
-          const value = db.prepare('SELECT characters FROM storyboards WHERE id = ?').get(opts.storyboard_id)?.characters;
-          const list = typeof value === 'string' ? JSON.parse(value) : value;
-          hasStoryboardCharacters = Array.isArray(list) && list.length > 0;
-        } catch (_) {}
-      }
-      // Never substitute another person's voice for an explicitly bound
-      // character; a project default is only valid for a characterless shot.
-      if (!chosen && !hasStoryboardCharacters) {
-        // 取 Map 中的第一个
-        chosen = voiceMap.values().next().value;
-      }
-      if (chosen) {
-        opts.voice_reference_url = chosen;
-        log.info('[视频][SD2][全能] 自动为 Seedance 2.0 注入角色音色参考（来自角色 seedance2_voice_asset）', {
-          video_gen_id,
-          storyboard_id: opts.storyboard_id,
-          voice_ref_url: String(chosen).slice(0, 100)
-        });
-      } else {
-        log.info('[视频][SD2][全能] 检测到活跃音色参考但未匹配到当前分镜角色', {
-          video_gen_id,
-          storyboard_id: opts.storyboard_id,
-          available_voice_char_ids: Array.from(voiceMap.keys())
-        });
-      }
-    } else {
-      log.info('[视频][SD2][全能] Seedance 2.0 模型但本剧暂无 active 音色参考', { video_gen_id, drama_id: opts.drama_id });
-    }
+  const isSeedance2 = isSeedance2FamilyModel(model) || protocol === 'volcengine_omni';
+  if (isSeedance2 && !opts.voice_reference_url && !Array.isArray(opts.reference_audio_urls)) {
+    opts.voice_reference_url = selectCharacterVoiceReference(db, opts.drama_id, opts.storyboard_id);
   }
   log.info('[视频] 路由协议', {
     video_gen_id,
@@ -3915,6 +3882,8 @@ async function callVideoApi(db, log, opts) {
       video_gen_id: opts.video_gen_id,
       // 关键：把 callVideoApi 里自动注入的 Seedance 2.0 音色参考音频透传下去
       voice_reference_url: opts.voice_reference_url,
+      reference_audio_urls: opts.reference_audio_urls,
+      input_validation_version: opts.input_validation_version,
     });
   }
 
@@ -4505,6 +4474,7 @@ async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 
 
 module.exports = {
   getDefaultVideoConfig,
+  selectCharacterVoiceReference,
   callVideoApi,
   pollVideoTask,
   cancelVideoTask,

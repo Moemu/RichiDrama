@@ -85,7 +85,7 @@ test('SD2 waiting generation resumes after restart when an old snapshot has no i
     const pendingCertification = JSON.stringify({ status: 'processing', stage: 'processing', hub_asset_id: 'asset-pending', asset_url: 'asset://asset-pending' });
     const asset = db.prepare(`INSERT INTO assets
       (owner_user_id, name, type, url, local_path, width, height, file_size, processing_status, requires_sd2_identity, seedance2_asset, created_at, updated_at)
-      VALUES (?, '真人参考图.png', 'image', '/static/library/identity.png', 'library/identity.png', 12699, 7559, 30023620, 'ready', 1, ?, ?, ?)`)
+      VALUES (?, '真人参考图.png', 'image', '/static/library/identity.png', 'library/identity.png', 1280, 720, 1000, 'ready', 1, ?, ?, ?)`)
       .run(admin.id, pendingCertification, now, now);
 
     const waiting = omni.create(db, log, {
@@ -96,7 +96,7 @@ test('SD2 waiting generation resumes after restart when an old snapshot has no i
     assert.equal(waiting.status, 'sd2_waiting');
     const storedJob = db.prepare('SELECT id, request_snapshot_json FROM omni_video_jobs WHERE video_generation_id=?').get(waiting.video_generation_id);
     assert.deepEqual(videoService.loadOmniReferenceImageInputs(db, waiting.video_generation_id, ['https://cdn.example/identity.png']), [{
-      url: 'https://cdn.example/identity.png', local_path: 'library/identity.png', width: 12699, height: 7559, file_size: 30023620,
+      url: 'https://cdn.example/identity.png', local_path: 'library/identity.png', width: 1280, height: 720, file_size: 1000,
     }]);
     const storedSnapshot = JSON.parse(storedJob.request_snapshot_json);
     assert.equal(storedSnapshot.idempotency_key, 'client-sd2-waiting-1');
@@ -111,6 +111,8 @@ test('SD2 waiting generation resumes after restart when an old snapshot has no i
     // Emulate a record created by the older release, then make the remote
     // certification active before restarting the backend.
     delete storedSnapshot.idempotency_key;
+    delete storedSnapshot.input_validation;
+    db.prepare('UPDATE assets SET width=12699,height=7559,file_size=30023620 WHERE id=?').run(Number(asset.lastInsertRowid));
     db.prepare('UPDATE omni_video_jobs SET request_snapshot_json=? WHERE id=?').run(JSON.stringify(storedSnapshot), storedJob.id);
     db.prepare('UPDATE assets SET seedance2_asset=?, updated_at=? WHERE id=?').run(
       JSON.stringify({ status: 'active', stage: 'active', hub_asset_id: 'asset-active', asset_url: 'asset://asset-active' }),
@@ -141,6 +143,8 @@ test('SD2 waiting generation resumes after restart when an old snapshot has no i
     db.prepare('UPDATE omni_video_jobs SET request_snapshot_json=? WHERE id=?').run(JSON.stringify(retrySnapshot), storedJob.id);
     assert.equal(omni.get(db, storedJob.id).can_retry_generation, true);
     assert.equal(omni.list(db, { owner_user_id: admin.id }).find((item) => item.id === storedJob.id)?.can_retry_generation, true);
+    assert.throws(() => omni.retry(db, log, storedJob.id, admin), /300–6000/);
+    db.prepare('UPDATE assets SET width=1280,height=720,file_size=1000 WHERE id=?').run(Number(asset.lastInsertRowid));
     const retried = omni.retry(db, log, storedJob.id, admin);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(retried.status, 'processing');
