@@ -1,5 +1,5 @@
 <template>
-  <div class="drama-detail">
+  <div class="drama-detail" :class="{ 'resources-workspace': workspaceTab === 'resources' }">
     <header class="header">
       <div class="header-inner">
         <h1 class="logo" @click="router.push('/')">
@@ -159,111 +159,22 @@
 
       <!-- 本剧资源库（Tab 切换） -->
       <section v-show="workspaceTab === 'resources'" class="section card res-section">
-        <nav class="res-tabbar">
-          <span class="res-tab-group-label">资源库</span>
+        <nav class="res-tabbar" aria-label="资源分类">
           <button
-            v-for="t in [{v:'lib-char',label:'角色'},{v:'lib-scene',label:'场景'},{v:'lib-prop',label:'道具'}]"
+            v-for="t in [{v:'char',label:'角色'},{v:'scene',label:'场景'},{v:'prop',label:'道具'},{v:'media',label:'项目素材'}]"
             :key="t.v"
+            type="button"
             class="res-tab res-tab--lib"
             :class="{ active: activeResTab === t.v }"
-            @click="activeResTab = t.v"
-          >{{ t.label }}</button>
-          <span class="res-tab-spacer"></span>
-          <span class="res-tab-group-label res-tab-group-label--prod">制作资源</span>
-          <button
-            v-for="t in [{v:'drama-char',label:'角色'},{v:'drama-scene',label:'场景'},{v:'drama-prop',label:'道具'}]"
-            :key="t.v"
-            class="res-tab res-tab--drama"
-            :class="{ active: activeResTab === t.v }"
-            @click="activeResTab = t.v"
+            :aria-pressed="activeResTab === t.v"
+            @click="selectResourceTab(t.v)"
           >{{ t.label }}</button>
         </nav>
 
-        <!-- 角色库 -->
-        <template v-if="activeResTab === 'lib-char'">
-          <div class="library-toolbar">
-            <el-input v-model="charKw" placeholder="搜索角色" clearable style="width: 200px" @input="onCharKwInput" />
-            <el-button size="small" @click="openImport('char')">从素材库导入</el-button>
-          </div>
-          <div v-loading="charLoading" class="library-list">
-            <div v-for="item in charList" :key="item.id" class="library-item">
-              <div class="library-item-cover" @click="openPreview(assetImageUrl(item))">
-                <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
-                <span v-else class="library-placeholder">暂无图</span>
-              </div>
-              <div class="library-item-info">
-                <div class="library-item-name">{{ item.name || '未命名' }}</div>
-                <div class="library-item-desc">{{ (item.description || '').slice(0, 60) }}</div>
-                <div class="library-item-actions">
-                  <el-button size="small" @click="openEditChar(item)">编辑</el-button>
-                  <el-button size="small" type="danger" plain @click="deleteChar(item)">删除</el-button>
-                </div>
-              </div>
-            </div>
-            <div v-if="!charLoading && charList.length === 0" class="library-empty">暂无本剧角色，可在制作页将角色「加入本剧库」</div>
-          </div>
-          <div class="library-pagination">
-            <el-pagination v-model:current-page="charPage" v-model:page-size="charPageSize" :total="charTotal" :page-sizes="[10,20,50]" layout="total, sizes, prev, pager, next" @current-change="loadCharList" @size-change="loadCharList" />
-          </div>
-        </template>
+        <ProjectMediaResources v-if="activeResTab === 'media'" :drama-id="dramaId" />
 
-        <!-- 场景库 -->
-        <template v-if="activeResTab === 'lib-scene'">
-          <div class="library-toolbar">
-            <el-input v-model="sceneKw" placeholder="搜索场景" clearable style="width: 200px" @input="onSceneKwInput" />
-            <el-button size="small" @click="openImport('scene')">从素材库导入</el-button>
-          </div>
-          <div v-loading="sceneLoading" class="library-list">
-            <div v-for="item in sceneList" :key="item.id" class="library-item">
-              <div class="library-item-cover" @click="openPreview(assetImageUrl(item))">
-                <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
-                <span v-else class="library-placeholder">暂无图</span>
-              </div>
-              <div class="library-item-info">
-                <div class="library-item-name">{{ item.location || item.time || '未命名' }}</div>
-                <div class="library-item-desc">{{ (item.description || item.prompt || '').slice(0, 60) }}</div>
-                <div class="library-item-actions">
-                  <el-button size="small" @click="openEditScene(item)">编辑</el-button>
-                  <el-button size="small" type="danger" plain @click="deleteScene(item)">删除</el-button>
-                </div>
-              </div>
-            </div>
-            <div v-if="!sceneLoading && sceneList.length === 0" class="library-empty">暂无本剧场景，可在制作页将场景「加入本剧库」</div>
-          </div>
-          <div class="library-pagination">
-            <el-pagination v-model:current-page="scenePage" v-model:page-size="scenePageSize" :total="sceneTotal" :page-sizes="[10,20,50]" layout="total, sizes, prev, pager, next" @current-change="loadSceneList" @size-change="loadSceneList" />
-          </div>
-        </template>
-
-        <!-- 道具库 -->
-        <template v-if="activeResTab === 'lib-prop'">
-          <div class="library-toolbar">
-            <el-input v-model="propKw" placeholder="搜索道具" clearable style="width: 200px" @input="onPropKwInput" />
-            <el-button size="small" @click="openImport('prop')">从素材库导入</el-button>
-          </div>
-          <div v-loading="propLoading" class="library-list">
-            <div v-for="item in propList" :key="item.id" class="library-item">
-              <div class="library-item-cover" @click="openPreview(assetImageUrl(item))">
-                <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
-                <span v-else class="library-placeholder">暂无图</span>
-              </div>
-              <div class="library-item-info">
-                <div class="library-item-name">{{ item.name || '未命名' }}</div>
-                <div class="library-item-desc">{{ (item.description || item.prompt || '').slice(0, 60) }}</div>
-                <div class="library-item-actions">
-                  <el-button size="small" @click="openEditProp(item)">编辑</el-button>
-                  <el-button size="small" type="danger" plain @click="deleteProp(item)">删除</el-button>
-                </div>
-              </div>
-            </div>
-            <div v-if="!propLoading && propList.length === 0" class="library-empty">暂无本剧道具，可在制作页将道具「加入本剧库」</div>
-          </div>
-          <div class="library-pagination">
-            <el-pagination v-model:current-page="propPage" v-model:page-size="propPageSize" :total="propTotal" :page-sizes="[10,20,50]" layout="total, sizes, prev, pager, next" @current-change="loadPropList" @size-change="loadPropList" />
-          </div>
-        </template>
         <!-- 本剧制作角色 -->
-        <template v-if="activeResTab === 'drama-char'">
+        <template v-if="activeResTab === 'char'">
           <div class="drama-res-list">
             <template v-if="drama?.characters?.length">
               <div v-for="item in drama.characters" :key="item.id" class="drama-res-item">
@@ -271,7 +182,7 @@
                   <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
                   <span v-else class="library-placeholder">暂无图</span>
                 </div>
-                <div class="drama-res-info">
+                <div class="drama-res-info"><span class="resource-source">制作条目</span>
                   <div class="drama-res-name">{{ item.name || '未命名' }}</div>
                   <div class="drama-res-meta" v-if="item.role">
                     <el-tag size="small" type="info">{{ item.role === 'main' ? '主角' : item.role === 'supporting' ? '配角' : item.role }}</el-tag>
@@ -288,7 +199,7 @@
         </template>
 
         <!-- 本剧制作场景 -->
-        <template v-if="activeResTab === 'drama-scene'">
+        <template v-if="activeResTab === 'scene'">
           <div class="drama-res-list">
             <template v-if="drama?.scenes?.length">
               <div v-for="item in drama.scenes" :key="item.id" class="drama-res-item">
@@ -296,7 +207,7 @@
                   <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
                   <span v-else class="library-placeholder">暂无图</span>
                 </div>
-                <div class="drama-res-info">
+                <div class="drama-res-info"><span class="resource-source">制作条目</span>
                   <div class="drama-res-name">{{ item.location || '未命名' }}</div>
                   <div class="drama-res-meta" v-if="item.time">
                     <el-tag size="small" type="info">{{ item.time }}</el-tag>
@@ -313,7 +224,7 @@
         </template>
 
         <!-- 本剧制作道具 -->
-        <template v-if="activeResTab === 'drama-prop'">
+        <template v-if="activeResTab === 'prop'">
           <div class="drama-res-list">
             <template v-if="drama?.props?.length">
               <div v-for="item in drama.props" :key="item.id" class="drama-res-item">
@@ -321,7 +232,7 @@
                   <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
                   <span v-else class="library-placeholder">暂无图</span>
                 </div>
-                <div class="drama-res-info">
+                <div class="drama-res-info"><span class="resource-source">制作条目</span>
                   <div class="drama-res-name">{{ item.name || '未命名' }}</div>
                   <div class="drama-res-meta" v-if="item.type">
                     <el-tag size="small" type="info">{{ item.type }}</el-tag>
@@ -336,11 +247,97 @@
             <div v-else class="library-empty">本剧暂无制作道具，在制作页创建后可在此管理</div>
           </div>
         </template>
+        <!-- 角色库 -->
+        <template v-if="activeResTab === 'char'">
+          <div class="library-toolbar">
+            <el-input v-model="charKw" placeholder="搜索项目库角色" clearable style="width: 200px" @input="onCharKwInput" />
+            <el-button size="small" @click="openImport('char')">从素材库导入</el-button>
+          </div>
+          <div v-if="charError" class="resource-error" role="alert">{{ charError }}<el-button size="small" @click="loadCharList">重试</el-button></div>
+          <div v-loading="charLoading" class="library-list">
+            <div v-for="item in charList" :key="item.id" class="library-item">
+              <div class="library-item-cover" @click="openPreview(assetImageUrl(item))">
+                <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
+                <span v-else class="library-placeholder">暂无图</span>
+              </div>
+              <div class="library-item-info">
+                <span class="resource-source">项目库</span><div class="library-item-name">{{ item.name || '未命名' }}</div>
+                <div class="library-item-desc">{{ (item.description || '').slice(0, 60) }}</div>
+                <div class="library-item-actions">
+                  <el-button size="small" @click="openEditChar(item)">编辑</el-button>
+                  <el-button size="small" type="danger" plain @click="deleteChar(item)">删除</el-button>
+                </div>
+              </div>
+            </div>
+            <div v-if="!charLoading && !charError && charList.length === 0" class="library-empty">项目库暂无角色，可从素材库导入</div>
+          </div>
+          <div class="library-pagination">
+            <el-pagination v-model:current-page="charPage" v-model:page-size="charPageSize" :total="charTotal" :page-sizes="[10,20,50]" layout="total, sizes, prev, pager, next" @current-change="loadCharList" @size-change="loadCharList" />
+          </div>
+        </template>
+
+        <!-- 场景库 -->
+        <template v-if="activeResTab === 'scene'">
+          <div class="library-toolbar">
+            <el-input v-model="sceneKw" placeholder="搜索项目库场景" clearable style="width: 200px" @input="onSceneKwInput" />
+            <el-button size="small" @click="openImport('scene')">从素材库导入</el-button>
+          </div>
+          <div v-if="sceneError" class="resource-error" role="alert">{{ sceneError }}<el-button size="small" @click="loadSceneList">重试</el-button></div>
+          <div v-loading="sceneLoading" class="library-list">
+            <div v-for="item in sceneList" :key="item.id" class="library-item">
+              <div class="library-item-cover" @click="openPreview(assetImageUrl(item))">
+                <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
+                <span v-else class="library-placeholder">暂无图</span>
+              </div>
+              <div class="library-item-info">
+                <span class="resource-source">项目库</span><div class="library-item-name">{{ item.location || item.time || '未命名' }}</div>
+                <div class="library-item-desc">{{ (item.description || item.prompt || '').slice(0, 60) }}</div>
+                <div class="library-item-actions">
+                  <el-button size="small" @click="openEditScene(item)">编辑</el-button>
+                  <el-button size="small" type="danger" plain @click="deleteScene(item)">删除</el-button>
+                </div>
+              </div>
+            </div>
+            <div v-if="!sceneLoading && !sceneError && sceneList.length === 0" class="library-empty">项目库暂无场景，可从素材库导入</div>
+          </div>
+          <div class="library-pagination">
+            <el-pagination v-model:current-page="scenePage" v-model:page-size="scenePageSize" :total="sceneTotal" :page-sizes="[10,20,50]" layout="total, sizes, prev, pager, next" @current-change="loadSceneList" @size-change="loadSceneList" />
+          </div>
+        </template>
+
+        <!-- 道具库 -->
+        <template v-if="activeResTab === 'prop'">
+          <div class="library-toolbar">
+            <el-input v-model="propKw" placeholder="搜索项目库道具" clearable style="width: 200px" @input="onPropKwInput" />
+            <el-button size="small" @click="openImport('prop')">从素材库导入</el-button>
+          </div>
+          <div v-if="propError" class="resource-error" role="alert">{{ propError }}<el-button size="small" @click="loadPropList">重试</el-button></div>
+          <div v-loading="propLoading" class="library-list">
+            <div v-for="item in propList" :key="item.id" class="library-item">
+              <div class="library-item-cover" @click="openPreview(assetImageUrl(item))">
+                <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
+                <span v-else class="library-placeholder">暂无图</span>
+              </div>
+              <div class="library-item-info">
+                <span class="resource-source">项目库</span><div class="library-item-name">{{ item.name || '未命名' }}</div>
+                <div class="library-item-desc">{{ (item.description || item.prompt || '').slice(0, 60) }}</div>
+                <div class="library-item-actions">
+                  <el-button size="small" @click="openEditProp(item)">编辑</el-button>
+                  <el-button size="small" type="danger" plain @click="deleteProp(item)">删除</el-button>
+                </div>
+              </div>
+            </div>
+            <div v-if="!propLoading && !propError && propList.length === 0" class="library-empty">项目库暂无道具，可从素材库导入</div>
+          </div>
+          <div class="library-pagination">
+            <el-pagination v-model:current-page="propPage" v-model:page-size="propPageSize" :total="propTotal" :page-sizes="[10,20,50]" layout="total, sizes, prev, pager, next" @current-change="loadPropList" @size-change="loadPropList" />
+          </div>
+        </template>
       </section>
     </main>
 
     <!-- 制作角色 编辑 -->
-    <el-dialog v-model="editDramaCharVisible" title="编辑制作角色" width="500px" @close="editDramaCharForm = null">
+    <el-dialog v-model="editDramaCharVisible" title="编辑制作角色" width="min(500px, 94vw)" @close="editDramaCharForm = null">
       <el-form v-if="editDramaCharForm" label-width="80px">
         <el-form-item label="图片">
           <div class="lib-img-editor">
@@ -374,7 +371,7 @@
     </el-dialog>
 
     <!-- 制作场景 编辑 -->
-    <el-dialog v-model="editDramaSceneVisible" title="编辑制作场景" width="500px" @close="editDramaSceneForm = null">
+    <el-dialog v-model="editDramaSceneVisible" title="编辑制作场景" width="min(500px, 94vw)" @close="editDramaSceneForm = null">
       <el-form v-if="editDramaSceneForm" label-width="80px">
         <el-form-item label="图片">
           <div class="lib-img-editor">
@@ -401,7 +398,7 @@
     </el-dialog>
 
     <!-- 制作道具 编辑 -->
-    <el-dialog v-model="editDramaPropVisible" title="编辑制作道具" width="500px" @close="editDramaPropForm = null">
+    <el-dialog v-model="editDramaPropVisible" title="编辑制作道具" width="min(500px, 94vw)" @close="editDramaPropForm = null">
       <el-form v-if="editDramaPropForm" label-width="80px">
         <el-form-item label="图片">
           <div class="lib-img-editor">
@@ -428,7 +425,7 @@
     </el-dialog>
 
     <!-- 编辑角色 -->
-    <el-dialog v-model="editCharVisible" title="编辑角色库" width="480px" @close="editCharForm = null">
+    <el-dialog v-model="editCharVisible" title="编辑角色库" width="min(480px, 94vw)" @close="editCharForm = null">
       <el-form v-if="editCharForm" label-width="80px">
         <el-form-item label="图片">
           <div class="lib-img-editor">
@@ -455,7 +452,7 @@
     </el-dialog>
 
     <!-- 编辑场景 -->
-    <el-dialog v-model="editSceneVisible" title="编辑场景库" width="480px" @close="editSceneForm = null">
+    <el-dialog v-model="editSceneVisible" title="编辑场景库" width="min(480px, 94vw)" @close="editSceneForm = null">
       <el-form v-if="editSceneForm" label-width="80px">
         <el-form-item label="图片">
           <div class="lib-img-editor">
@@ -483,7 +480,7 @@
     </el-dialog>
 
     <!-- 编辑道具 -->
-    <el-dialog v-model="editPropVisible" title="编辑道具库" width="480px" @close="editPropForm = null">
+    <el-dialog v-model="editPropVisible" title="编辑道具库" width="min(480px, 94vw)" @close="editPropForm = null">
       <el-form v-if="editPropForm" label-width="80px">
         <el-form-item label="图片">
           <div class="lib-img-editor">
@@ -513,7 +510,7 @@
     <el-dialog
       v-model="importVisible"
       :title="`从素材库导入${importType === 'char' ? '角色' : importType === 'scene' ? '场景' : '道具'}`"
-      width="760px"
+      width="min(760px, 94vw)"
       destroy-on-close
       @open="loadImportList"
     >
@@ -570,6 +567,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, VideoPlay, Plus, Delete, PictureFilled, Grid } from '@element-plus/icons-vue'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import EpisodeBatchImportDialog from '@/components/EpisodeBatchImportDialog.vue'
+import ProjectMediaResources from '@/components/ProjectMediaResources.vue'
 import { dramaAPI } from '@/api/drama'
 import { characterLibraryAPI } from '@/api/characterLibrary'
 import { sceneLibraryAPI } from '@/api/sceneLibrary'
@@ -1015,20 +1013,27 @@ async function onAddEpisode() {
 }
 
 // ---------- 资源库 Tab ----------
-const workspaceTab = ref('episodes')
-const activeResTab = ref('lib-char') // lib-char | lib-scene | lib-prop | drama-char | drama-scene | drama-prop
+const resourceTabs = ['char', 'scene', 'prop', 'media']
+const workspaceTab = ref(route.query.tab === 'resources' ? 'resources' : 'episodes')
+const activeResTab = ref(resourceTabs.includes(route.query.resource) ? route.query.resource : 'char')
+function selectResourceTab(tab) {
+  activeResTab.value = tab
+  router.replace({ query: { ...route.query, tab: 'resources', resource: tab } })
+}
 const previewUrl = ref(null)
 function openPreview(url) { if (url) previewUrl.value = url }
 
 // 角色
+const charError = ref('')
 const charList = ref([]), charLoading = ref(false), charPage = ref(1), charPageSize = ref(20), charTotal = ref(0), charKw = ref('')
 let charKwTimer = null
 async function loadCharList() {
   charLoading.value = true
+  charError.value = ''
   try {
     const res = await characterLibraryAPI.list({ drama_id: dramaId, page: charPage.value, page_size: charPageSize.value, keyword: charKw.value || undefined })
     charList.value = res?.items ?? []; charTotal.value = res?.pagination?.total ?? 0
-  } catch { charList.value = [] } finally { charLoading.value = false }
+  } catch (error) { charError.value = error.message || '项目库加载失败，请重试' } finally { charLoading.value = false }
 }
 function onCharKwInput() { if (charKwTimer) clearTimeout(charKwTimer); charKwTimer = setTimeout(() => { charPage.value = 1; loadCharList() }, 300) }
 const editCharVisible = ref(false), editCharForm = ref(null), editCharSaving = ref(false)
@@ -1049,14 +1054,16 @@ async function deleteChar(item) {
 }
 
 // 场景
+const sceneError = ref('')
 const sceneList = ref([]), sceneLoading = ref(false), scenePage = ref(1), scenePageSize = ref(20), sceneTotal = ref(0), sceneKw = ref('')
 let sceneKwTimer = null
 async function loadSceneList() {
   sceneLoading.value = true
+  sceneError.value = ''
   try {
     const res = await sceneLibraryAPI.list({ drama_id: dramaId, page: scenePage.value, page_size: scenePageSize.value, keyword: sceneKw.value || undefined })
     sceneList.value = res?.items ?? []; sceneTotal.value = res?.pagination?.total ?? 0
-  } catch { sceneList.value = [] } finally { sceneLoading.value = false }
+  } catch (error) { sceneError.value = error.message || '项目库加载失败，请重试' } finally { sceneLoading.value = false }
 }
 function onSceneKwInput() { if (sceneKwTimer) clearTimeout(sceneKwTimer); sceneKwTimer = setTimeout(() => { scenePage.value = 1; loadSceneList() }, 300) }
 const editSceneVisible = ref(false), editSceneForm = ref(null), editSceneSaving = ref(false)
@@ -1078,14 +1085,16 @@ async function deleteScene(item) {
 }
 
 // 道具
+const propError = ref('')
 const propList = ref([]), propLoading = ref(false), propPage = ref(1), propPageSize = ref(20), propTotal = ref(0), propKw = ref('')
 let propKwTimer = null
 async function loadPropList() {
   propLoading.value = true
+  propError.value = ''
   try {
     const res = await propLibraryAPI.list({ drama_id: dramaId, page: propPage.value, page_size: propPageSize.value, keyword: propKw.value || undefined })
     propList.value = res?.items ?? []; propTotal.value = res?.pagination?.total ?? 0
-  } catch { propList.value = [] } finally { propLoading.value = false }
+  } catch (error) { propError.value = error.message || '项目库加载失败，请重试' } finally { propLoading.value = false }
 }
 function onPropKwInput() { if (propKwTimer) clearTimeout(propKwTimer); propKwTimer = setTimeout(() => { propPage.value = 1; loadPropList() }, 300) }
 const editPropVisible = ref(false), editPropForm = ref(null), editPropSaving = ref(false)
@@ -1193,22 +1202,21 @@ async function doImport(item) {
 }
 
 watch(activeResTab, (tab) => {
-  if (tab === 'lib-char') loadCharList()
-  else if (tab === 'lib-scene') loadSceneList()
-  else if (tab === 'lib-prop') loadPropList()
-})
+  if (tab === 'char') loadCharList()
+  else if (tab === 'scene') loadSceneList()
+  else if (tab === 'prop') loadPropList()
+}, { immediate: true })
 
 let importBatchTimer = null
 onMounted(() => {
   loadDrama()
-  loadCharList()
   if (route.query.importBatch) {
     importBatchTimer = setTimeout(() => {
       episodeBatchImportDialogRef.value?.openDialog?.()
     }, 0)
   }
 })
-onBeforeUnmount(() => { if (importBatchTimer) clearTimeout(importBatchTimer) })
+onBeforeUnmount(() => { [importBatchTimer, charKwTimer, sceneKwTimer, propKwTimer, importKwTimer].forEach(clearTimeout) })
 </script>
 
 <style scoped>
@@ -1433,20 +1441,6 @@ html.light .section-title { color: #18181b; }
   padding-left: 20px;
 }
 .res-tabbar::-webkit-scrollbar { display: none; }
-.res-tab-group-label {
-  font-size: 11px;
-  color: var(--text-faint, #52525b);
-  padding: 0 8px 0 4px;
-  white-space: nowrap;
-  user-select: none;
-  letter-spacing: 0.03em;
-  align-self: center;
-}
-.res-tab-group-label--prod { color: #a78bfa; }
-.res-tab-spacer {
-  flex: 1;
-  min-width: 40px;
-}
 .res-tab {
   position: relative;
   display: inline-flex;
@@ -1474,6 +1468,13 @@ html.light .section-title { color: #18181b; }
   transition: background 0.15s;
 }
 .res-tab:hover { color: var(--text-primary); background: var(--bg-inner, rgba(255,255,255,0.04)); }
+.res-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.resource-source { display: inline-block; align-self: flex-start; margin-bottom: 6px; padding: 2px 6px; border-radius: 4px; background: var(--bg-hover); color: var(--text-muted); font-size: 11px; }
+.resource-error { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 0; color: var(--el-color-danger); }
+.res-section .drama-res-list { padding-top: 20px; }
+.res-section .library-toolbar { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-subtle); flex-wrap: wrap; }
+.res-section .library-pagination { max-width: 100%; }
+.res-section .library-pagination :deep(.el-pagination) { flex-wrap: wrap; justify-content: center; gap: 4px; }
 /* 资源库激活 */
 .res-tab--lib.active { color: #60a5fa; font-size: 14px; font-weight: 600; }
 .res-tab--lib.active::after { background: #60a5fa; }
@@ -1540,7 +1541,7 @@ html.light .btn-theme {
 .main{padding:clamp(1rem,2.7vw,2.5rem) 0 4rem;gap:16px}.section.card{border-color:var(--border-subtle);border-radius:var(--radius-lg);background:color-mix(in srgb,var(--bg-surface) 93%,transparent);box-shadow:var(--shadow-sm)}.section.card:hover{border-color:color-mix(in srgb,var(--accent) 43%,var(--border-color));box-shadow:var(--shadow-md)}.section-title{color:var(--text-primary);font-size:1.05rem;letter-spacing:-.015em}.section-count,.empty-tip,.import-tip,.library-placeholder,.library-empty{color:var(--text-muted)}
 .episode-grid{gap:14px}.episode-card{border-color:var(--border-subtle);border-radius:12px;background:var(--bg-raised);box-shadow:none}.episode-card::before{background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 12%,transparent),transparent 62%)}.episode-card:hover{border-color:color-mix(in srgb,var(--accent) 56%,var(--border-color));background:color-mix(in srgb,var(--accent) 7%,var(--bg-raised));box-shadow:var(--shadow-sm)}.episode-title,.library-item-name{color:var(--text-primary)}.episode-num,.episode-preview,.ep-stat,.library-item-desc{color:var(--text-muted)}.ep-stat-num{color:var(--accent-teal)}.episode-enter{border-color:var(--border-subtle);color:var(--text-faint)}
 .library-item,.drama-res-item{border-color:var(--border-subtle);border-radius:10px;background:var(--bg-raised)}.res-tabbar{border-color:var(--border-subtle)}.res-tab{color:var(--text-muted)}.res-tab:hover{color:var(--text-primary);background:color-mix(in srgb,var(--bg-raised) 76%,transparent)}.res-tab--lib.active,.res-tab--drama.active{color:var(--accent)}.res-tab--lib.active::after,.res-tab--drama.active::after{background:var(--accent)}
-@media(max-width:760px){.header{padding:9px 12px}.header-inner{gap:7px}.logo{min-width:30px}.richi-brand-copy,.breadcrumb-sep,.btn-back-list{display:none}.richi-brand-mark{width:30px;height:30px;flex:0 0 30px}.page-title{min-width:0;flex:1;padding:0;border:0;background:transparent}.header-actions{margin-left:0;gap:4px}.header-actions :deep(.account-balance){display:none}.header-actions .el-button{height:34px;padding-inline:9px;font-size:0}.header-actions .el-icon{font-size:15px}.main{padding:18px 12px 40px}.section.card{padding:16px;border-radius:14px}.section-header{align-items:flex-start;flex-wrap:wrap;gap:8px}.section-header .section-count{margin-right:auto}.episode-grid{grid-template-columns:1fr}.episode-card{min-height:132px}.drama-res-item{width:100%}.res-tabbar{margin-inline:-16px;padding-left:16px}.res-tab-spacer,.res-tab-group-label--prod{display:none}:deep(.info-form .el-col){width:100%;max-width:100%;flex:0 0 100%}:deep(.info-form .el-form-item){margin-bottom:16px}:deep(.info-form .el-form-item__label){font-size:13px}}
+@media(max-width:760px){.header{padding:9px 12px}.header-inner{gap:7px}.logo{min-width:30px}.richi-brand-copy,.breadcrumb-sep,.btn-back-list{display:none}.richi-brand-mark{width:30px;height:30px;flex:0 0 30px}.page-title{min-width:0;flex:1;padding:0;border:0;background:transparent}.header-actions{margin-left:0;gap:4px}.header-actions :deep(.account-balance){display:none}.header-actions .el-button{height:34px;padding-inline:9px;font-size:0}.header-actions .el-icon{font-size:15px}.main{padding:18px 12px 40px}.section.card{padding:16px;border-radius:14px}.section-header{align-items:flex-start;flex-wrap:wrap;gap:8px}.section-header .section-count{margin-right:auto}.episode-grid{grid-template-columns:1fr}.episode-card{min-height:132px}.drama-res-item{width:100%}.res-tabbar{margin-inline:-16px;padding-left:16px}:deep(.info-form .el-col){width:100%;max-width:100%;flex:0 0 100%}:deep(.info-form .el-form-item){margin-bottom:16px}:deep(.info-form .el-form-item__label){font-size:13px}}
 @media(min-width:900px){
   .drama-detail{background-image:radial-gradient(52% 42% at 7% -8%,color-mix(in srgb,var(--accent) 22%,transparent),transparent 72%),radial-gradient(38% 36% at 94% 18%,color-mix(in srgb,var(--accent-teal) 13%,transparent),transparent 70%),linear-gradient(180deg,color-mix(in srgb,var(--bg-page) 82%,#05070b),var(--bg-page) 36%)}
   .header{padding-block:13px}.header-inner{max-width:1340px}.main{max-width:1340px;padding-top:42px;gap:22px}.section.card{position:relative;overflow:hidden;padding:28px 30px;border-radius:20px}.section.card::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(120deg,color-mix(in srgb,var(--text-primary) 4%,transparent),transparent 34%);opacity:.6}.section.card>*{position:relative;z-index:1}
@@ -1602,4 +1603,12 @@ html.light .btn-theme {
   .episode-next-actions{margin-top:1.25rem}
   .episode-next-actions button{min-height:2.7rem}
 }
+.drama-detail.resources-workspace { overflow-y: auto; }
+.drama-detail.resources-workspace > .main { display: block; flex: 0 0 auto; min-height: auto; overflow: visible; }
+.drama-detail.resources-workspace .main > .res-section { overflow: visible; }
+.resources-workspace .drama-res-list { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,300px),1fr)); }
+.resources-workspace .drama-res-item { width: auto; min-width: 0; box-sizing: border-box; }
+.resources-workspace .res-section .library-list { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,300px),1fr)); max-height: none; overflow: visible; }
+.resources-workspace .res-section .library-empty { grid-column: 1 / -1; }
+.resources-workspace .res-tabbar { margin-inline: 0; padding-inline: 0; }
 </style>
