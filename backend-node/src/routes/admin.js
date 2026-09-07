@@ -113,7 +113,15 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
     updatePriceBook: guarded((req, res) => response.success(res, billing.savePriceBook(db, req.auth.id, req.body || {}, req.params.id))),
     providerPriceProbe: guardedAsync(async (req, res) => response.success(res, await providerPrices.probe(db, req.auth.id, { billPeriod: req.body?.bill_period }))),
     providerPriceProbeStatus: (_req, res) => response.success(res, providerPrices.sourceCheck(db)),
-    providerPriceSync: guardedAsync(async (req, res) => response.success(res, await providerPrices.sync(db, req.auth.id, { triggerType: 'manual' }))),
+    providerPriceSync: async (req, res) => {
+      try { response.success(res, await providerPrices.sync(db, req.auth.id, { triggerType: 'manual' })); }
+      catch (error) {
+        if (!error.publicCode) return response.badRequest(res, error.message);
+        response.error(res, error.httpStatus, error.publicCode, error.publicMessage, {
+          sync_id: error.syncId, provider_request_ids: error.requestIds || [], action: error.action,
+        });
+      }
+    },
     providerPriceSyncs: (req, res) => response.success(res, providerPrices.listSyncs(db, req.query?.limit)),
     providerPriceSyncDetail: (req, res) => {
       const item = providerPrices.syncView(db, req.params.id);

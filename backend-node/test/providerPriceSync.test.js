@@ -33,6 +33,108 @@ function activationResponse() {
   };
 }
 
+test('read-only price queries retry upstream timeouts but not authentication errors', async () => {
+  const credential = { accessKeyId: 'test', secretAccessKey: 'test', region: 'cn-beijing' };
+  let calls = 0;
+  const timeoutResponse = (status, code, message) => ({ ok: status < 400, status, text: async () => JSON.stringify({
+    ResponseMetadata: { RequestId: `timeout-${calls}`, Error: { Code: code, Message: message } },
+  }) });
+  const result = await prices.fetchAllActivations(credential, { fetchImpl: async (_url, init) => {
+    calls++; assert.ok(init.signal instanceof AbortSignal);
+    if (calls === 1) return timeoutResponse(200, 'InternalError', 'Internal Service is timeout. Pls Contact With Admin');
+    return { ok: true, status: 200, text: async () => JSON.stringify(activationResponse()) };
+  } });
+  assert.equal(calls, 2); assert.deepEqual(result.requestIds, ['timeout-1', 'ark-request-1']);
+  calls = 0;
+  await assert.rejects(() => prices.fetchAllActivations(credential, { fetchImpl: async () => {
+    calls++; return timeoutResponse(403, 'AccessDenied', 'permission denied');
+  } }), (error) => error.httpStatus === 502 && error.requestId === 'timeout-1');
+  assert.equal(calls, 1);
+  calls = 0;
+  await assert.rejects(() => prices.callOpenApi(credential, { action: 'WriteAction', service: 'ark', version: '2024-01-01', fetchImpl: async () => {
+    calls++; return timeoutResponse(500, 'InternalError', 'timeout');
+  } }), /timeout/);
+  assert.equal(calls, 1);
+});
+
+test('aborted reads return a bounded timeout; failed pagination retains earlier request IDs', async () => {
+  const credential = { accessKeyId: 'test', secretAccessKey: 'test', region: 'cn-beijing' };
+  let calls = 0;
+  await assert.rejects(() => prices.fetchAllActivations(credential, { fetchImpl: async (_url, init) => {
+    calls++; assert.ok(init.signal);
+    if (JSON.parse(init.body).PageNumber === 1) {
+      const payload = activationResponse(); payload.Result.TotalCount = 2;
+      return { ok: true, status: 200, text: async () => JSON.stringify(payload) };
+    }
+    throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+  } }), (error) => error.httpStatus === 504 && error.publicCode === 'PROVIDER_TIMEOUT' && error.requestIds[0] === 'ark-request-1');
+  assert.equal(calls, 3);
+});
+
+test('price sync HTTP reports upstream timeout, releases its lock and preserves prices after restart', async () => {
+  const { db, dbPath, admin, log } = setup();
+  const express = require('express');
+  const http = require('node:http');
+  const { requireAuth, requireAdmin } = require('../src/middleware/auth');
+  const originalFetch = global.fetch;
+  let calls = 0;
+  let server;
+  try {
+    const before = db.prepare('SELECT * FROM billing_price_book_items ORDER BY id').all();
+    global.fetch = async (url) => {
+      assert.equal(new URL(url).hostname, 'open.volcengineapi.com');
+      calls++;
+      return { ok: false, status: 500, text: async () => JSON.stringify({ ResponseMetadata: {
+        RequestId: `failed-price-${calls}`, Error: { Code: 'InternalError', Message: 'Internal Service is timeout. Pls Contact With Admin' },
+      } }) };
+    };
+    const app = express(); app.use(express.json());
+    app.post('/api/v1/admin/provider-prices/volcengine/sync', requireAuth(db), requireAdmin, require('../src/routes/admin')(db, log).providerPriceSync);
+    server = app.listen(0, '127.0.0.1'); await new Promise((resolve) => server.once('listening', resolve));
+    const token = auth.issueSession(db, admin).token;
+    const request = () => new Promise((resolve, reject) => {
+      const req = http.request({ hostname: '127.0.0.1', port: server.address().port, path: '/api/v1/admin/provider-prices/volcengine/sync', method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'X-Request-Id': 'price-timeout-test' } }, (res) => {
+        const chunks = []; res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));
+      }); req.on('error', reject); req.end();
+    });
+    const result = await request();
+    assert.equal(result.status, 504); assert.equal(result.body.error.code, 'PROVIDER_TIMEOUT');
+    assert.deepEqual(result.body.error.details.provider_request_ids, ['failed-price-1', 'failed-price-2']);
+    assert.equal(calls, 2);
+    const failedId = result.body.error.details.sync_id;
+    assert.equal(prices.syncView(db, failedId).status, 'failed');
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM provider_price_sync_locks').get().n, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM provider_price_candidates').get().n, 0);
+    assert.deepEqual(db.prepare('SELECT * FROM billing_price_book_items ORDER BY id').all(), before);
+    global.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify(activationResponse()) });
+    assert.equal((await request()).status, 200);
+    await new Promise((resolve) => server.close(resolve)); server = null;
+    closeDb();
+    const reopened = getDb({ path: dbPath, type: 'sqlite' });
+    assert.deepEqual(prices.syncView(reopened, failedId).provider_request_ids, ['failed-price-1', 'failed-price-2']);
+    assert.deepEqual(reopened.prepare('SELECT * FROM billing_price_book_items ORDER BY id').all(), before);
+  } finally {
+    global.fetch = originalFetch;
+    if (server) await new Promise((resolve) => server.close(resolve));
+    teardown(dbPath);
+  }
+});
+
+test('OpenAPI timeout aborts a stalled response body', { timeout: 20000 }, async () => {
+  const started = Date.now();
+  await assert.rejects(() => prices.callOpenApi({ accessKeyId: 'test', secretAccessKey: 'test' }, {
+    action: 'ListModelActivations', service: 'ark', version: '2024-01-01',
+    deadline: Date.now() + 1000,
+    fetchImpl: async (_url, init) => ({ ok: true, status: 200, text: () => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted body'), { name: 'AbortError' })), { once: true });
+    }) }),
+  }), (error) => error.publicCode === 'PROVIDER_TIMEOUT' && error.httpStatus === 504);
+  assert.ok(Date.now() - started >= 900);
+  assert.ok(Date.now() - started < 15000);
+});
+
 test('Volcengine price units map to canonical meters and exact micro-points', () => {
   assert.equal(prices.chargeMeter('InferencePrompt', '千 tokens'), 'input_token');
   assert.equal(prices.chargeMeter('InferenceCompletion', '千 tokens'), 'output_token');
