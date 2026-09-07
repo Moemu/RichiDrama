@@ -2740,7 +2740,7 @@ code {
 .field-tip {
   margin: 6px 0 0;
   font-size: 12px;
-  color: #909399;
+  color: var(--text-muted);
   line-height: 1.4;
 }
 .form-label-tip {
@@ -2800,7 +2800,7 @@ code {
 }
 .tip-icon {
   font-size: 13px;
-  color: #909399;
+  color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
   transition: color 0.15s;
@@ -2863,7 +2863,7 @@ code {
 .ep-tip {
   margin: 8px 0 0;
   font-size: 11px;
-  color: #909399;
+  color: var(--text-muted);
   line-height: 1.4;
 }
 .ep-tip-warn {
@@ -2932,7 +2932,7 @@ code {
   line-height: 1.8;
 }
 .gs-tip-note {
-  color: #909399;
+  color: var(--text-muted);
   font-size: 12px;
 }
 </style>

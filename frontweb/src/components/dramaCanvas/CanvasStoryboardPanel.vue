@@ -427,7 +427,7 @@ async function runStep(step) {
   margin-bottom: 8px;
   font-size: 12px;
   font-weight: 700;
-  color: #c7d2fe;
+  color: var(--text-primary);
 }
 .head-actions {
   display: flex;
@@ -438,15 +438,15 @@ async function runStep(step) {
   font-size: 10px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(96, 165, 250, 0.18);
-  color: #93c5fd;
+  background: var(--status-info-bg);
+  color: var(--status-info);
   animation: pulse-tag 1.2s ease-in-out infinite;
 }
 .compact-form :deep(.el-form-item) {
   margin-bottom: 6px;
 }
 .compact-form :deep(.el-form-item__label) {
-  color: #71717a;
+  color: var(--text-muted);
   font-size: 11px;
 }
 .compact-form :deep(.el-input__wrapper),

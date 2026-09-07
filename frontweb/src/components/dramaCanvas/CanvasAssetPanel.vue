@@ -314,7 +314,7 @@ function highlightRelated() {
   justify-content: space-between;
   font-size: 12px;
   font-weight: 700;
-  color: #6ee7b7;
+  color: var(--status-success);
   margin-bottom: 10px;
 }
 .panel-body {
@@ -359,7 +359,7 @@ function highlightRelated() {
   gap: 6px;
   background: rgba(9, 9, 11, 0.82);
   font-size: 10px;
-  color: #d4d4d8;
+  color: var(--text-on-media);
   text-align: center;
   padding: 6px;
 }
@@ -367,7 +367,7 @@ function highlightRelated() {
   width: 20px;
   height: 20px;
   border: 2px solid rgba(255, 255, 255, 0.12);
-  border-top-color: #34d399;
+  border-top-color: var(--status-success);
   border-radius: 50%;
   animation: spin 0.75s linear infinite;
 }
@@ -375,11 +375,11 @@ function highlightRelated() {
   margin-top: 6px;
   font-size: 10px;
   text-align: center;
-  color: #71717a;
+  color: var(--text-muted);
 }
-.entity-status.st-processing { color: #60a5fa; }
-.entity-status.st-completed { color: #34d399; }
-.entity-status.st-failed { color: #f87171; }
+.entity-status.st-processing { color: var(--status-info); }
+.entity-status.st-completed { color: var(--status-success); }
+.entity-status.st-failed { color: var(--status-danger); }
 .form-col {
   flex: 1;
   min-width: 0;
@@ -388,7 +388,7 @@ function highlightRelated() {
   margin-bottom: 6px;
 }
 .compact-form :deep(.el-form-item__label) {
-  color: #71717a;
+  color: var(--text-muted);
   font-size: 11px;
   padding-right: 6px;
 }
@@ -421,11 +421,11 @@ function highlightRelated() {
   margin: 0;
 }
 .kind-scene { border-color: rgba(96, 165, 250, 0.45); }
-.kind-scene .panel-head { color: #93c5fd; }
-.kind-scene .spinner { border-top-color: #93c5fd; }
+.kind-scene .panel-head { color: var(--status-info); }
+.kind-scene .spinner { border-top-color: var(--status-info); }
 .kind-prop { border-color: rgba(251, 191, 36, 0.45); }
-.kind-prop .panel-head { color: #fcd34d; }
-.kind-prop .spinner { border-top-color: #fcd34d; }
+.kind-prop .panel-head { color: var(--status-warning); }
+.kind-prop .spinner { border-top-color: var(--status-warning); }
 @keyframes spin {
   to { transform: rotate(360deg); }
 }

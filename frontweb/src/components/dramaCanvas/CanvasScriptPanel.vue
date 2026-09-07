@@ -159,7 +159,7 @@ async function onExtractAll() {
   justify-content: space-between;
   font-size: 12px;
   font-weight: 700;
-  color: #fcd34d;
+  color: var(--status-warning);
   margin-bottom: 6px;
 }
 .head-right {
@@ -169,19 +169,19 @@ async function onExtractAll() {
 }
 .busy-tag {
   font-size: 10px;
-  color: #93c5fd;
+  color: var(--status-info);
 }
 .flow-hint {
   margin: 0 0 10px;
   font-size: 10px;
   line-height: 1.45;
-  color: #71717a;
+  color: var(--text-muted);
 }
 .compact-form :deep(.el-form-item) {
   margin-bottom: 8px;
 }
 .compact-form :deep(.el-form-item__label) {
-  color: #71717a;
+  color: var(--text-muted);
   font-size: 11px;
 }
 .compact-form :deep(.el-textarea__inner) {
@@ -194,11 +194,11 @@ async function onExtractAll() {
   justify-content: space-between;
   gap: 8px;
   font-size: 10px;
-  color: #a1a1aa;
+  color: var(--text-muted);
   margin-bottom: 8px;
 }
 .len {
-  color: #71717a;
+  color: var(--text-muted);
 }
 .panel-actions {
   display: flex;

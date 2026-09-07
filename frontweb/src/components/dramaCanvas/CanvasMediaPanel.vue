@@ -152,7 +152,7 @@ async function runStep(step) {
   justify-content: space-between;
   font-size: 11px;
   font-weight: 700;
-  color: #a5b4fc;
+  color: var(--accent);
   margin-bottom: 8px;
 }
 .head-right {
@@ -162,7 +162,7 @@ async function runStep(step) {
 }
 .busy-tag {
   font-size: 10px;
-  color: #93c5fd;
+  color: var(--status-info);
 }
 .panel-body {
   display: flex;
@@ -176,7 +176,7 @@ async function runStep(step) {
   margin: 0;
   font-size: 11px;
   line-height: 1.45;
-  color: #d4d4d8;
+  color: var(--text-regular);
   max-height: 72px;
   overflow-y: auto;
 }
@@ -202,7 +202,7 @@ async function runStep(step) {
   align-items: center;
   justify-content: center;
   font-size: 11px;
-  color: #71717a;
+  color: var(--text-muted);
 }
 .preview-loading {
   position: absolute;
@@ -214,7 +214,7 @@ async function runStep(step) {
   gap: 4px;
   background: rgba(9, 9, 11, 0.85);
   font-size: 10px;
-  color: #d4d4d8;
+  color: var(--text-on-media);
 }
 .spinner {
   width: 18px;
@@ -230,7 +230,7 @@ async function runStep(step) {
 }
 .audio-label {
   font-size: 11px;
-  color: #fbbf24;
+  color: var(--status-warning);
   width: 100%;
 }
 .panel-actions {
