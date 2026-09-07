@@ -79,9 +79,17 @@ function createApp() {
   applyVendorLock(db, logger, config);
   const log = logger;
 
-  const { resumeProcessingVideoGenerations, reconcileUnarchivedCompletedVideos, resumePendingVideoArchives, resumeMissingVideoPosters, startPendingVideoArchiveRetry } = require('./services/videoService');
+  const { resumeProcessingVideoGenerations, reconcileUnarchivedCompletedVideos, resumeCompletedPostprocessVideoGenerations, resumePendingVideoArchives, resumeMissingVideoPosters, startPendingVideoArchiveRetry } = require('./services/videoService');
+  // A resolved/waived reconciliation case may have completed its stage output
+  // while the process was down. Queue the durable finalizer on startup.
+  try {
+    const result = billingService.recoverResolvedVideoReconciliations(db, log);
+    if (result.queued) log.info('queued resolved video reconciliation recovery', result);
+  } catch (error) { log.warn('resolved video reconciliation recovery failed', { error: error.message }); }
   reconcileUnarchivedCompletedVideos(db, log);
   resumeProcessingVideoGenerations(db, log);
+  const postprocessRecovery = resumeCompletedPostprocessVideoGenerations(db, log);
+  if (postprocessRecovery?.queued) log.info('queued completed video post-process recovery', postprocessRecovery);
   resumePendingVideoArchives(db, log);
   resumeMissingVideoPosters(db, log);
   const videoStoragePath = path.isAbsolute(config.storage?.local_path)
@@ -153,14 +161,18 @@ function createApp() {
     : path.join(process.cwd(), 'data', 'storage');
   try {
     if (!fs.existsSync(storageRoot)) fs.mkdirSync(storageRoot, { recursive: true });
-    const protectStatic = config.security?.protect_static ?? process.env.NODE_ENV === 'production';
     const mediaStorage = require('./services/mediaStorageService');
-    if (protectStatic) {
-      const { requireAuth } = require('./middleware/auth');
-      app.use('/static', requireAuth(db), mediaStorage.staticHandler(config, storageRoot));
-    } else {
-      app.use('/static', mediaStorage.staticHandler(config, storageRoot));
-    }
+    const { requireAuth } = require('./middleware/auth');
+    // Media authorization is database-backed, so authentication remains in
+    // the route even when an old config explicitly disabled `protect_static`.
+    // The handler then checks the requested key against the current user's
+    // project, asset, generation, or explicitly global library record.
+    app.use('/static', requireAuth(db), mediaStorage.staticHandler(config, storageRoot, {
+      db,
+      privateCache: true,
+      storageRoot,
+      sharedPrefixes: config.security?.static_shared_prefixes,
+    }));
     mediaStorage.startArchiveScheduler(config, storageRoot, log, { db });
   } catch (e) {
     console.warn('Static storage mount skipped:', e.message);
@@ -225,7 +237,7 @@ function createApp() {
       // express.sendFile reports an invalid or stale media Range as 416. This
       // is a normal media protocol response, not an application failure.
       if (status === 416) return res.status(416).set('Content-Range', 'bytes */*').end();
-      const message = isFileTooLarge ? '图片大小不能超过 16MB，请压缩后重试' : (err.message || '服务器错误');
+      const message = isFileTooLarge ? '文件超过此上传接口的大小限制，请压缩后重试' : (err.message || '服务器错误');
       res.status(status).json({ success: false, error: { code: isFileTooLarge ? 'FILE_TOO_LARGE' : (status === 500 ? 'INTERNAL_ERROR' : 'REQUEST_ERROR'), message }, timestamp: new Date().toISOString() });
     }
   });

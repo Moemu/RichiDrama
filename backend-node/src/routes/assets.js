@@ -31,6 +31,8 @@ function routes(db, log, cfg) {
         response.created(res, item);
       } catch (err) {
         log.error('assets create', { error: err.message });
+        if (err.code === 'MEDIA_REFERENCE_FORBIDDEN') return response.forbidden(res, err.message);
+        if (err.code === 'INVALID_MEDIA_PATH') return response.badRequest(res, err.message);
         response.internalError(res, err.message);
       }
     },
@@ -77,6 +79,8 @@ function routes(db, log, cfg) {
         response.success(res, item);
       } catch (err) {
         log.error('assets update', { error: err.message });
+        if (err.code === 'MEDIA_REFERENCE_FORBIDDEN') return response.forbidden(res, err.message);
+        if (err.code === 'INVALID_MEDIA_PATH') return response.badRequest(res, err.message);
         response.internalError(res, err.message);
       }
     },

@@ -24,6 +24,11 @@ export function useCharacters(deps) {
   const { store, dramaId, currentEpisodeId, getSelectedStyle, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage } = deps
   const genStore = useGenerationTaskStore()
 
+  function nullableText(value) {
+    const text = value == null ? '' : String(value).trim()
+    return text || null
+  }
+
   function buildCharImageMeta(char) {
     const dramaTitle = store.drama?.title || ''
     const epNum = store.currentEpisode?.episode_number
@@ -228,12 +233,12 @@ export function useCharacters(deps) {
       if (form.id) {
         await characterAPI.update(form.id, {
           name: form.name.trim(),
-          role: form.role || undefined,
-          appearance: form.appearance || undefined,
-          personality: form.personality || undefined,
-          description: form.description || undefined,
-          polished_prompt: form.polished_prompt || undefined,
-          stages: form.stages ? form.stages.trim() || undefined : undefined
+          role: nullableText(form.role),
+          appearance: nullableText(form.appearance),
+          personality: nullableText(form.personality),
+          description: nullableText(form.description),
+          polished_prompt: nullableText(form.polished_prompt),
+          stages: nullableText(form.stages)
         })
         await saveCharRefImageIfAny(form.id)
         ElMessage.success('角色已保存')

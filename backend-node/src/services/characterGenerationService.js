@@ -98,6 +98,16 @@ async function processCharacterGeneration(db, cfg, log, taskID, req) {
     return;
   }
 
+  // Keep existing characters and episode associations when extraction yields
+  // no usable character. The task remains explicitly failed for retry.
+  const validCharacters = Array.isArray(result)
+    ? result.filter((character) => character && String(character.name || '').trim())
+    : [];
+  if (validCharacters.length === 0) {
+    taskService.updateTaskError(db, taskID, '未提取到有效角色，原有角色已保留，请重试');
+    return;
+  }
+
   const dramaId = Number(req.drama_id);
   const now = new Date().toISOString();
 
@@ -123,7 +133,7 @@ async function processCharacterGeneration(db, cfg, log, taskID, req) {
 
   const characters = [];
 
-  for (const char of result) {
+  for (const char of validCharacters) {
     const name = (char.name || '').trim();
     if (!name) continue;
     const existing = db.prepare('SELECT id, name FROM characters WHERE drama_id = ? AND name = ? AND deleted_at IS NULL').get(dramaId, name);

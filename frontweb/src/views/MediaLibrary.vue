@@ -12,6 +12,7 @@
         <AccountBalanceBadge />
         <el-button type="warning" plain :disabled="!selectedIds.size" @click="batchDelete">批量归档{{ selectedIds.size ? `（${selectedIds.size}）` : '' }}</el-button>
         <el-button type="danger" plain :disabled="!total" @click="clearLibrary">一键归档{{ projectDramaId ? '项目素材' : '素材库' }}</el-button>
+        <el-button plain :disabled="!total || selectingAll" @click="selectAllFiltered">{{ selectingAll ? '正在全选…' : '全选筛选结果' }}</el-button>
         <el-button type="primary" plain @click="triggerUpload">
           <el-icon><Upload /></el-icon>
           上传素材
@@ -117,7 +118,7 @@
     <div v-if="selectedIds.size > 0" class="batch-bar">
       <span>已选 {{ selectedIds.size }} 项</span>
       <el-button size="small" @click="selectAllFiltered">选中全部筛选结果</el-button>
-      <el-button size="small" @click="selectedIds.clear()">取消选择</el-button>
+      <el-button size="small" @click="clearSelection">取消选择</el-button>
       <el-button v-if="canConcatSelected" size="small" @click="concatSelectedVideos">拼接选中视频</el-button>
       <el-button size="small" type="primary" plain @click="batchCertifyRealPeople">批量标记含真人并认证</el-button>
       <el-button size="small" type="danger" plain @click="batchDelete">批量归档</el-button>
@@ -142,7 +143,7 @@
       <div class="preview-meta">
         <div class="meta-row"><span>名称：</span>{{ previewItem?.name || '未命名' }}</div>
         <div class="meta-row"><span>大小：</span>{{ formatSize(previewItem?.size) }}</div>
-        <div class="meta-row"><span>创建时间：</span>{{ previewItem?.created_at }}</div>
+        <div class="meta-row"><span>创建时间：</span>{{ formatChinaDateTime(previewItem?.created_at, '—') }}</div>
         <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔" @change="saveTags" /></div>
         <section v-if="previewItem" class="remote-library-row">
           <div><b>上传到素材库</b></div>
@@ -174,7 +175,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, reactive, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, Upload, Search, Loading, CircleCheck,
@@ -186,6 +187,7 @@ import request from '@/utils/request'
 import AudioWaveform from '@/components/AudioWaveform.vue'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import { safeRedirectPath } from '@/utils/routeRecovery'
+import { formatChinaDateTime } from '@/utils/time'
 
 const loading = ref(false)
 const uploading = ref(false)
@@ -198,7 +200,9 @@ const page = ref(1)
 const pageSize = ref(30)
 const total = ref(0)
 const selectedIds = reactive(new Set())
-const selectedMedia = computed(() => mediaItems.value.filter((item) => selectedIds.has(item.id)))
+const selectedItemCache = reactive(new Map())
+const selectingAll = ref(false)
+const selectedMedia = computed(() => [...selectedIds].map((id) => selectedItemCache.get(Number(id))).filter(Boolean))
 const canConcatSelected = computed(() => selectedMedia.value.length >= 2 && selectedMedia.value.every((item) => item.type === 'video'))
 const showPreview = ref(false)
 const previewItem = ref(null)
@@ -269,7 +273,6 @@ function debouncedLoad() {
 
 function resetAndLoad() {
   page.value = 1
-  selectedIds.clear()
   return loadMedia()
 }
 
@@ -287,6 +290,7 @@ async function loadMedia() {
     if (favoriteOnly.value) params.favorite = 1
     const res = await request.get('/assets', { params })
     mediaItems.value = (res?.items || []).filter((item) => item && Number.isFinite(Number(item.id))).map(normalizeItem)
+    for (const item of mediaItems.value) selectedItemCache.set(item.id, item)
     total.value = Number(res?.pagination?.total ?? res?.total ?? 0)
     // 删除末页最后几条后原页码越界会得到空列表(看似素材全没了): 收敛页码后重载一次
     const maxPage = Math.max(1, Math.ceil(total.value / pageSize.value))
@@ -308,6 +312,7 @@ function normalizeItem(item) {
   const isAudio = item.type === 'audio'
   return {
     ...item,
+    id: Number(item.id),
     type: isAudio ? 'audio' : isVideo ? 'video' : 'image',
     name: item.name || item.filename || (url.split('/').pop()),
   }
@@ -328,11 +333,19 @@ function formatSize(size) {
 }
 
 function toggleSelect(item) {
-  if (selectedIds.has(item.id)) {
-    selectedIds.delete(item.id)
+  const id = Number(item?.id)
+  if (!Number.isFinite(id)) return
+  if (selectedIds.has(id)) {
+    selectedIds.delete(id)
+    selectedItemCache.delete(id)
   } else {
-    selectedIds.add(item.id)
+    selectedIds.add(id)
+    selectedItemCache.set(id, item)
   }
+}
+function clearSelection() {
+  selectedIds.clear()
+  selectedItemCache.clear()
 }
 function thumbnailUrl(item) {
   return item?.thumbnail_local_path ? '/static/' + item.thumbnail_local_path.replace(/^\//, '') : itemUrl(item)
@@ -383,7 +396,7 @@ async function concatSelectedVideos() {
     await ElMessageBox.confirm(`将按当前素材排序拼接 ${selectedMedia.value.length} 段视频，并保留原素材。`, '拼接视频', { type: 'info' })
     const item = await omniVideoAPI.concatAssets(selectedMedia.value.map((entry) => entry.id))
     mediaItems.value.unshift(normalizeItem(item)); total.value++
-    selectedIds.clear()
+    clearSelection()
     ElMessage.success('已拼接为新的派生视频素材')
   } catch (error) {
     if (error !== 'cancel' && error?.message !== 'cancel') ElMessage.error(error.message || '拼接视频失败')
@@ -494,31 +507,50 @@ async function batchDelete() {
   await ElMessageBox.confirm(`确定归档选中的 ${count} 个素材？归档后新镜头不能再选用；已有镜头不受影响。范围：${scopeLabel}。`, '批量归档', { type: 'warning', confirmButtonText: '归档选中素材', cancelButtonText: '取消' })
   try {
     const result = await request.post('/assets/batch-delete', { ids: [...selectedIds], scope: assetScope.value, ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}) })
-    selectedIds.clear()
+    clearSelection()
     ElMessage.success(result?.message || `${count} 个素材已归档`)
     loadMedia()
   } catch (error) { ElMessage.error(error.message || '批量删除失败') }
 }
 
 async function selectAllFiltered() {
-  const params = {
-    page: 1,
-    page_size: 500,
-    scope: assetScope.value,
-    ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}),
+  if (!total.value || selectingAll.value) return
+  selectingAll.value = true
+  try {
+    const baseParams = {
+      scope: assetScope.value,
+      ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}),
+    }
+    if (mediaType.value !== 'all') baseParams.type = mediaType.value
+    if (keyword.value) baseParams.keyword = keyword.value
+    if (favoriteOnly.value) baseParams.favorite = 1
+    const pageSize = 100
+    let currentPage = 1
+    let totalMatching = 0
+    let added = 0
+    while (currentPage === 1 || (currentPage - 1) * pageSize < totalMatching) {
+      const res = await request.get('/assets', { params: { ...baseParams, page: currentPage, page_size: pageSize } })
+      const items = (res?.items || []).filter((item) => item && Number.isFinite(Number(item.id))).map(normalizeItem)
+      const pagination = res?.pagination || {}
+      totalMatching = Number(pagination.total ?? res?.total ?? items.length)
+      for (const item of items) {
+        selectedIds.add(item.id)
+        selectedItemCache.set(item.id, item)
+        added += 1
+      }
+      if (!items.length || items.length < pageSize) break
+      currentPage += 1
+    }
+    ElMessage.success(`已选中 ${totalMatching || added} 项筛选结果`)
+  } catch (error) {
+    ElMessage.error(error.message || '全选筛选结果失败')
+  } finally {
+    selectingAll.value = false
   }
-  if (mediaType.value !== 'all') params.type = mediaType.value
-  if (keyword.value) params.keyword = keyword.value
-  if (favoriteOnly.value) params.favorite = 1
-  const res = await request.get('/assets', { params })
-  const ids = (res?.items || []).map((item) => Number(item?.id)).filter(Number.isFinite)
-  ids.forEach((id) => selectedIds.add(id))
-  if (Number(res?.pagination?.total ?? 0) > 500) ElMessage.info('素材较多，已选中前 500 项')
-  else ElMessage.success(`已选中 ${ids.length} 项`)
 }
 
 async function batchCertifyRealPeople() {
-  const ids = mediaItems.value.filter((item) => selectedIds.has(item.id) && item.type === 'image').map((item) => item.id)
+  const ids = selectedMedia.value.filter((item) => item.type === 'image').map((item) => item.id)
   if (!ids.length) return ElMessage.warning('请选择至少一张图片素材')
   try {
     await ElMessageBox.confirm(`将 ${ids.length} 张图片标记为含真人并自动认证；生成会等待认证完成后继续。`, '批量真人认证', { type: 'info' })
@@ -541,7 +573,7 @@ async function clearLibrary() {
       { type: 'warning', confirmButtonText: '确认归档', cancelButtonText: '取消' }
     )
     const result = await request.post('/assets/batch-delete', { all_matching: true, scope: assetScope.value, ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}), type: mediaType.value === 'all' ? undefined : mediaType.value, keyword: keyword.value || undefined, favorite: favoriteOnly.value ? 1 : undefined })
-    selectedIds.clear()
+    clearSelection()
     showPreview.value = false
     ElMessage.success(result?.message || (isProjectLibrary ? '项目素材已归档' : '素材库已归档'))
     await resetAndLoad()
@@ -551,6 +583,7 @@ async function clearLibrary() {
 }
 
 onMounted(loadMedia)
+onBeforeUnmount(() => window.clearTimeout(keywordTimer))
 </script>
 
 <style scoped>
@@ -615,6 +648,9 @@ onMounted(loadMedia)
   border-radius: 8px;
   overflow: hidden;
   border: 2px solid var(--border-subtle);
+  align-self: start;
+  min-block-size: fit-content;
+  height: auto;
   cursor: pointer;
   transition: all .2s;
   box-shadow: var(--shadow-sm);
@@ -676,7 +712,19 @@ onMounted(loadMedia)
 
 .overlay-actions {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.overlay-actions :deep(.el-button),
+.overlay-actions :deep(.el-button + .el-button) {
+  flex: 0 0 auto;
+  min-width: 28px;
+  margin-inline: 0;
+  padding-inline: 6px;
 }
 
 .media-info {
@@ -807,13 +855,13 @@ onMounted(loadMedia)
 .media-library-page{max-width:min(1520px,96vw);margin-inline:auto;padding:clamp(1rem,2.5vw,2rem)}.page-header{margin-block:clamp(.5rem,2vw,1.5rem)}.filter-bar{padding:.7rem;border:1px solid var(--border-subtle);border-radius:var(--radius-lg);background:color-mix(in srgb,var(--bg-raised) 74%,transparent)}.media-grid{gap:16px}.media-card{border-width:1px;border-radius:var(--radius-lg);background:color-mix(in srgb,var(--bg-surface) 92%,transparent);transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}.media-card:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--accent) 50%,var(--border-color))}.media-info{padding:10px}.media-name{font-size:13px;color:var(--text-primary)}@media(max-width:48rem){.media-library-page{padding:1rem}.page-header{align-items:flex-start;gap:.75rem;flex-direction:column}.header-actions{width:100%;overflow-x:auto;padding-block-end:.2rem}.header-actions :deep(.account-balance),.header-actions .el-button[type="danger"]{display:none}.filter-bar{gap:.65rem}.search-input{width:100%}.media-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.concat-bar{right:12px;bottom:12px}}
 .media-library-page{position:relative;padding-top:clamp(1.25rem,3.5vw,3.5rem);background:radial-gradient(50% 30% at 86% -4%,color-mix(in srgb,var(--accent) 15%,transparent),transparent 72%),var(--bg-page)}.library-header{position:relative;min-height:128px;margin-top:0!important;padding:clamp(18px,3vw,34px);overflow:hidden;border:1px solid color-mix(in srgb,var(--border-strong) 43%,transparent);border-radius:20px;background:linear-gradient(115deg,color-mix(in srgb,var(--bg-raised) 86%,transparent),color-mix(in srgb,var(--bg-surface) 87%,transparent));box-shadow:var(--shadow-sm)}.library-header::before{content:'';position:absolute;right:-34px;top:-126px;width:310px;height:310px;border:1px solid color-mix(in srgb,var(--accent-teal) 34%,transparent);border-radius:50%;box-shadow:0 0 0 48px color-mix(in srgb,var(--accent) 5%,transparent),0 0 0 96px color-mix(in srgb,var(--accent-teal) 4%,transparent)}.library-header .header-left,.library-header .header-actions{position:relative;z-index:1}.library-header .header-left{gap:18px}.library-kicker{margin:0 0 5px;color:var(--accent-teal);font-size:10px;font-weight:750;letter-spacing:.16em}.page-title{font-size:clamp(26px,3vw,38px);letter-spacing:-.05em}.library-subtitle{max-width:590px;margin:7px 0 0;color:var(--text-muted);font-size:13px;line-height:1.55}.upload-limits{margin:14px 4px 15px;padding-left:10px;border-left:2px solid color-mix(in srgb,var(--accent) 74%,transparent)}.filter-bar{position:sticky;top:10px;z-index:7;margin-bottom:22px;padding:10px 12px;border-radius:14px;background:color-mix(in srgb,var(--bg-surface) 86%,transparent);backdrop-filter:blur(14px);box-shadow:0 9px 30px rgba(0,0,0,.1)}.media-grid{grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:18px}.media-card{position:relative;border-radius:15px;box-shadow:0 14px 32px rgba(0,0,0,.1)}.media-card::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 10%,transparent),transparent 34%);opacity:0;transition:opacity var(--motion-fast) var(--motion-ease)}.media-card:hover::after,.media-card.selected::after{opacity:1}.media-thumb{aspect-ratio:4/3}.media-overlay{background:linear-gradient(to top,rgba(1,4,11,.76),rgba(1,4,11,.08) 68%)}.media-info{padding:12px 13px 13px}.media-meta-row{margin-top:6px}.empty-media{min-height:380px;border-radius:18px;background:linear-gradient(135deg,color-mix(in srgb,var(--bg-raised) 80%,transparent),color-mix(in srgb,var(--bg-surface) 86%,transparent))}.batch-bar{bottom:26px;border:1px solid color-mix(in srgb,var(--border-strong) 60%,transparent);background:color-mix(in srgb,var(--bg-elevated) 88%,transparent);backdrop-filter:blur(14px);box-shadow:var(--shadow-md)}@media(max-width:48rem){.library-header{min-height:0;padding:21px 18px}.library-header::before{right:-150px;top:-155px;opacity:.58}.library-header .header-left{align-items:flex-start}.library-header .header-left>.el-button{margin-top:3px}.library-subtitle{max-width:290px}.filter-bar{top:6px}.media-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.media-card{border-radius:12px}.media-thumb{aspect-ratio:1}.library-kicker{font-size:9px}}
 /* Asset room: a full-height library rail beside a bounded visual contact sheet. */
-.media-library-page { display:grid; grid-template-columns:22rem minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr) auto; gap:0; width:100%; max-width:none; height:100vh; height:100dvh; min-height:0; padding:0; overflow:hidden; background:var(--bg-page); }
-.library-header { grid-column:1; grid-row:1 / 5; display:flex; min-height:0; height:100%; margin:0!important; padding:clamp(2rem,4vw,4.5rem) 2.2rem; flex-direction:column; align-items:stretch; justify-content:space-between; border-width:0 1px 0 0; border-radius:0; background:radial-gradient(circle at 82% 16%,color-mix(in srgb,var(--accent) 25%,transparent),transparent 30%),linear-gradient(155deg,var(--bg-raised),#070a10 72%); }
+.media-library-page { display:grid; grid-template-columns:22rem minmax(0,1fr); grid-template-rows:0 auto minmax(max-content,auto) auto; gap:0; width:100%; max-width:none; min-height:100dvh; height:auto; padding:0; overflow:visible; background:var(--bg-page); }
+.library-header { position:sticky; top:0; z-index:5; grid-column:1; grid-row:1 / 5; align-self:start; display:flex; min-height:100dvh; height:auto; max-height:100dvh; overflow-x:hidden; overflow-y:auto; margin:0!important; padding:clamp(2rem,4vw,4.5rem) 2.2rem; flex-direction:column; align-items:stretch; justify-content:space-between; border-width:0 1px 0 0; border-radius:0; background:radial-gradient(circle at 82% 16%,color-mix(in srgb,var(--accent) 25%,transparent),transparent 30%),linear-gradient(155deg,var(--bg-raised),#070a10 72%); }
 .library-header .header-left { align-items:flex-start; flex-direction:column; gap:2.5rem; }.library-header .header-left > .el-button { margin:0; padding:0!important; border:0!important; background:transparent!important; }.library-header .page-title { font-size:clamp(3rem,4vw,4.6rem); line-height:.9; }.library-header .library-subtitle { margin-top:1.2rem; font-size:.82rem; line-height:1.7; }
 .library-header .header-actions { display:flex; align-items:stretch; flex-direction:column; gap:.55rem; width:100%; }.library-header .header-actions .el-button { width:100%; margin:0; }
 .upload-limits { grid-column:2; grid-row:1; margin:0; padding:.75rem 1.4rem; border:0; border-bottom:1px solid var(--border-subtle); color:var(--text-faint); font-size:.65rem; }
 .filter-bar { position:relative; top:auto; grid-column:2; grid-row:2; margin:0; padding:.85rem 1.2rem; border-width:0 0 1px; border-radius:0; background:color-mix(in srgb,var(--bg-surface) 90%,transparent); box-shadow:none; backdrop-filter:blur(.8rem); }
-.media-grid { grid-column:2; grid-row:3; align-content:start; min-height:0; padding:1.2rem; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
+.media-grid { grid-column:2; grid-row:3; align-content:start; align-items:start; grid-auto-rows:max-content; min-height:fit-content; height:auto; padding:1.2rem; overflow:visible; overscroll-behavior:contain; scrollbar-width:thin; }
 .pagination { grid-column:2; grid-row:4; margin:0; padding:.65rem 1.2rem; border-top:1px solid var(--border-subtle); background:var(--bg-surface); }
 .upload-progress { position:fixed; z-index:12; right:1.2rem; top:1.2rem; }
 .media-grid.sparse-library { display:grid; grid-template-columns:minmax(19rem,.72fr) minmax(30rem,1.28fr); align-content:stretch; gap:clamp(1.2rem,3vw,3.5rem); padding:clamp(1.5rem,3vw,3.6rem); }
@@ -825,7 +873,50 @@ onMounted(loadMedia)
 .sparse-asset-facts { display:grid; grid-template-columns:1.2fr .7fr 1fr; gap:0; border-top:1px solid var(--border-color); border-bottom:1px solid var(--border-color); }.sparse-asset-facts span { display:grid; gap:.45rem; min-width:0; padding:1rem; border-right:1px solid var(--border-color); }.sparse-asset-facts span:last-child { border-right:0; }.sparse-asset-facts small { color:var(--text-faint); font-size:.6rem; letter-spacing:.08em; }.sparse-asset-facts b { overflow:hidden; font-size:.78rem; text-overflow:ellipsis; white-space:nowrap; }
 .sparse-flow { display:flex; align-items:center; gap:.75rem; color:var(--text-faint); font:700 .62rem/1 ui-monospace,monospace; }.sparse-flow i { flex:1; height:1px; background:var(--border-color); }
 .sparse-actions { display:flex; gap:.7rem; }.sparse-actions button { padding:.85rem 1.1rem; border:1px solid var(--border-strong); border-radius:.55rem; background:transparent; color:var(--text-regular); cursor:pointer; }.sparse-actions button.primary { border-color:var(--accent); background:var(--accent); color:#fff; }
-@media(max-width:52rem){.media-library-page{grid-template-columns:1fr;grid-template-rows:auto auto minmax(0,1fr) auto}.library-header{grid-column:1;grid-row:1;min-height:10rem;height:auto;padding:1.2rem;border-width:0 0 1px;flex-direction:row;gap:1rem}.library-header .header-left{gap:.7rem}.library-header .page-title{font-size:2.5rem}.library-header .library-subtitle{display:none}.library-header .header-actions{width:auto;justify-content:flex-end}.library-header .header-actions :deep(.account-balance),.library-header .header-actions .el-button--danger{display:none}.upload-limits{display:none}.filter-bar{grid-column:1;grid-row:2}.media-grid{grid-column:1;grid-row:3}.pagination{grid-column:1;grid-row:4}.concat-bar{right:12px;bottom:72px}.batch-bar{right:12px;bottom:14px;max-width:calc(100vw - 24px)}}
+@media(max-width:52rem){.media-library-page{grid-template-columns:1fr;grid-template-rows:auto auto minmax(max-content,auto) auto}.library-header{grid-column:1;grid-row:1;min-height:10rem;height:auto;padding:1.2rem;border-width:0 0 1px;flex-direction:row;gap:1rem}.library-header .header-left{gap:.7rem}.library-header .page-title{font-size:2.5rem}.library-header .library-subtitle{display:none}.library-header .header-actions{width:auto;justify-content:flex-end}.library-header .header-actions :deep(.account-balance),.library-header .header-actions .el-button--danger{display:none}.upload-limits{display:none}.filter-bar{grid-column:1;grid-row:2}.media-grid{grid-column:1;grid-row:3}.pagination{grid-column:1;grid-row:4}.concat-bar{right:12px;bottom:72px}.batch-bar{right:12px;bottom:14px;max-width:calc(100vw - 24px)}}
 @media(max-width:70rem){.media-grid.sparse-library{grid-template-columns:minmax(16rem,.85fr) minmax(22rem,1.15fr);padding:1.2rem}.sparse-library-guide h3{font-size:3rem}.sparse-asset-facts{grid-template-columns:1fr}.sparse-asset-facts span{border-right:0;border-bottom:1px solid var(--border-color)}.sparse-asset-facts span:last-child{border-bottom:0}.sparse-flow{display:none}}
 @media(max-width:52rem){.media-grid.sparse-library{display:grid;grid-template-columns:1fr;grid-template-rows:minmax(0,.95fr) minmax(0,1.05fr);gap:.8rem;padding:1rem;overflow:hidden}.sparse-library>.media-card{min-height:0}.sparse-library>.media-card .audio-thumb{min-height:0}.sparse-library-guide{min-height:0;padding:.85rem 0}.sparse-library-guide h3{font-size:2rem}.sparse-library-guide>div:first-child>p:last-child{margin:.65rem 0 0;line-height:1.5}.sparse-asset-facts{display:none}.sparse-actions{gap:.55rem}.sparse-actions button{min-height:2.7rem;padding:.65rem .8rem}}
+
+/* Keep the contact sheet in normal document flow. The rail may stay visible,
+   but it must never turn the page or the cards into a clipped viewport. */
+.media-library-page {
+  padding-bottom: 10rem;
+}
+.batch-bar {
+  box-sizing: border-box;
+  max-width: calc(100vw - 32px);
+  flex-wrap: wrap;
+  justify-content: center;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+@media (max-width: 52rem) {
+  .media-library-page {
+    grid-template-rows: auto auto minmax(max-content, auto) auto;
+    min-height: 100dvh;
+    height: auto;
+    padding-bottom: 13rem;
+    overflow: visible;
+  }
+  .library-header {
+    position: relative;
+    top: auto;
+    z-index: auto;
+    min-height: 0;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+  .batch-bar {
+    left: 12px;
+    right: 12px;
+    bottom: 14px;
+    width: auto;
+    max-width: none;
+    padding: 10px 12px;
+    border-radius: 16px;
+    transform: none;
+    justify-content: flex-start;
+  }
+}
 </style>

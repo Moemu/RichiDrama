@@ -153,7 +153,6 @@ const modes = computed(() => props.media === 'image' ? [
   { label: '文生图', value: 'text', hint: '只使用提示词', rule: '不需要参考素材。' },
   { label: '单图参考', value: 'image', hint: '保持主体或构图', rule: '选择一张项目图片。' },
   { label: '多图参考', value: 'multi', hint: '融合多个元素', rule: '可选择多张项目图片。' },
-  { label: '组生组图', value: 'batch', hint: '共享风格批量出图', rule: '只使用提示词创建。' },
 ] : [
   { label: '文生视频', value: 'text', hint: '只使用提示词', rule: '不需要参考素材。' },
   { label: '图生视频', value: 'image', hint: '从一张图片起镜', rule: '选择一张图片作为起始参考。' },

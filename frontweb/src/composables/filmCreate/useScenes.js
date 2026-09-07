@@ -24,6 +24,11 @@ export function useScenes(deps) {
   const { store, dramaId, currentEpisodeId, getSelectedStyle, scriptLanguage, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage, dramaAPI } = deps
   const genStore = useGenerationTaskStore()
 
+  function nullableText(value) {
+    const text = value == null ? '' : String(value).trim()
+    return text || null
+  }
+
   function buildSceneImageMeta(scene) {
     const dramaTitle = store.drama?.title || ''
     const epNum = store.currentEpisode?.episode_number
@@ -259,10 +264,10 @@ export function useScenes(deps) {
       if (form.id) {
         await sceneAPI.update(form.id, {
           location: form.location.trim(),
-          time: form.time || undefined,
-          prompt: form.prompt || undefined,
-          polished_prompt: form.polished_prompt || undefined,
-          polished_prompt_single: form.polished_prompt_single || undefined
+          time: nullableText(form.time),
+          prompt: nullableText(form.prompt),
+          polished_prompt: nullableText(form.polished_prompt),
+          polished_prompt_single: nullableText(form.polished_prompt_single)
         })
         await saveSceneRefImageIfAny(form.id)
         ElMessage.success('场景已保存')

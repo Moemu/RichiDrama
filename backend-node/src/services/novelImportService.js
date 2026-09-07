@@ -5,12 +5,14 @@
 const aiClient = require('./aiClient');
 const { safeParseAIJSON } = require('../utils/safeJson');
 
+const MAX_NOVEL_TEXT_BYTES = 64 * 1024 * 1024;
+const MAX_NOVEL_CHAPTERS = 20;
+
 /**
  * 简单的章节检测（不调用 AI，基于规则）
  * 识别常见章节标题格式
  */
 function detectChaptersByRules(text) {
-  const lines = text.split(/\r?\n/);
   const chapterPatterns = [
     /^第[零一二三四五六七八九十百千\d]+章/,
     /^第[零一二三四五六七八九十百千\d]+节/,
@@ -24,23 +26,28 @@ function detectChaptersByRules(text) {
   let currentStart = 0;
   let currentTitle = '序章';
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
+  // Scan offsets instead of creating an array containing every line.
+  const linePattern = /[^\r\n]*(?:\r\n|\n|\r|$)/g;
+  let match;
+  while ((match = linePattern.exec(text))) {
+    const rawLine = match[0];
+    if (!rawLine) break;
+    const line = rawLine.replace(/(?:\r\n|\n|\r)$/, '').trim();
     if (!line) continue;
     const isChapter = chapterPatterns.some((p) => p.test(line));
     if (isChapter) {
-      if (i > currentStart) {
-        const content = lines.slice(currentStart, i).join('\n').trim();
+      if (match.index > currentStart) {
+        const content = text.slice(currentStart, match.index).trim();
         if (content.length > 20) {
           chapters.push({ title: currentTitle, content });
         }
       }
       currentTitle = line;
-      currentStart = i + 1;
+      currentStart = match.index + rawLine.length;
     }
   }
   // 最后一章
-  const lastContent = lines.slice(currentStart).join('\n').trim();
+  const lastContent = text.slice(currentStart).trim();
   if (lastContent.length > 20) {
     chapters.push({ title: currentTitle, content: lastContent });
   }
@@ -79,7 +86,11 @@ ${truncated}
  * @returns {{ chapters: Array<{title, content, script}> }}
  */
 async function importNovel(db, log, { text, title, maxChapters, aiSummarize }) {
-  if (!text || !text.trim()) throw new Error('小说内容不能为空');
+  if (!text || typeof text !== 'string') throw new Error('小说内容不能为空');
+  if (Buffer.byteLength(text, 'utf8') > MAX_NOVEL_TEXT_BYTES) {
+    throw new Error(`小说内容过大，最多支持 ${MAX_NOVEL_TEXT_BYTES / 1024 / 1024} MiB`);
+  }
+  if (!text.trim()) throw new Error('小说内容不能为空');
 
   const chapters = detectChaptersByRules(text);
   if (chapters.length === 0) {
@@ -87,7 +98,11 @@ async function importNovel(db, log, { text, title, maxChapters, aiSummarize }) {
     chapters.push({ title: title || '第一集', content: text.trim() });
   }
 
-  const limit = Math.min(maxChapters || 20, chapters.length);
+  const parsedMaxChapters = Number(maxChapters);
+  const requestedLimit = Number.isFinite(parsedMaxChapters) && parsedMaxChapters > 0
+    ? Math.floor(parsedMaxChapters)
+    : MAX_NOVEL_CHAPTERS;
+  const limit = Math.min(Math.max(1, requestedLimit), MAX_NOVEL_CHAPTERS, chapters.length);
   const result = [];
 
   for (let i = 0; i < limit; i++) {
@@ -107,4 +122,4 @@ async function importNovel(db, log, { text, title, maxChapters, aiSummarize }) {
   return { chapters: result, total: chapters.length };
 }
 
-module.exports = { importNovel, detectChaptersByRules };
+module.exports = { importNovel, detectChaptersByRules, MAX_NOVEL_TEXT_BYTES, MAX_NOVEL_CHAPTERS };

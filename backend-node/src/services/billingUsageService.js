@@ -9,8 +9,8 @@ function positiveInteger(value) {
 
 function textUsage(raw) {
   const usage = raw && typeof raw === 'object' ? raw : {};
-  const input = positiveInteger(usage.prompt_tokens ?? usage.input_tokens ?? usage.input_token_count);
-  const output = positiveInteger(usage.completion_tokens ?? usage.output_tokens ?? usage.output_token_count);
+  const input = positiveInteger(usage.prompt_tokens ?? usage.input_tokens ?? usage.input_token_count ?? usage.input_token);
+  const output = positiveInteger(usage.completion_tokens ?? usage.output_tokens ?? usage.output_token_count ?? usage.output_token);
   if (input == null && output == null) return null;
   const result = {};
   if (input != null) result.input_token = input;
@@ -34,4 +34,23 @@ function hasTokenMeter(snapshot) {
   return Object.keys(snapshot?.usage || {}).some((meter) => meter === 'input_token' || meter === 'output_token');
 }
 
-module.exports = { textUsage, unicodeCharacterCount, textReservation, hasTokenMeter };
+function tokenMeters(snapshot) {
+  return Object.keys(snapshot?.usage || {})
+    .filter((meter) => meter === 'input_token' || meter === 'output_token');
+}
+
+// A multi-request workflow may aggregate enough tokens to look complete even
+// when one provider response omitted a meter. Validate every response before
+// settling so the workflow goes to reconciliation instead of undercharging.
+function hasCompleteTextUsage(snapshot, normalizedUsage, samples = null) {
+  const required = tokenMeters(snapshot);
+  if (!required.length) return true;
+  const responses = samples === null ? [normalizedUsage] : samples;
+  if (!Array.isArray(responses) || responses.length === 0) return false;
+  return responses.every((sample) => {
+    const usage = textUsage(sample);
+    return usage && required.every((meter) => Object.prototype.hasOwnProperty.call(usage, meter));
+  });
+}
+
+module.exports = { textUsage, unicodeCharacterCount, textReservation, hasTokenMeter, tokenMeters, hasCompleteTextUsage };

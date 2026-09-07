@@ -833,7 +833,7 @@ input_reference = (图片文件，可选)</pre>
         </div>
 
         <template v-if="form.service_type !== 'jimeng2_character_auth'">
-        <el-form-item>
+        <el-form-item prop="modelText">
           <template #label>
             <span class="form-label-tip">模型列表
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
@@ -1403,6 +1403,15 @@ const rules = computed(() => ({
   name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
   provider: [{ required: true, message: '请选择或输入厂商', trigger: 'change' }],
   base_url: [{ required: true, message: '请输入 Base URL', trigger: 'blur' }],
+  modelText: [
+    {
+      validator: (_rule, value, cb) => {
+        if (form.value.service_type === 'jimeng2_character_auth' || parseModelText(value).length > 0) return cb()
+        cb(new Error('至少填写一个模型'))
+      },
+      trigger: 'blur',
+    },
+  ],
   api_key: [
     {
       validator: (_rule, v, cb) => {
@@ -2036,12 +2045,20 @@ function openEdit(row) {
 }
 
 async function submit() {
-  await formRef.value?.validate?.().catch(() => {})
+  try {
+    await formRef.value?.validate?.()
+  } catch (_) {
+    return
+  }
   saving.value = true
   try {
     let modelList = parseModelText(form.value.modelText)
     if (form.value.service_type === 'jimeng2_character_auth' && modelList.length === 0) {
       modelList = ['-']
+    }
+    if (form.value.service_type !== 'model_ark_asset' && modelList.length === 0) {
+      ElMessage.warning('至少填写一个模型')
+      return
     }
     const defaultModel = form.value.default_model && modelList.includes(form.value.default_model)
       ? form.value.default_model

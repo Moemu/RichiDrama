@@ -35,7 +35,7 @@ const tools = [
   { title: '剧本分析', icon: '◎', tone: 'blue', label: '文本策划', input: '剧本与项目设定', output: '角色、场景、镜头建议', description: '把剧本拆解为可制作的结构化信息。', to: '/ai-tools/script-analysis', group: 'writing' },
   { title: '剧本分析（流式）', icon: '≋', tone: 'copper', label: '批量处理', input: '多个 TXT / 剧本', output: '可续写的分析记录', description: '适合长剧本与批量拆解，运行过程持续保存。', to: '/ai-tools/script-analysis-stream', group: 'writing' },
   { title: '剧本创作', icon: '✦', tone: 'green', label: '文本策划', input: '创意、题材、集数', output: '分集短剧正文', description: '从灵感扩写为分集短剧，可导入项目。', to: '/ai-tools/script-writing', group: 'writing' },
-  { title: '图片生成', icon: '▣', tone: 'blue', label: '视觉生成', input: '提示词与参考图', output: '图片生成记录', description: '支持文生图、图生图、多参考与组生组图。', to: '/ai-tools/image-generation', group: 'visual' },
+  { title: '图片生成', icon: '▣', tone: 'blue', label: '视觉生成', input: '提示词与参考图', output: '图片生成记录', description: '支持文生图、图生图与多参考。', to: '/ai-tools/image-generation', group: 'visual' },
   { title: '视频生成', icon: '▶', tone: 'copper', label: '视频工作流', input: '提示词、首尾帧、参考', output: '视频任务与成片', description: '按模型能力选择文生、图生、首尾帧或多参考模式。', to: '/ai-tools/video-generation', group: 'visual' },
   { title: '反推提示词', icon: '◌', tone: 'green', label: '素材分析', input: '图片或视频素材', output: '镜头与风格提示词', description: '从视觉素材提炼主体、构图、光影、运动与完整提示词。', to: '/ai-tools/reverse-prompt', group: 'visual' },
 ]

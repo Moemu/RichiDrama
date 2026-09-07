@@ -364,6 +364,8 @@ test('专项工具页沿用中文工作台标签和产品主色', async () => {
     assert.match(workbench, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   }
   assert.doesNotMatch(workbench, /AI RUN STUDIO|INPUT DECK|RUN ARCHIVE|OUTPUT STAGE/)
+  assert.match(workbench, /<template v-else-if="kind === 'reverse_prompt'">[\s\S]*ToolAssetSelector/)
+  assert.doesNotMatch(workbench, /<template v-else><ToolAssetSelector/)
   assert.match(media, /<h1 id="tool-title">\{\{ media === 'image' \? '生成单张图片' : '直接生成单个视频' \}\}<\/h1>/)
   assert.match(media, /<h2>素材库<\/h2>/)
   assert.match(media, /class="history-toggle"/)
@@ -389,10 +391,12 @@ test('单视频工具直达生成并引用账号全部素材', async () => {
   assert.match(media, /omniVideoAPI\.list\(\{ tool_only: 1 \}\)/)
   assert.match(media, /videosAPI\.list\(\{ page_size: 30, tool_only: 1 \}\)/)
   assert.match(media, /history_kind: 'legacy'/)
-  assert.match(media, /label: '组生组图', value: 'batch'/)
+  assert.doesNotMatch(media, /label: '组生组图'|value: 'batch'/)
+  // 旧状态即使残留 batch，也必须继续按无参考素材提交，避免改变历史载荷语义。
+  assert.match(media, /mode\.value === 'text' \|\| mode\.value === 'batch'/)
   assert.match(selector, /scope: 'project', drama_id: Number\(props\.dramaId\)/)
   assert.match(selector, /scope: 'global'/)
-  assert.match(selector, /loadScope\(\{ scope: 'all' \}\)/)
+  assert.match(selector, /loadScope\(\{ scope: 'all', type, keyword \}\)/)
   assert.match(selector, /可引用项目素材和个人素材/)
   assert.match(selector, /drama_id: Number\(props\.dramaId\) \|\| undefined/)
   assert.match(selector, /multiple/)

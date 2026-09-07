@@ -19,6 +19,15 @@ function appendPrompt(base, extra) {
   return current + ', ' + add;
 }
 
+function buildPropImagePrompt(prompt, style, useQuadGrid) {
+  const base = appendPrompt(prompt, style);
+  if (!useQuadGrid) return base;
+  return appendPrompt(
+    base,
+    'Create exactly four consistent views of the same prop in one 2x2 grid: front, left side, right side, and back. No borders or labels.'
+  );
+}
+
 async function processPropImageGeneration(db, log, taskId, propId, opts) {
   taskService.updateTaskStatus(db, taskId, 'processing', 0, '正在生成图片...');
 
@@ -60,7 +69,11 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
     } catch (_) {}
   }
   if (!imageSize) imageSize = cfg?.style?.default_image_size || '1920x1920';
-  const fullPrompt = appendPrompt(String(prop.prompt).trim(), style);
+  const fullPrompt = buildPropImagePrompt(
+    String(prop.prompt).trim(),
+    style,
+    opts?.use_quad_grid === true
+  );
   // 与角色/场景一致：使用前端「图片生成模型」选择的 model；未传时用 YAML default_image_provider 兜底
   const model = (opts && opts.model) ? String(opts.model).trim() || null : null;
   const preferredProvider = !model && cfg?.ai?.default_image_provider ? cfg.ai.default_image_provider : null;

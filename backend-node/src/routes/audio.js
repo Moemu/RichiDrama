@@ -70,11 +70,40 @@ function routes(db, log, cfg) {
       if (!Array.isArray(storyboard_ids) || storyboard_ids.length === 0) {
         return response.badRequest(res, 'storyboard_ids 不能为空');
       }
+      const maxBatchSize = 10;
+      if (storyboard_ids.length > maxBatchSize) {
+        return response.badRequest(res, `单次最多处理${maxBatchSize}个分镜`);
+      }
+      // ownershipGuard can validate a singular storyboard_id, but this batch
+      // endpoint accepts an array. Validate every item before synthesizing so
+      // a mixed-owner request cannot read or update another user's dialogue.
+      const requestedIds = [];
+      const seenIds = new Set();
+      for (const rawId of storyboard_ids) {
+        const id = Number(rawId);
+        if (!Number.isInteger(id) || id <= 0) return response.badRequest(res, 'storyboard_ids 包含无效 ID');
+        if (!seenIds.has(id)) {
+          seenIds.add(id);
+          requestedIds.push(id);
+        }
+      }
+      const rows = [];
+      for (const id of requestedIds) {
+        const row = db.prepare(`SELECT s.id, s.dialogue, d.owner_user_id
+          FROM storyboards s
+          JOIN episodes e ON e.id = s.episode_id
+          JOIN dramas d ON d.id = e.drama_id
+          WHERE s.id = ? AND s.deleted_at IS NULL AND e.deleted_at IS NULL AND d.deleted_at IS NULL`).get(id);
+        if (!row || Number(row.owner_user_id) !== Number(req.auth.id)) {
+          return response.notFound(res, '资源不存在');
+        }
+        rows.push(row);
+      }
       const results = [];
       const storagePath = getStoragePath();
-      for (const sbId of storyboard_ids) {
-        const row = db.prepare('SELECT id, dialogue FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(sbId));
-        if (!row || !row.dialogue?.trim()) {
+      for (const row of rows) {
+        const sbId = row.id;
+        if (!row.dialogue?.trim()) {
           results.push({ storyboard_id: sbId, error: '对白为空' });
           continue;
         }

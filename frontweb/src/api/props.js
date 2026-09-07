@@ -16,10 +16,14 @@ export const propAPI = {
   generatePrompt(id, model, style) {
     return request.post(`/props/${id}/generate-prompt`, { model, style })
   },
-  generateImage(id, model, style) {
-    const body = { model, style }
-    if (body.model == null && body.style == null) return request.post(`/props/${id}/generate`)
-    return request.post(`/props/${id}/generate`, body)
+  generateImage(id, model, style, useQuadGrid) {
+    const body = {}
+    if (model !== undefined && model !== null) body.model = model
+    if (style !== undefined && style !== null) body.style = style
+    if (useQuadGrid !== undefined) body.use_quad_grid = !!useQuadGrid
+    return Object.keys(body).length
+      ? request.post(`/props/${id}/generate`, body)
+      : request.post(`/props/${id}/generate`)
   },
   extractFromScript(episodeId) {
     return request.post(`/episodes/${episodeId}/props/extract`)

@@ -135,6 +135,12 @@ async function processBackgroundExtraction(db, cfg, log, taskID, episodeId, mode
     );
     backgroundsInfo = translated;
   }
+  // An empty extraction must never replace existing scenes. Treat it as a
+  // failed task so the caller can retry while the current data stays intact.
+  if (!Array.isArray(backgroundsInfo) || backgroundsInfo.length === 0) {
+    taskService.updateTaskError(db, taskID, '未提取到有效场景，原有场景已保留，请重试');
+    return;
+  }
   sceneService.deleteScenesByEpisodeId(db, log, episodeId);
   const scenes = [];
   for (const bg of backgroundsInfo) {

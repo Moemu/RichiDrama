@@ -22,6 +22,69 @@ function normalizeApiKeyForService(serviceType, apiKey) {
   }
   return apiKey;
 }
+
+function parseSettings(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function usesOfficialAccessSecret(body, existing = null) {
+  const serviceType = String(body.service_type ?? existing?.service_type ?? '').trim();
+  const protocol = String(body.api_protocol ?? existing?.api_protocol ?? '').trim();
+  const settings = parseSettings(body.settings ?? existing?.settings);
+  if (serviceType === 'model_ark_asset') {
+    return Boolean(String(settings.access_key_id || '').trim() && String(settings.secret_access_key || '').trim());
+  }
+  return serviceType === 'video'
+    && protocol === 'kling_omni'
+    && Boolean(String(settings.kling_access_key || '').trim() && String(settings.kling_secret_key || '').trim());
+}
+
+function modelList(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
+  if (value == null) return [];
+  return [String(value).trim()].filter(Boolean);
+}
+
+/**
+ * Validate user-facing AI configuration requests. Internal template creation
+ * intentionally uses createConfig directly and may keep credentials blank.
+ */
+function validateConfigRequest(body = {}, { mode = 'create', existing = null } = {}) {
+  const required = ['service_type', 'name', 'provider', 'base_url'];
+  if (mode === 'create') {
+    const missing = required.filter((field) => !String(body[field] ?? '').trim());
+    if (missing.length) throw new Error(`缺少必填字段: ${missing.join(', ')}`);
+  } else {
+    for (const field of required) {
+      if (Object.prototype.hasOwnProperty.call(body, field) && !String(body[field] ?? '').trim()) {
+        throw new Error(`${field} 不能为空`);
+      }
+    }
+  }
+
+  const effective = { ...(existing || {}), ...body };
+  const specialCredential = usesOfficialAccessSecret(effective, existing);
+  const hasApiKey = Object.prototype.hasOwnProperty.call(body, 'api_key');
+  const apiKey = body.api_key == null ? '' : String(body.api_key).trim();
+  const masked = isMaskedApiKey(body.api_key);
+  if ((mode === 'create' || hasApiKey) && !masked && !apiKey && !specialCredential) {
+    throw new Error('api_key 不能为空；官方 AK/SK 配置可不填 API Key');
+  }
+
+  const hasModel = Object.prototype.hasOwnProperty.call(body, 'model');
+  const shouldValidateModel = mode === 'create' || hasModel;
+  if (shouldValidateModel && effective.service_type !== 'model_ark_asset' && !modelList(effective.model).length) {
+    throw new Error('至少配置一个模型');
+  }
+  return true;
+}
 const { applyDeepSeekConnectivityOptions } = require('./deepseekConfig');
 function modelToDb(model) {
   if (model == null) return null;
@@ -671,6 +734,7 @@ module.exports = {
   testConnection,
   maskApiKey,
   isMaskedApiKey,
+  validateConfigRequest,
   getVendorLockStatus,
   applyVendorLock,
   bulkUpdateApiKey,

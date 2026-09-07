@@ -189,8 +189,8 @@ function create(db, log, body, billingUser) {
     db.prepare(`UPDATE video_generations SET billing_authorization_id = ?, provider = ?, prompt = ?, model = ?, duration = ?, aspect_ratio = ?, resolution = ?, upscale_resolution = ?, target_fps = ?, seed = ?, camera_fixed = ?, watermark = ?, image_url = ?, first_frame_url = ?, last_frame_url = ?, reference_image_urls = ?, status = ?, error_msg = NULL, updated_at = ? WHERE id = ?`)
       .run(authorization.authorization_id, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution, targetFps, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0, imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null, imageUrls.length ? JSON.stringify(imageUrls) : null, 'processing', now, videoGenerationId);
   } else {
-    const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, status, task_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`)
+    const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, postprocess_recovery_version, status, task_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?)`)
       .run(Number(body.drama_id) || null, body.storyboard_id ? Number(body.storyboard_id) : null, body.owner_user_id || payer.id, tenantId, authorization?.authorization_id || null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution,
         targetFps, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
         imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null,
@@ -886,6 +886,10 @@ function retryPostprocess(db, log, omniJobId, actor, requestedStage) {
       if (result?.local_path) await videoService.resumePostprocessVideoGeneration(db, log, job.video_generation_id);
     });
   }
+  // Only an explicit user retry opts historical generations into automatic
+  // post-process recovery. Stage helpers are also used by upstream recovery.
+  db.prepare(`UPDATE video_generations SET postprocess_recovery_version=1, updated_at=?
+    WHERE id=? AND deleted_at IS NULL`).run(new Date().toISOString(), job.video_generation_id);
   return get(db, job.omni_job_id);
 }
 
@@ -1070,7 +1074,11 @@ async function cancelJob(db, log, jobId, user) {
   const message = generation.provider_task_id
     ? '用户取消：火山排队任务已取消，已释放预授权'
     : '用户取消：任务尚未提交模型，已停止并释放预授权';
-  db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run('failed', message, now, generation.id);
+  const cancelled = db.prepare(`UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ?
+    WHERE id = ? AND status IN ('sd2_waiting', 'processing')`).run('failed', message, now, generation.id);
+  if (!cancelled.changes) {
+    throw new Error('任务状态已变化，取消未改变最终结果；请刷新状态');
+  }
   if (generation.task_id) {
     try { require('./taskService').updateTaskError(db, generation.task_id, message); } catch (_) {}
   }

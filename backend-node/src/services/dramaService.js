@@ -29,6 +29,11 @@ function safeParseJsonObject(value) {
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
 }
 
+function safeParseJsonArray(value) {
+  const parsed = parseJsonColumn(value);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
 function createDrama(db, log, req) {
   const now = new Date().toISOString();
   let meta = {};
@@ -393,6 +398,13 @@ function rowToStoryboard(r) {
     polished_prompt: r.polished_prompt ?? null,
     continuity_snapshot: r.continuity_snapshot ?? null,
     video_prompt: r.video_prompt,
+    text_model: r.text_model ?? null,
+    video_model: r.video_model ?? null,
+    video_resolution: r.video_resolution ?? null,
+    video_upscale_resolution: r.video_upscale_resolution ?? null,
+    video_target_fps: r.video_target_fps ?? null,
+    video_aspect_ratio: r.video_aspect_ratio ?? null,
+    generation_overrides: safeParseJsonObject(r.generation_overrides_json),
       shot_type: r.shot_type ?? null,
       angle: r.angle ?? null,
       angle_h: r.angle_h ?? null,
@@ -401,26 +413,42 @@ function rowToStoryboard(r) {
       movement: r.movement ?? null,
       lighting_style: r.lighting_style ?? null,
       depth_of_field: r.depth_of_field ?? null,
+      emotion: r.emotion ?? null,
+      emotion_intensity: r.emotion_intensity ?? null,
       segment_index: r.segment_index ?? 0,
       segment_title: r.segment_title ?? null,
       creation_mode: r.creation_mode === 'universal' ? 'universal' : 'classic',
       universal_segment_text: r.universal_segment_text ?? null,
       omni_prompt_document: safeParseJsonObject(r.omni_prompt_document_json),
+      omni_asset_ids: safeParseJsonArray(r.omni_asset_ids),
+      audio_strategy: r.audio_strategy || 'reference_only',
+      keep_original_audio: !!r.keep_original_audio,
+      audio_volume: r.audio_volume ?? 1,
+      audio_fade_seconds: r.audio_fade_seconds ?? 0,
+      omni_creation_mode: r.omni_creation_mode || 'multi_reference',
+      omni_asset_send_policy: r.omni_asset_send_policy || 'all_selected',
+      omni_first_frame_asset_id: r.omni_first_frame_asset_id != null ? Number(r.omni_first_frame_asset_id) : null,
+      omni_last_frame_asset_id: r.omni_last_frame_asset_id != null ? Number(r.omni_last_frame_asset_id) : null,
+      omni_asset_usage: safeParseJsonObject(r.omni_asset_usage_json),
+      layout_description: r.layout_description ?? null,
       first_frame_image_id: r.first_frame_image_id ?? null,
       last_frame_image_id: r.last_frame_image_id ?? null,
       last_frame_image_url: sanitizeImageUrl(r.last_frame_image_url),
       last_frame_local_path: r.last_frame_local_path ?? null,
       characters: parseStoryboardCharacters(r.characters),
+      prop_ids: [],
       composed_image: r.composed_image,
       image_url: sanitizeImageUrl(r.image_url),
       local_path: r.local_path ?? null,
       main_panel_idx: r.main_panel_idx != null ? Number(r.main_panel_idx) : null,
-      video_url: r.video_url,
+      video_url: (r.local_path && /\.(?:mp4|webm|mov|m4v|avi|mkv)(?:[?#].*)?$/i.test(String(r.local_path).trim()))
+        ? `/static/${String(r.local_path).trim().replace(/^\/+/, '')}`
+        : (r.video_url || null),
       active_video_generation_id: r.active_video_generation_id ?? null,
       audio_local_path: r.audio_local_path ?? null,
       narration_audio_local_path: r.narration_audio_local_path ?? null,
       status: r.status || 'pending',
-      error_msg: r.error_msg,
+      error_msg: r.error_msg ?? null,
       created_at: r.created_at,
       updated_at: r.updated_at,
     };

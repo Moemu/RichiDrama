@@ -338,12 +338,14 @@ function createAutomaticTextAuthorization(db, config, model, userPrompt, systemP
 
 function settleAutomaticTextAuthorization(ticket, providerUsage, providerRequestId) {
   if (!ticket) return;
-  const usage = require('./billingUsageService').textUsage(providerUsage);
+  const usageService = require('./billingUsageService');
+  const usage = usageService.textUsage(providerUsage);
   const snapshot = ticket.authorization.snapshot;
-  if (require('./billingUsageService').hasTokenMeter(snapshot) && !usage) {
+  if (!usageService.hasCompleteTextUsage(snapshot, usage)) {
     ticket.billing.markPendingReconciliation(ticket.db, ticket.actor, ticket.authorization.authorization_id, {
       provider_request_id: providerRequestId,
-      reason: '文本供应商成功响应但未返回实际 token 用量',
+      observed_usage: usage || undefined,
+      reason: '文本供应商成功响应但未返回完整 token 用量',
     });
     return;
   }
@@ -802,6 +804,7 @@ async function generateTextWithVision(db, log, serviceType, userPrompt, systemPr
   }
   log.info('[Vision] 请求成功', { model, elapsed_ms: Date.now() - startMs, result_len: content.length, result_preview: content.slice(0, 100) });
   settleAutomaticTextAuthorization(billingTicket, res.usage, res.provider_request_id);
+  if (typeof options.usage_callback === 'function') options.usage_callback(res.usage, res.provider_request_id);
   return content.trim();
 }
 

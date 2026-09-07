@@ -31,6 +31,10 @@ async function generateStory(db, log, body) {
     tenant_id: body.tenant_id || undefined,
     temperature: 0.8,
     min_max_tokens: minTokensNeeded,
+    // Tool runs pass this callback through so their single project-scoped
+    // authorization can settle against the provider's actual usage.  The
+    // normal story endpoint leaves it undefined and keeps its existing flow.
+    usage_callback: typeof body.usage_callback === 'function' ? body.usage_callback : undefined,
   });
 
   log && log.info && log.info('Story raw response', {

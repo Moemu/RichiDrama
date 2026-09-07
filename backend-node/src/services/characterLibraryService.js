@@ -18,6 +18,7 @@ const {
   normalizeSourceId,
   updateLibraryItem: updateExistingLibraryItem,
 } = require('./libraryDedup');
+const libraryOwnership = require('./libraryOwnership');
 
 function applyStyleOverrideToCfg(cfg, styleOverride) {
   const o = (styleOverride || '').toString().trim();
@@ -100,28 +101,33 @@ function generateCharacterImage(db, log, cfg, characterId, modelName, style) {
   return { ok: true, image_generation: imageGen };
 }
 
-function listLibraryItems(db, query) {
-  let sql = 'FROM character_libraries WHERE deleted_at IS NULL';
+function listLibraryItems(db, query, actor = null) {
+  let sql = `FROM character_libraries l LEFT JOIN dramas d ON d.id = l.drama_id${libraryOwnership.activeDramaPredicate('d')} WHERE l.deleted_at IS NULL`;
   const params = [];
+  const actorId = libraryOwnership.actorId(actor);
+  if (actorId != null) {
+    sql += ' AND (l.drama_id IS NULL OR d.owner_user_id = ?)';
+    params.push(actorId);
+  }
   if (query.global === '1' || query.global === 1) {
     // 仅全局素材库（drama_id IS NULL）
-    sql += ' AND drama_id IS NULL';
+    sql += ' AND l.drama_id IS NULL';
   } else if (query.drama_id != null && query.drama_id !== '') {
     // 本剧资源库
-    sql += ' AND drama_id = ?';
+    sql += ' AND l.drama_id = ?';
     params.push(Number(query.drama_id));
   }
   if (query.category) {
-    sql += ' AND category = ?';
+    sql += ' AND l.category = ?';
     params.push(query.category);
   }
   if (query.source_type) {
-    sql += ' AND source_type = ?';
+    sql += ' AND l.source_type = ?';
     params.push(query.source_type);
   }
   sql = appendSourceIdFilters(query, sql, params);
   if (query.keyword) {
-    sql += ' AND (name LIKE ? OR description LIKE ?)';
+    sql += ' AND (l.name LIKE ? OR l.description LIKE ?)';
     const k = '%' + query.keyword + '%';
     params.push(k, k);
   }
@@ -130,11 +136,12 @@ function listLibraryItems(db, query) {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 20));
   const offset = (page - 1) * pageSize;
-  const rows = db.prepare('SELECT * ' + sql + ' ORDER BY created_at DESC LIMIT ? OFFSET ?').all(...params, pageSize, offset);
+  const rows = db.prepare('SELECT l.* ' + sql + ' ORDER BY l.created_at DESC LIMIT ? OFFSET ?').all(...params, pageSize, offset);
   return { items: rows.map(rowToItem), total, page, pageSize };
 }
 
-function createLibraryItem(db, log, req) {
+function createLibraryItem(db, log, req, actor = null) {
+  libraryOwnership.assertCreate(db, req.drama_id, actor);
   const now = new Date().toISOString();
   const sourceType = req.source_type || 'generated';
   const info = insertLibraryItem(db, 'character_libraries', {
@@ -154,33 +161,37 @@ function createLibraryItem(db, log, req) {
   return getLibraryItem(db, String(info.lastInsertRowid));
 }
 
-function getLibraryItem(db, id) {
-  const row = db.prepare('SELECT * FROM character_libraries WHERE id = ? AND deleted_at IS NULL').get(Number(id));
+function getLibraryItem(db, id, actor = null) {
+  const row = libraryOwnership.read(db, 'character_libraries', id, actor);
   return row ? rowToItem(row) : null;
 }
 
-function updateLibraryItem(db, log, id, req) {
-  const row = db.prepare('SELECT id FROM character_libraries WHERE id = ? AND deleted_at IS NULL').get(Number(id));
+function updateLibraryItem(db, log, id, req, actor = null) {
+  const row = libraryOwnership.writable(db, 'character_libraries', id, actor);
   if (!row) return null;
   const updates = [];
   const params = [];
-  if (req.name != null) { updates.push('name = ?'); params.push(req.name); }
-  if (req.category != null) { updates.push('category = ?'); params.push(req.category); }
-  if (req.description != null) { updates.push('description = ?'); params.push(req.description); }
-  if (req.tags != null) { updates.push('tags = ?'); params.push(req.tags); }
-  if (req.image_url != null) { updates.push('image_url = ?'); params.push(req.image_url); }
-  if (req.local_path != null) { updates.push('local_path = ?'); params.push(req.local_path); }
-  if (req.source_type != null) { updates.push('source_type = ?'); params.push(req.source_type); }
-  if (req.source_id != null) { updates.push('source_id = ?'); params.push(normalizeSourceId(req.source_id)); }
-  if (updates.length === 0) return getLibraryItem(db, id);
+  // A missing property means "leave it unchanged". JSON null is an
+  // explicit clear, including for optional text and media fields.
+  if (req.name !== undefined) { updates.push('name = ?'); params.push(req.name ?? ''); }
+  if (req.category !== undefined) { updates.push('category = ?'); params.push(req.category); }
+  if (req.description !== undefined) { updates.push('description = ?'); params.push(req.description); }
+  if (req.tags !== undefined) { updates.push('tags = ?'); params.push(req.tags); }
+  if (req.image_url !== undefined) { updates.push('image_url = ?'); params.push(req.image_url); }
+  if (req.local_path !== undefined) { updates.push('local_path = ?'); params.push(req.local_path); }
+  if (req.source_type !== undefined) { updates.push('source_type = ?'); params.push(req.source_type); }
+  if (req.source_id !== undefined) { updates.push('source_id = ?'); params.push(req.source_id == null ? null : normalizeSourceId(req.source_id)); }
+  if (updates.length === 0) return getLibraryItem(db, id, actor);
   params.push(new Date().toISOString(), Number(id));
   db.prepare('UPDATE character_libraries SET ' + updates.join(', ') + ', updated_at = ? WHERE id = ?').run(...params);
   log.info('Library item updated', { item_id: id });
-  return getLibraryItem(db, id);
+  return getLibraryItem(db, id, actor);
 }
 
-function deleteLibraryItem(db, log, id) {
+function deleteLibraryItem(db, log, id, actor = null) {
   const now = new Date().toISOString();
+  const row = libraryOwnership.writable(db, 'character_libraries', id, actor);
+  if (!row) return false;
   const result = db.prepare('UPDATE character_libraries SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').run(now, Number(id));
   if (result.changes === 0) return false;
   log.info('Library item deleted', { item_id: id });
@@ -314,21 +325,22 @@ function updateCharacter(db, log, characterId, req) {
   if (!drama) return { ok: false, error: 'unauthorized' };
   const updates = [];
   const params = [];
-  if (req.name != null) { updates.push('name = ?'); params.push(req.name); }
-  if (req.role != null) { updates.push('role = ?'); params.push(req.role); }
-  if (req.appearance != null) { updates.push('appearance = ?'); params.push(req.appearance); }
-  if (req.personality != null) { updates.push('personality = ?'); params.push(req.personality); }
-  if (req.description != null) { updates.push('description = ?'); params.push(req.description); }
-  if (req.image_url != null) { updates.push('image_url = ?'); params.push(req.image_url); }
-  if (req.local_path != null) { updates.push('local_path = ?'); params.push(req.local_path); }
-  if (req.polished_prompt != null) { updates.push('polished_prompt = ?'); params.push(req.polished_prompt); }
-  if (req.stages != null) { updates.push('stages = ?'); params.push(typeof req.stages === 'string' ? req.stages : JSON.stringify(req.stages)); }
+  if (req.name !== undefined) { updates.push('name = ?'); params.push(req.name ?? ''); }
+  if (req.role !== undefined) { updates.push('role = ?'); params.push(req.role); }
+  if (req.appearance !== undefined) { updates.push('appearance = ?'); params.push(req.appearance); }
+  if (req.personality !== undefined) { updates.push('personality = ?'); params.push(req.personality); }
+  if (req.description !== undefined) { updates.push('description = ?'); params.push(req.description); }
+  if (req.voice_style !== undefined) { updates.push('voice_style = ?'); params.push(req.voice_style); }
+  if (req.image_url !== undefined) { updates.push('image_url = ?'); params.push(req.image_url); }
+  if (req.local_path !== undefined) { updates.push('local_path = ?'); params.push(req.local_path); }
+  if (req.polished_prompt !== undefined) { updates.push('polished_prompt = ?'); params.push(req.polished_prompt); }
+  if (req.stages !== undefined) { updates.push('stages = ?'); params.push(req.stages == null ? null : (typeof req.stages === 'string' ? req.stages : JSON.stringify(req.stages))); }
   if (req.negative_prompt !== undefined) { updates.push('negative_prompt = ?'); params.push(req.negative_prompt); }
   if (updates.length === 0) return { ok: true };
-  if (req.image_url != null || req.local_path != null) {
+  if (req.image_url !== undefined || req.local_path !== undefined) {
     seedance2AssetGuards.markStaleOnCharacterMainImageDrift(db, log, charRow, {
-      image_url: req.image_url != null ? req.image_url : charRow.image_url,
-      local_path: req.local_path != null ? req.local_path : charRow.local_path,
+      image_url: req.image_url !== undefined ? req.image_url : charRow.image_url,
+      local_path: req.local_path !== undefined ? req.local_path : charRow.local_path,
     });
   }
   params.push(new Date().toISOString(), characterId);
