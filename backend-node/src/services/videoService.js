@@ -136,12 +136,8 @@ function list(db, query) {
  * 默认轮播。清单仅接受相对的本地视频路径，避免重新暴露供应商临时 URL。
  */
 function listHomepageDefaultVideos(db, limit = 3) {
-  const configured = require('./settingsService').getGlobalSetting(db, 'homepage_default_video_paths', []);
+  const configured = require('./settingsService').getHomepageVideoPaths(db);
   const pageSize = Math.min(3, Math.max(1, Number(limit) || 3));
-  const allowedPath = (value) => {
-    const normalized = String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
-    return normalized && !normalized.split('/').includes('..') && /\.(?:mp4|webm|mov|m4v)$/i.test(normalized) ? normalized : '';
-  };
   // OSS 镜像：默认资源已归档到对象存储时返回 CDN 地址，供线上渲染使用。
   // 前端优先用 oss_url，本地无法访问 CDN 时回退到本地 /static 路径。
   const CDN_BASE = 'https://cdn.ai.tensorbytes.com/';
@@ -150,9 +146,7 @@ function listHomepageDefaultVideos(db, limit = 3) {
     db.prepare("SELECT local_path, oss_key FROM media_archive_records WHERE archive_status = 'oss_synced' AND oss_key IS NOT NULL").all()
       .forEach((r) => { if (r.local_path) ossByPath.set(String(r.local_path).replace(/^\/+/, ''), CDN_BASE + r.oss_key); });
   } catch (_) {}
-  return (Array.isArray(configured) ? configured : [])
-    .map(allowedPath)
-    .filter(Boolean)
+  return configured
     .slice(0, pageSize)
     .map((localPath, index) => ({
       // 固定 key 使前端在同一份资源清单内稳定切换；不关联用户或作品记录。

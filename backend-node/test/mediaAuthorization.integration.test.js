@@ -37,6 +37,7 @@ test('static media is owner-scoped, private-cacheable, and keeps local Range sup
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const db = new Database(path.join(root, 'auth.db'));
   db.exec(`
+    CREATE TABLE global_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
     CREATE TABLE users (
       id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password_hash TEXT,
       display_name TEXT, role TEXT, console_access INTEGER, account_kind TEXT,
@@ -68,6 +69,11 @@ test('static media is owner-scoped, private-cacheable, and keeps local Range sup
   const other = auth.createUser(db, { username: 'media-other', password: 'test-password' }, null);
   const ownerSession = auth.login(db, owner.username, 'test-password').token;
   const otherSession = auth.login(db, other.username, 'test-password').token;
+  const homepagePaths = [64, 63, 62].map((id) => `library/videos/vg_${id}.mp4`);
+  fs.mkdirSync(path.join(root, 'library/videos'), { recursive: true });
+  for (const key of [...homepagePaths, 'library/videos/private.mp4']) fs.writeFileSync(path.join(root, key), '0123456789');
+  db.prepare('INSERT INTO global_settings (key, value) VALUES (?, ?)')
+    .run('homepage_default_video_paths', JSON.stringify(homepagePaths));
   db.prepare('INSERT INTO dramas (id, owner_user_id, title) VALUES (?,?,?)').run(7, owner.id, 'Owner project');
   db.prepare('INSERT INTO dramas (id, owner_user_id, title) VALUES (?,?,?)').run(8, other.id, 'Other project');
   db.prepare('INSERT INTO episodes (id, drama_id) VALUES (?,?)').run(80, 8);
@@ -140,6 +146,15 @@ test('static media is owner-scoped, private-cacheable, and keeps local Range sup
   let server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   try {
+    for (const key of homepagePaths) {
+      assert.equal((await request(server, `/static/${key}`)).status, 401);
+      for (const token of [ownerSession, otherSession]) {
+        const response = await request(server, `/static/${key}`, { headers: { Authorization: `Bearer ${token}`, Range: 'bytes=2-5' } });
+        assert.equal(response.status, 206);
+        assert.equal(response.body.toString(), '2345');
+      }
+    }
+    assert.equal((await request(server, '/static/library/videos/private.mp4', { headers: { Authorization: `Bearer ${otherSession}` } })).status, 404);
     const url = `/static/${relative}`;
     const anonymous = await request(server, url);
     assert.equal(anonymous.status, 401);
@@ -165,6 +180,9 @@ test('static media is owner-scoped, private-cacheable, and keeps local Range sup
     // NULL source_type is the historical representation of an administrator
     // created global row and remains readable after restart/migration.
     assert.equal((await request(server, `/static/${legacyNullGlobalKey}`, { headers: { Authorization: `Bearer ${otherSession}` } })).status, 200);
+    for (const key of homepagePaths) assert.equal((await request(server, `/static/${key}`, { headers: { Authorization: `Bearer ${otherSession}` } })).status, 200);
+    db.prepare('DELETE FROM global_settings WHERE key=?').run('homepage_default_video_paths');
+    assert.equal((await request(server, `/static/${homepagePaths[0]}`, { headers: { Authorization: `Bearer ${otherSession}` } })).status, 404);
     // Conflicting root-level owners fail closed instead of selecting one by
     // update time or row ID.
     assert.equal((await request(server, `/static/${ambiguousKey}`, { headers: { Authorization: `Bearer ${ownerSession}` } })).status, 404);
@@ -281,6 +299,10 @@ test('retained generation history stays readable after project deletion and data
   const other = auth.createUser(db, { username: 'history-other', password: 'test-password' }, null);
   const ownerToken = auth.login(db, owner.username, 'test-password').token;
   const otherToken = auth.login(db, other.username, 'test-password').token;
+  const homepageKey = 'library/videos/homepage.mp4';
+  fs.mkdirSync(path.join(root, 'library/videos'), { recursive: true });
+  fs.writeFileSync(path.join(root, homepageKey), 'homepage-video');
+  require('../src/services/settingsService').setGlobalSetting(db, 'homepage_default_video_paths', [homepageKey]);
   const at = '2026-01-01T00:00:00.000Z';
   db.prepare('INSERT INTO dramas (id, owner_user_id, title, deleted_at) VALUES (?,?,?,?)')
     .run(7, owner.id, 'Deleted historical project', at);
@@ -314,6 +336,12 @@ test('retained generation history stays readable after project deletion and data
   try {
     for (let pass = 0; pass < 2; pass++) {
       server = await start();
+      const homepage = await request(server, '/api/v1/homepage/default-videos', { headers: { Authorization: `Bearer ${otherToken}` } });
+      assert.equal(homepage.status, 200);
+      assert.ok(homepage.body.toString().includes(`/static/${homepageKey}`));
+      const homepageVideo = await request(server, `/static/${homepageKey}`, { headers: { Authorization: `Bearer ${otherToken}` } });
+      assert.equal(homepageVideo.status, 200);
+      assert.equal(homepageVideo.body.toString(), 'homepage-video');
       for (const endpoint of ['images/1', 'videos/1']) {
         assert.equal((await request(server, `/api/v1/${endpoint}`, { headers: { Authorization: `Bearer ${ownerToken}` } })).status, 200);
       }

@@ -380,6 +380,12 @@ function authorizeMediaPath(db, keyOrUrl, user, options = {}) {
   const userId = Number(user?.id ?? user);
   if (!Number.isSafeInteger(userId) || userId <= 0) return { allowed: false, status: 401, code: 'UNAUTHORIZED', key, reason: 'authentication_required' };
 
+  // The administrator's homepage list explicitly publishes these exact files
+  // to signed-in users. It does not share their directory or source project.
+  if (require('./settingsService').getHomepageVideoPaths(db).includes(key)) {
+    return { allowed: true, status: 200, code: 'MEDIA_ALLOWED', key, matched: true, owner_user_id: null, shared: true };
+  }
+
   // The canonical project layout is already an ownership index: every
   // `projects/<drama-id>_...` key is written under that drama's directory.
   // Resolve this cheap owner lookup before scanning every media table. The

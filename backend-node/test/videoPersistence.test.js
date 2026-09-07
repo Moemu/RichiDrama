@@ -68,6 +68,23 @@ test('homepage defaults use the configured product media resources rather than a
   assert.ok(items.every((item) => item.drama_id === null && item.status === 'completed'));
 });
 
+test('homepage sharing accepts only the three published local video keys', () => {
+  const db = new Database(':memory:');
+  try {
+    db.exec('CREATE TABLE global_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)');
+    require('../src/services/settingsService').setGlobalSetting(db, 'homepage_default_video_paths', [
+      '../outside.mp4', 'https://example.test/video.mp4', 'folder/./video.mp4', 'image.jpg', null,
+      '/library/videos/one.mp4', 'library\\videos\\two.mp4', 'library/videos/three.webm', 'library/videos/four.mp4',
+    ]);
+    const items = listHomepageDefaultVideos(db);
+    assert.deepEqual(items.map(item => item.local_path), ['library/videos/one.mp4', 'library/videos/two.mp4', 'library/videos/three.webm']);
+    const { authorizeMediaPath } = require('../src/services/mediaAuthorizationService');
+    for (const item of items) assert.equal(authorizeMediaPath(db, item.local_path, { id: 2 }).allowed, true);
+    assert.equal(authorizeMediaPath(db, 'library/videos/four.mp4', { id: 2 }).allowed, false);
+    assert.equal(authorizeMediaPath(db, items[0].local_path, null).status, 401);
+  } finally { db.close(); }
+});
+
 test('a completed local video remains completed when OSS archival is temporarily unavailable', async () => {
   const db = new Database(':memory:');
   db.exec(`CREATE TABLE video_generations (
