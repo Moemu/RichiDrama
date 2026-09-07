@@ -191,7 +191,8 @@ async function inspectMedia(filePath, type, storageRoot, localPath, log) {
     const parsed = JSON.parse(probe.stdout || '{}'); const stream = (parsed.streams || []).find((item) => item.codec_type === (type === 'audio' ? 'audio' : 'video')) || (parsed.streams || [])[0] || {};
     result.width = Number(stream.width) || null; result.height = Number(stream.height) || null;
     result.duration = Number(parsed.format?.duration) || null;
-    result.metadata = { codec: stream.codec_name || null, frame_rate: stream.r_frame_rate || null, duration: result.duration };
+    result.metadata = { codec: stream.codec_name || null, frame_rate: stream.r_frame_rate || null, duration: result.duration,
+      audio_codecs: (parsed.streams || []).filter((item) => item.codec_type === 'audio').map((item) => item.codec_name) };
     if (type === 'video') {
       const thumbDir = path.join(storageRoot, path.dirname(localPath), 'thumbnails'); fs.mkdirSync(thumbDir, { recursive: true });
       const thumbName = `${path.basename(localPath, path.extname(localPath))}.jpg`; const thumbAbs = path.join(thumbDir, thumbName);

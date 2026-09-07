@@ -117,6 +117,26 @@ test('Seedance omni request carries image, native video, and audio references', 
   }
 });
 
+test('validated requests preserve every ordered audio reference and suppress the legacy fallback', async () => {
+  const originalFetch = global.fetch;
+  let body;
+  global.fetch = async (_url, init) => {
+    body = JSON.parse(init.body);
+    return { ok: true, text: async () => JSON.stringify({ id: 'multi-audio-test' }) };
+  };
+  try {
+    const config = { base_url: 'https://video.example.test', api_key: 'test-key', default_model: 'doubao-seedance-2-0-fast-260128' };
+    const opts = { prompt: '多段音频参考', duration: 5, aspect_ratio: '16:9', input_validation_version: 1,
+      reference_urls: ['https://assets.example.test/image.png'],
+      voice_reference_url: 'https://assets.example.test/legacy.wav',
+      reference_audio_urls: ['https://assets.example.test/one.wav', 'https://assets.example.test/two.mp3', 'https://assets.example.test/three.wav'] };
+    await callVolcengineOmniVideoApi(config, log, opts);
+    assert.deepEqual(body.content.filter((part) => part.type === 'audio_url').map((part) => part.audio_url.url), opts.reference_audio_urls);
+    await callVolcengineOmniVideoApi(config, log, { ...opts, reference_audio_urls: [] });
+    assert.equal(body.content.some((part) => part.type === 'audio_url'), false);
+  } finally { global.fetch = originalFetch; }
+});
+
 test('Seedance omni rejects a source video that the provider cannot reach', async () => {
   await assert.rejects(() => callVolcengineOmniVideoApi({
     base_url: 'https://video.example.test', api_key: 'test-key', model: ['seedance-2.0'], default_model: 'seedance-2.0',

@@ -87,32 +87,80 @@ function credentials(db) {
   return { configId: row.id, configName: row.name, accessKeyId, secretAccessKey, region: String(settings.sign_region || 'cn-beijing').trim() || 'cn-beijing' };
 }
 
+function isRateLimitError(error) {
+  return error.status === 429 || /FlowLimitExceeded|throttl/i.test(error.code || '');
+}
+
+function isTransientOpenApiError(error) {
+  if ([401, 403].includes(error.status) || /AccessDenied|Unauthorized|InvalidAccessKey|Signature|InvalidParameter/i.test(error.code || '')) return false;
+  return isRateLimitError(error) || [408, 500, 502, 503, 504].includes(error.status)
+    || /timeout|timed out|throttl|serviceunavailable|internalerror/i.test(`${error.code || ''} ${error.message || ''}`)
+    || ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'].includes(error.cause?.code);
+}
+
 async function callOpenApi(credential, options = {}) {
   const fetchImpl = options.fetchImpl || global.fetch;
   if (typeof fetchImpl !== 'function') throw new Error('当前 Node.js 运行时不支持 fetch');
-  const signed = signedHeaders({
-    accessKeyId: credential.accessKeyId,
-    secretAccessKey: credential.secretAccessKey,
-    region: options.region || credential.region || 'cn-beijing',
-    service: options.service,
-    action: options.action,
-    version: options.version,
-    body: options.body,
-    date: options.date,
-  });
-  const response = await fetchImpl(signed.url, { method: 'POST', headers: signed.headers, body: signed.bodyText, redirect: 'manual' });
-  const text = await response.text();
-  let payload;
-  try { payload = text ? JSON.parse(text) : {}; } catch (_) { payload = { _raw: text.slice(0, 1000) }; }
-  const upstreamError = payload?.ResponseMetadata?.Error;
-  if (!response.ok || upstreamError) {
-    const error = new Error(String(upstreamError?.Message || payload?.message || `火山 OpenAPI HTTP ${response.status}`).slice(0, 1000));
-    error.status = response.status;
-    error.code = upstreamError?.Code || 'VOLCENGINE_OPENAPI_ERROR';
-    error.requestId = payload?.ResponseMetadata?.RequestId || null;
-    throw error;
+  const readOnly = ['ListModelActivations', 'ListBillDetail'].includes(options.action);
+  const attempts = readOnly ? 2 : 1;
+  const requestIds = [];
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const signed = signedHeaders({
+      accessKeyId: credential.accessKeyId, secretAccessKey: credential.secretAccessKey,
+      region: options.region || credential.region || 'cn-beijing', service: options.service,
+      action: options.action, version: options.version, body: options.body, date: options.date,
+    });
+    const controller = new AbortController();
+    const remaining = options.deadline == null ? 15000 : Math.min(15000, options.deadline - Date.now());
+    const timer = setTimeout(() => controller.abort(), Math.max(0, remaining));
+    try {
+      if (remaining <= 0) throw Object.assign(new Error('火山价格查询超时'), { name: 'TimeoutError' });
+      const response = await fetchImpl(signed.url, { method: 'POST', headers: signed.headers, body: signed.bodyText, redirect: 'manual', signal: controller.signal });
+      const text = await response.text();
+      let payload;
+      try { payload = text ? JSON.parse(text) : {}; } catch (_) { payload = { _raw: text.slice(0, 1000) }; }
+      const requestId = payload?.ResponseMetadata?.RequestId || null;
+      if (requestId) requestIds.push(requestId);
+      const upstreamError = payload?.ResponseMetadata?.Error;
+      if (!response.ok || upstreamError) {
+        const error = new Error(String(upstreamError?.Message || payload?.message || `火山 OpenAPI HTTP ${response.status}`).slice(0, 1000));
+        error.status = response.status;
+        error.code = upstreamError?.Code || 'VOLCENGINE_OPENAPI_ERROR';
+        error.requestId = requestId;
+        const retryAfter = response.headers?.get('retry-after');
+        if (retryAfter) {
+          const seconds = Number(retryAfter);
+          const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
+          if (Number.isFinite(delay) && delay > 0) error.retryAfterMs = delay;
+        }
+        throw error;
+      }
+      return { payload, requestId, requestIds };
+    } catch (error) {
+      if (controller.signal.aborted || ['AbortError', 'TimeoutError'].includes(error.name)) {
+        error.code = 'VOLCENGINE_TIMEOUT';
+        error.status = 504;
+      }
+      error.requestIds = [...requestIds];
+      error.action = options.action;
+      const transient = isTransientOpenApiError(error);
+      const rateLimited = isRateLimitError(error);
+      const retryDelay = Math.max(rateLimited ? 2000 + Math.floor(Math.random() * 500) : 250, error.retryAfterMs || 0);
+      if (transient && attempt < attempts && retryDelay <= 5000 && (options.deadline == null || Date.now() + retryDelay < options.deadline)) {
+        clearTimeout(timer);
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        continue;
+      }
+      const timeout = /timeout|timed out/i.test(`${error.code || ''} ${error.message || ''}`) || [408, 504].includes(error.status);
+      error.httpStatus = timeout ? 504 : transient ? 503 : 502;
+      error.publicCode = timeout ? 'PROVIDER_TIMEOUT' : transient ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_API_ERROR';
+      error.publicMessage = timeout ? '火山价格服务响应超时，请稍后重试；当前已发布价目表未改变。'
+        : rateLimited ? '火山价格查询触发接口限流，请稍后重试；当前已发布价目表未改变。'
+        : transient ? '火山价格服务暂时不可用，请稍后重试；当前已发布价目表未改变。'
+        : `火山价格查询失败：${error.message}`;
+      throw error;
+    } finally { clearTimeout(timer); }
   }
-  return { payload, requestId: payload?.ResponseMetadata?.RequestId || null };
 }
 
 async function fetchAllActivations(credential, options = {}) {
@@ -120,12 +168,16 @@ async function fetchAllActivations(credential, options = {}) {
   const requestIds = [];
   let page = 1;
   let total = Infinity;
+  const deadline = Date.now() + 45000;
   while (items.length < total && page <= 100) {
     const result = await callOpenApi(credential, {
-      ...options, service: 'ark', action: 'ListModelActivations', version: ARK_VERSION,
+      ...options, deadline, service: 'ark', action: 'ListModelActivations', version: ARK_VERSION,
       body: { PageNumber: page, PageSize: 100, WithPrice: true, WithFreeUsage: false, Filter: { States: ['Available'], IncludeDeprecatedModels: true } },
+    }).catch((error) => {
+      error.requestIds = [...requestIds, ...(error.requestIds || [])];
+      throw error;
     });
-    if (result.requestId) requestIds.push(result.requestId);
+    requestIds.push(...result.requestIds);
     const pageItems = Array.isArray(result.payload?.Result?.Items) ? result.payload.Result.Items : [];
     items.push(...pageItems);
     total = Number(result.payload?.Result?.TotalCount ?? items.length);
@@ -545,7 +597,9 @@ async function sync(db, actorId, options = {}) {
     return syncView(db, id);
   } catch (error) {
     const exists = db.prepare('SELECT 1 FROM provider_price_syncs WHERE id=?').get(id);
-    if (exists) db.prepare(`UPDATE provider_price_syncs SET status='failed',error_summary=?,updated_at=? WHERE id=?`).run(String(error.message || error).slice(0, 1000), now(), id);
+    if (exists) db.prepare(`UPDATE provider_price_syncs SET status='failed',error_summary=?,provider_request_ids_json=?,updated_at=? WHERE id=?`)
+      .run(`${error.action || 'sync'} ${error.code || 'ERROR'}: ${error.message || error}`.slice(0, 1000), json(error.requestIds || []), now(), id);
+    error.syncId = exists ? id : null;
     throw error;
   } finally { releaseLock(db, token); }
 }

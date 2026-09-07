@@ -67,6 +67,16 @@ function routes(db, log) {
         }
         try { capabilityService.validateAspectRatio(capability, aspectRatio); }
         catch (error) { return response.badRequest(res, error.message); }
+        const inputValidation = require('../services/seedanceInputValidation');
+        if (inputValidation.rulesForModel(modelForBilling)) {
+          try {
+            const assets = inputValidation.legacyAssets(body);
+            inputValidation.validateSubmission(db, capability, assets, {
+              ...body, owner_user_id: req.auth.id,
+              creation_mode: assets.some((asset) => asset.usage === 'first_frame') ? 'first_last_frame' : 'multi_reference',
+            });
+          } catch (error) { return response.badRequest(res, error.message); }
+        }
         const billingTarget = require('../services/aiConfigService').resolveBillingTarget(db, body.service_type || 'video', modelForBilling, body.ai_config_id, aiOptions);
         const configForBilling = require('../services/aiConfigService').getConfig(db, billingTarget.config_id) || videoConfig;
         let settings = {}; try { settings = JSON.parse(configForBilling?.settings || '{}'); } catch (_) {}
@@ -119,7 +129,7 @@ function routes(db, log) {
         // 多图模式：sxy，存 JSON 数组到 reference_image_urls
         const refImagesJson =
           body.reference_image_urls && Array.isArray(body.reference_image_urls)
-            ? JSON.stringify(body.reference_image_urls.slice(0, 10))
+            ? JSON.stringify(body.reference_image_urls.slice(0, inputValidation.rulesForModel(model)?.image || 10))
             : null;
         db.prepare(
           `INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, postprocess_recovery_version, status, task_id, created_at, updated_at)
