@@ -140,7 +140,11 @@ function normalizeUsername(username) {
 }
 
 function register(db, input) {
-  const user = createUser(db, { ...input, role: 'user', is_active: true }, null);
+  const user = createUser(db, {
+    username: input.username,
+    password: input.password,
+    display_name: input.display_name,
+  }, null);
   return login(db, user.username, input.password);
 }
 

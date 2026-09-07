@@ -18,6 +18,7 @@ function createDb() {
     CREATE TABLE dramas (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT,
+      owner_user_id INTEGER,
       deleted_at TEXT
     );
 

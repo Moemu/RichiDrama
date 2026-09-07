@@ -1,3 +1,12 @@
+const { normalizeStorageKey } = require('../utils/storagePath');
+const { validateWritableMediaReferences } = require('./mediaAuthorizationService');
+
+function validateMediaPaths(input) {
+  for (const key of ['local_path', 'thumbnail_local_path']) {
+    if (input[key] != null && input[key] !== '') normalizeStorageKey(input[key]);
+  }
+}
+
 function list(db, query) {
   let sql = 'FROM assets WHERE deleted_at IS NULL';
   const params = [];
@@ -28,9 +37,9 @@ function list(db, query) {
     params.push(query.type);
   }
   if (query.keyword) {
-    sql += ' AND (name LIKE ? OR tags_json LIKE ?)';
+    sql += ' AND (name LIKE ? OR reference_alias LIKE ? OR tags_json LIKE ?)';
     const keyword = `%${String(query.keyword).trim()}%`;
-    params.push(keyword, keyword);
+    params.push(keyword, keyword, keyword);
   }
   if (String(query.favorite || '') === '1' || String(query.favorite || '').toLowerCase() === 'true') {
     sql += ' AND is_favorite = 1';
@@ -40,7 +49,7 @@ function list(db, query) {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 20));
   const offset = (page - 1) * pageSize;
-  const rows = db.prepare('SELECT * ' + sql + ' ORDER BY created_at DESC LIMIT ? OFFSET ?').all(...params, pageSize, offset);
+  const rows = db.prepare('SELECT * ' + sql + ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?').all(...params, pageSize, offset);
   return { items: rows.map(rowToItem), total, page, pageSize };
 }
 
@@ -151,6 +160,8 @@ function findByChecksum(db, checksum, dramaId = null, ownerUserId = null) {
 }
 
 function create(db, log, req) {
+  validateMediaPaths(req);
+  validateWritableMediaReferences(db, req, req.owner_user_id);
   const now = new Date().toISOString();
   const info = db.prepare(
     `INSERT INTO assets (drama_id, owner_user_id, name, reference_alias, type, category, url, local_path, file_size, mime_type, width, height, duration, image_gen_id, video_gen_id, source_type, parent_asset_id, thumbnail_local_path, metadata_json, tags_json, checksum, processing_status, error_msg, created_at, updated_at)
@@ -186,6 +197,7 @@ function create(db, log, req) {
 }
 
 function update(db, log, id, req, ownerUserId = null) {
+  validateMediaPaths(req);
   const row = ownerUserId == null
     ? db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id))
     : db.prepare(`SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL
@@ -193,6 +205,7 @@ function update(db, log, id, req, ownerUserId = null) {
         SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL
       ))`).get(Number(id), Number(ownerUserId), Number(ownerUserId));
   if (!row) return null;
+  validateWritableMediaReferences(db, req, ownerUserId);
   const updates = [];
   const params = [];
   ['name', 'description', 'type', 'category', 'url', 'local_path', 'thumbnail_url', 'thumbnail_local_path', 'file_size', 'mime_type', 'width', 'height', 'duration', 'is_favorite', 'source_type', 'parent_asset_id', 'checksum', 'processing_status', 'error_msg', 'requires_sd2_identity'].forEach((key) => {

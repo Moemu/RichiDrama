@@ -286,7 +286,9 @@ function ensureAllColumns(database) {
     { name: 'location',         type: 'TEXT' },
     { name: 'time',             type: 'TEXT' },
     { name: 'prompt',           type: 'TEXT' },
+    { name: 'description',      type: 'TEXT' },
     { name: 'polished_prompt',  type: 'TEXT' },  // 文字AI润色后的完整四视图图片提示词，生图时直接使用
+    { name: 'polished_prompt_single', type: 'TEXT' }, // 单图模式的独立提示词，不能复用四视图提示词
     { name: 'image_url',        type: 'TEXT' },
     { name: 'local_path',       type: 'TEXT' },
     { name: 'seedance2_asset',  type: 'TEXT' },
@@ -469,6 +471,9 @@ function ensureAllColumns(database) {
     { name: 'archive_error',         type: 'TEXT' },
     { name: 'archive_attempts',      type: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'archived_at',           type: 'TEXT' },
+    // Automatic post-process recovery is opt-in. Historical rows keep the
+    // safe default zero until a new run or explicit retry marks them.
+    { name: 'postprocess_recovery_version', type: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'created_at',           type: 'TEXT' },
     { name: 'updated_at',           type: 'TEXT' },
     { name: 'deleted_at',           type: 'TEXT' },

@@ -510,6 +510,83 @@ function publicReconciliationCase(row) {
   return { ...row, observed_usage: parse(row.observed_usage_json, null), resolution: parse(row.resolution_json, null) };
 }
 
+function recordVideoReconciliationRecovery(db, caseId, recovery) {
+  const row = db.prepare('SELECT resolution_json, status FROM billing_reconciliation_cases WHERE id=?').get(caseId);
+  if (!row || !['resolved', 'waived'].includes(String(row.status || ''))) return false;
+  const resolution = parse(row.resolution_json, {});
+  const optIn = resolution.postprocess_recovery && typeof resolution.postprocess_recovery === 'object'
+    ? resolution.postprocess_recovery : {};
+  db.prepare(`UPDATE billing_reconciliation_cases SET resolution_json=?
+    WHERE id=? AND status IN ('resolved','waived')`)
+    .run(json({ ...resolution, postprocess_recovery: { ...optIn, ...recovery, version: 1, enabled: true } }), caseId);
+  return true;
+}
+
+function resolvedVideoStageReconciliationRows(db) {
+  return db.prepare(`
+    SELECT c.id AS case_id, c.status AS case_status, c.authorization_id,
+      v.id AS video_generation_id, j.id AS stage_job_id, j.status AS stage_status,
+      j.output_local_path, 'upscale' AS stage
+    FROM billing_reconciliation_cases c
+    JOIN video_upscale_jobs j ON j.billing_authorization_id=c.authorization_id
+    JOIN video_generations v ON v.id=j.video_generation_id
+    WHERE c.status IN ('resolved','waived')
+      AND json_extract(c.resolution_json, '$.postprocess_recovery.version') = 1
+      AND v.status='billing_reconciliation'
+      AND j.status='reconciliation_required'
+      AND j.output_local_path IS NOT NULL AND TRIM(j.output_local_path)!=''
+    UNION ALL
+    SELECT c.id AS case_id, c.status AS case_status, c.authorization_id,
+      v.id AS video_generation_id, j.id AS stage_job_id, j.status AS stage_status,
+      j.output_local_path, 'interpolation' AS stage
+    FROM billing_reconciliation_cases c
+    JOIN video_interpolation_jobs j ON j.billing_authorization_id=c.authorization_id
+    JOIN video_generations v ON v.id=j.video_generation_id
+    WHERE c.status IN ('resolved','waived')
+      AND json_extract(c.resolution_json, '$.postprocess_recovery.version') = 1
+      AND v.status='billing_reconciliation'
+      AND j.status='reconciliation_required'
+      AND j.output_local_path IS NOT NULL AND TRIM(j.output_local_path)!=''
+    ORDER BY video_generation_id`).all();
+}
+
+function scheduleVideoStageReconciliationRecovery(db, caseId, videoGenerationId, log = null) {
+  setImmediate(async () => {
+    try {
+      const result = await require('./videoService').resumeResolvedPostprocessVideoGeneration(
+        db, log || { info() {}, warn() {}, error() {} }, videoGenerationId
+      );
+      recordVideoReconciliationRecovery(db, caseId, {
+        status: ['completed', 'scheduled', 'already_running'].includes(String(result?.status || '')) ? 'completed' : 'retryable',
+        updated_at: now(), video_generation_id: Number(videoGenerationId), detail: result || null,
+      });
+    } catch (error) {
+      try {
+        recordVideoReconciliationRecovery(db, caseId, {
+          status: 'retryable', updated_at: now(), video_generation_id: Number(videoGenerationId),
+          error: String(error.message || error).slice(0, 500),
+        });
+      } catch (_) {}
+      log?.warn?.('resolved video reconciliation recovery failed', {
+        case_id: caseId, video_generation_id: videoGenerationId, error: error.message,
+      });
+    }
+  });
+}
+
+/** Queue durable recovery for resolved/waived stage cases after application start. */
+function recoverResolvedVideoReconciliations(db, log) {
+  let rows = [];
+  try { rows = resolvedVideoStageReconciliationRows(db); } catch (error) {
+    log?.warn?.('resolved video reconciliation scan failed', { error: error.message });
+    return { queued: 0 };
+  }
+  const unique = new Map();
+  for (const row of rows) unique.set(`${row.case_id}:${row.video_generation_id}`, row);
+  for (const row of unique.values()) scheduleVideoStageReconciliationRecovery(db, row.case_id, row.video_generation_id, log);
+  return { queued: unique.size };
+}
+
 // 后处理阶段（插帧/超分）授权兜底：视频已 failed/deleted 但阶段任务的预授权未结算时，
 // 会形成用户永久冻结且对账队列不可见。按供应商是否已调用分类处置：
 // - 未调用（无 provider 任务 ID）：直接 void 归还用户，无需人工核验
@@ -592,8 +669,10 @@ function settleReconciliationCase(db, actor, caseId, input = {}) {
   });
   const at = now();
   db.prepare(`UPDATE billing_reconciliation_cases SET status='resolved', resolution_json=?, resolved_at=?, resolved_by=? WHERE id=? AND status='pending'`)
-    .run(json({ usage: input.usage, transaction_id: settled.transaction_id, charged_micro: settled.charged_micro, reason: input.reason || null }), at, actor.id, caseId);
+    .run(json({ usage: input.usage, transaction_id: settled.transaction_id, charged_micro: settled.charged_micro, reason: input.reason || null,
+      postprocess_recovery: { version: 1, enabled: true, requested_at: at } }), at, actor.id, caseId);
   audit(db, actor.id, 'billing.reconciliation.settled', 'reconciliation_case', caseId, { authorization_id: row.authorization_id, charged_micro: settled.charged_micro });
+  recoverResolvedVideoReconciliations(db);
   return publicReconciliationCase(db.prepare('SELECT * FROM billing_reconciliation_cases WHERE id = ?').get(caseId));
 }
 
@@ -605,8 +684,10 @@ function waiveReconciliationCase(db, actor, caseId, reason) {
   const released = voidAuthorization(db, actor, row.authorization_id, reason || '管理员豁免待对账预授权');
   const at = now();
   db.prepare(`UPDATE billing_reconciliation_cases SET status='waived', resolution_json=?, resolved_at=?, resolved_by=? WHERE id=? AND status='pending'`)
-    .run(json({ released_micro: released.released_micro, reason: reason || null }), at, actor.id, caseId);
+    .run(json({ released_micro: released.released_micro, reason: reason || null,
+      postprocess_recovery: { version: 1, enabled: true, requested_at: at } }), at, actor.id, caseId);
   audit(db, actor.id, 'billing.reconciliation.waived', 'reconciliation_case', caseId, { authorization_id: row.authorization_id, reason: reason || null });
+  recoverResolvedVideoReconciliations(db);
   return publicReconciliationCase(db.prepare('SELECT * FROM billing_reconciliation_cases WHERE id = ?').get(caseId));
 }
 
@@ -1167,4 +1248,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { account, payerAccount, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, adjustOrganizationBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };
+module.exports = { account, payerAccount, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, recoverResolvedVideoReconciliations, recordVideoReconciliationRecovery, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, adjustOrganizationBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };

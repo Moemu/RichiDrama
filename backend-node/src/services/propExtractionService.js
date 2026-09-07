@@ -67,13 +67,21 @@ async function processPropExtraction(db, log, taskId, episodeId) {
     return;
   }
 
+  // Do not soft-delete the current episode props when the model returns an
+  // empty or unusable list. Keep the old data and expose a retryable failure.
+  const validProps = extractedProps.filter((prop) => prop && String(prop.name || '').trim());
+  if (validProps.length === 0) {
+    taskService.updateTaskError(db, taskId, '未提取到有效道具，原有道具已保留，请重试');
+    return;
+  }
+
   taskService.updateTaskStatus(db, taskId, 'processing', 50, '正在保存道具...');
 
   propService.softDeletePropsByEpisodeId(db, log, episodeId);
 
   const dramaId = episode.drama_id;
   const createdProps = [];
-  for (const p of extractedProps) {
+  for (const p of validProps) {
     const name = (p.name && String(p.name).trim()) || '';
     if (!name) continue;
     const existing = db.prepare(

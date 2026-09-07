@@ -34,7 +34,9 @@ function retryFromSource(db, videoGenerationId) {
   const row = db.prepare('SELECT * FROM video_generations WHERE id=? AND deleted_at IS NULL').get(Number(videoGenerationId));
   if (!row?.source_local_path) throw new Error('超分重试缺少已归档的原始视频');
   const job = db.prepare('SELECT * FROM video_upscale_jobs WHERE video_generation_id=?').get(row.id);
-  if (!job) return reserveForGeneration(db, row.id, row.upscale_resolution);
+  if (!job) {
+    return reserveForGeneration(db, row.id, row.upscale_resolution);
+  }
   if (!['failed', 'cancelled'].includes(job.status)) throw new Error('当前超分任务不可重试');
   // A failed attempt must never leave a frozen authorization behind before a
   // retry gets its own idempotency key. voidAuthorization is idempotent, so it
@@ -177,12 +179,25 @@ async function process(db, log, videoGenerationId, storagePath) {
   } catch (error) {
     const now = new Date().toISOString();
     if (error.reconciliationRequired) { log.error('Video upscale requires billing reconciliation', { video_generation_id: videoGenerationId, error: error.message }); return null; }
+    const message = String(error.message).slice(0, 500);
+    let stageChanged = !job;
     if (job) {
-      db.prepare("UPDATE video_upscale_jobs SET status='failed', error_msg=?, updated_at=? WHERE id=?").run(String(error.message).slice(0, 500), now, job.id);
-      try { billing.voidAuthorization(db, { id: job.owner_user_id, role: 'admin' }, job.billing_authorization_id, '视频超分失败'); } catch (_) {}
+      const failed = db.prepare(`UPDATE video_upscale_jobs SET status='failed', error_msg=?, updated_at=?
+        WHERE id=? AND status IN ('awaiting_source','pending','processing')`).run(message, now, job.id);
+      stageChanged = failed.changes > 0;
+      if (stageChanged) {
+        try { billing.voidAuthorization(db, { id: job.owner_user_id, role: 'admin' }, job.billing_authorization_id, '视频超分失败'); } catch (_) {}
+      }
     }
-    db.prepare("UPDATE video_generations SET status='failed', upscale_status='failed', error_msg=?, updated_at=? WHERE id=?").run(String(error.message).slice(0, 500), now, Number(videoGenerationId));
-    log.error('Video upscale failed', { video_generation_id: videoGenerationId, error: error.message });
+    const failedGeneration = db.prepare(`UPDATE video_generations SET status='failed', upscale_status='failed', error_msg=?, updated_at=?
+      WHERE id=? AND status IN ('processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting')`)
+      .run(message, now, Number(videoGenerationId));
+    if (failedGeneration.changes) {
+      try { require('./videoService').syncVideoGenerationFailure(db, videoGenerationId, message, now); } catch (syncError) {
+        log.warn('Video upscale storyboard failure sync failed', { video_generation_id: videoGenerationId, error: syncError.message });
+      }
+    }
+    if (stageChanged || failedGeneration.changes) log.error('Video upscale failed', { video_generation_id: videoGenerationId, error: message });
     return null;
   } finally { active.delete(Number(videoGenerationId)); }
 }

@@ -47,7 +47,7 @@ test('generative enhancement reservation persists before provider submission', (
   } finally { teardown(context.root); }
 });
 
-test('upscale retry releases the failed authorization before reserving the retry stage', () => {
+test('upscale retry releases the failed authorization without opting in legacy recovery', () => {
   const context = setup();
   try {
     const now = new Date().toISOString();
@@ -65,6 +65,7 @@ test('upscale retry releases the failed authorization before reserving the retry
     // The first frozen reservation is released before the retry reservation is
     // made, so only one post-process amount remains frozen.
     assert.equal(billing.account(context.db, context.user.id).frozen_micro, 916667);
+    assert.equal(context.db.prepare('SELECT postprocess_recovery_version FROM video_generations WHERE id=?').get(info.lastInsertRowid).postprocess_recovery_version, 0);
   } finally { teardown(context.root); }
 });
 

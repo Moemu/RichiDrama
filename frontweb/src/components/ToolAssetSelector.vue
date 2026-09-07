@@ -50,15 +50,15 @@
       <input ref="fileInput" hidden type="file" :accept="accept" :aria-label="`上传${acceptedLabel}`" @change="upload" />
     </template>
 
-    <div v-if="selectedAssets.length && props.multiple" class="selected-summary" role="status" aria-live="polite">
-      <span>已选 {{ selectedAssets.length }} 项</span>
+    <div v-if="selectedIds.length && props.multiple" class="selected-summary" role="status" aria-live="polite">
+      <span>已选 {{ selectedIds.length }} 项</span>
       <button type="button" @click="clear">清空</button>
     </div>
   </section>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { beginAssetPointerDrag, shouldSuppressAssetClick } from '@/utils/assetPointerDrag'
@@ -73,16 +73,15 @@ const props = defineProps({
   promptDraggable: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue', 'selected', 'selection-change', 'assets-loaded'])
-const source = ref('library'), assets = ref([]), search = ref(''), uploading = ref(false), loading = ref(false), fileInput = ref(null)
+const source = ref('library'), assets = ref([]), assetCache = ref(new Map()), search = ref(''), uploading = ref(false), loading = ref(false), fileInput = ref(null)
 let loadRevision = 0
 const filteredAssets = computed(() => {
-  const keyword = search.value.trim().toLowerCase()
-  return assets.value.filter((asset) => props.types.includes(asset.type) && (!keyword || `${asset.alias || ''} ${asset.name || ''}`.toLowerCase().includes(keyword)))
+  return assets.value.filter((asset) => props.types.includes(asset.type))
 })
 const selectedIds = computed(() => props.multiple
   ? (Array.isArray(props.modelValue) ? props.modelValue.map(Number) : [])
   : (Number(props.modelValue) > 0 ? [Number(props.modelValue)] : []))
-const selectedAssets = computed(() => selectedIds.value.map((id) => assets.value.find((asset) => Number(asset.id) === id)).filter(Boolean))
+const selectedAssets = computed(() => selectedIds.value.map((id) => assetCache.value.get(id)).filter(Boolean))
 const libraryHint = computed(() => props.dramaId ? '当前项目素材和个人素材' : '可引用项目素材和个人素材')
 const uploadHint = computed(() => props.dramaId
   ? '上传后保存到当前项目素材库，可立即引用。'
@@ -92,14 +91,27 @@ const acceptedLabel = computed(() => props.types.map(typeLabel).join('、'))
 const assetUrl = (asset) => asset?.local_path ? `/static/${String(asset.local_path).replace(/^\/+/, '')}` : asset?.url || ''
 const typeLabel = (type) => ({ image: '图片', video: '视频', audio: '音频' }[type] || '素材')
 const isSelected = (id) => selectedIds.value.includes(Number(id))
+let searchTimer = null
+
+function rememberAssets(items) {
+  if (!items?.length) return
+  const next = new Map(assetCache.value)
+  for (const asset of items) {
+    const id = Number(asset?.id)
+    if (Number.isInteger(id) && id > 0) next.set(id, asset)
+  }
+  assetCache.value = next
+}
 
 async function load() {
   const revision = ++loadRevision
   loading.value = true
+  const keyword = search.value.trim()
+  const type = props.types.length === 1 ? props.types[0] : undefined
   try {
     const requests = Number(props.dramaId) > 0
-      ? [loadScope({ scope: 'project', drama_id: Number(props.dramaId) }), loadScope({ scope: 'global' })]
-      : [loadScope({ scope: 'all' })]
+      ? [loadScope({ scope: 'project', drama_id: Number(props.dramaId), type, keyword }), loadScope({ scope: 'global', type, keyword })]
+      : [loadScope({ scope: 'all', type, keyword })]
     const results = await Promise.allSettled(requests)
     if (revision !== loadRevision) return
     const available = results.filter((result) => result.status === 'fulfilled').flatMap((result) => result.value.items || [])
@@ -108,20 +120,23 @@ async function load() {
     if (results.some((result) => result.status === 'fulfilled' && result.value.truncated)) ElMessage.info('素材较多，仅显示前 300 项；请用搜索查找更多')
     const unique = new Map(available.map((asset) => [Number(asset.id), asset]))
     assets.value = [...unique.values()]
+    rememberAssets(assets.value)
     emit('assets-loaded', assets.value)
-    emitSelection()
   } catch (error) { ElMessage.error(error.message || '素材库加载失败') }
   finally { if (revision === loadRevision) loading.value = false }
 }
 // 素材库很大时全量分页拉取代价过高：上限 300 条，更多用搜索。
 const MAX_LOADED_ASSETS = 300
 async function loadScope(params) {
-  const first = await omniVideoAPI.assets({ ...params, page: 1, page_size: 100 })
+  const query = Object.fromEntries(Object.entries(params).filter(([, value]) => value != null && value !== ''))
+  const first = await omniVideoAPI.assets({ ...query, page: 1, page_size: 100 })
   const items = [...(first.items || [])]
-  const total = Number(first.total || items.length)
-  const pageCount = Math.min(Math.ceil(total / 100), Math.ceil(MAX_LOADED_ASSETS / 100))
+  const pagination = first.pagination || {}
+  const total = Number(pagination.total ?? first.total ?? items.length)
+  const pageSize = Number(pagination.page_size ?? first.page_size ?? 100) || 100
+  const pageCount = Math.min(Math.ceil(total / pageSize), Math.ceil(MAX_LOADED_ASSETS / pageSize))
   for (let page = 2; items.length < total && page <= pageCount; page += 1) {
-    const result = await omniVideoAPI.assets({ ...params, page, page_size: 100 })
+    const result = await omniVideoAPI.assets({ ...query, page, page_size: pageSize })
     const pageItems = result.items || []
     items.push(...pageItems)
     if (!pageItems.length) break
@@ -131,11 +146,12 @@ async function loadScope(params) {
 function emitSelection() { emit('selection-change', selectedAssets.value) }
 function selectGuarded(asset) { if (!shouldSuppressAssetClick()) select(asset) }
 function select(asset) {
+  rememberAssets([asset])
   if (props.multiple) {
     if (!isSelected(asset.id) && selectedIds.value.length >= props.maxSelections) return ElMessage.warning(`最多选择 ${props.maxSelections} 项素材`)
     const next = isSelected(asset.id) ? selectedIds.value.filter((id) => id !== Number(asset.id)) : [...selectedIds.value, Number(asset.id)]
     emit('update:modelValue', next)
-    queueMicrotask(() => emit('selection-change', next.map((id) => assets.value.find((item) => Number(item.id) === id)).filter(Boolean)))
+    queueMicrotask(() => emit('selection-change', next.map((id) => assetCache.value.get(Number(id))).filter(Boolean)))
   } else {
     const next = isSelected(asset.id) ? null : Number(asset.id)
     emit('update:modelValue', next)
@@ -157,6 +173,7 @@ async function upload(event) {
     const result = await omniVideoAPI.upload(file, { name: file.name, drama_id: Number(props.dramaId) || undefined })
     const asset = result.asset
     if (!asset) throw new Error('上传未返回素材')
+    rememberAssets([asset])
     assets.value = [asset, ...assets.value.filter((item) => Number(item.id) !== Number(asset.id))]
     emit('assets-loaded', assets.value)
     source.value = 'library'
@@ -166,7 +183,15 @@ async function upload(event) {
   finally { uploading.value = false }
 }
 watch(() => props.dramaId, load)
+watch(search, () => {
+  if (searchTimer) window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(load, 280)
+})
 onMounted(load)
+onBeforeUnmount(() => {
+  if (searchTimer) window.clearTimeout(searchTimer)
+  loadRevision += 1
+})
 </script>
 
 <style scoped>

@@ -1,4 +1,12 @@
 // 分镜：create, update, delete；帧提示词 get/save
+const { validateWritableMediaReferences } = require('./mediaAuthorizationService');
+const { normalizeStorageKey } = require('../utils/storagePath');
+
+function validateStoryboardLocalPaths(input) {
+  for (const field of ['local_path', 'last_frame_local_path', 'audio_local_path', 'narration_audio_local_path']) {
+    if (input?.[field] != null && input[field] !== '') normalizeStorageKey(input[field]);
+  }
+}
 
 /**
  * 将分镜勾选的角色（dramas.characters 表 id）同步到 storyboard_characters（角色库 id），
@@ -33,6 +41,17 @@ function parseJsonArray(value) {
 function parseJsonObject(value) {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value
   try { const parsed = value ? JSON.parse(value) : {}; return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {} } catch (_) { return {} }
+}
+
+function parseStoryboardCharacters(value) {
+  let parsed = value;
+  if (typeof value === 'string') {
+    try { parsed = JSON.parse(value); } catch (_) { return []; }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .map((character) => (typeof character === 'object' && character != null ? Number(character.id) : Number(character)))
+    .filter((id) => Number.isFinite(id));
 }
 
 function syncStoryboardCharacterLinks(db, storyboardId, dramaCharacterIds) {
@@ -150,17 +169,38 @@ function activeOmniAssetIds(db, storyboardId, rawIds, ownerUserId, log) {
 function updateStoryboard(db, log, id, req, ownerUserId = null) {
   const row = db.prepare('SELECT id, updated_at FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!row) return null;
+  validateStoryboardLocalPaths(req);
+  validateWritableMediaReferences(db, req, ownerUserId, [
+    'image_url', 'local_path', 'composed_image', 'video_url',
+    'last_frame_image_url', 'last_frame_local_path',
+    'audio_local_path', 'narration_audio_local_path',
+  ]);
   const allowed = ['title', 'description', 'location', 'time', 'duration', 'dialogue', 'narration', 'action', 'result', 'atmosphere', 'image_prompt', 'polished_prompt', 'video_prompt', 'text_model', 'video_model', 'video_resolution', 'video_aspect_ratio', 'video_upscale_resolution', 'video_target_fps', 'scene_id', 'characters', 'composed_image', 'image_url', 'local_path', 'main_panel_idx', 'video_url', 'active_video_generation_id', 'audio_local_path', 'narration_audio_local_path', 'status', 'shot_type', 'angle', 'angle_h', 'angle_v', 'angle_s', 'movement', 'segment_index', 'segment_title', 'creation_mode', 'universal_segment_text', 'layout_description', 'first_frame_image_id', 'last_frame_image_id', 'last_frame_image_url', 'last_frame_local_path', 'omni_asset_ids', 'audio_strategy', 'keep_original_audio', 'audio_volume', 'audio_fade_seconds', 'omni_creation_mode', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'omni_asset_usage_json', 'omni_asset_send_policy', 'omni_prompt_document'];
   const updates = [];
   const params = [];
   // 前端可能传 character_ids，与 characters 统一：存为 JSON 字符串
   const charactersValue = req.character_ids !== undefined ? req.character_ids : req.characters;
   let parsedDramaCharIdsForSync = null;
+  let validatedPropIds = null;
   if (charactersValue !== undefined) {
     updates.push('characters = ?');
     const jsonStr = Array.isArray(charactersValue) ? JSON.stringify(charactersValue) : (typeof charactersValue === 'string' ? charactersValue : '[]');
     params.push(jsonStr);
     parsedDramaCharIdsForSync = parseDramaCharacterIds(charactersValue) ?? [];
+    if (parsedDramaCharIdsForSync.length > 0) {
+      const marks = parsedDramaCharIdsForSync.map(() => '?').join(', ');
+      const dramaRow = db.prepare(`SELECT e.drama_id
+        FROM storyboards s JOIN episodes e ON e.id = s.episode_id
+        WHERE s.id = ? AND s.deleted_at IS NULL`).get(Number(id));
+      const rows = db.prepare(`SELECT c.id FROM characters c
+        WHERE c.id IN (${marks}) AND c.drama_id = ? AND c.deleted_at IS NULL`)
+        .all(...parsedDramaCharIdsForSync, Number(dramaRow?.drama_id));
+      if (rows.length !== new Set(parsedDramaCharIdsForSync).size) {
+        const error = new Error('只能关联当前项目的角色');
+        error.code = 'BAD_REQUEST';
+        throw error;
+      }
+    }
   }
   for (const key of allowed) {
     if (key === 'characters') continue;
@@ -173,6 +213,10 @@ function updateStoryboard(db, log, id, req, ownerUserId = null) {
       else if (key === 'keep_original_audio') params.push(val ? 1 : 0);
       else params.push(val);
     }
+  }
+  if (req.prop_ids !== undefined) {
+    const propService = require('./propService');
+    validatedPropIds = propService.validateStoryboardPropIds(db, id, req.prop_ids);
   }
   if (updates.length === 0 && req.prop_ids === undefined) return getStoryboardById(db, id);
   if (updates.length > 0) {
@@ -190,10 +234,9 @@ function updateStoryboard(db, log, id, req, ownerUserId = null) {
   }
   // 道具关联：写入 storyboard_props 表
   if (req.prop_ids !== undefined) {
-    const propIds = Array.isArray(req.prop_ids) ? req.prop_ids : [];
     db.prepare('DELETE FROM storyboard_props WHERE storyboard_id = ?').run(Number(id));
     const ins = db.prepare('INSERT OR IGNORE INTO storyboard_props (storyboard_id, prop_id) VALUES (?, ?)');
-    for (const pid of propIds) ins.run(Number(id), Number(pid));
+    for (const pid of validatedPropIds) ins.run(Number(id), Number(pid));
   }
   log.info('Storyboard updated', { id });
   return getStoryboardById(db, id);
@@ -222,12 +265,7 @@ function deleteStoryboard(db, log, id) {
 function getStoryboardById(db, id) {
   const r = db.prepare('SELECT * FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!r) return null;
-  let characters = [];
-  if (r.characters) {
-    if (typeof r.characters === 'string') {
-      try { characters = JSON.parse(r.characters); } catch (_) {}
-    } else if (Array.isArray(r.characters)) characters = r.characters;
-  }
+  const characters = parseStoryboardCharacters(r.characters);
   let propIds = [];
   try {
     const propLinks = db.prepare('SELECT prop_id FROM storyboard_props WHERE storyboard_id = ?').all(Number(id));
@@ -252,6 +290,7 @@ function getStoryboardById(db, id) {
     atmosphere: r.atmosphere,
     image_prompt: r.image_prompt,
     polished_prompt: r.polished_prompt ?? null,
+    continuity_snapshot: r.continuity_snapshot ?? null,
     video_prompt: r.video_prompt,
     text_model: r.text_model ?? null,
     video_model: r.video_model ?? null,
@@ -266,6 +305,10 @@ function getStoryboardById(db, id) {
     angle_v: r.angle_v ?? null,
     angle_s: r.angle_s ?? null,
     movement: r.movement,
+    lighting_style: r.lighting_style ?? null,
+    depth_of_field: r.depth_of_field ?? null,
+    emotion: r.emotion ?? null,
+    emotion_intensity: r.emotion_intensity ?? null,
     segment_index: r.segment_index ?? 0,
     segment_title: r.segment_title ?? null,
     creation_mode: r.creation_mode === 'universal' ? 'universal' : 'classic',
@@ -299,6 +342,7 @@ function getStoryboardById(db, id) {
     audio_local_path: r.audio_local_path ?? null,
     narration_audio_local_path: r.narration_audio_local_path ?? null,
     status: r.status || 'pending',
+    error_msg: r.error_msg ?? null,
     created_at: r.created_at,
     updated_at: r.updated_at,
   };

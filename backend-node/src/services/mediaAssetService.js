@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
-const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const uploadService = require('./uploadService');
 const storageLayout = require('./storageLayout');
 const assetService = require('./assetService');
@@ -9,6 +9,8 @@ const mediaStorage = require('./mediaStorageService');
 const { getFfmpegPath, getFfprobePath } = require('../utils/ffmpegPath');
 
 const LIMITS = { image: 30, video: 50, audio: 15 };
+const INSPECTION_TIMEOUT_MS = 30_000;
+const THUMBNAIL_TIMEOUT_MS = 60_000;
 const EXTENSIONS = {
   image: ['.jpg', '.jpeg', '.png', '.gif', '.webp'],
   video: ['.mp4', '.webm', '.mov', '.m4v'],
@@ -73,7 +75,19 @@ async function upload(db, cfg, log, file, body = {}) {
   }
   const projectSubdir = storageLayout.getProjectStorageSubdir(db, dramaId);
   const result = uploadService.uploadFile(storagePath, cfg?.storage?.base_url || '', log, file.buffer, file.originalname, file.mimetype, `${type}s`, projectSubdir);
-  const inspection = await inspectMedia(path.join(storagePath, result.local_path.replace(/\//g, path.sep)), type, storagePath, result.local_path, log);
+  let inspection;
+  try {
+    inspection = await inspectMedia(path.join(storagePath, result.local_path.replace(/\//g, path.sep)), type, storagePath, result.local_path, log);
+  } catch (error) {
+    // The file has no database owner yet.  Remove only the exact newly-created
+    // path so a failed probe cannot leave an untracked media object behind.
+    try {
+      const absolute = path.resolve(storagePath, result.local_path.replace(/\//g, path.sep));
+      const relative = path.relative(path.resolve(storagePath), absolute);
+      if (relative && !path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`)) fs.rmSync(absolute, { force: true });
+    } catch (_) {}
+    throw error;
+  }
   const displayName = String(body.name || readableUploadName(file.originalname) || 'untitled-media').slice(0, 255);
   const asset = assetService.create(db, log, {
     drama_id: dramaId,
@@ -107,8 +121,65 @@ async function upload(db, cfg, log, file, body = {}) {
   }
 }
 
+function runMediaProcess(command, args, options = {}) {
+  const timeoutMs = Math.max(100, Number(options.timeoutMs || INSPECTION_TIMEOUT_MS));
+  const maxBuffer = Math.max(64 * 1024, Number(options.maxBuffer || 1024 * 1024));
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const stdout = [];
+    const stderr = [];
+    let outputBytes = 0;
+    let timedOut = false;
+    let outputTooLarge = false;
+    let settled = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
+    const collect = (target) => (chunk) => {
+      outputBytes += chunk.length;
+      if (outputBytes > maxBuffer) {
+        outputTooLarge = true;
+        child.kill('SIGKILL');
+        return;
+      }
+      target.push(chunk);
+    };
+    child.stdout?.on('data', collect(stdout));
+    child.stderr?.on('data', collect(stderr));
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    };
+    child.once('error', fail);
+    child.once('close', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const standardError = Buffer.concat(stderr).toString('utf8').trim().slice(-2000);
+      if (timedOut) return reject(new Error(`媒体处理超时（${timeoutMs}ms）`));
+      if (outputTooLarge) return reject(new Error('媒体处理输出超过限制'));
+      if (code !== 0) {
+        const suffix = standardError ? `: ${standardError}` : '';
+        return reject(new Error(`媒体处理失败（退出码 ${code ?? 'unknown'}${signal ? `，信号 ${signal}` : ''}）${suffix}`));
+      }
+      resolve({ stdout: Buffer.concat(stdout).toString('utf8'), stderr: standardError, code, signal });
+    });
+  });
+}
+
 async function inspectMedia(filePath, type, storageRoot, localPath, log) {
   const result = { width: null, height: null, duration: null, thumbnail_local_path: null, metadata: {} };
+  let thumbnailAbs = null;
   try {
     if (type === 'image') {
       const sharp = require('sharp'); const image = await sharp(filePath).metadata();
@@ -116,21 +187,27 @@ async function inspectMedia(filePath, type, storageRoot, localPath, log) {
       result.metadata = { format: image.format || null, space: image.space || null };
       return result;
     }
-    const probe = spawnSync(getFfprobePath(), ['-v', 'error', '-show_entries', 'format=duration:stream=codec_name,codec_type,width,height,r_frame_rate', '-of', 'json', filePath], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
-    if (probe.status === 0) {
-      const parsed = JSON.parse(probe.stdout || '{}'); const stream = (parsed.streams || []).find((item) => item.codec_type === (type === 'audio' ? 'audio' : 'video')) || (parsed.streams || [])[0] || {};
-      result.width = Number(stream.width) || null; result.height = Number(stream.height) || null;
-      result.duration = Number(parsed.format?.duration) || null;
-      result.metadata = { codec: stream.codec_name || null, frame_rate: stream.r_frame_rate || null, duration: result.duration };
-    }
+    const probe = await runMediaProcess(getFfprobePath(), ['-v', 'error', '-show_entries', 'format=duration:stream=codec_name,codec_type,width,height,r_frame_rate', '-of', 'json', filePath], { timeoutMs: INSPECTION_TIMEOUT_MS, maxBuffer: 1024 * 1024 });
+    const parsed = JSON.parse(probe.stdout || '{}'); const stream = (parsed.streams || []).find((item) => item.codec_type === (type === 'audio' ? 'audio' : 'video')) || (parsed.streams || [])[0] || {};
+    result.width = Number(stream.width) || null; result.height = Number(stream.height) || null;
+    result.duration = Number(parsed.format?.duration) || null;
+    result.metadata = { codec: stream.codec_name || null, frame_rate: stream.r_frame_rate || null, duration: result.duration };
     if (type === 'video') {
       const thumbDir = path.join(storageRoot, path.dirname(localPath), 'thumbnails'); fs.mkdirSync(thumbDir, { recursive: true });
       const thumbName = `${path.basename(localPath, path.extname(localPath))}.jpg`; const thumbAbs = path.join(thumbDir, thumbName);
-      const made = spawnSync(getFfmpegPath(), ['-y', '-ss', '0', '-i', filePath, '-frames:v', '1', '-q:v', '3', thumbAbs], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
-      if (made.status === 0 && fs.existsSync(thumbAbs)) result.thumbnail_local_path = path.relative(storageRoot, thumbAbs).replace(/\\/g, '/');
+      thumbnailAbs = thumbAbs;
+      await runMediaProcess(getFfmpegPath(), ['-y', '-ss', '0', '-i', filePath, '-frames:v', '1', '-q:v', '3', thumbAbs], { timeoutMs: THUMBNAIL_TIMEOUT_MS, maxBuffer: 1024 * 1024 });
+      if (!fs.existsSync(thumbAbs)) throw new Error('视频缩略图生成失败');
+      result.thumbnail_local_path = path.relative(storageRoot, thumbAbs).replace(/\\/g, '/');
     }
-  } catch (error) { log.warn('媒体探测失败，仍保留已上传文件', { error: error.message, local_path: localPath }); }
+  } catch (error) {
+    if (thumbnailAbs) {
+      try { fs.rmSync(thumbnailAbs, { force: true }); } catch (_) {}
+    }
+    log?.warn?.('媒体探测失败', { error: error.message, local_path: localPath });
+    throw error;
+  }
   return result;
 }
 
-module.exports = { upload, detectType, LIMITS, EXTENSIONS, limits, readableUploadName, hasExpectedSignature, inspectMedia };
+module.exports = { upload, detectType, LIMITS, EXTENSIONS, limits, readableUploadName, hasExpectedSignature, inspectMedia, runMediaProcess };

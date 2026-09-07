@@ -8,6 +8,7 @@ const path = require('path');
 const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
+const { normalizeStorageKey, resolveStorageFile } = require('../utils/storagePath');
 
 function normalizeKey(value) {
   const key = String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
@@ -110,6 +111,188 @@ async function readObjectByKey(cfg, key) {
   if (result.status === 404) return null;
   if (result.status < 200 || result.status >= 300) throw new Error(`OSS read failed: HTTP ${result.status}`);
   return result.body;
+}
+
+function copyProxyHeaders(res, headers, fallbackType, cacheControl, privateResponse) {
+  const names = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified', 'content-encoding'];
+  for (const name of names) {
+    const value = headers?.[name];
+    if (value != null && value !== '') res.setHeader(name, value);
+  }
+  if (!headers?.['content-type'] && fallbackType) res.setHeader('Content-Type', fallbackType);
+  res.setHeader('Cache-Control', cacheControl);
+  if (privateResponse) res.setHeader('Vary', 'Cookie, Authorization, X-LMD-Session');
+}
+
+function clearProxyBodyHeaders(res) {
+  if (typeof res.removeHeader === 'function') {
+    res.removeHeader('Content-Encoding');
+    res.removeHeader('Content-Length');
+  }
+  // Error responses intentionally discard the provider body. Keeping the
+  // provider's length or content encoding makes clients wait for bytes that
+  // the application will never send.
+  res.setHeader('Content-Length', '0');
+}
+
+function setResponseStatus(res, status) {
+  if (typeof res.status === 'function') res.status(status);
+  res.statusCode = status;
+}
+
+// Stream a cold OSS object directly to the client.  The old fallback used a
+// full-object buffer, which made a single seek in a pruned video allocate the
+// whole file in Node.  Range and HEAD are forwarded to OSS and the upstream
+// response headers are retained so browser video controls keep working.
+function streamObjectByKey(cfg, localPath, req, res, options = {}) {
+  if (!isOss(cfg)) return Promise.resolve({ handled: false, reason: 'local_storage' });
+  const oss = ossConfig(cfg);
+  const key = objectKey(cfg, localPath);
+  const urlText = endpointUrl(oss, key);
+  const url = new URL(urlText);
+  const transport = url.protocol === 'https:' ? https : http;
+  const method = String(req?.method || 'GET').toUpperCase() === 'HEAD' ? 'HEAD' : 'GET';
+  const date = new Date().toUTCString();
+  const headers = {
+    Date: date,
+    Authorization: ossAuthorization(oss, method, '', date, key),
+  };
+  for (const name of ['range', 'if-range', 'if-none-match', 'if-modified-since']) {
+    const value = req?.headers?.[name];
+    if (value) headers[name[0].toUpperCase() + name.slice(1)] = value;
+  }
+  const fallbackType = mediaContentType(localPath) || 'application/octet-stream';
+  const cacheControl = options.cacheControl || 'private, max-age=0, must-revalidate';
+  const privateResponse = options.privateResponse !== false;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let completed = false;
+    let clientClosed = false;
+    let upstream = null;
+    let upstreamRes = null;
+
+    const removeListener = (target, event, listener) => {
+      if (!target || !listener) return;
+      if (typeof target.off === 'function') target.off(event, listener);
+      else if (typeof target.removeListener === 'function') target.removeListener(event, listener);
+    };
+    const cleanup = () => {
+      removeListener(req, 'aborted', onClientClose);
+      removeListener(res, 'close', onClientClose);
+      removeListener(res, 'error', onClientError);
+      removeListener(upstream, 'error', onUpstreamError);
+      removeListener(upstreamRes, 'error', onUpstreamError);
+      removeListener(upstreamRes, 'aborted', onUpstreamAborted);
+    };
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+    const finishError = (error) => {
+      if (settled) return;
+      if (clientClosed) return settle({ handled: true, aborted: true, error });
+      cleanup();
+      settled = true;
+      reject(error);
+    };
+    const onClientClose = () => {
+      if (settled) return;
+      clientClosed = true;
+      if (!completed && upstream && !upstream.destroyed) upstream.destroy();
+      settle({ handled: true, aborted: true });
+    };
+    const onClientError = (error) => {
+      if (settled) return;
+      clientClosed = true;
+      if (!completed && upstream && !upstream.destroyed) upstream.destroy();
+      settle({ handled: true, aborted: true, error });
+    };
+    const onUpstreamError = (error) => {
+      if (settled) return;
+      if (clientClosed) return settle({ handled: true, aborted: true, error });
+      finishError(error);
+      if (typeof res?.destroy === 'function' && !res.destroyed && !res.writableEnded) {
+        try { res.destroy(); } catch (_) {}
+      }
+    };
+    const onUpstreamAborted = () => onUpstreamError(new Error('OSS response aborted'));
+
+    if (typeof req?.on === 'function') req.on('aborted', onClientClose);
+    if (typeof res?.on === 'function') {
+      res.on('close', onClientClose);
+      res.on('error', onClientError);
+    }
+
+    const handleUpstreamResponse = (response) => {
+      upstreamRes = response;
+      response.once('error', onUpstreamError);
+      response.once('aborted', onUpstreamAborted);
+      if (clientClosed) {
+        removeListener(response, 'error', onUpstreamError);
+        removeListener(response, 'aborted', onUpstreamAborted);
+        response.resume();
+        response.destroy();
+        return;
+      }
+
+      const status = Number(response.statusCode || 0);
+      if (status === 404) {
+        response.once('end', () => {
+          completed = true;
+          settle({ handled: false, status });
+        });
+        response.resume();
+        return;
+      }
+
+      // Preserve 416 from the object store. For other upstream failures,
+      // return only the status and safe headers without provider body bytes.
+      if (status < 200 || status >= 400) {
+        copyProxyHeaders(res, response.headers, fallbackType, cacheControl, privateResponse);
+        clearProxyBodyHeaders(res);
+        setResponseStatus(res, status || 502);
+        response.once('end', () => {
+          completed = true;
+          settle({ handled: true, status });
+        });
+        response.resume();
+        if (typeof res.end === 'function') res.end();
+        return;
+      }
+
+      copyProxyHeaders(res, response.headers, fallbackType, cacheControl, privateResponse);
+      setResponseStatus(res, status);
+      if (method === 'HEAD' || status === 204 || status === 304) {
+        response.once('end', () => {
+          completed = true;
+          settle({ handled: true, status });
+        });
+        response.resume();
+        if (typeof res.end === 'function') res.end();
+        return;
+      }
+
+      response.once('end', () => {
+        completed = true;
+        settle({ handled: true, status });
+      });
+      response.pipe(res);
+    };
+
+    try {
+      upstream = transport.request(url, { method, headers }, handleUpstreamResponse);
+      upstream.setTimeout(Math.max(5_000, Number(options.timeout || 60_000)), () => {
+        upstream.destroy(new Error('OSS request timed out'));
+      });
+      upstream.on('error', onUpstreamError);
+      upstream.end();
+    } catch (error) {
+      finishError(error);
+    }
+  });
 }
 
 async function verifyOssObject(cfg, localPath) {
@@ -253,21 +436,56 @@ async function retryPendingMirrors(db, cfg, storageRoot, log, limit = 100) {
   }
   return { synced, failed };
 }
-function staticHandler(cfg, storageRoot) {
+function staticHandler(cfg, storageRoot, options = {}) {
+  // Existing service-level callers can still use the storage handler as a
+  // plain byte proxy.  The application mount passes `db`, which turns on the
+  // ownership check and private cache policy for user media.
+  const opts = typeof options === 'function' ? { authorize: options } : (options || {});
+  const authorization = opts.authorize || (opts.db ? require('./mediaAuthorizationService').createStaticMediaAuthorizer(opts.db, opts) : null);
   const maxAge = Math.max(0, Number(cfg?.storage?.static_cache_max_age_seconds ?? 3600));
-  const cacheControl = `public, max-age=${maxAge}`;
+  const cacheControl = opts.privateCache || authorization
+    ? `private, max-age=${maxAge}, must-revalidate`
+    : `public, max-age=${maxAge}`;
+  const setMediaHeaders = (res) => {
+    res.setHeader('Cache-Control', cacheControl);
+    if (opts.privateCache || authorization) res.setHeader('Vary', 'Cookie, Authorization, X-LMD-Session');
+  };
   return async (req, res, next) => {
-    let key; try { key = normalizeKey(decodeURIComponent(req.path)); } catch (_) { return res.status(400).end(); }
-    const local = path.join(storageRoot, key);
+    let key;
+    try { key = normalizeStorageKey(decodeURIComponent(req.path).replace(/^\/+/, '')); }
+    catch (_) { return res.status(400).end(); }
+    if (authorization) {
+      let decision;
+      try {
+        decision = await authorization({ key, user: req.auth || null, req, storageRoot });
+      } catch (error) { return next(error); }
+      if (!decision?.allowed) return res.status(Number(decision?.status) || (req.auth ? 404 : 401)).end();
+    }
+    let local = null;
+    try {
+      // Resolve through realpath so a symlink inside storage cannot turn this
+      // route into a read primitive for an arbitrary host file.
+      local = resolveStorageFile(storageRoot, key);
+    } catch (_) {}
     // The application route remains the authorization boundary. If a future
     // retention job removes a verified local hot copy, proxy bytes from the
     // private OSS object instead of leaking a permanent public object URL.
-    if (fs.existsSync(local)) {
+    if (local) {
       // send@0.19 only writes its defaults when these headers are absent — set
       // ours first so media responses are actually cacheable (kill repeated
       // full downloads on carousel/pager revisits).
-      res.setHeader('Cache-Control', cacheControl);
+      setMediaHeaders(res);
       return res.sendFile(local);
+    }
+    if (isOss(cfg)) {
+      try {
+        const proxied = await streamObjectByKey(cfg, key, req, res, {
+          cacheControl,
+          privateResponse: !!(opts.privateCache || authorization),
+        });
+        if (proxied?.handled) return;
+        return next();
+      } catch (error) { return next(error); }
     }
     try {
       const body = await readMediaBuffer(cfg, storageRoot, key);
@@ -295,11 +513,12 @@ function staticHandler(cfg, storageRoot) {
         return res.status(206).set({
           'Accept-Ranges': 'bytes',
           'Cache-Control': cacheControl,
+          ...(opts.privateCache || authorization ? { Vary: 'Cookie, Authorization, X-LMD-Session' } : {}),
           'Content-Range': `bytes ${start}-${end}/${total}`,
           'Content-Length': String(chunk.length),
         }).type(type).send(chunk);
       }
-      res.setHeader('Cache-Control', cacheControl);
+      setMediaHeaders(res);
       res.type(type).send(body);
     } catch (error) { next(error); }
   };
@@ -348,4 +567,4 @@ function startArchiveScheduler(cfg, storageRoot, log, options = {}) {
   return { runNow, stop: () => clearInterval(timer) };
 }
 
-module.exports = { normalizeKey, isOss, objectKey, objectUrl, publicBaseUrl, putBuffer, readMediaBuffer, readObjectByKey, mediaContentType, verifyOssObject, archiveLocalFile, mirrorAndTrack, retryPendingMirrors, pruneVerifiedLocalCopies, staticHandler, migrateLocalTree, startArchiveScheduler, assertOssDeliveryReady };
+module.exports = { normalizeKey, isOss, objectKey, objectUrl, publicBaseUrl, putBuffer, readMediaBuffer, readObjectByKey, streamObjectByKey, mediaContentType, verifyOssObject, archiveLocalFile, mirrorAndTrack, retryPendingMirrors, pruneVerifiedLocalCopies, staticHandler, migrateLocalTree, startArchiveScheduler, assertOssDeliveryReady };

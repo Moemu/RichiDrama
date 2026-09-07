@@ -4,6 +4,7 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const { randomUUID } = require('crypto');
+const { resolveStorageFile } = require('../utils/storagePath');
 
 /**
  * 用 Node.js 原生 http/https 模块下载 URL 到 Buffer。
@@ -230,12 +231,10 @@ async function uploadLocalImageToProxy(storagePath, localPathOrUrl, log, tag) {
         // URL 中文可能百分号编码，需 decode 才能与磁盘路径匹配
         let rel = afterStatic.replace(/^\//, '');
         try { rel = decodeURIComponent(rel); } catch (_) {}
-        filePath = path.join(storagePath, rel);
+        filePath = resolveStorageFile(storagePath, rel);
       }
     } else if (localPathOrUrl && storagePath) {
-      filePath = path.isAbsolute(localPathOrUrl)
-        ? localPathOrUrl
-        : path.join(storagePath, localPathOrUrl.replace(/^\//, ''));
+      filePath = resolveStorageFile(storagePath, localPathOrUrl);
     }
     if (!filePath || !fs.existsSync(filePath)) {
       log.warn('[图床上传] 本地文件不存在', { tag, filePath });

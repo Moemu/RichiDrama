@@ -76,17 +76,17 @@ function update(db, log, id, updates) {
   if (!existing) return null;
   const set = [];
   const params = [];
-  if (updates.name != null) { set.push('name = ?'); params.push(updates.name); }
-  if (updates.type != null) { set.push('type = ?'); params.push(updates.type); }
-  if (updates.description != null) { set.push('description = ?'); params.push(updates.description); }
-  if (updates.prompt != null) { set.push('prompt = ?'); params.push(updates.prompt); }
+  if (updates.name !== undefined) { set.push('name = ?'); params.push(updates.name ?? ''); }
+  if (updates.type !== undefined) { set.push('type = ?'); params.push(updates.type); }
+  if (updates.description !== undefined) { set.push('description = ?'); params.push(updates.description); }
+  if (updates.prompt !== undefined) { set.push('prompt = ?'); params.push(updates.prompt); }
   if (updates.negative_prompt !== undefined) { set.push('negative_prompt = ?'); params.push(updates.negative_prompt); }
-  if (updates.image_url != null) { set.push('image_url = ?'); params.push(updates.image_url); }
+  if (updates.image_url !== undefined) { set.push('image_url = ?'); params.push(updates.image_url); }
   if (updates.local_path !== undefined) { set.push('local_path = ?'); params.push(updates.local_path ?? null); }
   if (updates.extra_images !== undefined) { set.push('extra_images = ?'); params.push(updates.extra_images ?? null); }
   if (updates.ref_image !== undefined) { set.push('ref_image = ?'); params.push(updates.ref_image ?? null); }
   if (set.length === 0) return existing;
-  if (updates.image_url != null || updates.local_path !== undefined) {
+  if (updates.image_url !== undefined || updates.local_path !== undefined) {
     assetSd2Service.markResourceStale(db, 'prop', existing, updates);
   }
   params.push(new Date().toISOString(), id);
@@ -119,10 +119,41 @@ function softDeletePropsByEpisodeId(db, log, episodeId) {
   }
 }
 
+function validateStoryboardPropIds(db, storyboardId, propIds) {
+  const sb = db.prepare(`SELECT s.id, e.drama_id
+    FROM storyboards s JOIN episodes e ON e.id = s.episode_id
+    WHERE s.id = ? AND s.deleted_at IS NULL AND e.deleted_at IS NULL`).get(Number(storyboardId));
+  if (!sb) {
+    const error = new Error('分镜不存在');
+    error.code = 'NOT_FOUND';
+    throw error;
+  }
+  const ids = [...new Set((Array.isArray(propIds) ? propIds : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0))];
+  if (Array.isArray(propIds) && propIds.some((value) => !Number.isInteger(Number(value)) || Number(value) <= 0)) {
+    const error = new Error('prop_ids 包含无效 ID');
+    error.code = 'BAD_REQUEST';
+    throw error;
+  }
+  if (ids.length > 0) {
+    const marks = ids.map(() => '?').join(', ');
+    const rows = db.prepare(`SELECT id FROM props
+      WHERE id IN (${marks}) AND drama_id = ? AND deleted_at IS NULL`).all(...ids, Number(sb.drama_id));
+    if (rows.length !== ids.length) {
+      const error = new Error('只能关联当前项目的道具');
+      error.code = 'BAD_REQUEST';
+      throw error;
+    }
+  }
+  return ids;
+}
+
 function associateWithStoryboard(db, log, storyboardId, propIds) {
+  const ids = validateStoryboardPropIds(db, storyboardId, propIds);
   db.prepare('DELETE FROM storyboard_props WHERE storyboard_id = ?').run(storyboardId);
   const ins = db.prepare('INSERT OR IGNORE INTO storyboard_props (storyboard_id, prop_id) VALUES (?, ?)');
-  for (const pid of propIds || []) ins.run(storyboardId, pid);
+  for (const pid of ids) ins.run(storyboardId, pid);
   log.info('Props associated with storyboard', { storyboard_id: storyboardId });
   return true;
 }
@@ -228,6 +259,7 @@ module.exports = {
   update,
   deleteById,
   softDeletePropsByEpisodeId,
+  validateStoryboardPropIds,
   associateWithStoryboard,
   generatePropPromptOnly,
   extractPropFromImage,

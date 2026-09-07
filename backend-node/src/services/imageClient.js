@@ -120,10 +120,12 @@ function inferProtocol(provider, model) {
  * @param {string} [imageServiceType] - 'image' 文本生成图片（角色/场景/道具），'storyboard_image' 分镜图片生成（支持参考图）；缺省为 'image'
  */
 function getDefaultImageConfig(db, preferredModel, preferredProvider, imageServiceType, options = {}) {
+  const tenantId = options.tenant_id || options.tenantId || require('./billingRequestContext').current()?.tenant_id;
+  const scope = tenantId ? { ...options, tenant_id: tenantId } : options;
   const serviceType = imageServiceType || 'image';
-  let configs = aiConfigService.listConfigs(db, serviceType, options);
+  let configs = aiConfigService.listConfigs(db, serviceType, scope);
   if (configs.length === 0 && serviceType === 'storyboard_image') {
-    configs = aiConfigService.listConfigs(db, 'image', options);
+    configs = aiConfigService.listConfigs(db, 'image', scope);
   }
   let active = configs.filter((c) => c.is_active);
   if (active.length === 0) return null;
@@ -1424,7 +1426,7 @@ async function callImageApi(db, log, opts) {
     user_negative_prompt,
   } = opts;
   const preferredProvider = preferred_provider ?? opts.preferredProvider;
-  const config = getDefaultImageConfig(db, preferredModel, preferredProvider, imageServiceType);
+  const config = getDefaultImageConfig(db, preferredModel, preferredProvider, imageServiceType, { tenant_id: opts.tenant_id });
   if (!config) {
     throw new Error('未配置图片模型，请在「AI 配置」中添加 image 类型且已启用的配置');
   }
@@ -1659,9 +1661,8 @@ function createAndGenerateImage(db, log, opts) {
     'SELECT owner_user_id FROM dramas WHERE id = ? AND deleted_at IS NULL'
   ).get(dramaIdNum);
   const ownerUserId = Number(opts.owner_user_id || dramaOwner?.owner_user_id) || null;
-  const tenantId = ownerUserId
-    ? require('./tenantService').tenantForUser(db, ownerUserId)?.id || null
-    : null;
+  const tenantId = opts.tenant_id || require('./billingRequestContext').current()?.tenant_id
+    || (ownerUserId ? require('./tenantService').tenantForUser(db, ownerUserId)?.id : null) || null;
 
   let resourceId;
   if (charIdNum != null) resourceId = `character_${charIdNum}`;
@@ -1726,6 +1727,7 @@ function createAndGenerateImage(db, log, opts) {
       db.prepare('UPDATE image_generations SET status = ? WHERE id = ?').run('processing', imageGenId);
       const result = await callImageApi(db, log, {
         prompt,
+        tenant_id: tenantId,
         model,
         size,
         quality,

@@ -57,11 +57,10 @@ function create(db, log, cfg) {
     const body = req.body || {};
     const tenantId = Number(body.tenant_id || req.query?.tenant_id);
     if (tenantId && !require('../services/tenantService').tenantDetail(db, tenantId)) return response.notFound(res, '项目分组不存在');
-    if (!body.service_type || !body.name || !body.provider || !body.base_url) {
-      return response.badRequest(res, '缺少必填字段: service_type, name, provider, base_url');
-    }
-    if (body.api_key === undefined || body.api_key === null) {
-      return response.badRequest(res, '缺少必填字段: api_key');
+    try {
+      aiConfigService.validateConfigRequest(body, { mode: 'create' });
+    } catch (err) {
+      return response.badRequest(res, err.message);
     }
     try {
       const config = aiConfigService.createConfig(db, log, {
@@ -125,6 +124,11 @@ function update(db, log, cfg) {
     }
 
     if (tenantId) body = { ...body, is_default: false };
+    try {
+      aiConfigService.validateConfigRequest(body, { mode: 'update', existing: owned });
+    } catch (err) {
+      return response.badRequest(res, err.message);
+    }
     const config = aiConfigService.updateConfig(db, log, id, body);
     if (!config) return response.notFound(res, '配置不存在');
     // 仅当配置真正归属该组时才更新分组绑定;bindOwnedConfig 会拒绝

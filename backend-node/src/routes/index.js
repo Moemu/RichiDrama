@@ -44,7 +44,7 @@ function setupRouter(cfg, db, log) {
   // calls, so every text-model invocation can participate in billing.
   r.use((req, res, next) => {
     const tenant = require('../services/tenantService').tenantForUser(db, req.auth?.id);
-    return require('../services/billingRequestContext').run({ actor: req.auth, tenant_id: tenant?.id || null, db, log }, next);
+    return require('../services/billingRequestContext').run({ actor: req.auth, tenant_id: tenant?.id || null, db, log, cfg }, next);
   });
   r.get('/auth/me', auth.me);
   r.post('/auth/session-cookie', auth.sessionCookie);
@@ -537,14 +537,14 @@ function setupRouter(cfg, db, log) {
 
   // ---------- settings ----------
   r.get('/settings/language', settings.getLanguage);
-  r.put('/settings/language', settings.updateLanguage);
+  r.put('/settings/language', requireAdmin, settings.updateLanguage);
   r.get('/settings/generation', settings.getGenerationSettings);
-  r.put('/settings/generation', settings.updateGenerationSettings);
+  r.put('/settings/generation', requireAdmin, settings.updateGenerationSettings);
 
   // ---------- prompt overrides ----------
   r.get('/settings/prompts', promptOverrides.list);
-  r.put('/settings/prompts/:key', promptOverrides.update);
-  r.delete('/settings/prompts/:key', promptOverrides.reset);
+  r.put('/settings/prompts/:key', requireAdmin, promptOverrides.update);
+  r.delete('/settings/prompts/:key', requireAdmin, promptOverrides.reset);
 
   // ---------- scene model map ----------
   r.get('/scene-model-map', sceneModelMap.list);

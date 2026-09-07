@@ -319,7 +319,7 @@ import CanvasFlowAligner from '@/components/dramaCanvas/CanvasFlowAligner.vue'
 const route = useRoute()
 const router = useRouter()
 const { isDark, toggle: toggleTheme } = useTheme()
-const { imagesBySbId, videosBySbId, loadForDrama } = useCanvasStoryboardMedia()
+const { imagesBySbId, videosBySbId, universalAssets, loadForDrama } = useCanvasStoryboardMedia()
 
 const loading = ref(false)
 const drama = ref(null)
@@ -494,6 +494,7 @@ function getCanvasGenerationOptions() {
   return {
     ...getDramaGenerationOptions(drama.value),
     imagesBySbId: imagesBySbId.value,
+    universalAssets: universalAssets.value,
   }
 }
 
@@ -504,6 +505,7 @@ provide(CANVAS_CONTEXT_KEY, {
   drama,
   imagesBySbId,
   videosBySbId,
+  universalAssets,
   getGenerationOptions: getCanvasGenerationOptions,
   setFocusedNode: (nodeId) => {
     focusedNodeId.value = nodeId
@@ -627,6 +629,7 @@ const {
   filterEpisodeId,
   imagesBySbId,
   videosBySbId,
+  universalAssets,
   refreshCanvas,
   nodeStatus,
 })

@@ -194,7 +194,7 @@ function importDrama(db, cfg, log) {
       response.created(res, result);
     } catch (err) {
       log.error('Import drama failed', { error: err.message });
-      if (err.message && (err.message.includes('格式') || err.message.includes('缺少') || err.message.includes('损坏'))) {
+      if (err.message && (err.message.includes('格式') || err.message.includes('缺少') || err.message.includes('损坏') || err.message.includes('过大') || err.message.includes('条目') || err.message.includes('解压'))) {
         return response.badRequest(res, err.message);
       }
       response.internalError(res, err.message || '导入失败');

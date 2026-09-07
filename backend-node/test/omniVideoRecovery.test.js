@@ -12,6 +12,7 @@ const aiConfigs = require('../src/services/aiConfigService');
 const tenants = require('../src/services/tenantService');
 const billing = require('../src/services/billingService');
 const videoService = require('../src/services/videoService');
+const upscaleService = require('../src/services/videoUpscaleService');
 
 test('only safe provider material-fetch timeouts enable failed-generation retry', () => {
   const internalTimeout = 'Timeout while downloading url: https://ark-common-storage-prod-cn-beijing.tos-cn-beijing.volces.com/ark-async-gateway/cgt-test/2?x-tos-process=image%2Fformat%2Cjpg Request id: 021788';
@@ -94,6 +95,7 @@ test('SD2 waiting generation resumes after restart when an old snapshot has no i
       assets: [{ asset_id: Number(asset.lastInsertRowid), alias: '真人参考图', type: 'image', role: 'reference', usage: 'reference' }],
     }, admin);
     assert.equal(waiting.status, 'sd2_waiting');
+    assert.equal(db.prepare('SELECT postprocess_recovery_version FROM video_generations WHERE id=?').get(waiting.video_generation_id).postprocess_recovery_version, 1);
     const storedJob = db.prepare('SELECT id, request_snapshot_json FROM omni_video_jobs WHERE video_generation_id=?').get(waiting.video_generation_id);
     assert.deepEqual(videoService.loadOmniReferenceImageInputs(db, waiting.video_generation_id, ['https://cdn.example/identity.png']), [{
       url: 'https://cdn.example/identity.png', local_path: 'library/identity.png', width: 12699, height: 7559, file_size: 30023620,
@@ -154,6 +156,41 @@ test('SD2 waiting generation resumes after restart when an old snapshot has no i
     assert.deepEqual(processed, [waiting.video_generation_id, retried.video_generation_id]);
   } finally {
     videoService.processVideoGeneration = originalProcess;
+    closeDb();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('explicit Omni post-process retry opts a legacy generation into recovery', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'local-mini-drama-omni-postprocess-retry-'));
+  const originalRetry = upscaleService.retryFromSource;
+  const originalProcess = upscaleService.process;
+  let db;
+  try {
+    db = getDb({ path: path.join(root, 'test.db'), type: 'sqlite' });
+    runMigrationsAndEnsure(db);
+    const log = { warn() {}, error() {} };
+    const admin = auth.ensureBootstrapAdmin(db, log);
+    const now = new Date().toISOString();
+    const generation = db.prepare(`INSERT INTO video_generations
+      (owner_user_id, provider, model, duration, resolution, source_local_path, upscale_resolution,
+       upscale_status, postprocess_recovery_version, status, created_at, updated_at)
+      VALUES (?, 'volces', 'seedance', 10, '720p', 'projects/retry/videos/source.mp4', '720p',
+       'failed', 0, 'failed', ?, ?)`)
+      .run(admin.id, now, now);
+    const job = db.prepare(`INSERT INTO omni_video_jobs
+      (video_generation_id, owner_user_id, prompt, model_requested, model_resolved, created_at, updated_at)
+      VALUES (?, ?, 'retry', 'seedance', 'seedance', ?, ?)`)
+      .run(generation.lastInsertRowid, admin.id, now, now);
+
+    upscaleService.retryFromSource = () => ({ id: 1 });
+    upscaleService.process = async () => null;
+    omni.retryPostprocess(db, log, job.lastInsertRowid, admin, 'upscale');
+    assert.equal(db.prepare('SELECT postprocess_recovery_version FROM video_generations WHERE id=?').get(generation.lastInsertRowid).postprocess_recovery_version, 1);
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    upscaleService.retryFromSource = originalRetry;
+    upscaleService.process = originalProcess;
     closeDb();
     fs.rmSync(root, { recursive: true, force: true });
   }

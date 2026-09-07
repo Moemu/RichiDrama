@@ -78,7 +78,7 @@ const isNodeBusy = computed(() => {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .canvas-script-node.focused {
-  border-color: #fbbf24;
+  border-color: var(--status-warning);
   box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 .canvas-script-node.empty {
@@ -86,7 +86,7 @@ const isNodeBusy = computed(() => {
   opacity: 0.92;
 }
 .canvas-script-node.processing {
-  border-color: #60a5fa;
+  border-color: var(--status-info);
   animation: script-pulse 1.4s ease-in-out infinite;
 }
 .head {
@@ -98,16 +98,16 @@ const isNodeBusy = computed(() => {
 .badge {
   font-size: 12px;
   font-weight: 700;
-  color: #fcd34d;
+  color: var(--status-warning);
 }
 .ep {
   font-size: 11px;
-  color: #d4d4d8;
+  color: var(--text-regular);
 }
 .preview {
   font-size: 11px;
   line-height: 1.45;
-  color: #e4e4e7;
+  color: var(--text-regular);
   max-height: 56px;
   overflow: hidden;
   margin-bottom: 8px;
@@ -123,11 +123,11 @@ const isNodeBusy = computed(() => {
   padding: 2px 6px;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.08);
-  color: #a1a1aa;
+  color: var(--text-muted);
 }
 .hint {
   font-size: 10px;
-  color: #71717a;
+  color: var(--text-muted);
 }
 @keyframes script-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.25); }

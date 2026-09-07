@@ -11,7 +11,7 @@
         <label v-if="kind === 'script_analysis' || kind === 'script_analysis_stream'">剧本资料<el-input v-model="content" type="textarea" :rows="12" placeholder="粘贴剧本文本" /></label>
         <label v-if="kind === 'script_analysis_stream'">导入 TXT（≤2MB）<input type="file" accept="text/plain,.txt" @change="readTxt" /></label>
         <template v-else-if="kind === 'script_writing'"><label>创意／故事梗概<el-input v-model="content" type="textarea" :rows="8" placeholder="主角、冲突、世界观……" /></label><label>题材<el-input v-model="genre" placeholder="例如：都市悬疑" /></label><label>集数<el-input-number v-model="episodeCount" :min="1" :max="100" /></label></template>
-        <template v-else><ToolAssetSelector v-model="assetId" label="反推素材" /><small>可从素材库选择或本地上传；视频只分析首、中、尾帧，不上传完整视频。</small></template>
+        <template v-else-if="kind === 'reverse_prompt'"><ToolAssetSelector v-model="assetId" label="反推素材" /><small>可从素材库选择或本地上传；视频只分析首、中、尾帧，不上传完整视频。</small></template>
         <el-button native-type="submit" type="primary" :loading="running">{{ config.action }}</el-button>
       </form>
       <aside class="run-history"><div class="panel-kicker"><span>02</span><div><b>运行历史</b><small>{{ runs.length }} 条记录</small></div><el-button text @click="load">刷新</el-button></div><button v-for="runItem in runs" :key="runItem.id" class="run-item" :class="{active:active?.id===runItem.id}" @click="open(runItem)"><span :class="`dot ${runItem.status}`"></span><div><b>{{ runItem.title || `运行 #${runItem.id}` }}</b><small>{{ statusText(runItem.status) }} · {{ formatChinaDateTime(runItem.updated_at) }}</small></div></button><p v-if="!runs.length" class="history-empty">没有运行记录。首次运行后会出现在这里。</p></aside>
@@ -60,5 +60,38 @@ watch(()=>props.kind,()=>{active.value=null;load()});onMounted(async()=>{const d
 }
 .tool-workbench { display:grid; grid-template-rows:auto minmax(0,1fr); row-gap:1rem; width:100%; height:100vh; height:100dvh; min-height:0; padding:1.4rem 1.8rem; overflow:hidden; }
 .tool-layout { width:100%; max-width:1500px; height:100%; min-height:0; margin:0 auto; grid-template-columns:19rem 17rem minmax(0,1fr); overflow:hidden; }.tool-form,.run-history,.result { min-height:0; }.tool-form,.run-history { overflow-y:auto; overscroll-behavior:contain; }.result pre { min-height:0; max-height:none; }
-@media(max-width:900px){.tool-workbench{height:100dvh;overflow:hidden}.tool-layout{grid-template-columns:1fr;overflow-y:auto}.tool-form,.run-history{overflow:visible}.result pre{min-height:18rem}}
+@media (max-width: 900px) {
+  .tool-workbench {
+    display: block;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+  .tool-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+  .tool-form,
+  .run-history,
+  .result {
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+  }
+  .result pre {
+    min-height: 18rem;
+    max-height: none;
+    overflow: auto;
+  }
+  .result::after {
+    display: none;
+  }
+  .empty {
+    min-height: 18rem;
+  }
+}
 </style>

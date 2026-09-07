@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { safeRedirectPath } from '@/utils/routeRecovery'
+import { readAuthUser } from '@/utils/authUser'
 
 // Preview builds bake a " (preview)" suffix in (Dockerfile.preview's
 // PREVIEW_TITLE_BADGE); production builds leave it empty.
@@ -94,7 +95,7 @@ router.beforeEach((to) => {
   if (to.meta.title) {
     document.title = `${to.meta.title} - 瑞池传媒短剧平台${TITLE_BADGE}`
   }
-  const user = JSON.parse(localStorage.getItem('lmd_auth_user') || 'null')
+  const user = readAuthUser()
   if (!to.meta.public && !localStorage.getItem('lmd_auth_token')) return { path: '/login', query: { redirect: to.fullPath } }
   if (to.meta.admin && user?.console_access !== true) return '/'
   if (to.path === '/login' && localStorage.getItem('lmd_auth_token')) {

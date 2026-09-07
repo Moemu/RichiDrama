@@ -573,6 +573,68 @@ test('authenticated text calls settle exact provider usage and hold missing usag
   }
 });
 
+test('tool settlement keeps partial or unpriced token usage pending without losing the observed usage', () => {
+  const { db, dbPath, admin, log } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'partial-tool-usage', password: '1' }, admin.id);
+    const actor = { id: user.id, role: 'user' };
+    const project = drama.createDrama(db, log, { title: '工具部分用量项目', owner_user_id: user.id });
+    billing.savePriceBook(db, admin.id, {
+      name: 'partial tool text',
+      status: 'published',
+      items: [
+        { service_type: 'text', model: 'partial-tool-model', meter: 'request', unit_price: 1 },
+        { service_type: 'text', model: 'partial-tool-model', meter: 'input_token', unit_price: 2 },
+        { service_type: 'text', model: 'partial-tool-model', meter: 'output_token', unit_price: 3 },
+      ],
+    });
+    billing.adjustBalance(db, admin.id, user.id, 100000, 'partial tool balance');
+    const authorization = billing.createAuthorization(db, actor, {
+      idempotency_key: 'partial-tool-auth', service_type: 'text', model: 'partial-tool-model',
+      usage: { request: 1, input_token: 100, output_token: 100 }, drama_id: project.id, source_kind: 'tool_run',
+    });
+    const run = tools.create(db, {
+      tool_type: 'reverse_prompt', model: 'partial-tool-model', owner_user_id: user.id,
+      drama_id: project.id, billing_authorization_id: authorization.authorization_id, input: {},
+    });
+
+    tools.set(db, run.id, {
+      status: 'completed', output: { ok: true },
+      billing_usage: { request: 1, input_token: 10, output_token: 5 },
+      billing_usage_responses: [{ input_token: 10, output_token: 5 }, { input_token: 3 }],
+      provider_request_id: 'partial-tool-provider',
+    });
+    assert.equal(billing.listUsage(db, { user_id: user.id }).length, 0);
+    const pending = billing.listReconciliationCases(db, { user_id: user.id, status: 'pending' });
+    assert.equal(pending.length, 1);
+    assert.deepEqual(pending[0].observed_usage, { input_token: 10, output_token: 5 });
+    assert.ok(billing.account(db, user.id).frozen_micro > 0);
+
+    const requestOnly = billing.savePriceBook(db, admin.id, {
+      name: 'request-only tool text', status: 'published',
+      items: [{ service_type: 'text', model: 'request-only-tool-model', meter: 'request', unit_price: 1 }],
+    });
+    assert.ok(requestOnly);
+    const requestOnlyAuth = billing.createAuthorization(db, actor, {
+      idempotency_key: 'request-only-tool-auth', service_type: 'text', model: 'request-only-tool-model',
+      usage: { request: 1 }, drama_id: project.id, source_kind: 'tool_run',
+    });
+    const requestOnlyRun = tools.create(db, {
+      tool_type: 'script_analysis', model: 'request-only-tool-model', owner_user_id: user.id,
+      drama_id: project.id, billing_authorization_id: requestOnlyAuth.authorization_id, input: {},
+    });
+    tools.set(db, requestOnlyRun.id, {
+      status: 'completed', output: { ok: true },
+      billing_usage: { request: 1, input_token: 1 },
+      billing_usage_responses: [{ input_token: 1 }],
+      provider_request_id: 'unpriced-token-provider',
+    });
+    assert.equal(billing.listUsage(db, { user_id: user.id }).length, 0);
+    assert.equal(billing.listReconciliationCases(db, { user_id: user.id, status: 'pending' }).length, 2);
+    assert.ok(billing.account(db, user.id).frozen_micro > 0);
+  } finally { teardown(dbPath); }
+});
+
 test('a tool retry replaces the settled authorization with a newly frozen one', () => {
   const { db, dbPath, admin } = setup();
   try {

@@ -55,6 +55,18 @@ function getGlobalSetting(db, key, defaultValue = null) {
   } catch (_) { return defaultValue; }
 }
 
+function getHomepageVideoPaths(db) {
+  const configured = getGlobalSetting(db, 'homepage_default_video_paths', []);
+  const { normalizeStorageKey } = require('../utils/storagePath');
+  return (Array.isArray(configured) ? configured : []).flatMap((value) => {
+    if (typeof value !== 'string') return [];
+    try {
+      const key = normalizeStorageKey(value.replace(/\\/g, '/').replace(/^\/+/, ''));
+      return /\.(?:mp4|webm|mov|m4v)$/i.test(key) ? [key] : [];
+    } catch (_) { return []; }
+  }).slice(0, 3);
+}
+
 /**
  * 向 global_settings 表写入一个键值（value 会被 JSON.stringify）。
  */
@@ -72,5 +84,6 @@ module.exports = {
   getLanguage,
   updateLanguage,
   getGlobalSetting,
+  getHomepageVideoPaths,
   setGlobalSetting,
 };

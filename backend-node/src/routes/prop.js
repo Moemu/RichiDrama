@@ -51,8 +51,15 @@ function generateImage(db, log) {
     if (isNaN(id)) return response.badRequest(res, '无效的ID');
     const model = req.body?.model != null ? String(req.body.model).trim() || null : null;
     const style = req.body?.style != null ? String(req.body.style).trim() || null : null;
+    const useQuadGrid = req.body?.use_quad_grid !== undefined
+      ? req.body.use_quad_grid === true || req.body.use_quad_grid === 'true'
+      : undefined;
     try {
-      const taskId = propImageGenerationService.generatePropImage(db, log, id, { model, style });
+      const taskId = propImageGenerationService.generatePropImage(db, log, id, {
+        model,
+        style,
+        use_quad_grid: useQuadGrid,
+      });
       response.success(res, { task_id: taskId });
     } catch (err) {
       if (err.message === '道具不存在') return response.notFound(res, err.message);
@@ -85,8 +92,15 @@ function associateProps(db, log) {
   return (req, res) => {
     const storyboardId = parseInt(req.params.id, 10);
     const propIds = Array.isArray(req.body?.prop_ids) ? req.body.prop_ids : [];
-    propService.associateWithStoryboard(db, log, storyboardId, propIds);
-    response.success(res, { message: '关联成功' });
+    try {
+      propService.associateWithStoryboard(db, log, storyboardId, propIds);
+      response.success(res, { message: '关联成功' });
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') return response.notFound(res, err.message);
+      if (err.code === 'BAD_REQUEST') return response.badRequest(res, err.message);
+      log.error('associate storyboard props', { error: err.message, storyboard_id: storyboardId });
+      response.internalError(res, err.message);
+    }
   };
 }
 
