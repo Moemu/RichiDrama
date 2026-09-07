@@ -10,6 +10,40 @@ const index = read('../index.html')
 const themeComposable = read('../src/composables/useTheme.js')
 const plan = read('../../docs/plans/2026-08-13-light-dark-ui-full-adaptation.md')
 
+const palette = (selector) => Object.fromEntries(
+  [...theme.match(new RegExp(`${selector}\\s*\\{([^}]+)\\}`))[1].matchAll(/(--[\w-]+):\s*(#[\da-f]{6});/gi)]
+    .map(([, name, value]) => [name, value]),
+)
+const luminance = (hex) => hex.slice(1).match(/../g)
+  .map((value) => Number.parseInt(value, 16) / 255)
+  .map((value) => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+  .reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0)
+const contrast = (foreground, background) => {
+  const values = [luminance(foreground), luminance(background)]
+  return (Math.max(...values) + .05) / (Math.min(...values) + .05)
+}
+
+test('both palettes keep normal text and media captions readable', () => {
+  const dark = palette('html\\.dark')
+  const light = { ...dark, ...palette('html\\.light') }
+  for (const [mode, colors] of Object.entries({ dark, light })) {
+    for (const text of ['--text-primary', '--text-regular', '--text-muted', '--text-faint']) {
+      for (const surface of ['--bg-page', '--bg-surface', '--bg-raised', '--bg-inner']) {
+        assert.ok(contrast(colors[text], colors[surface]) >= 4.5, `${mode}: ${text} on ${surface}`)
+      }
+    }
+    for (const text of ['--text-on-media', '--text-on-media-muted']) {
+      assert.ok(contrast(colors[text], colors['--stage-bg']) >= 4.5, `${mode}: ${text} on stage`)
+    }
+    for (const surface of ['--action-bg', '--action-hover-bg', '--action-gradient-end']) {
+      assert.ok(contrast(colors['--accent-contrast'], colors[surface]) >= 4.5, `${mode}: button on ${surface}`)
+    }
+    for (const status of ['success', 'warning', 'danger', 'info']) {
+      assert.ok(contrast(colors[`--status-${status}`], colors['--bg-surface']) >= 4.5, `${mode}: ${status}`)
+    }
+  }
+})
+
 test('light and dark modes expose the same semantic UI contract', () => {
   for (const token of [
     '--bg-page', '--bg-surface', '--bg-raised', '--bg-elevated',

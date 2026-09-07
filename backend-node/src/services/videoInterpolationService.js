@@ -46,7 +46,9 @@ function retryFromSource(db, videoGenerationId) {
   const source = row?.upscale_local_path || row?.source_local_path;
   if (!source) throw new Error('插帧重试缺少已归档的视频');
   const job = db.prepare('SELECT * FROM video_interpolation_jobs WHERE video_generation_id=?').get(row.id);
-  if (!job) return ensureJob(db, row, source);
+  if (!job) {
+    return ensureJob(db, row, source);
+  }
   if (!['failed', 'cancelled'].includes(job.status)) throw new Error('当前插帧任务不可重试');
   // Release a failed attempt before creating the retry authorization, so a
   // stage retry cannot leave two frozen/settled postprocess charges.
@@ -211,12 +213,25 @@ async function process(db, log, videoGenerationId, storagePath) {
       log.error('Video interpolation requires billing reconciliation', { video_generation_id: videoGenerationId, error: error.message });
       return null;
     }
+    const message = String(error.message).slice(0, 500);
+    let stageChanged = !job;
     if (job) {
-      db.prepare("UPDATE video_interpolation_jobs SET status='failed', error_msg=?, updated_at=? WHERE id=?").run(String(error.message).slice(0, 500), now, job.id);
-      try { billing.voidAuthorization(db, { id: job.owner_user_id, role: 'admin' }, job.billing_authorization_id, '视频插帧失败'); } catch (_) {}
+      const failed = db.prepare(`UPDATE video_interpolation_jobs SET status='failed', error_msg=?, updated_at=?
+        WHERE id=? AND status IN ('awaiting_source','pending','processing')`).run(message, now, job.id);
+      stageChanged = failed.changes > 0;
+      if (stageChanged) {
+        try { billing.voidAuthorization(db, { id: job.owner_user_id, role: 'admin' }, job.billing_authorization_id, '视频插帧失败'); } catch (_) {}
+      }
     }
-    db.prepare("UPDATE video_generations SET status='failed', interpolation_status='failed', error_msg=?, updated_at=? WHERE id=?").run(String(error.message).slice(0, 500), now, Number(videoGenerationId));
-    log.error('Video interpolation failed', { video_generation_id: videoGenerationId, error: error.message });
+    const failedGeneration = db.prepare(`UPDATE video_generations SET status='failed', interpolation_status='failed', error_msg=?, updated_at=?
+      WHERE id=? AND status IN ('processing','upscale_pending','upscaling','interpolation_pending','interpolating','persisting')`)
+      .run(message, now, Number(videoGenerationId));
+    if (failedGeneration.changes) {
+      try { require('./videoService').syncVideoGenerationFailure(db, videoGenerationId, message, now); } catch (syncError) {
+        log.warn('Video interpolation storyboard failure sync failed', { video_generation_id: videoGenerationId, error: syncError.message });
+      }
+    }
+    if (stageChanged || failedGeneration.changes) log.error('Video interpolation failed', { video_generation_id: videoGenerationId, error: message });
     return null;
   } finally { active.delete(Number(videoGenerationId)); }
 }

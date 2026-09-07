@@ -276,7 +276,6 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
       settings: ttsSettings,
     });
   } else if (provider === 'openai' || ttsConfig.base_url) {
-    console.log('==c sxy synthesizeWithOpenai', text, voiceId, ttsConfig.api_key, ttsConfig.base_url, ttsModel, finalSpeed);
     audioBuffer = await synthesizeWithOpenai(
       text,
       voiceId || 'alloy',

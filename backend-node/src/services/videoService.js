@@ -62,6 +62,25 @@ function setVideoGenFailed(db, videoGenId, errorMsg, now) {
   } catch (_) {}
 }
 
+/**
+ * Synchronize a stage-owned generation failure to the visible storyboard.
+ *
+ * Post-processing services already own their stage status and billing
+ * cleanup. Calling setVideoGenFailed() from those services would cancel the
+ * stage that just reported the failure, so they use this narrow helper to
+ * update only the storyboard projection.
+ */
+function syncVideoGenerationFailure(db, videoGenId, errorMsg, at = new Date().toISOString()) {
+  const row = db.prepare('SELECT storyboard_id, task_id FROM video_generations WHERE id=? AND deleted_at IS NULL').get(Number(videoGenId));
+  if (!row?.storyboard_id) return { storyboard_updated: false };
+  const result = db.prepare(`UPDATE storyboards SET active_video_generation_id=COALESCE(active_video_generation_id, ?),
+      status='failed', error_msg=?, updated_at=?
+    WHERE id=? AND deleted_at IS NULL
+      AND (active_video_generation_id IS NULL OR active_video_generation_id=?)`)
+    .run(Number(videoGenId), String(errorMsg || '视频生成失败').slice(0, 500), at, row.storyboard_id, Number(videoGenId));
+  return { storyboard_updated: result.changes > 0 };
+}
+
 function list(db, query) {
   let sql = 'FROM video_generations WHERE deleted_at IS NULL';
   const params = [];
@@ -117,12 +136,8 @@ function list(db, query) {
  * 默认轮播。清单仅接受相对的本地视频路径，避免重新暴露供应商临时 URL。
  */
 function listHomepageDefaultVideos(db, limit = 3) {
-  const configured = require('./settingsService').getGlobalSetting(db, 'homepage_default_video_paths', []);
+  const configured = require('./settingsService').getHomepageVideoPaths(db);
   const pageSize = Math.min(3, Math.max(1, Number(limit) || 3));
-  const allowedPath = (value) => {
-    const normalized = String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
-    return normalized && !normalized.split('/').includes('..') && /\.(?:mp4|webm|mov|m4v)$/i.test(normalized) ? normalized : '';
-  };
   // OSS 镜像：默认资源已归档到对象存储时返回 CDN 地址，供线上渲染使用。
   // 前端优先用 oss_url，本地无法访问 CDN 时回退到本地 /static 路径。
   const CDN_BASE = 'https://cdn.ai.tensorbytes.com/';
@@ -131,9 +146,7 @@ function listHomepageDefaultVideos(db, limit = 3) {
     db.prepare("SELECT local_path, oss_key FROM media_archive_records WHERE archive_status = 'oss_synced' AND oss_key IS NOT NULL").all()
       .forEach((r) => { if (r.local_path) ossByPath.set(String(r.local_path).replace(/^\/+/, ''), CDN_BASE + r.oss_key); });
   } catch (_) {}
-  return (Array.isArray(configured) ? configured : [])
-    .map(allowedPath)
-    .filter(Boolean)
+  return configured
     .slice(0, pageSize)
     .map((localPath, index) => ({
       // 固定 key 使前端在同一份资源清单内稳定切换；不关联用户或作品记录。
@@ -456,6 +469,23 @@ function createVideoPoster(storagePath, localPath, videoGenId, log) {
 
 /** 防止同一 videoGenId 重复发起 poll（含重启恢复） */
 const activeVideoPolls = new Set();
+/** 防止对账/重启恢复同时进入同一后处理链。 */
+const activePostprocessResumes = new Set();
+const activeReconciliationResumes = new Set();
+
+const FINALIZABLE_VIDEO_STATUSES = new Set([
+  'processing',
+  'upscale_pending',
+  'upscaling',
+  'interpolation_pending',
+  'interpolating',
+  'persisting',
+]);
+
+function canFinalizeVideoGeneration(db, videoGenId) {
+  const row = db.prepare('SELECT status FROM video_generations WHERE id=? AND deleted_at IS NULL').get(Number(videoGenId));
+  return !!row && FINALIZABLE_VIDEO_STATUSES.has(String(row.status || ''));
+}
 
 function resolveStoragePath(cfg) {
   return path.isAbsolute(cfg.storage?.local_path)
@@ -486,6 +516,10 @@ function settleGenerationBeforePostProcess(db, log, row, videoGenId, providerUsa
 
 async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, videoUrl, logLabel, providerUsage = null, providerRequestId = null, providerResponseSnapshot = null) {
   const now = new Date().toISOString();
+  if (!canFinalizeVideoGeneration(db, videoGenId)) {
+    log.info('Skip video finalization after local terminal state', { video_gen_id: videoGenId, log_label: logLabel });
+    return;
+  }
   if (row?.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 70, '视频已生成，正在下载并保存原片');
   let localPath = null;
   let storagePath = null;
@@ -533,15 +567,23 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
   // selected stage owns its own authorization and creates a new local file.
   try {
     const sourceSavedAt = new Date().toISOString();
-    db.prepare(`UPDATE video_generations SET source_local_path=?, upscale_status=?, interpolation_status=?, updated_at=? WHERE id=?`)
+    const sourceSaved = db.prepare(`UPDATE video_generations SET source_local_path=?, upscale_status=?, interpolation_status=?,
+      updated_at=?
+      WHERE id=? AND status IN (${Array.from(FINALIZABLE_VIDEO_STATUSES).map(() => '?').join(',')})`)
       .run(localPath,
         row.upscale_resolution ? (row.upscale_status === 'completed' ? 'completed' : 'awaiting_source') : 'skipped',
         row.target_fps ? (['completed', 'skipped'].includes(row.interpolation_status) ? row.interpolation_status : 'awaiting_source') : 'skipped',
-        sourceSavedAt, videoGenId);
+        sourceSavedAt, videoGenId, ...Array.from(FINALIZABLE_VIDEO_STATUSES));
+    if (!sourceSaved.changes) {
+      log.info('Skip source persistence after local terminal state', { video_gen_id: videoGenId, log_label: logLabel });
+      return;
+    }
 
     if (row.upscale_resolution) {
-      db.prepare("UPDATE video_generations SET status='upscale_pending', upscale_status='pending', updated_at=? WHERE id=?")
-        .run(new Date().toISOString(), videoGenId);
+      const pending = db.prepare(`UPDATE video_generations SET status='upscale_pending', upscale_status='pending', updated_at=?
+        WHERE id=? AND status IN (${Array.from(FINALIZABLE_VIDEO_STATUSES).map(() => '?').join(',')})`)
+        .run(new Date().toISOString(), videoGenId, ...Array.from(FINALIZABLE_VIDEO_STATUSES));
+      if (!pending.changes) return;
       if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 78, `视频已生成，正在 AI 超分至 ${row.upscale_resolution}`);
       const upscaled = await require('./videoUpscaleService').process(db, log, videoGenId, storagePath);
       if (!upscaled?.local_path) {
@@ -567,8 +609,10 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
     }
 
     if (row.target_fps) {
-      db.prepare("UPDATE video_generations SET status='interpolation_pending', interpolation_status='pending', updated_at=? WHERE id=?")
-        .run(new Date().toISOString(), videoGenId);
+      const pending = db.prepare(`UPDATE video_generations SET status='interpolation_pending', interpolation_status='pending', updated_at=?
+        WHERE id=? AND status IN (${Array.from(FINALIZABLE_VIDEO_STATUSES).map(() => '?').join(',')})`)
+        .run(new Date().toISOString(), videoGenId, ...Array.from(FINALIZABLE_VIDEO_STATUSES));
+      if (!pending.changes) return;
       if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 88, `${row.upscale_resolution ? '超分完成，' : ''}正在进行 ${Number(row.target_fps)}fps 智能插帧`);
       const interpolated = await require('./videoInterpolationService').process(db, log, videoGenId, storagePath);
       if (!interpolated?.local_path) {
@@ -597,7 +641,13 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
   }
   // Never persist a provider's signed delivery URL as the application's
   // completed-media URL. TOS links normally expire after 24 hours.
-  db.prepare("UPDATE video_generations SET status='persisting', updated_at=? WHERE id=?").run(new Date().toISOString(), videoGenId);
+  const persisting = db.prepare(`UPDATE video_generations SET status='persisting', updated_at=?
+    WHERE id=? AND status IN (${Array.from(FINALIZABLE_VIDEO_STATUSES).map(() => '?').join(',')})`)
+    .run(new Date().toISOString(), videoGenId, ...Array.from(FINALIZABLE_VIDEO_STATUSES));
+  if (!persisting.changes) {
+    log.info('Skip video persistence after local terminal state', { video_gen_id: videoGenId, log_label: logLabel });
+    return;
+  }
   if (row.task_id) taskService.updateTaskStatus(db, row.task_id, 'processing', 95, '正在规范画幅并持久化最终成片');
   let finalProbe;
   try {
@@ -611,25 +661,38 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
   }
   videoUrl = `/static/${String(localPath).replace(/^\/+/, '')}`;
   const posterLocalPath = createVideoPoster(resolveStoragePath(require('../config').loadConfig()), localPath, videoGenId, log);
+  const completedAt = new Date().toISOString();
+  const archiveStatus = require('./mediaStorageService').isOss(require('../config').loadConfig()) ? 'pending' : 'local';
   try {
-    db.prepare(
-      'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, output_width=?, output_height=?, output_resolution=?, output_fps=?, output_duration_ms=?, archive_status = ?, archive_error = NULL, completed_at = ?, updated_at = ? WHERE id = ?'
-    ).run('completed', videoUrl, localPath, finalProbe.width, finalProbe.height, finalProbe.resolution, finalProbe.fps, finalProbe.duration_ms, require('./mediaStorageService').isOss(require('../config').loadConfig()) ? 'pending' : 'local', new Date().toISOString(), new Date().toISOString(), videoGenId);
+    const completed = db.prepare(
+      `UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, output_width=?, output_height=?, output_resolution=?, output_fps=?, output_duration_ms=?, archive_status = ?, archive_error = NULL, completed_at = ?, updated_at = ?
+       WHERE id = ? AND status IN (${Array.from(FINALIZABLE_VIDEO_STATUSES).map(() => '?').join(',')})`
+    ).run('completed', videoUrl, localPath, finalProbe.width, finalProbe.height, finalProbe.resolution, finalProbe.fps, finalProbe.duration_ms, archiveStatus, completedAt, completedAt, videoGenId, ...Array.from(FINALIZABLE_VIDEO_STATUSES));
+    if (!completed.changes) {
+      log.info('Skip completed video write after local terminal state', { video_gen_id: videoGenId, log_label: logLabel });
+      return;
+    }
   } catch (e) {
     if ((e.message || '').includes('archive_')) {
       try {
-        db.prepare(
-          'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, completed_at = ?, updated_at = ? WHERE id = ?'
-        ).run('completed', videoUrl, localPath, now, now, videoGenId);
+        const completed = db.prepare(
+          `UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, completed_at = ?, updated_at = ?
+           WHERE id = ? AND status IN (${Array.from(FINALIZABLE_VIDEO_STATUSES).map(() => '?').join(',')})`
+        ).run('completed', videoUrl, localPath, completedAt, completedAt, videoGenId, ...Array.from(FINALIZABLE_VIDEO_STATUSES));
+        if (!completed.changes) return;
       } catch (_) {
-        db.prepare(
-          'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, updated_at = ? WHERE id = ?'
-        ).run('completed', videoUrl, localPath, now, videoGenId);
+        const completed = db.prepare(
+          `UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, updated_at = ?
+           WHERE id = ? AND status IN (${Array.from(FINALIZABLE_VIDEO_STATUSES).map(() => '?').join(',')})`
+        ).run('completed', videoUrl, localPath, completedAt, videoGenId, ...Array.from(FINALIZABLE_VIDEO_STATUSES));
+        if (!completed.changes) return;
       }
     } else if ((e.message || '').includes('completed_at')) {
-      db.prepare(
-        'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, updated_at = ? WHERE id = ?'
-      ).run('completed', videoUrl, localPath, now, videoGenId);
+      const completed = db.prepare(
+        `UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, updated_at = ?
+         WHERE id = ? AND status IN (${Array.from(FINALIZABLE_VIDEO_STATUSES).map(() => '?').join(',')})`
+      ).run('completed', videoUrl, localPath, completedAt, videoGenId, ...Array.from(FINALIZABLE_VIDEO_STATUSES));
+      if (!completed.changes) return;
     } else throw e;
   }
   if (posterLocalPath) {
@@ -744,6 +807,17 @@ async function pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspec
   );
   if (pollResult.stopped) {
     log.info('Provider poll stopped after local task reached a terminal state', { video_gen_id: videoGenId, status: pollResult.local_status });
+    return;
+  }
+  // The cancellation request can win while the provider query is in flight.
+  // Re-read the durable state immediately before consuming a successful
+  // response; the final write below is conditional as a second guard.
+  const localAfterPoll = db.prepare('SELECT status FROM video_generations WHERE id=? AND deleted_at IS NULL').get(Number(videoGenId));
+  if (!localAfterPoll || !FINALIZABLE_VIDEO_STATUSES.has(String(localAfterPoll.status || ''))) {
+    log.info('Provider poll result ignored after local terminal state', {
+      video_gen_id: videoGenId,
+      local_status: localAfterPoll?.status || null,
+    });
     return;
   }
   const now = new Date().toISOString();
@@ -897,6 +971,36 @@ function resumePendingVideoArchives(db, log) {
   let rows = [];
   try { rows = db.prepare(`SELECT id FROM video_generations WHERE status = 'completed' AND local_path IS NOT NULL AND TRIM(local_path) != '' AND archive_status = 'pending' AND deleted_at IS NULL`).all(); } catch (_) { return; }
   for (const row of rows) setImmediate(() => archiveCompletedVideo(db, log, row.id).catch((error) => log.warn('Video archive retry failed', { id: row.id, error: error.message })));
+}
+
+/**
+ * Recover the handoff between a completed post-process stage and the outer
+ * finalizer. The stage output is already local, so process() only reuses the
+ * persisted job and never submits another supplier task.
+ */
+function resumeCompletedPostprocessVideoGenerations(db, log) {
+  let rows = [];
+  try {
+    rows = db.prepare(`SELECT DISTINCT v.id
+      FROM video_generations v
+      LEFT JOIN video_upscale_jobs u ON u.video_generation_id = v.id
+      LEFT JOIN video_interpolation_jobs i ON i.video_generation_id = v.id
+      WHERE v.deleted_at IS NULL
+        AND v.source_local_path IS NOT NULL AND TRIM(v.source_local_path) != ''
+        AND COALESCE(v.postprocess_recovery_version, 0) >= 1
+        AND v.status IN ('upscale_pending','upscaling','interpolation_pending','interpolating','persisting')
+        AND (
+          (v.upscale_status = 'completed' AND u.status = 'completed' AND u.output_local_path IS NOT NULL AND TRIM(u.output_local_path) != '')
+          OR (v.interpolation_status IN ('completed','skipped') AND i.status IN ('completed','skipped') AND i.output_local_path IS NOT NULL AND TRIM(i.output_local_path) != '')
+        )
+      ORDER BY v.id`).all();
+  } catch (_) { return { queued: 0 }; }
+  for (const row of rows) {
+    setImmediate(() => resumePostprocessVideoGeneration(db, log, row.id).catch((error) => {
+      log.error('Completed post-process finalization resume failed', { video_generation_id: row.id, error: error.message });
+    }));
+  }
+  return { queued: rows.length };
 }
 
 // Historical completed rows predate poster extraction. Backfill a small batch
@@ -1167,17 +1271,113 @@ async function processVideoGeneration(db, log, videoGenId) {
  * optional stage started, so this re-enters with the local source and never
  * submits the video-generation request a second time. */
 async function resumePostprocessVideoGeneration(db, log, videoGenId) {
-  const row = db.prepare('SELECT * FROM video_generations WHERE id=? AND deleted_at IS NULL').get(Number(videoGenId));
-  if (!row?.source_local_path || row.status === 'completed' || row.status === 'billing_reconciliation') return;
+  const numericVideoGenId = Number(videoGenId);
+  if (activePostprocessResumes.has(numericVideoGenId)) return { status: 'already_running' };
+  activePostprocessResumes.add(numericVideoGenId);
   try {
-    await finalizeSuccessfulVideo(
-      db, log, Number(videoGenId),
-      { ...row, billing_authorization_id: null }, row,
-      `/static/${String(row.source_local_path).replace(/^\/+/, '')}`,
-      'restart-resume'
-    );
-  } catch (error) {
-    log.error('Post-processing pipeline resume failed', { video_generation_id: Number(videoGenId), error: error.message });
+    const row = db.prepare('SELECT * FROM video_generations WHERE id=? AND deleted_at IS NULL').get(Number(videoGenId));
+    if (!row?.source_local_path || row.status === 'completed' || row.status === 'billing_reconciliation') return { status: row?.status || 'missing' };
+    try {
+      await finalizeSuccessfulVideo(
+        db, log, Number(videoGenId),
+        { ...row, billing_authorization_id: null }, row,
+        `/static/${String(row.source_local_path).replace(/^\/+/, '')}`,
+        'restart-resume'
+      );
+      const after = db.prepare('SELECT status, error_msg FROM video_generations WHERE id=? AND deleted_at IS NULL').get(numericVideoGenId);
+      return { status: after?.status === 'completed' ? 'completed' : (after?.status || 'retryable'), error: after?.error_msg || null };
+    } catch (error) {
+      log.error('Post-processing pipeline resume failed', { video_generation_id: Number(videoGenId), error: error.message });
+      return { status: 'retryable', error: error.message };
+    }
+  } finally {
+    activePostprocessResumes.delete(numericVideoGenId);
+  }
+}
+
+function readReconciliationStageRows(db, videoGenId) {
+  return [
+    db.prepare(`SELECT 'upscale' AS stage, j.id, j.status, j.output_local_path, j.output_width, j.output_height,
+        j.output_duration_ms, j.output_resolution, j.output_fps, c.status AS reconciliation_status
+      FROM video_upscale_jobs j
+      JOIN billing_reconciliation_cases c ON c.authorization_id=j.billing_authorization_id
+        AND c.status IN ('resolved','waived')
+        AND json_extract(c.resolution_json, '$.postprocess_recovery.version') = 1
+      WHERE j.video_generation_id=?`).get(Number(videoGenId)),
+    db.prepare(`SELECT 'interpolation' AS stage, j.id, j.status, j.output_local_path, j.output_width, j.output_height,
+        j.output_duration_ms, j.output_resolution, j.output_fps, c.status AS reconciliation_status
+      FROM video_interpolation_jobs j
+      JOIN billing_reconciliation_cases c ON c.authorization_id=j.billing_authorization_id
+        AND c.status IN ('resolved','waived')
+        AND json_extract(c.resolution_json, '$.postprocess_recovery.version') = 1
+      WHERE j.video_generation_id=?`).get(Number(videoGenId)),
+  ].filter(Boolean);
+}
+
+/**
+ * Resolve a paid post-process stage after its billing reconciliation case is
+ * settled or waived. The provider output is already local and validated;
+ * this only adopts the durable stage row and re-enters the local finalizer.
+ */
+async function resumeResolvedPostprocessVideoGeneration(db, log, videoGenId) {
+  const numericVideoGenId = Number(videoGenId);
+  if (activeReconciliationResumes.has(numericVideoGenId)) return { status: 'already_running' };
+  activeReconciliationResumes.add(numericVideoGenId);
+  try {
+    const row = db.prepare('SELECT * FROM video_generations WHERE id=? AND deleted_at IS NULL').get(numericVideoGenId);
+    if (!row) return { status: 'missing' };
+    if (row.status === 'completed') return { status: 'completed' };
+    if (!String(row.source_local_path || '').trim()) throw new Error('缺少已归档的原始视频，无法恢复对账后的成片');
+    const stages = readReconciliationStageRows(db, numericVideoGenId);
+    const pending = stages.filter((stage) => stage.status === 'reconciliation_required'
+      && ['resolved', 'waived'].includes(String(stage.reconciliation_status || ''))
+      && String(stage.output_local_path || '').trim());
+    if (!pending.length) return { status: 'not_reconciliation' };
+
+    const storagePath = resolveStoragePath(require('../config').loadConfig());
+    for (const stage of pending) {
+      const localKey = String(stage.output_local_path).replace(/^\/+/, '');
+      const absolute = path.resolve(storagePath, localKey);
+      if (!(absolute === path.resolve(storagePath) || absolute.startsWith(path.resolve(storagePath) + path.sep))
+        || !fs.statSync(absolute, { throwIfNoEntry: false })?.isFile()) {
+        throw new Error(`${stage.stage === 'upscale' ? '超分' : '插帧'}输出文件不可读，无法恢复对账后的成片`);
+      }
+    }
+
+    const at = new Date().toISOString();
+    db.transaction(() => {
+      for (const stage of pending) {
+        const table = stage.stage === 'upscale' ? 'video_upscale_jobs' : 'video_interpolation_jobs';
+        db.prepare(`UPDATE ${table} SET status='completed', error_msg=NULL,
+            source_local_path=COALESCE(source_local_path, ?),
+            completed_at=COALESCE(completed_at, ?), updated_at=?
+          WHERE id=? AND status='reconciliation_required'`).run(row.source_local_path, at, at, stage.id);
+        if (stage.stage === 'upscale') {
+          db.prepare(`UPDATE video_generations SET status='billing_reconciliation', upscale_status='completed',
+              upscale_local_path=?, error_msg=NULL, updated_at=?
+            WHERE id=? AND status='billing_reconciliation'`).run(stage.output_local_path, at, numericVideoGenId);
+        } else {
+          db.prepare(`UPDATE video_generations SET status='billing_reconciliation', interpolation_status='completed',
+              output_width=COALESCE(?, output_width), output_height=COALESCE(?, output_height),
+              output_resolution=COALESCE(?, output_resolution), output_fps=COALESCE(?, output_fps),
+              output_duration_ms=COALESCE(?, output_duration_ms), error_msg=NULL, updated_at=?
+            WHERE id=? AND status='billing_reconciliation'`)
+            .run(stage.output_width, stage.output_height, stage.output_resolution, stage.output_fps, stage.output_duration_ms, at, numericVideoGenId);
+        }
+      }
+      const current = db.prepare('SELECT * FROM video_generations WHERE id=? AND deleted_at IS NULL').get(numericVideoGenId);
+      if (!current || current.status !== 'billing_reconciliation') return;
+      const upscaleReady = !current.upscale_resolution || current.upscale_status === 'completed' || current.upscale_status === 'skipped';
+      const interpolationReady = !current.target_fps || current.interpolation_status === 'completed' || current.interpolation_status === 'skipped';
+      const nextStatus = !upscaleReady ? 'upscale_pending' : !interpolationReady ? 'interpolation_pending' : 'persisting';
+      db.prepare(`UPDATE video_generations SET status=?, error_msg=NULL, updated_at=?
+        WHERE id=? AND status='billing_reconciliation'`).run(nextStatus, at, numericVideoGenId);
+    })();
+
+    const resumed = await resumePostprocessVideoGeneration(db, log, numericVideoGenId);
+    return { status: resumed?.status || 'scheduled', stage_count: pending.length };
+  } finally {
+    activeReconciliationResumes.delete(numericVideoGenId);
   }
 }
 
@@ -1189,6 +1389,7 @@ function deleteById(db, log, id) {
 
 module.exports = {
   setVideoGenFailed,
+  syncVideoGenerationFailure,
   list,
   listHomepageDefaultVideos,
   getById,
@@ -1196,11 +1397,13 @@ module.exports = {
   processVideoGeneration,
   archiveCompletedVideo,
   resumePendingVideoArchives,
+  resumeCompletedPostprocessVideoGenerations,
   resumeMissingVideoPosters,
   startPendingVideoArchiveRetry,
   resumeProcessingVideoGenerations,
   reconcileUnarchivedCompletedVideos,
   resumePostprocessVideoGeneration,
+  resumeResolvedPostprocessVideoGeneration,
   loadOmniReferenceImageInputs,
   loadOmniReferenceVideoUrls,
   targetVideoPixelsForAspect,

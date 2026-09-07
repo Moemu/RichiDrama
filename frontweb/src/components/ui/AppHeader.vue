@@ -98,4 +98,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeMenusOnEscape, 
 .app-header__nav>button::after,.app-header__nav :deep(.el-dropdown>button)::after{display:none}.app-header__nav>button:hover,.app-header__nav>button.active,.app-header__nav :deep(.el-dropdown>button:hover),.app-header__nav :deep(.el-dropdown>button.active){color:var(--ui-text-1)}.app-header__nav>button:hover,.app-header__nav :deep(.el-dropdown>button:hover){background:color-mix(in srgb,var(--ui-text-1) 6%,transparent)}.app-header__nav>button.active,.app-header__nav :deep(.el-dropdown>button.active){background:var(--ui-surface-3);box-shadow:0 2px 8px rgba(0,0,0,.16),inset 0 1px color-mix(in srgb,#fff 10%,transparent)}
 .app-header__actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;min-width:0}.app-header__actions :deep(.el-button--primary){min-height:36px;padding-inline:14px;border-color:transparent;background:linear-gradient(135deg,var(--ui-accent),#6d5de0);box-shadow:0 8px 18px color-mix(in srgb,var(--ui-accent) 28%,transparent)}.app-header__account{display:grid;width:36px;height:36px;place-items:center;border:1px solid var(--ui-line-2);border-radius:11px;background:color-mix(in srgb,var(--ui-surface-2) 86%,transparent);color:var(--ui-text-2);cursor:pointer;transition:transform var(--ui-motion-fast) var(--ui-ease-out),background-color var(--ui-motion-fast) var(--ui-ease-standard),border-color var(--ui-motion-fast) var(--ui-ease-standard),color var(--ui-motion-fast) var(--ui-ease-standard)}.app-header__account:hover{border-color:var(--ui-accent);background:var(--ui-surface-hover);color:var(--ui-text-1);transform:translateY(-1px)}
 @media(max-width:1180px){.app-header__inner{grid-template-columns:minmax(11rem,1fr) auto minmax(11rem,1fr);gap:14px;padding-inline:24px}.app-header__nav>button,.app-header__nav :deep(.el-dropdown>button){min-width:60px;padding-inline:10px}.app-header__actions{gap:6px}}
+@media(max-width:720px){
+  .app-header{height:auto;min-height:var(--ui-header-height)}
+  .app-header__inner{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:34px 26px;grid-template-areas:"brand actions" "nav nav";gap:2px 8px;height:auto;min-height:var(--ui-header-height);padding:1px 12px}
+  .app-header__brand{grid-area:brand;min-width:0}
+  .app-header__nav{grid-area:nav;justify-self:stretch;width:100%;min-width:0;height:26px;padding:2px;overflow-x:auto;scrollbar-width:none}
+  .app-header__nav::-webkit-scrollbar{display:none}
+  .app-header__nav>button,.app-header__nav :deep(.el-dropdown>button){flex:0 0 auto;min-width:60px;height:20px;padding-inline:8px;font-size:12px}
+  .app-header__actions{grid-area:actions;gap:4px;min-width:0}
+  .app-header__actions :deep(.el-dropdown){flex:0 0 auto}
+  .app-header__actions :deep(.account-balance){max-width:7rem;min-width:0;padding-inline:8px;overflow:hidden}
+  .app-header__actions :deep(.el-button--primary){min-height:34px;padding-inline:9px}
+  .app-header__account{width:34px;height:34px}
+}
 </style>

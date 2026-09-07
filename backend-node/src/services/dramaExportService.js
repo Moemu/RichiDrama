@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const AdmZip = require('adm-zip');
 
-const EXPORT_VERSION = '1.4';  // 1.4: 完整导出分镜图片历史（含首尾帧 first/last 绑定）、frame_prompts、layout_description 等，支持导入后恢复首尾帧模式数据
+const EXPORT_VERSION = '1.5';  // 1.5: 保留 Omni 资产、资源关联及分镜生成设置；兼容导入旧版本 ZIP
 
 function getStoragePath(cfg) {
   const raw = cfg?.storage?.local_path || './data/storage';
@@ -32,6 +32,22 @@ function parseExtraImages(raw) {
     const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
     return Array.isArray(arr) ? arr.filter(Boolean) : [];
   } catch (_) { return []; }
+}
+
+function parseJson(raw, fallback) {
+  if (raw == null || raw === '') return fallback;
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(raw); } catch (_) { return fallback; }
+}
+
+function parseJsonArray(raw) {
+  const value = parseJson(raw, []);
+  return Array.isArray(value) ? value : [];
+}
+
+function parseJsonObject(raw) {
+  const value = parseJson(raw, {});
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
 const EXPORT_FIRST_FRAME_TYPES = ['storyboard_first', 'first', 'first_frame'];
@@ -183,6 +199,139 @@ async function exportDrama(db, cfg, log, dramaId) {
   const propIdToIndex = {};
   props.forEach((p, idx) => { propIdToIndex[p.id] = idx; });
 
+  // ---- 7b. 读取 Omni 素材及项目资源关联 ----
+  // Storyboards store database IDs for editable references.  Export the
+  // project assets and referenced global assets, then use archive-local
+  // indexes so importing into another project never reuses stale IDs.
+  const referencedAssetIds = new Set();
+  for (const sb of Object.values(storyboardsByEp).flat()) {
+    for (const id of parseJsonArray(sb.omni_asset_ids)) {
+      if (Number.isFinite(Number(id))) referencedAssetIds.add(Number(id));
+    }
+    for (const id of [sb.omni_first_frame_asset_id, sb.omni_last_frame_asset_id]) {
+      if (id != null && Number.isFinite(Number(id))) referencedAssetIds.add(Number(id));
+    }
+    for (const id of Object.keys(parseJsonObject(sb.omni_asset_usage_json))) {
+      if (Number.isFinite(Number(id))) referencedAssetIds.add(Number(id));
+    }
+    const document = parseJsonObject(sb.omni_prompt_document_json);
+    for (const ref of (Array.isArray(document.refs) ? document.refs : [])) {
+      if (ref?.asset_id != null && Number.isFinite(Number(ref.asset_id))) referencedAssetIds.add(Number(ref.asset_id));
+    }
+  }
+
+  // A project-resource mapping may point at a global asset instead of a
+  // project-owned row. Include those mappings in the same reference set.
+  const resourceAssetRows = db.prepare(
+    'SELECT asset_id FROM asset_resource_links WHERE drama_id = ? AND asset_id IS NOT NULL'
+  ).all(Number(dramaId));
+  for (const row of resourceAssetRows) {
+    if (Number.isSafeInteger(Number(row.asset_id))) referencedAssetIds.add(Number(row.asset_id));
+  }
+
+  const exportedAssets = [];
+  const assetById = new Map();
+  const assetFilesToPack = [];
+  const projectAssetRows = db.prepare(
+    'SELECT * FROM assets WHERE drama_id = ? AND deleted_at IS NULL ORDER BY id'
+  ).all(Number(dramaId));
+  const selectedAssetRows = new Map(projectAssetRows.map((row) => [Number(row.id), row]));
+  const queuedAssetIds = new Set();
+  const pendingAssetIds = [];
+  const queueAsset = (rawId) => {
+    const id = Number(rawId);
+    if (!Number.isSafeInteger(id) || id <= 0 || selectedAssetRows.has(id) || queuedAssetIds.has(id)) return;
+    queuedAssetIds.add(id);
+    pendingAssetIds.push(id);
+  };
+
+  // Preserve parent references for project rows and explicitly referenced
+  // globals. The query below admits only this project or this owner's globals.
+  for (const row of projectAssetRows) queueAsset(row.parent_asset_id);
+  for (const id of referencedAssetIds) queueAsset(id);
+  while (pendingAssetIds.length > 0) {
+    const batch = pendingAssetIds.splice(0, pendingAssetIds.length);
+    for (let offset = 0; offset < batch.length; offset += 500) {
+      const ids = batch.slice(offset, offset + 500);
+      const placeholders = ids.map(() => '?').join(', ');
+      const rows = db.prepare(
+        `SELECT * FROM assets
+         WHERE deleted_at IS NULL AND id IN (${placeholders})
+           AND (drama_id = ? OR (drama_id IS NULL AND owner_user_id = ?))`
+      ).all(...ids, Number(dramaId), drama.owner_user_id ?? null);
+      for (const row of rows) {
+        const id = Number(row.id);
+        if (selectedAssetRows.has(id)) continue;
+        selectedAssetRows.set(id, row);
+        queueAsset(row.parent_asset_id);
+      }
+    }
+  }
+
+  const rows = [...selectedAssetRows.values()];
+  rows.sort((a, b) => {
+    const aIsProject = Number(a.drama_id) === Number(dramaId);
+    const bIsProject = Number(b.drama_id) === Number(dramaId);
+    return Number(bIsProject) - Number(aIsProject) || Number(a.id) - Number(b.id);
+  });
+  rows.forEach((row, index) => { assetById.set(Number(row.id), index); });
+  for (const row of rows) {
+    const item = {
+      original_id: Number(row.id),
+      name: row.name || null,
+      reference_alias: row.reference_alias || null,
+      type: row.type || 'image',
+      category: row.category || null,
+      url: row.url || null,
+      file_size: row.file_size ?? null,
+      mime_type: row.mime_type || null,
+      width: row.width ?? null,
+      height: row.height ?? null,
+      duration: row.duration ?? null,
+      image_gen_id: row.image_gen_id ?? null,
+      video_gen_id: row.video_gen_id ?? null,
+      source_type: row.source_type || 'upload',
+      parent_asset_index: row.parent_asset_id != null && assetById.has(Number(row.parent_asset_id)) ? assetById.get(Number(row.parent_asset_id)) : null,
+      metadata: parseJson(row.metadata_json, null),
+      tags: parseJson(row.tags_json, null),
+      is_favorite: !!row.is_favorite,
+      checksum: row.checksum || null,
+      processing_status: row.processing_status || 'ready',
+      error_msg: row.error_msg || null,
+      seedance2_asset: parseJson(row.seedance2_asset, null),
+      requires_sd2_identity: !!row.requires_sd2_identity,
+      created_at: row.created_at || null,
+      updated_at: row.updated_at || null,
+      archived_at: row.archived_at || null,
+      file: row.local_path ? `media/assets/asset_${row.id}${extOf(row.local_path)}` : null,
+      thumbnail_file: row.thumbnail_local_path ? `media/assets/asset_${row.id}_thumb${extOf(row.thumbnail_local_path)}` : null,
+    };
+    if (row.local_path) assetFilesToPack.push({ localRelPath: row.local_path, zipPath: item.file });
+    if (row.thumbnail_local_path) assetFilesToPack.push({ localRelPath: row.thumbnail_local_path, zipPath: item.thumbnail_file });
+    exportedAssets.push(item);
+  }
+
+  const exportedResourceLinks = [];
+  const resourceRows = db.prepare('SELECT * FROM asset_resource_links WHERE drama_id = ? ORDER BY id').all(Number(dramaId));
+  const resourceIndex = {
+    character: new Map(characters.map((row, index) => [Number(row.id), index])),
+    scene: new Map(dedupedScenes.map((row, index) => [Number(row.id), index])),
+    prop: new Map(props.map((row, index) => [Number(row.id), index])),
+  };
+  for (const row of resourceRows) {
+    const assetIndex = assetById.get(Number(row.asset_id));
+    const resourceIndexValue = resourceIndex[row.resource_type]?.get(Number(row.resource_id));
+    if (assetIndex == null || resourceIndexValue == null) continue;
+    exportedResourceLinks.push({
+      asset_index: assetIndex,
+      resource_type: row.resource_type,
+      resource_index: resourceIndexValue,
+      role: row.role || 'primary_image',
+      status: row.status || 'active',
+      detached_at: row.detached_at || null,
+    });
+  }
+
   // ---- 读取所有分镜的道具关联（storyboard_props） ----
   const allSbIdsForProps = Object.values(storyboardsByEp).flat().map(s => s.id);
   const sbPropIds = {}; // storyboard_id → prop_id[]
@@ -250,6 +399,30 @@ async function exportDrama(db, cfg, log, dramaId) {
             .map(id => propIdToIndex[id])
             .filter(idx => idx !== undefined);
 
+          const omniAssetIds = parseJsonArray(sb.omni_asset_ids)
+            .map((id) => assetById.get(Number(id)))
+            .filter((index) => index != null);
+          const omniAssetUsage = parseJsonObject(sb.omni_asset_usage_json);
+          const exportedUsage = {};
+          for (const [rawId, usage] of Object.entries(omniAssetUsage)) {
+            const assetIndex = assetById.get(Number(rawId));
+            if (assetIndex != null) exportedUsage[String(assetIndex)] = usage;
+          }
+          const promptDocument = parseJsonObject(sb.omni_prompt_document_json);
+          const exportedPromptRefs = (Array.isArray(promptDocument.refs) ? promptDocument.refs : []).map((ref) => {
+            const assetIndex = assetById.get(Number(ref?.asset_id));
+            if (assetIndex == null) return null;
+            const { asset_id, ...rest } = ref;
+            return { ...rest, asset_index: assetIndex };
+          }).filter(Boolean);
+          const exportedPromptDocument = Object.keys(promptDocument).length
+            ? { ...promptDocument, refs: exportedPromptRefs }
+            : null;
+          const firstFrameAssetIndex = sb.omni_first_frame_asset_id != null
+            ? (assetById.get(Number(sb.omni_first_frame_asset_id)) ?? null) : null;
+          const lastFrameAssetIndex = sb.omni_last_frame_asset_id != null
+            ? (assetById.get(Number(sb.omni_last_frame_asset_id)) ?? null) : null;
+
           return {
             storyboard_number: sb.storyboard_number,
             title: sb.title,
@@ -281,6 +454,30 @@ async function exportDrama(db, cfg, log, dramaId) {
             creation_mode: sb.creation_mode === 'universal' ? 'universal' : 'classic',
             universal_segment_text: sb.universal_segment_text || null,
             layout_description: sb.layout_description || null,
+            text_model: sb.text_model || null,
+            video_model: sb.video_model || null,
+            video_resolution: sb.video_resolution || null,
+            video_aspect_ratio: sb.video_aspect_ratio || null,
+            video_upscale_resolution: sb.video_upscale_resolution || null,
+            video_target_fps: sb.video_target_fps ?? null,
+            generation_overrides: parseJsonObject(sb.generation_overrides_json),
+            generation_overrides_json: parseJsonObject(sb.generation_overrides_json),
+            audio_strategy: sb.audio_strategy || null,
+            keep_original_audio: !!sb.keep_original_audio,
+            audio_volume: sb.audio_volume ?? null,
+            audio_fade_seconds: sb.audio_fade_seconds ?? null,
+            omni_creation_mode: sb.omni_creation_mode || null,
+            omni_asset_send_policy: sb.omni_asset_send_policy || null,
+            omni_asset_refs: omniAssetIds.map((asset_index) => ({ asset_index, usage: exportedUsage[String(asset_index)] || null })),
+            // These index-based aliases make the archive self-describing while
+            // keeping the legacy field names available to older readers.
+            omni_asset_ids: omniAssetIds,
+            omni_asset_usage_json: exportedUsage,
+            omni_first_frame_asset_index: firstFrameAssetIndex,
+            omni_last_frame_asset_index: lastFrameAssetIndex,
+            omni_asset_usage: exportedUsage,
+            omni_prompt_document: exportedPromptDocument,
+            omni_prompt_document_json: exportedPromptDocument,
             // 用 original_id 记录首尾帧绑定的 image_generations 旧ID，导入时映射回新ID
             first_frame_image_original_id: sb.first_frame_image_id ?? null,
             last_frame_image_original_id: sb.last_frame_image_id ?? null,
@@ -372,6 +569,8 @@ async function exportDrama(db, cfg, log, dramaId) {
         extra_image_files: extraFiles,
       };
     }),
+    assets: exportedAssets,
+    asset_resource_links: exportedResourceLinks,
   };
 
   // ---- 9. 打包 ZIP ----
@@ -432,6 +631,12 @@ async function exportDrama(db, cfg, log, dramaId) {
 
   // extra_images（角色/场景/道具的额外参考图）
   for (const { localRelPath, zipPath } of extraFilesToPack) {
+    const buf = await safeReadMedia(cfg, storagePath, localRelPath);
+    if (buf) zip.addFile(zipPath, buf);
+  }
+
+  // Omni 素材主文件和缩略图
+  for (const { localRelPath, zipPath } of assetFilesToPack) {
     const buf = await safeReadMedia(cfg, storagePath, localRelPath);
     if (buf) zip.addFile(zipPath, buf);
   }

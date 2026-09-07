@@ -267,6 +267,25 @@ test('global and project asset scopes are isolated for the same owner', () => {
   assert.equal(assetService.list(db, { owner_user_id: 7 }).total, 2);
 });
 
+test('asset search finds reference aliases beyond the first page without crossing owners', () => {
+  const db = createDb();
+  try {
+    const insert = db.prepare('INSERT INTO assets (owner_user_id, name, reference_alias, type, created_at) VALUES (?, ?, ?, ?, ?)');
+    for (let id = 1; id <= 101; id += 1) insert.run(7, `frame-${id}.png`, `图片${id}`, 'image', '2026-09-07T00:00:00.000Z');
+    insert.run(8, 'private.png', '图片1', 'image', '2026-09-07T00:00:00.000Z');
+    const first = assetService.list(db, { owner_user_id: 7, page: 1, page_size: 100 });
+    const second = assetService.list(db, { owner_user_id: 7, page: 2, page_size: 100 });
+    assert.equal(first.total, 101);
+    assert.equal(first.items.length, 100);
+    assert.equal(second.items.length, 1);
+    assert.equal(new Set([...first.items, ...second.items].map((item) => item.id)).size, 101);
+    assert.equal(second.items[0].reference_alias, '图片1');
+    const found = assetService.list(db, { owner_user_id: 7, keyword: '图片1', page_size: 100 });
+    assert.ok(found.items.some((item) => item.name === 'frame-1.png'));
+    assert.ok(found.items.every((item) => item.name !== 'private.png'));
+  } finally { db.close(); }
+});
+
 test('Seedance 2.5 applies its model-specific reference limits instead of legacy model limits', () => {
   const capability = { model: 'doubao-seedance-2-5-260628', limits: { total_reference: { max: 50 }, image_reference: { max: 30 }, video_reference: { max: 10 }, audio_reference: { max: 10 } } };
   assert.deepEqual(assetLimitsForCapability(capability), { total: 50, image: 30, video: 10, audio: 10 });

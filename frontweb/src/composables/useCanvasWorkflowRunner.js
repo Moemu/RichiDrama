@@ -1,6 +1,7 @@
 import { taskAPI } from '@/api/task'
 import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
+import { omniVideoAPI } from '@/api/omniVideo'
 import request from '@/utils/request'
 import { storyboardImageUrl } from '@/utils/mediaUrl'
 import {
@@ -9,7 +10,13 @@ import {
   getDramaGenerationOptions,
   toAbsoluteMediaUrl,
 } from '@/utils/canvasWorkflow'
-import { dramaUsesFirstLastFrame, sbVideoFirstLastUrls } from '@/utils/storyboardMedia'
+import {
+  dramaUsesFirstLastFrame,
+  sbVideoFirstLastUrls,
+  storyboardOmniAssetRecords,
+  storyboardOmniRequestAssets,
+  storyboardOmniSelection,
+} from '@/utils/storyboardMedia'
 
 async function pollTaskSimple(taskId, options = {}) {
   if (!taskId) return { status: 'failed', error: '缺少 task_id' }
@@ -49,38 +56,122 @@ export async function runImageStep(drama, sb, genOpts) {
 function resolveVideoStepInput(drama, sb, genOpts) {
   const useFirstLast = dramaUsesFirstLastFrame(drama)
   const imagesBySbId = genOpts?.imagesBySbId || {}
-  const { first, last } = sbVideoFirstLastUrls(sb, imagesBySbId, useFirstLast)
+  const universal = sb?.creation_mode === 'universal'
+  const omniSelection = storyboardOmniSelection(sb)
+  const omniAssetRecords = universal ? storyboardOmniAssetRecords(sb, genOpts?.universalAssets || []) : []
+  const missingOmniAssetIds = omniAssetRecords
+    .filter((record) => !record.asset)
+    .map((record) => record.asset_id)
+  const invalidOmniSelection = universal && (
+    (omniSelection.mode === 'first_last_frame' && (
+      omniSelection.invalidFirst
+      || omniSelection.invalidLast
+      || omniSelection.firstId == null
+      || (omniSelection.lastId != null && omniSelection.lastId === omniSelection.firstId)
+    ))
+    || (omniSelection.mode === 'multi_reference' && omniSelection.invalidIds?.length > 0)
+  )
+  const { first, last, omniCreationMode } = sbVideoFirstLastUrls(
+    sb,
+    imagesBySbId,
+    useFirstLast,
+    genOpts?.universalAssets || []
+  )
   const imgPath = first || storyboardImageUrl(sb)
-  return { first, last, imgPath }
+  return {
+    first,
+    last,
+    imgPath,
+    omniCreationMode,
+    omniSelection,
+    omniAssetRecords,
+    omniRequestAssets: universal ? storyboardOmniRequestAssets(sb, genOpts?.universalAssets || []) : [],
+    missingOmniAssetIds,
+    invalidOmniSelection,
+  }
 }
 
 export function canRunVideoStep(drama, sb, genOpts) {
-  const { last, imgPath } = resolveVideoStepInput(drama, sb, genOpts)
+  const {
+    last,
+    imgPath,
+    omniSelection,
+    missingOmniAssetIds,
+    invalidOmniSelection,
+  } = resolveVideoStepInput(drama, sb, genOpts)
+  if (sb?.creation_mode === 'universal') {
+    const prompt = String(sb?.universal_segment_text || sb?.video_prompt || '').trim()
+    if (!prompt || invalidOmniSelection || missingOmniAssetIds.length) return false
+    if (omniSelection.mode === 'first_last_frame') return omniSelection.firstId != null
+    return true
+  }
   return !!(imgPath || sb?.video_prompt || last)
 }
 
 export async function runVideoStep(drama, sb, genOpts) {
-  const { last, imgPath } = resolveVideoStepInput(drama, sb, genOpts)
-  if (!imgPath && !sb.video_prompt && !last) {
+  const {
+    last,
+    imgPath,
+    omniCreationMode,
+    omniSelection,
+    omniRequestAssets,
+    missingOmniAssetIds,
+    invalidOmniSelection,
+  } = resolveVideoStepInput(drama, sb, genOpts)
+  const universal = sb?.creation_mode === 'universal'
+  const prompt = universal
+    ? String(sb.universal_segment_text || sb.video_prompt || '').trim()
+    : (sb.video_prompt || sb.polished_prompt || sb.image_prompt || sb.description || '')
+  if (universal && !prompt) {
+    throw new Error(`分镜 #${sb.storyboard_number ?? sb.id} 缺少视频提示词，无法生成视频`)
+  }
+  if (universal && invalidOmniSelection) {
+    throw new Error(`分镜 #${sb.storyboard_number ?? sb.id} 的全能素材选择无效，无法生成视频`)
+  }
+  if (universal && missingOmniAssetIds.length) {
+    throw new Error(`分镜 #${sb.storyboard_number ?? sb.id} 缺少已加载的全能素材引用（${missingOmniAssetIds.join('、')}），无法生成视频`)
+  }
+  if (universal && omniSelection.mode === 'first_last_frame' && omniSelection.firstId == null) {
+    throw new Error(`分镜 #${sb.storyboard_number ?? sb.id} 缺少首帧素材，无法生成视频`)
+  }
+  if (!universal && !imgPath && !sb.video_prompt && !last) {
     throw new Error(`分镜 #${sb.storyboard_number ?? sb.id} 缺少分镜图，无法生成视频`)
   }
   const absoluteFirst = toAbsoluteMediaUrl(imgPath)
   const absoluteLast = last ? toAbsoluteMediaUrl(last) : undefined
-  const prompt = sb.video_prompt || sb.polished_prompt || sb.image_prompt || sb.description || ''
-  const selectedVideoModel = sb.video_model && sb.video_model !== 'auto' ? sb.video_model : undefined
-  const res = await videosAPI.create({
+  const selectedVideoModel = sb.video_model && sb.video_model !== 'auto'
+    ? sb.video_model
+    : (universal && genOpts.videoModel && genOpts.videoModel !== 'auto' ? genOpts.videoModel : undefined)
+  const settings = {
     drama_id: drama.id,
     storyboard_id: sb.id,
     prompt,
-    image_url: absoluteFirst || undefined,
-    first_frame_url: absoluteFirst || undefined,
-    last_frame_url: absoluteLast,
     style: genOpts.style || undefined,
     model: selectedVideoModel,
     aspect_ratio: sb.video_aspect_ratio || genOpts.aspectRatio,
     resolution: sb.video_resolution || genOpts.videoResolution || undefined,
     duration: sb.duration || undefined,
-  })
+  }
+  const res = universal
+    ? await omniVideoAPI.create({
+      ...settings,
+      creation_mode: omniCreationMode,
+      prompt_document: sb.omni_prompt_document || undefined,
+      asset_selection_policy: sb.omni_asset_send_policy === 'prompt_references' ? 'prompt_references' : 'all_selected',
+      audio_strategy: sb.audio_strategy || undefined,
+      keep_original_audio: sb.keep_original_audio ? true : undefined,
+      audio_volume: sb.audio_volume ?? undefined,
+      audio_fade_seconds: sb.audio_fade_seconds ?? undefined,
+      upscale_resolution: sb.video_upscale_resolution || undefined,
+      target_fps: sb.video_target_fps || undefined,
+      assets: omniRequestAssets,
+    })
+    : await videosAPI.create({
+      ...settings,
+      image_url: absoluteFirst || undefined,
+      first_frame_url: absoluteFirst || undefined,
+      last_frame_url: absoluteLast,
+    })
   if (res?.task_id) {
     const polled = await pollTaskSimple(res.task_id)
     if (polled.status !== 'completed') throw new Error(polled.error || '视频生成失败')

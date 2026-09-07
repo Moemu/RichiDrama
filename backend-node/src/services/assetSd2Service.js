@@ -165,7 +165,12 @@ async function refreshResource(db, log, cfg, kind, id, userId) {
 function markResourceStale(db, kind, previous, next) {
   const table = tableFor(kind); if (!table) return;
   const cert = parse(previous?.seedance2_asset); if (!cert) return;
-  const oldFp = sourceFingerprint(previous); const newFp = sourceFingerprint({ ...previous, ...next, image_url: next?.image_url ?? previous?.image_url });
+  const newFp = sourceFingerprint({
+    ...previous,
+    ...next,
+    image_url: next?.image_url !== undefined ? next.image_url : previous?.image_url,
+  });
+  const oldFp = sourceFingerprint(previous);
   if (oldFp === newFp) return;
   if (String(cert.status || '').toLowerCase() === 'stale' && cert.source_fingerprint && cert.source_fingerprint === newFp) {
     const at = new Date().toISOString();

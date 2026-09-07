@@ -66,6 +66,7 @@ export function getDramaGenerationOptions(drama) {
     aspectRatio: meta.aspect_ratio || '16:9',
     style: meta.style_prompt_en || meta.style_prompt_zh || drama?.style || '',
     videoResolution: meta.video_resolution || '480p',
+    videoModel: meta.video_model && meta.video_model !== 'auto' ? meta.video_model : undefined,
   }
 }
 

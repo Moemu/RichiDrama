@@ -54,6 +54,7 @@ test('frame interpolation reserves its own conditional duration charge and persi
     assert.equal(authorization.amount_micro, 220000);
     const video = db.prepare('SELECT interpolation_job_id, interpolation_status, target_fps FROM video_generations WHERE id=?').get(info.lastInsertRowid);
     assert.deepEqual(video, { interpolation_job_id: job.id, interpolation_status: 'awaiting_source', target_fps: 60 });
+    assert.equal(db.prepare('SELECT postprocess_recovery_version FROM video_generations WHERE id=?').get(info.lastInsertRowid).postprocess_recovery_version, 0);
   } catch (error) {
     assert.fail(error?.stack || `${error?.code}: ${error?.message}`);
   } finally {
@@ -68,6 +69,50 @@ test('frame interpolation pricing context normalizes resolution and fps tiers', 
   assert.equal(interpolation.fpsTier(60), 'lte60');
   assert.equal(interpolation.fpsTier(120), 'lte120');
   assert.throws(() => interpolation.resolutionTier('7680x4320'), /8K/);
+});
+
+test('frame interpolation retry releases the failed authorization without opting in legacy recovery', () => {
+  const context = setup();
+  try {
+    const { db, user } = context;
+    const now = new Date().toISOString();
+    const info = db.prepare(`INSERT INTO video_generations
+      (owner_user_id, provider, model, duration, resolution, target_fps, source_local_path, status, created_at, updated_at)
+      VALUES (?, 'volces', 'seedance', 10, '720p', 60, 'projects/retry/videos/source.mp4', 'failed', ?, ?)`)
+      .run(user.id, now, now);
+    const first = interpolation.reserveForGeneration(db, info.lastInsertRowid, 60);
+    db.prepare("UPDATE video_interpolation_jobs SET status='cancelled' WHERE id=?").run(first.id);
+    db.prepare("UPDATE video_generations SET interpolation_status='failed' WHERE id=?").run(info.lastInsertRowid);
+
+    interpolation.retryFromSource(db, info.lastInsertRowid);
+
+    assert.equal(db.prepare('SELECT postprocess_recovery_version FROM video_generations WHERE id=?').get(info.lastInsertRowid).postprocess_recovery_version, 0);
+  } finally {
+    teardown(context.root);
+  }
+});
+
+test('automatic interpolation recovery through ensureJob does not opt in legacy recovery', () => {
+  const context = setup();
+  try {
+    const { db, user } = context;
+    const now = new Date().toISOString();
+    const info = db.prepare(`INSERT INTO video_generations
+      (owner_user_id, provider, model, duration, resolution, target_fps, source_local_path, status, created_at, updated_at)
+      VALUES (?, 'volces', 'seedance', 10, '720p', 60, 'projects/retry/videos/source.mp4', 'failed', ?, ?)`)
+      .run(user.id, now, now);
+    const first = interpolation.reserveForGeneration(db, info.lastInsertRowid, 60);
+    db.prepare("UPDATE video_interpolation_jobs SET status='failed' WHERE id=?").run(first.id);
+    db.prepare("UPDATE video_generations SET interpolation_status='failed' WHERE id=?").run(info.lastInsertRowid);
+
+    const row = db.prepare('SELECT * FROM video_generations WHERE id=?').get(info.lastInsertRowid);
+    const retried = interpolation.ensureJob(db, row, row.source_local_path);
+
+    assert.equal(retried.status, 'pending');
+    assert.equal(db.prepare('SELECT postprocess_recovery_version FROM video_generations WHERE id=?').get(info.lastInsertRowid).postprocess_recovery_version, 0);
+  } finally {
+    teardown(context.root);
+  }
 });
 
 test('frame interpolation submit uses the official client_token field', async () => {

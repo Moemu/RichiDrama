@@ -22,6 +22,11 @@ export function useProps(deps) {
   const { store, dramaId, currentEpisodeId, getSelectedStyle, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage } = deps
   const genStore = useGenerationTaskStore()
 
+  function nullableText(value) {
+    const text = value == null ? '' : String(value).trim()
+    return text || null
+  }
+
   function buildPropImageMeta(prop) {
     const dramaTitle = store.drama?.title || ''
     const epNum = store.currentEpisode?.episode_number
@@ -239,9 +244,9 @@ export function useProps(deps) {
     try {
       await propAPI.update(editPropForm.value.id, {
         name: editPropForm.value.name?.trim(),
-        type: editPropForm.value.type || undefined,
-        description: editPropForm.value.description || undefined,
-        prompt: editPropForm.value.prompt || undefined
+        type: nullableText(editPropForm.value.type),
+        description: nullableText(editPropForm.value.description),
+        prompt: nullableText(editPropForm.value.prompt)
       })
       await savePropRefImageIfAny(editPropForm.value.id)
       await loadDrama()

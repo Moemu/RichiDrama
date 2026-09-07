@@ -3,18 +3,47 @@ const fs = require('fs');
 const { getFfmpegPath, getFfprobePath, hasLocalFfmpeg } = require('../utils/ffmpegPath');
 const storageLayout = require('./storageLayout');
 
-function list(db, query) {
-  let sql = 'FROM video_merges WHERE deleted_at IS NULL';
+function ownerId(actor) {
+  if (actor == null) return null;
+  return Number(typeof actor === 'object' ? actor.id : actor);
+}
+
+// Older merge rows may have drama_id = 0/NULL even though episode_id points
+// to a valid project. Resolve ownership from the episode first and only use
+// the merge's direct drama reference when the episode no longer exists.
+function scopedMergeFromSql() {
+  return `FROM video_merges vm
+    LEFT JOIN episodes e ON e.id = vm.episode_id AND e.deleted_at IS NULL
+    LEFT JOIN dramas episode_drama ON episode_drama.id = e.drama_id AND episode_drama.deleted_at IS NULL
+    LEFT JOIN dramas merge_drama ON merge_drama.id = vm.drama_id AND merge_drama.deleted_at IS NULL
+    WHERE vm.deleted_at IS NULL`;
+}
+
+function scopedMergeOwnerSql() {
+  return 'CASE WHEN e.id IS NOT NULL THEN episode_drama.owner_user_id ELSE merge_drama.owner_user_id END';
+}
+
+function scopedMergeDramaSql() {
+  return 'CASE WHEN e.id IS NOT NULL THEN e.drama_id ELSE vm.drama_id END';
+}
+
+function list(db, query = {}, actor = null) {
+  const scopedOwner = ownerId(actor);
+  let sql = scopedMergeFromSql();
   const params = [];
   if (query.episode_id) {
-    sql += ' AND episode_id = ?';
+    sql += ' AND vm.episode_id = ?';
     params.push(query.episode_id);
   }
   if (query.drama_id) {
-    sql += ' AND drama_id = ?';
+    sql += ` AND ${scopedMergeDramaSql()} = ?`;
     params.push(query.drama_id);
   }
-  const rows = db.prepare('SELECT * ' + sql + ' ORDER BY created_at DESC').all(...params);
+  if (scopedOwner != null) {
+    sql += ` AND ${scopedMergeOwnerSql()} = ?`;
+    params.push(scopedOwner);
+  }
+  const rows = db.prepare('SELECT vm.* ' + sql + ' ORDER BY vm.created_at DESC').all(...params);
   return rows.map(rowToItem);
 }
 
@@ -35,15 +64,50 @@ function rowToItem(r) {
   };
 }
 
-function getById(db, id) {
-  const r = db.prepare('SELECT * FROM video_merges WHERE id = ? AND deleted_at IS NULL').get(Number(id));
+function getById(db, id, actor = null) {
+  const scopedOwner = ownerId(actor);
+  let sql = `SELECT vm.* ${scopedMergeFromSql()}
+    AND vm.id = ?`;
+  // scopedMergeFromSql contributes the FROM/WHERE before the id predicate;
+  // keep the id first in the bound parameter list for readability below.
+  const reorderedParams = [Number(id)];
+  if (scopedOwner != null) {
+    sql += ` AND ${scopedMergeOwnerSql()} = ?`;
+    reorderedParams.push(scopedOwner);
+  }
+  const r = db.prepare(sql).get(...reorderedParams);
   return r ? rowToItem(r) : null;
 }
 
-function create(db, log, req) {
+function create(db, log, req, actor = null) {
+  const episodeId = Number(req.episode_id);
+  const episode = db.prepare(`SELECT e.id, e.drama_id, d.owner_user_id
+    FROM episodes e JOIN dramas d ON d.id = e.drama_id
+    WHERE e.id = ? AND e.deleted_at IS NULL AND d.deleted_at IS NULL`).get(episodeId);
+  if (!episode) {
+    const error = new Error('剧集不存在');
+    error.code = 'NOT_FOUND';
+    throw error;
+  }
+  const actorId = ownerId(actor);
+  if (actorId != null && Number(episode.owner_user_id) !== actorId) {
+    const error = new Error('资源不存在');
+    error.code = 'NOT_FOUND';
+    throw error;
+  }
+  const requestedDramaId = req.drama_id == null || req.drama_id === '' ? 0 : Number(req.drama_id);
+  const hasDramaReference = requestedDramaId !== 0;
+  if (!Number.isInteger(requestedDramaId) || (hasDramaReference && requestedDramaId !== Number(episode.drama_id))) {
+    const error = new Error('episode_id 与 drama_id 不匹配');
+    error.code = 'BAD_REQUEST';
+    throw error;
+  }
+  // Preserve the historical API behavior: an omitted drama_id is stored as
+  // 0. Ownership reads resolve it through episode_id without rewriting data.
+  const dramaId = hasDramaReference ? requestedDramaId : 0;
   const now = new Date().toISOString();
   const taskService = require('./taskService');
-  const task = taskService.createTaskFromContext(db, log, 'video_merge', String(req.episode_id || ''));
+  const task = taskService.createTaskFromContext(db, log, 'video_merge', String(episodeId || ''), actorId);
   const mergeOptionsJson = (() => {
     const o = req.merge_options;
     if (o && typeof o === 'object') return JSON.stringify(o);
@@ -53,8 +117,8 @@ function create(db, log, req) {
     `INSERT INTO video_merges (episode_id, drama_id, title, provider, model, status, scenes, merge_options, task_id, created_at)
      VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`
   ).run(
-    Number(req.episode_id) || 0,
-    Number(req.drama_id) || 0,
+    episodeId || 0,
+    dramaId || 0,
     req.title ?? null,
     req.provider || 'ffmpeg',
     req.model ?? null,
@@ -66,9 +130,15 @@ function create(db, log, req) {
   return { merge_id: info.lastInsertRowid, task_id: task.id, ...getById(db, info.lastInsertRowid) };
 }
 
-function deleteById(db, log, id) {
+function deleteById(db, log, id, actor = null) {
   const now = new Date().toISOString();
-  const result = db.prepare('UPDATE video_merges SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').run(now, Number(id));
+  const scopedOwner = ownerId(actor);
+  if (scopedOwner != null) {
+    if (!getById(db, id, actor)) return false;
+  }
+  const result = db.prepare(
+    'UPDATE video_merges SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL'
+  ).run(now, Number(id));
   return result.changes > 0;
 }
 

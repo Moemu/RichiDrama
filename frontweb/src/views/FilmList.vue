@@ -319,6 +319,7 @@ import { imagesAPI } from '@/api/images'
 import { taskAPI } from '@/api/task'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { videosAPI } from '@/api/videos'
+import { readAuthUser } from '@/utils/authUser'
 
 const router = useRouter()
 const { toggle: toggleTheme } = useTheme()
@@ -819,23 +820,44 @@ async function onDeletePropLibrary(item) {
 const showNewDialog = ref(false)
 const newForm = ref({ title: '', description: '', aspect_ratio: '16:9' })
 const newSaving = ref(false)
-const isAdmin = JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').console_access === true
+const isAdmin = readAuthUser()?.console_access === true
 const importing = ref(false)
 const importFileInput = ref(null)
 
 function loadList() {
   loading.value = true
-  Promise.all([dramaAPI.list({ page: 1, page_size: 50 }), omniVideoAPI.listSequences(), omniVideoAPI.assets({ page: 1, page_size: 40 }).catch(() => ({ items: [] })), videosAPI.list({ page: 1, page_size: 12, status: 'completed' }).catch(() => ({ items: [] })), videosAPI.defaultHomepageVideos().catch(() => [])])
+  const requests = [
+    dramaAPI.list({ page: 1, page_size: 50 }),
+    omniVideoAPI.listSequences(),
+    omniVideoAPI.assets({ page: 1, page_size: 40 }),
+    videosAPI.list({ page: 1, page_size: 12, status: 'completed' }),
+    videosAPI.defaultHomepageVideos(),
+  ]
+  Promise.allSettled(requests)
     .then(([dramaResult, omniResult, assetResult, videoResult, defaultVideoResult]) => {
-      dramas.value = dramaResult?.items ?? []
-      total.value = dramaResult?.pagination?.total ?? 0
-      omniProjects.value = omniResult ?? []
-      workspaceAssets.value = assetResult?.items ?? []
-      workspaceVideos.value = videoResult?.items ?? []
-      defaultHeroVideos.value = Array.isArray(defaultVideoResult) ? defaultVideoResult : (defaultVideoResult?.items ?? [])
-      heroVideoFailed.value = false
+      const failures = []
+      if (dramaResult.status === 'fulfilled') {
+        dramas.value = dramaResult.value?.items ?? []
+        total.value = dramaResult.value?.pagination?.total ?? 0
+      } else failures.push('短剧项目')
+      if (omniResult.status === 'fulfilled') omniProjects.value = omniResult.value ?? []
+      else failures.push('全能制作')
+      if (assetResult.status === 'fulfilled') workspaceAssets.value = assetResult.value?.items ?? []
+      else failures.push('媒体素材')
+      if (videoResult.status === 'fulfilled') workspaceVideos.value = videoResult.value?.items ?? []
+      else failures.push('已完成视频')
+      if (defaultVideoResult.status === 'fulfilled') {
+        const value = defaultVideoResult.value
+        defaultHeroVideos.value = Array.isArray(value) ? value : (value?.items ?? [])
+        heroVideoFailed.value = false
+      } else failures.push('主页背景')
+      if (failures.length) {
+        const message = failures.length === requests.length
+          ? '主页数据暂时无法加载，请稍后重试'
+          : `部分主页数据暂时不可用：${failures.join('、')}`
+        ElMessage.warning(message)
+      }
     })
-    .catch(() => { dramas.value = []; omniProjects.value = []; workspaceAssets.value = []; workspaceVideos.value = []; defaultHeroVideos.value = [] })
     .finally(() => { loading.value = false })
 }
 
@@ -2030,4 +2052,9 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 .media-canvas>.hero-video-layer.is-ready.is-current{z-index:2;opacity:1}
 .media-canvas>.hero-video-layer.is-ready.is-incoming{z-index:3;opacity:1}
 @media(prefers-reduced-motion:reduce){.media-canvas>.hero-video-layer{transition:none}}
+
+/* Keep the records shortcut clear of the mobile hero title. */
+@media (max-width: 52rem) {
+  .media-stage-content { padding-top: 7.5rem; }
+}
 </style>

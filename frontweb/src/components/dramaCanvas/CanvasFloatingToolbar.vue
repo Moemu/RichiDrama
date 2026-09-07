@@ -38,7 +38,7 @@ function create(type) {
 }
 .toolbar-label {
   font-size: 11px;
-  color: #71717a;
+  color: var(--text-muted);
   margin-right: 4px;
   white-space: nowrap;
 }

@@ -78,7 +78,7 @@ const isNodeBusy = computed(() => {
 .canvas-sb-node:hover,
 .canvas-sb-node.selected,
 .canvas-sb-node.focused {
-  border-color: #818cf8;
+  border-color: var(--accent);
   box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.35), 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 .head {
@@ -90,14 +90,14 @@ const isNodeBusy = computed(() => {
 .num {
   font-size: 12px;
   font-weight: 700;
-  color: #a5b4fc;
+  color: var(--accent);
 }
 .wf-badge {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: rgba(251, 191, 36, 0.18);
-  color: #fcd34d;
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
   max-width: 88px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -105,7 +105,7 @@ const isNodeBusy = computed(() => {
 }
 .seg {
   font-size: 10px;
-  color: #71717a;
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -114,8 +114,8 @@ const isNodeBusy = computed(() => {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: rgba(167, 139, 250, 0.2);
-  color: #c4b5fd;
+  background: var(--el-color-primary-light-9);
+  color: var(--accent);
 }
 .title {
   font-size: 13px;
@@ -135,14 +135,14 @@ const isNodeBusy = computed(() => {
   padding: 2px 6px;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.06);
-  color: #a1a1aa;
+  color: var(--text-muted);
 }
-.st-completed { color: #34d399 !important; background: rgba(52, 211, 153, 0.12) !important; }
-.st-processing { color: #60a5fa !important; }
-.st-failed { color: #f87171 !important; }
+.st-completed { color: var(--status-success) !important; background: var(--status-success-bg) !important; }
+.st-processing { color: var(--status-info) !important; }
+.st-failed { color: var(--status-danger) !important; }
 .processing {
   animation: sb-pulse 1.4s ease-in-out infinite;
-  border-color: #60a5fa;
+  border-color: var(--status-info);
 }
 .highlighted {
   box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.75), 0 8px 28px rgba(99, 102, 241, 0.25);
@@ -156,6 +156,6 @@ const isNodeBusy = computed(() => {
 }
 .hint {
   font-size: 10px;
-  color: #52525b;
+  color: var(--text-faint);
 }
 </style>

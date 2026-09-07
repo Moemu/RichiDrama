@@ -74,11 +74,27 @@ function routes(db, cfg, log, uploadService) {
         if (characterIds.length > 10) {
           return response.badRequest(res, '单次最多生成10个角色');
         }
+        const normalizedIds = characterIds.map((value) => Number(value));
+        if (normalizedIds.some((id) => !Number.isInteger(id) || id <= 0)) {
+          return response.badRequest(res, 'character_ids 包含无效 ID');
+        }
+        // This endpoint accepts an array, so the generic singular-ID
+        // ownership guard cannot protect every item. Check all rows before
+        // queuing any provider work.
+        for (const characterId of normalizedIds) {
+          const row = db.prepare(`SELECT c.id, d.owner_user_id
+            FROM characters c
+            JOIN dramas d ON d.id = c.drama_id
+            WHERE c.id = ? AND c.deleted_at IS NULL AND d.deleted_at IS NULL`).get(characterId);
+          if (!row || Number(row.owner_user_id) !== Number(req.auth.id)) {
+            return response.notFound(res, '资源不存在');
+          }
+        }
         const out = characterLibraryService.batchGenerateCharacterImages(
           db,
           log,
           cfg,
-          characterIds,
+          normalizedIds,
           body.model,
           body.style
         );

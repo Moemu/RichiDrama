@@ -1,6 +1,8 @@
 import { ref } from 'vue'
 import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
+import { omniVideoAPI } from '@/api/omniVideo'
+import { storyboardOmniAssetIds } from '@/utils/storyboardMedia'
 
 /**
  * 加载当前剧集分镜的 images / videos 列表（与 FilmCreate.loadStoryboardMedia 对齐）
@@ -8,13 +10,24 @@ import { videosAPI } from '@/api/videos'
 export function useCanvasStoryboardMedia() {
   const imagesBySbId = ref({})
   const videosBySbId = ref({})
+  const universalAssets = ref([])
   const mediaLoading = ref(false)
+
+  async function loadUniversalAssets(storyboards) {
+    const ids = [...new Set((storyboards || []).flatMap((sb) => storyboardOmniAssetIds(sb)))]
+    if (!ids.length) return []
+    const results = await Promise.allSettled(ids.map((id) => omniVideoAPI.getAsset(id)))
+    return results
+      .filter((result) => result.status === 'fulfilled' && result.value && Number.isInteger(Number(result.value.id)))
+      .map((result) => result.value)
+  }
 
   async function loadForStoryboards(storyboards) {
     const boards = storyboards || []
     if (!boards.length) {
       imagesBySbId.value = {}
       videosBySbId.value = {}
+      universalAssets.value = []
       return
     }
     mediaLoading.value = true
@@ -48,12 +61,21 @@ export function useCanvasStoryboardMedia() {
       ? (drama?.episodes || []).filter((ep) => ep.id === episodeId)
       : (drama?.episodes || [])
     const boards = episodes.flatMap((ep) => ep.storyboards || [])
-    await loadForStoryboards(boards)
+    await Promise.all([
+      loadForStoryboards(boards),
+      boards.some((sb) => sb.creation_mode === 'universal' && (
+        (Array.isArray(sb.omni_asset_ids) && sb.omni_asset_ids.length) ||
+        sb.omni_first_frame_asset_id != null || sb.omni_last_frame_asset_id != null
+      ))
+        ? loadUniversalAssets(boards).then((assets) => { universalAssets.value = assets }).catch(() => { universalAssets.value = [] })
+        : Promise.resolve().then(() => { universalAssets.value = [] }),
+    ])
   }
 
   return {
     imagesBySbId,
     videosBySbId,
+    universalAssets,
     mediaLoading,
     loadForStoryboards,
     loadForDrama,

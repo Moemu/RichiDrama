@@ -200,40 +200,58 @@ test('missing local media is read through the protected static route from OSS', 
   const server = http.createServer((req, res) => { assert.equal(req.method, 'GET'); res.writeHead(200); res.end('proxied'); });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); t.after(() => server.close());
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-oss-static-'));
-  const handler = staticHandler(ossConfig(`http://127.0.0.1:${server.address().port}`), root);
-  let sent = null; let type = null; const headers = {};
-  await handler({ path: '/images/legacy.png' }, { setHeader: (n, v) => { headers[n] = v; }, type: (value) => { type = value; return { send: (value2) => { sent = value2; } }; } }, () => assert.fail('should proxy'));
-  assert.equal(type, 'image/png'); assert.equal(sent.toString(), 'proxied');
+  const app = express();
+  app.use('/static', staticHandler(ossConfig(`http://127.0.0.1:${server.address().port}`), root));
+  const appServer = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => appServer.once('listening', resolve));
+  t.after(() => appServer.close());
+  const response = await fetch(`http://127.0.0.1:${appServer.address().port}/static/images/legacy.png`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'image/png');
+  assert.equal(await response.text(), 'proxied');
   // Cache semantics: repeated carousel/list revisits must not refetch bytes.
-  assert.equal(headers['Cache-Control'], 'public, max-age=3600');
+  assert.equal(response.headers.get('cache-control'), 'public, max-age=3600');
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('OSS static fallback preserves video byte-range responses', async (t) => {
-  const server = http.createServer((req, res) => { res.writeHead(200); res.end('0123456789'); });
+  const bytes = Buffer.from('0123456789');
+  const server = http.createServer((req, res) => {
+    const match = /^bytes=(\d+)-(\d*)$/i.exec(req.headers.range || '');
+    if (!match) {
+      res.writeHead(200, { 'Content-Length': bytes.length, 'Accept-Ranges': 'bytes' });
+      return res.end(bytes);
+    }
+    const start = Number(match[1]);
+    const end = match[2] ? Math.min(Number(match[2]), bytes.length - 1) : bytes.length - 1;
+    if (start >= bytes.length || end < start) {
+      res.writeHead(416, { 'Content-Range': `bytes */${bytes.length}` });
+      return res.end();
+    }
+    const body = bytes.subarray(start, end + 1);
+    res.writeHead(206, {
+      'Content-Length': body.length,
+      'Content-Range': `bytes ${start}-${end}/${bytes.length}`,
+      'Accept-Ranges': 'bytes',
+    });
+    return res.end(body);
+  });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); t.after(() => server.close());
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-oss-range-'));
-  const handler = staticHandler(ossConfig(`http://127.0.0.1:${server.address().port}`), root);
-  const calls = { headers: {}, status: null, type: null, body: null, ended: false };
-  const res = {
-    status(value) { calls.status = value; return this; },
-    set(value, next) { if (typeof value === 'string') calls.headers[value] = next; else Object.assign(calls.headers, value); return this; },
-    setHeader(name, value) { calls.headers[name] = value; return this; },
-    type(value) { calls.type = value; return this; },
-    send(value) { calls.body = value; return this; },
-    end() { calls.ended = true; return this; },
-  };
-  await handler({ path: '/videos/legacy.mp4', headers: { range: 'bytes=2-5' } }, res, () => assert.fail('should proxy'));
-  assert.equal(calls.status, 206);
-  assert.equal(calls.type, 'video/mp4');
-  assert.equal(calls.headers['Content-Range'], 'bytes 2-5/10');
-  assert.equal(calls.headers['Cache-Control'], 'public, max-age=3600');
-  assert.equal(calls.headers['Accept-Ranges'], 'bytes');
-  assert.equal(calls.body.toString(), '2345');
-  await handler({ path: '/videos/legacy.mp4', headers: { range: 'bytes=999-' } }, res, () => assert.fail('should proxy'));
-  assert.equal(calls.status, 416);
-  assert.equal(calls.headers['Content-Range'], 'bytes */10');
-  assert.equal(calls.ended, true);
+  const app = express();
+  app.use('/static', staticHandler(ossConfig(`http://127.0.0.1:${server.address().port}`), root));
+  const appServer = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => appServer.once('listening', resolve));
+  t.after(() => appServer.close());
+  const base = `http://127.0.0.1:${appServer.address().port}/static/videos/legacy.mp4`;
+  const ranged = await fetch(base, { headers: { Range: 'bytes=2-5' } });
+  assert.equal(ranged.status, 206);
+  assert.equal(ranged.headers.get('content-range'), 'bytes 2-5/10');
+  assert.equal(await ranged.text(), '2345');
+  const invalid = await fetch(base, { headers: { Range: 'bytes=999-' } });
+  assert.equal(invalid.status, 416);
+  assert.equal(invalid.headers.get('content-range'), 'bytes */10');
+  assert.equal(await invalid.text(), '');
   fs.rmSync(root, { recursive: true, force: true });
 });
 

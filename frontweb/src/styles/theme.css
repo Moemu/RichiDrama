@@ -3,8 +3,8 @@
  *
  * This is intentionally the only global visual authority.  Page components
  * may describe layout, but must use these tokens for colour, borders and
- * elevation.  Keeping both UI modes on the same workbench palette prevents
- * an old persisted `light` class from producing a second, conflicting UI.
+ * elevation. Both modes share semantic roles; media overlays keep their own
+ * foreground colours because the underlying images do not follow the theme.
  */
 :root,
 html.dark {
@@ -24,14 +24,17 @@ html.dark {
   --text-main: #f4f6fb;
   --text-regular: #d7ddeb;
   --text-muted: #a7b0c2;
-  --text-faint: #738097;
+  --text-faint: #98a4b7;
   --text-bright: #ffffff;
   --text-secondary: #a7b0c2;
-  --text-subtle: #738097;
+  --text-subtle: #98a4b7;
   --focus-ring: #8b7cff;
-  --accent: #8b7cff;
+  --accent: #a497ff;
   --accent-hover: #a497ff;
   --accent-contrast: #ffffff;
+  --action-bg: #6757d9;
+  --action-hover-bg: #5545c5;
+  --action-gradient-end: #6b5cde;
   --accent-teal: #42d3c7;
   --accent-warm: #ffb86b;
   --text-on-accent: #ffffff;
@@ -44,6 +47,8 @@ html.dark {
   --status-danger-bg: rgba(255, 123, 136, .13);
   --status-info-bg: rgba(121, 184, 255, .13);
   --stage-bg: #05070c;
+  --text-on-media: #f4f6fb;
+  --text-on-media-muted: #c1c8d6;
   --stage-border: #263349;
   --overlay-scrim: rgba(3, 7, 18, .64);
   --shadow-sm: 0 8px 22px rgba(0, 0, 0, .18);
@@ -68,12 +73,20 @@ html.dark {
   --el-border-color: var(--border-color);
   --el-border-color-light: var(--border-color);
   --el-border-color-lighter: #293443;
-  --el-color-primary: #8b7cff;
+  --el-color-primary: var(--accent);
   --el-color-primary-light-3: #a497ff;
   --el-color-primary-light-5: #bcb2ff;
   --el-color-primary-light-7: #d8d2ff;
   --el-color-primary-light-9: #292650;
   --el-color-primary-dark-2: #7463ee;
+  --el-color-success: var(--status-success);
+  --el-color-warning: var(--status-warning);
+  --el-color-danger: var(--status-danger);
+  --el-color-info: var(--status-info);
+  --el-color-success-light-9: var(--status-success-bg);
+  --el-color-warning-light-9: var(--status-warning-bg);
+  --el-color-danger-light-9: var(--status-danger-bg);
+  --el-color-info-light-9: var(--status-info-bg);
   --el-font-size-base: 17px;
   --el-font-size-small: 15px;
   --el-component-size: 40px;
@@ -101,10 +114,10 @@ html.light {
   --text-main: #171a26;
   --text-regular: #41485a;
   --text-muted: #626a7d;
-  --text-faint: #858c9e;
+  --text-faint: #646c7f;
   --text-bright: #11141f;
   --text-secondary: #626a7d;
-  --text-subtle: #858c9e;
+  --text-subtle: #646c7f;
   --focus-ring: #5b4bd4;
   --accent: #5b4bd4;
   --accent-hover: #493ab9;
@@ -171,11 +184,11 @@ button:focus-visible, a:focus-visible,
 .el-button, .el-input__inner, .el-textarea__inner, .el-select__selected-item, .el-form-item__label, .el-table, .el-tabs__item { font-size: 15px !important; }
 .el-table th.el-table__cell { font-size: 14px !important; font-weight: 600; }
 .el-button--primary:not(.is-link):not(.is-plain) {
-  --el-button-bg-color: var(--accent) !important;
-  --el-button-border-color: var(--accent) !important;
+  --el-button-bg-color: var(--action-bg) !important;
+  --el-button-border-color: var(--action-bg) !important;
   --el-button-text-color: var(--accent-contrast) !important;
-  --el-button-hover-bg-color: var(--accent-hover) !important;
-  --el-button-hover-border-color: var(--accent-hover) !important;
+  --el-button-hover-bg-color: var(--action-hover-bg) !important;
+  --el-button-hover-border-color: var(--action-hover-bg) !important;
 }
 .el-button:not(.el-button--primary):not(.is-text):not(.is-link) {
   --el-button-bg-color: var(--bg-raised) !important;
@@ -198,27 +211,23 @@ html body #app .el-button:not(.el-button--primary):not(.is-text):not(.is-link) {
   color: var(--text-regular) !important;
 }
 html body #app .el-button--primary:not(.is-link):not(.is-plain) {
-  --el-button-bg-color: var(--accent) !important;
-  --el-button-border-color: var(--accent) !important;
+  --el-button-bg-color: var(--action-bg) !important;
+  --el-button-border-color: var(--action-bg) !important;
   --el-button-text-color: var(--accent-contrast) !important;
-  --el-button-hover-bg-color: var(--accent-hover) !important;
-  --el-button-hover-border-color: var(--accent-hover) !important;
-  background: linear-gradient(135deg, var(--accent), #7162ee) !important;
+  --el-button-hover-bg-color: var(--action-hover-bg) !important;
+  --el-button-hover-border-color: var(--action-hover-bg) !important;
+  background: linear-gradient(135deg, var(--action-bg), var(--action-gradient-end)) !important;
   border-color: transparent !important;
   color: var(--accent-contrast) !important;
   box-shadow: 0 8px 24px rgba(103, 87, 217, .22) !important;
 }
-html.light body #app .el-button--primary:not(.is-link):not(.is-plain) {
-  --el-button-bg-color: #6757d9 !important;
-  --el-button-border-color: #6757d9 !important;
-  --el-button-text-color: #fff !important;
-  --el-button-hover-bg-color: #5545c5 !important;
-  --el-button-hover-border-color: #5545c5 !important;
-  background: linear-gradient(135deg, #6757d9, #7b66e6) !important;
-  border-color: transparent !important;
-  color: #fff !important;
-}
+
 .el-button.is-text, .el-button.is-link { color: var(--text-muted) !important; }
+html body #app .el-button--primary.is-plain {
+  background: var(--el-color-primary-light-9) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
 .el-button.is-text:hover, .el-button.is-link:hover { color: var(--text-primary) !important; background: var(--bg-hover) !important; }
 .el-input__wrapper, .el-textarea__wrapper, .el-select__wrapper { background: var(--bg-raised) !important; box-shadow: 0 0 0 1px var(--border-color) inset !important; }
 .el-input__wrapper.is-focus, .el-textarea__wrapper:focus-within, .el-select__wrapper.is-focused { box-shadow: 0 0 0 1px var(--focus-ring) inset !important; }
@@ -234,6 +243,11 @@ html.light .el-loading-mask { background: rgba(245, 247, 251, .82) !important; }
 .el-card, .el-dialog, .el-message-box, .el-popper, .el-select-dropdown, .el-collapse, .el-collapse-item__header, .el-collapse-item__wrap, .el-table, .el-table tr, .el-table th.el-table__cell, .el-table td.el-table__cell { background: var(--bg-surface) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; box-shadow: none !important; }
 .el-alert { background: var(--bg-raised) !important; border: 1px solid var(--border-color) !important; color: var(--text-regular) !important; }
 .el-alert__title, .el-alert__description, .el-alert__icon { color: var(--text-regular) !important; }
+.el-tag.el-tag--success { --el-tag-text-color: var(--status-success); --el-tag-bg-color: var(--status-success-bg); --el-tag-border-color: var(--status-success); }
+.el-tag.el-tag--warning { --el-tag-text-color: var(--status-warning); --el-tag-bg-color: var(--status-warning-bg); --el-tag-border-color: var(--status-warning); }
+.el-tag.el-tag--danger { --el-tag-text-color: var(--status-danger); --el-tag-bg-color: var(--status-danger-bg); --el-tag-border-color: var(--status-danger); }
+.el-tag.el-tag--info { --el-tag-text-color: var(--text-muted); --el-tag-bg-color: var(--bg-raised); --el-tag-border-color: var(--border-strong); }
+.el-tag.el-tag--primary { --el-tag-text-color: var(--accent); --el-tag-bg-color: var(--el-color-primary-light-9); --el-tag-border-color: var(--accent); }
 .el-tabs__nav-wrap::after { background: var(--border-color) !important; }
 .el-tabs__item { color: var(--text-muted) !important; }
 .el-tabs__item:hover, .el-tabs__item.is-active { color: var(--text-primary) !important; }
@@ -261,7 +275,7 @@ html body #app .center-stage, html body #app .video-stage, html body #app .playe
 html body #app .time-ruler, html body #app .result pre, html body #app .dropzone, html body #app .mode-note, html body #app .workflow,
 html body #app .run-item, html body #app .status, html body #app .resource-center-item, html body #app .resource-media-card,
 html body #app .mode-info, html body #app .featured, html body #app .empty-result { background: var(--bg-raised) !important; border-color: var(--border-color) !important; color: var(--text-regular) !important; box-shadow: none !important; }
-html body #app .featured, html body #app .empty-result { background: #0b1016 !important; color: var(--text-muted) !important; }
+html body #app .featured, html body #app .empty-result { background: var(--bg-raised) !important; color: var(--text-muted) !important; }
 html body #app .asset-lineage { border-color: var(--border-subtle) !important; }
 html body #app .asset-lineage-title { color: var(--text-main) !important; }
 html body #app .asset-lineage-list button, html body #app .asset-lineage-current { background: var(--bg-elevated) !important; border-color: var(--border-subtle) !important; color: var(--text-muted) !important; }
@@ -269,8 +283,7 @@ html body #app .asset-lineage-current { border-color: var(--accent) !important; 
 html body #app .asset-lineage-empty, html body #app .asset-lineage-list small { color: var(--text-muted) !important; }
 html body #app .concat-bar .el-button { background: var(--bg-elevated) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; box-shadow: var(--shadow-md) !important; }
 html body #app .polish-suggestion { background: var(--bg-raised) !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; }
-/* Prevent the legacy light-mode switch from reactivating page-local styles. */
-html body #app .featured footer { background: rgba(16, 21, 29, .92) !important; color: var(--text-primary) !important; }
+html body #app .featured footer { background: var(--bg-surface) !important; color: var(--text-primary) !important; }
 html body #app .project-card:hover, html body #app .episode-card:hover, html body #app .library-item:hover, html body #app .tool-card:hover,
 html body #app .tool-card:focus-visible, html body #app .history-card.active, html body #app .run-item.active, html body #app .shot-card.active,
 html body #app .material-card.selected { background: var(--bg-hover) !important; border-color: var(--text-primary) !important; box-shadow: inset 2px 0 0 var(--text-primary) !important; transform: none !important; }
@@ -460,7 +473,6 @@ html.light body #app .omni-page .shot-tabs .active {
 html.light body #app .omni-page .shot-tabs,
 html.light body #app .omni-page .shot-tabs span,
 html.light body #app .omni-page .shot-state,
-html.light body #app .omni-page .shot-preview > span,
 html.light body #app .omni-page .drag-handle {
   color: var(--text-muted) !important;
 }
@@ -705,8 +717,34 @@ html body #app .omni-page .video-stage {
   border-color: var(--stage-border) !important;
   box-shadow: inset 0 0 52px rgba(0, 0, 0, .24), var(--shadow-md) !important;
 }
-html body #app .omni-page .video-stage b { color: #f5f6fb !important; }
-html body #app .omni-page .video-stage small { color: #aeb5c4 !important; }
+html body #app .omni-page .video-stage b { color: var(--text-on-media) !important; }
+html body #app .omni-page .video-stage small { color: var(--text-on-media-muted) !important; }
+/* Video heroes and thumbnail captions always sit above media or a dark scrim. */
+html body #app .tools-page .tool-manifesto,
+html body #app .film-list .records-panel {
+  --text-primary: var(--text-on-media);
+  --text-regular: var(--text-on-media);
+  --text-muted: var(--text-on-media-muted);
+  --accent: #a497ff;
+}
+html body #app .film-list .records-panel {
+  --text-faint: var(--text-on-media-muted);
+  --bg-page: #080b12;
+  --bg-surface: #101722;
+  --bg-raised: #172131;
+  --bg-hover: #202c40;
+}
+html body #app .film-list .media-stage :is(h2, .recent-stack b),
+html body #app .film-list .film-frame span { color: var(--text-on-media) !important; }
+html body #app .film-list .media-stage :is(small, .record-meta),
+html body #app .film-list .film-frame small,
+html body #app .login-page :is(.brand-lockup small, .track-copy small) { color: var(--text-on-media-muted) !important; }
+html body #app .omni-page .shot-preview > span {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(3, 7, 18, .78);
+  color: var(--text-on-media) !important;
+}
 html body #app .omni-page .generation-settings,
 html body #app .omni-page .el-input__wrapper,
 html body #app .omni-page .el-select__wrapper,

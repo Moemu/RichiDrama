@@ -34,6 +34,7 @@ export function useCanvasEpisodeGenerate(deps) {
     filterEpisodeId,
     imagesBySbId,
     videosBySbId,
+    universalAssets,
     refreshCanvas,
     nodeStatus,
   } = deps
@@ -92,6 +93,7 @@ export function useCanvasEpisodeGenerate(deps) {
     return {
       ...getDramaGenerationOptions(drama.value),
       imagesBySbId: imagesBySbId.value,
+      universalAssets: universalAssets.value,
     }
   }
 

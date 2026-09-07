@@ -317,6 +317,9 @@ function routes(db, log) {
       } catch (err) {
         log.error('storyboards update', { error: err.message });
         if (err.code === 'VERSION_CONFLICT') return response.error(res, 409, 'VERSION_CONFLICT', err.message);
+        if (err.code === 'BAD_REQUEST') return response.badRequest(res, err.message);
+        if (err.code === 'INVALID_MEDIA_PATH') return response.badRequest(res, err.message);
+        if (err.code === 'MEDIA_REFERENCE_FORBIDDEN') return response.forbidden(res, err.message);
         response.internalError(res, err.message);
       }
     },

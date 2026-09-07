@@ -120,6 +120,7 @@ import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import { formatCredits, serviceLabel } from '@/utils/billingPresentation'
 import { formatChinaDateTime } from '@/utils/time'
 import { safeRedirectPath } from '@/utils/routeRecovery'
+import { readAuthUser, writeAuthUser } from '@/utils/authUser'
 
 const route = useRoute()
 const router = useRouter()
@@ -132,10 +133,11 @@ const usagePage = reactive({ page: 1, page_size: 20, total: 0 })
 const usageFilters = reactive({ dates: [], user_id: null })
 const billingView = ref('usage')
 const models = ref([])
-const isAdmin = JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').console_access === true
+const authUser = readAuthUser()
+const isAdmin = authUser?.console_access === true
 const password = reactive({ old_password: '', new_password: '' })
-const username = ref(JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').username || '')
-const displayName = ref(JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').display_name || '')
+const username = ref(authUser?.username || '')
+const displayName = ref(authUser?.display_name || '')
 const accountTab = ref('overview')
 const paymentOptions = ref({ channels: [], preset_amounts_yuan: [] })
 const paymentOrders = ref([])
@@ -177,7 +179,7 @@ const countdownText = computed(() => {
 const paymentDialogTitle = computed(() => activePayment.value?.status === 'paid' ? '支付完成' : activePayment.value?.status === 'pending' ? '扫码完成支付' : '订单状态')
 const PAYMENT_STATUS = { pending:{label:'等待支付',type:'warning'},paid:{label:'已到账',type:'success'},closed:{label:'已关闭',type:'info'},expired:{label:'已过期',type:'info'},review_required:{label:'需要核查',type:'danger'},failed:{label:'下单失败',type:'danger'} }
 function paymentStatus(status) { return PAYMENT_STATUS[status] || { label: status, type: 'info' } }
-function formatDate(value) { return value ? new Intl.DateTimeFormat('zh-CN', { timeZone:'Asia/Shanghai', dateStyle:'short', timeStyle:'medium' }).format(new Date(value)) : '—' }
+function formatDate(value) { return formatChinaDateTime(value, '—') }
 function selectRechargeAmount(value) { rechargeAmountChoice.value = value; if (value === 'custom') nextTick(() => customAmountInput.value?.focus()) }
 
 async function loadAccount() { account.value = await accountAPI.me() }
@@ -224,12 +226,12 @@ async function changePassword() {
 }
 
 async function changeUsername() {
-  try { const session = await accountAPI.changeUsername({ username: username.value }); localStorage.setItem('lmd_auth_token', session.token); localStorage.setItem('lmd_auth_user', JSON.stringify(session.user)); username.value = session.user.username; ElMessage.success('用户名已更新') }
+  try { const session = await accountAPI.changeUsername({ username: username.value }); localStorage.setItem('lmd_auth_token', session.token); writeAuthUser(session.user); username.value = session.user.username; ElMessage.success('用户名已更新') }
   catch (error) { ElMessage.error(error?.message || '用户名更新失败') }
 }
 
 async function changeDisplayName() {
-  try { const session = await accountAPI.changeDisplayName({ display_name: displayName.value }); localStorage.setItem('lmd_auth_token', session.token); localStorage.setItem('lmd_auth_user', JSON.stringify(session.user)); displayName.value = session.user.display_name || ''; ElMessage.success('显示名已更新'); window.dispatchEvent(new Event('lmd:auth-user-changed')) }
+  try { const session = await accountAPI.changeDisplayName({ display_name: displayName.value }); localStorage.setItem('lmd_auth_token', session.token); writeAuthUser(session.user); displayName.value = session.user.display_name || ''; ElMessage.success('显示名已更新'); window.dispatchEvent(new Event('lmd:auth-user-changed')) }
   catch (error) { ElMessage.error(error?.message || '显示名更新失败') }
 }
 

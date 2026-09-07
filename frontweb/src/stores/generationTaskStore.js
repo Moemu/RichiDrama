@@ -33,6 +33,9 @@ function taskKey({ dramaId, episodeId, resourceType, resourceId }) {
   return `${dramaId}:${episodeId}:${resourceType}:${resourceId}`
 }
 
+let taskVersionSequence = 0
+let finishVersionSequence = 0
+
 function isLastFrameType(frameType) {
   if (frameType == null || frameType === '') return false
   return LAST_FRAME_TYPES.has(String(frameType).toLowerCase())
@@ -105,14 +108,21 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
     for (const key of keys) {
       const existing = tasks.value.get(key)
       if (!existing) continue
+      const taskVersion = existing.taskVersion
+      const finishVersion = ++finishVersionSequence
       _setTask(key, {
         ...existing,
         status,
         error: error || '',
         finishedAt: Date.now(),
+        finishVersion,
       })
       const delay = status === 'failed' ? 8000 : 3000
-      setTimeout(() => _deleteTask(key), delay)
+      setTimeout(() => {
+        const current = tasks.value.get(key)
+        if (!current || current.taskVersion !== taskVersion || current.finishVersion !== finishVersion) return
+        _deleteTask(key)
+      }, delay)
     }
   }
 
@@ -124,6 +134,8 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
       key,
       status: 'running',
       startedAt: Date.now(),
+      taskVersion: ++taskVersionSequence,
+      finishVersion: null,
     })
     return key
   }
