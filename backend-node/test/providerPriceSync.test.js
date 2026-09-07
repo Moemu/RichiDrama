@@ -71,6 +71,33 @@ test('aborted reads return a bounded timeout; failed pagination retains earlier 
   assert.equal(calls, 3);
 });
 
+test('rate limits back off, honor Retry-After and do not retry before the deadline', async () => {
+  const credential = { accessKeyId: 'test', secretAccessKey: 'test' };
+  const starts = [];
+  const result = await prices.fetchAllActivations(credential, { fetchImpl: async () => {
+    starts.push(Date.now());
+    if (starts.length === 1) return { ok: true, status: 200, headers: new Headers({ 'Retry-After': '3' }), text: async () => JSON.stringify({
+      ResponseMetadata: { RequestId: 'limited', Error: { Code: 'FlowLimitExceeded', Message: 'flow control limit' } },
+    }) };
+    return { ok: true, status: 200, text: async () => JSON.stringify(activationResponse()) };
+  } });
+  assert.ok(starts[1] - starts[0] >= 2900);
+  assert.deepEqual(result.requestIds, ['limited', 'ark-request-1']);
+  for (const headers of [new Headers({ 'Retry-After': '60' }), new Headers({ 'Retry-After': new Date(Date.now() + 60000).toUTCString() }), new Headers()]) {
+    let calls = 0;
+    await assert.rejects(() => prices.callOpenApi(credential, {
+      action: 'ListModelActivations', service: 'ark', version: '2024-01-01', deadline: Date.now() + 1000,
+      fetchImpl: async () => {
+        calls++;
+        return { ok: false, status: 429, headers, text: async () => JSON.stringify({ ResponseMetadata: {
+          RequestId: 'still-limited', Error: { Code: 'FlowLimitExceeded', Message: 'flow control limit' },
+        } }) };
+      },
+    }), (error) => error.httpStatus === 503 && error.publicCode === 'PROVIDER_UNAVAILABLE' && /限流/.test(error.publicMessage));
+    assert.equal(calls, 1);
+  }
+});
+
 test('price sync HTTP reports upstream timeout, releases its lock and preserves prices after restart', async () => {
   const { db, dbPath, admin, log } = setup();
   const express = require('express');
@@ -108,11 +135,22 @@ test('price sync HTTP reports upstream timeout, releases its lock and preserves 
     assert.equal(db.prepare('SELECT COUNT(*) n FROM provider_price_sync_locks').get().n, 0);
     assert.equal(db.prepare('SELECT COUNT(*) n FROM provider_price_candidates').get().n, 0);
     assert.deepEqual(db.prepare('SELECT * FROM billing_price_book_items ORDER BY id').all(), before);
+    global.fetch = async () => ({ ok: false, status: 429, headers: new Headers({ 'Retry-After': '60' }), text: async () => JSON.stringify({
+      ResponseMetadata: { RequestId: 'rate-limit-http', Error: { Code: 'FlowLimitExceeded', Message: 'flow control limit' } },
+    }) });
+    const limited = await request();
+    assert.equal(limited.status, 503);
+    assert.equal(limited.body.error.details.provider_error_code, 'FlowLimitExceeded');
+    assert.match(limited.body.error.message, /限流/);
+    const limitedId = limited.body.error.details.sync_id;
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM provider_price_sync_locks').get().n, 0);
     global.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify(activationResponse()) });
     assert.equal((await request()).status, 200);
     await new Promise((resolve) => server.close(resolve)); server = null;
     closeDb();
     const reopened = getDb({ path: dbPath, type: 'sqlite' });
+    assert.match(prices.syncView(reopened, limitedId).error_summary, /FlowLimitExceeded/);
+    assert.deepEqual(prices.syncView(reopened, limitedId).provider_request_ids, ['rate-limit-http']);
     assert.deepEqual(prices.syncView(reopened, failedId).provider_request_ids, ['failed-price-1', 'failed-price-2']);
     assert.deepEqual(reopened.prepare('SELECT * FROM billing_price_book_items ORDER BY id').all(), before);
   } finally {

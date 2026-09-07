@@ -119,6 +119,7 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
         if (!error.publicCode) return response.badRequest(res, error.message);
         response.error(res, error.httpStatus, error.publicCode, error.publicMessage, {
           sync_id: error.syncId, provider_request_ids: error.requestIds || [], action: error.action,
+          provider_error_code: error.code,
         });
       }
     },

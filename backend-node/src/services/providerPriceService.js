@@ -87,9 +87,13 @@ function credentials(db) {
   return { configId: row.id, configName: row.name, accessKeyId, secretAccessKey, region: String(settings.sign_region || 'cn-beijing').trim() || 'cn-beijing' };
 }
 
+function isRateLimitError(error) {
+  return error.status === 429 || /FlowLimitExceeded|throttl/i.test(error.code || '');
+}
+
 function isTransientOpenApiError(error) {
   if ([401, 403].includes(error.status) || /AccessDenied|Unauthorized|InvalidAccessKey|Signature|InvalidParameter/i.test(error.code || '')) return false;
-  return [408, 429, 500, 502, 503, 504].includes(error.status)
+  return isRateLimitError(error) || [408, 500, 502, 503, 504].includes(error.status)
     || /timeout|timed out|throttl|serviceunavailable|internalerror/i.test(`${error.code || ''} ${error.message || ''}`)
     || ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'].includes(error.cause?.code);
 }
@@ -123,6 +127,12 @@ async function callOpenApi(credential, options = {}) {
         error.status = response.status;
         error.code = upstreamError?.Code || 'VOLCENGINE_OPENAPI_ERROR';
         error.requestId = requestId;
+        const retryAfter = response.headers?.get('retry-after');
+        if (retryAfter) {
+          const seconds = Number(retryAfter);
+          const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
+          if (Number.isFinite(delay) && delay > 0) error.retryAfterMs = delay;
+        }
         throw error;
       }
       return { payload, requestId, requestIds };
@@ -134,15 +144,18 @@ async function callOpenApi(credential, options = {}) {
       error.requestIds = [...requestIds];
       error.action = options.action;
       const transient = isTransientOpenApiError(error);
-      if (transient && attempt < attempts && (options.deadline == null || Date.now() + 250 < options.deadline)) {
+      const rateLimited = isRateLimitError(error);
+      const retryDelay = Math.max(rateLimited ? 2000 + Math.floor(Math.random() * 500) : 250, error.retryAfterMs || 0);
+      if (transient && attempt < attempts && retryDelay <= 5000 && (options.deadline == null || Date.now() + retryDelay < options.deadline)) {
         clearTimeout(timer);
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
         continue;
       }
       const timeout = /timeout|timed out/i.test(`${error.code || ''} ${error.message || ''}`) || [408, 504].includes(error.status);
       error.httpStatus = timeout ? 504 : transient ? 503 : 502;
       error.publicCode = timeout ? 'PROVIDER_TIMEOUT' : transient ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_API_ERROR';
       error.publicMessage = timeout ? '火山价格服务响应超时，请稍后重试；当前已发布价目表未改变。'
+        : rateLimited ? '火山价格查询触发接口限流，请稍后重试；当前已发布价目表未改变。'
         : transient ? '火山价格服务暂时不可用，请稍后重试；当前已发布价目表未改变。'
         : `火山价格查询失败：${error.message}`;
       throw error;
