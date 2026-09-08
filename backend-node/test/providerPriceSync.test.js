@@ -33,6 +33,28 @@ function activationResponse() {
   };
 }
 
+test('price queries read all models in signed pages of twenty', async () => {
+  const pages = [];
+  const result = await prices.fetchAllActivations({ accessKeyId: 'test', secretAccessKey: 'test' }, {
+    fetchImpl: async (_url, init) => {
+      const body = JSON.parse(init.body);
+      assert.equal(body.PageSize, 20);
+      assert.equal(body.WithPrice, true);
+      assert.ok(init.headers.Authorization);
+      pages.push(body.PageNumber);
+      const start = (body.PageNumber - 1) * 20;
+      return { ok: true, status: 200, text: async () => JSON.stringify({
+        ResponseMetadata: { RequestId: `page-${body.PageNumber}` },
+        Result: { TotalCount: 43, Items: Array.from({ length: Math.min(20, 43 - start) }, (_, i) => ({ FoundationModelName: `model-${start + i}` })) },
+      }) };
+    },
+  });
+  assert.deepEqual(pages, [1, 2, 3]);
+  assert.equal(result.items.length, 43);
+  assert.equal(new Set(result.items.map(item => item.FoundationModelName)).size, 43);
+  assert.deepEqual(result.requestIds, ['page-1', 'page-2', 'page-3']);
+});
+
 test('read-only price queries retry upstream timeouts but not authentication errors', async () => {
   const credential = { accessKeyId: 'test', secretAccessKey: 'test', region: 'cn-beijing' };
   let calls = 0;

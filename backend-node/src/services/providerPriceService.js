@@ -172,7 +172,7 @@ async function fetchAllActivations(credential, options = {}) {
   while (items.length < total && page <= 100) {
     const result = await callOpenApi(credential, {
       ...options, deadline, service: 'ark', action: 'ListModelActivations', version: ARK_VERSION,
-      body: { PageNumber: page, PageSize: 100, WithPrice: true, WithFreeUsage: false, Filter: { States: ['Available'], IncludeDeprecatedModels: true } },
+      body: { PageNumber: page, PageSize: 20, WithPrice: true, WithFreeUsage: false, Filter: { States: ['Available'], IncludeDeprecatedModels: true } },
     }).catch((error) => {
       error.requestIds = [...requestIds, ...(error.requestIds || [])];
       throw error;
