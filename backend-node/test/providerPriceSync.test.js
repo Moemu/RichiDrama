@@ -55,6 +55,25 @@ test('price queries read all models in signed pages of twenty', async () => {
   assert.deepEqual(result.requestIds, ['page-1', 'page-2', 'page-3']);
 });
 
+test('upstream price timeouts reduce page size and restart without mixing snapshots', async () => {
+  const requests = [];
+  const result = await prices.fetchAllActivations({ accessKeyId: 'test', secretAccessKey: 'test' }, {
+    fetchImpl: async (_url, init) => {
+      const { PageNumber: page, PageSize: size } = JSON.parse(init.body);
+      requests.push([size, page]);
+      const timeout = (size === 20 && page === 2) || size === 10;
+      const start = (page - 1) * size;
+      return { ok: true, status: 200, text: async () => JSON.stringify({
+        ResponseMetadata: { RequestId: `request-${requests.length}`, ...(timeout ? { Error: { Code: 'InternalServiceTimeout', Message: 'timeout' } } : {}) },
+        ...(!timeout ? { Result: { TotalCount: 23, Items: Array.from({ length: Math.min(size, 23 - start) }, (_, i) => ({ FoundationModelName: `${size}-${start + i}` })) } } : {}),
+      }) };
+    },
+  });
+  assert.deepEqual(requests, [[20, 1], [20, 2], [20, 2], [10, 1], [10, 1], [5, 1], [5, 2], [5, 3], [5, 4], [5, 5]]);
+  assert.deepEqual(result.items.map(item => item.FoundationModelName), Array.from({ length: 23 }, (_, i) => `5-${i}`));
+  assert.equal(result.requestIds.length, requests.length);
+});
+
 test('read-only price queries retry upstream timeouts but not authentication errors', async () => {
   const credential = { accessKeyId: 'test', secretAccessKey: 'test', region: 'cn-beijing' };
   let calls = 0;
@@ -134,7 +153,7 @@ test('price sync HTTP reports upstream timeout, releases its lock and preserves 
       assert.equal(new URL(url).hostname, 'open.volcengineapi.com');
       calls++;
       return { ok: false, status: 500, text: async () => JSON.stringify({ ResponseMetadata: {
-        RequestId: `failed-price-${calls}`, Error: { Code: 'InternalError', Message: 'Internal Service is timeout. Pls Contact With Admin' },
+        RequestId: `failed-price-${calls}`, Error: { Code: 'InternalServiceTimeout', Message: 'Internal Service is timeout. Pls Contact With Admin' },
       } }) };
     };
     const app = express(); app.use(express.json());
@@ -150,8 +169,8 @@ test('price sync HTTP reports upstream timeout, releases its lock and preserves 
     });
     const result = await request();
     assert.equal(result.status, 504); assert.equal(result.body.error.code, 'PROVIDER_TIMEOUT');
-    assert.deepEqual(result.body.error.details.provider_request_ids, ['failed-price-1', 'failed-price-2']);
-    assert.equal(calls, 2);
+    assert.deepEqual(result.body.error.details.provider_request_ids, Array.from({ length: 6 }, (_, i) => `failed-price-${i + 1}`));
+    assert.equal(calls, 6);
     const failedId = result.body.error.details.sync_id;
     assert.equal(prices.syncView(db, failedId).status, 'failed');
     assert.equal(db.prepare('SELECT COUNT(*) n FROM provider_price_sync_locks').get().n, 0);
@@ -173,7 +192,7 @@ test('price sync HTTP reports upstream timeout, releases its lock and preserves 
     const reopened = getDb({ path: dbPath, type: 'sqlite' });
     assert.match(prices.syncView(reopened, limitedId).error_summary, /FlowLimitExceeded/);
     assert.deepEqual(prices.syncView(reopened, limitedId).provider_request_ids, ['rate-limit-http']);
-    assert.deepEqual(prices.syncView(reopened, failedId).provider_request_ids, ['failed-price-1', 'failed-price-2']);
+    assert.deepEqual(prices.syncView(reopened, failedId).provider_request_ids, Array.from({ length: 6 }, (_, i) => `failed-price-${i + 1}`));
     assert.deepEqual(reopened.prepare('SELECT * FROM billing_price_book_items ORDER BY id').all(), before);
   } finally {
     global.fetch = originalFetch;
@@ -359,4 +378,12 @@ test('reviewed provider prices publish atomically and notices persist per user',
     assert.equal(prices.rollback(db, admin.id, base.id, { confirm: true, reason: 'test rollback again', idempotency_key: 'rollback-reviewed' }).reused, true);
     assert.equal(db.prepare('SELECT COUNT(*) count FROM billing_price_books').get().count, bookCount);
   } finally { teardown(dbPath); }
+});
+
+test('incomplete price pages cannot produce a partial price snapshot', async () => {
+  await assert.rejects(() => prices.fetchAllActivations({ accessKeyId: 'test', secretAccessKey: 'test' }, {
+    fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({
+      ResponseMetadata: { RequestId: 'empty-page' }, Result: { TotalCount: 1, Items: [] },
+    }) }),
+  }), error => error.publicCode === 'PROVIDER_API_ERROR' && error.requestIds[0] === 'empty-page');
 });

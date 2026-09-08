@@ -168,21 +168,40 @@ async function fetchAllActivations(credential, options = {}) {
   const requestIds = [];
   let page = 1;
   let total = Infinity;
+  let pageSize = 20;
   const deadline = Date.now() + 45000;
   while (items.length < total && page <= 100) {
-    const result = await callOpenApi(credential, {
-      ...options, deadline, service: 'ark', action: 'ListModelActivations', version: ARK_VERSION,
-      body: { PageNumber: page, PageSize: 20, WithPrice: true, WithFreeUsage: false, Filter: { States: ['Available'], IncludeDeprecatedModels: true } },
-    }).catch((error) => {
-      error.requestIds = [...requestIds, ...(error.requestIds || [])];
+    let result;
+    try {
+      result = await callOpenApi(credential, {
+        ...options, deadline, service: 'ark', action: 'ListModelActivations', version: ARK_VERSION,
+        body: { PageNumber: page, PageSize: pageSize, WithPrice: true, WithFreeUsage: false, Filter: { States: ['Available'], IncludeDeprecatedModels: true } },
+      });
+    } catch (error) {
+      requestIds.push(...(error.requestIds || []));
+      if (error.code === 'InternalServiceTimeout' && pageSize > 5 && Date.now() < deadline) {
+        pageSize /= 2;
+        // Changing page size changes offsets, so discard the partial snapshot.
+        items.length = 0;
+        page = 1;
+        total = Infinity;
+        continue;
+      }
+      error.requestIds = [...requestIds];
       throw error;
-    });
+    }
     requestIds.push(...result.requestIds);
     const pageItems = Array.isArray(result.payload?.Result?.Items) ? result.payload.Result.Items : [];
     items.push(...pageItems);
     total = Number(result.payload?.Result?.TotalCount ?? items.length);
     if (!pageItems.length) break;
     page += 1;
+  }
+  if (items.length < total) {
+    throw Object.assign(new Error('火山价格分页结果不完整'), {
+      httpStatus: 502, publicCode: 'PROVIDER_API_ERROR', requestIds, action: 'ListModelActivations',
+      publicMessage: '火山价格列表未读取完整，请稍后重试；当前已发布价目表未改变。',
+    });
   }
   return { items, requestIds };
 }
