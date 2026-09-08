@@ -191,8 +191,15 @@ test('GitHub workflows gate preview and production', () => {
   assert.match(cleanup, /bash \/usr\/local\/lib\/richidrama-preview\/preview-cleanup/);
   assert.match(production, /environment: production/);
   assert.match(production, /workflow_run\.conclusion == 'success'/);
-  // Production fetches its own source server-side; the runner ships no bytes.
-  assert.doesNotMatch(production, /scp-action|actions\/checkout|Upload source archive/);
+  // Preparation checks out the queue script, while production still fetches
+  // its own release source server-side; neither job uploads source bytes.
+  const releaseJob = production.split('\n  deploy:\n')[1];
+  assert.ok(releaseJob);
+  assert.doesNotMatch(production, /scp-action|Upload source archive/);
+  assert.doesNotMatch(releaseJob, /actions\/checkout/);
+  assert.match(releaseJob, /needs: prepare/);
+  assert.match(releaseJob, /cancel-in-progress: false/);
+  assert.match(releaseJob, /environment: production/);
   assert.match(production, /rev-parse FETCH_HEAD\)" = "\$sha"/);
   const protection = read('deploy/configure-github-protection');
   assert.match(protection, /preview \/ smoke/);
