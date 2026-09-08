@@ -1242,8 +1242,8 @@ function projectUsageSection(db, dramaId, filters, section) {
 function pagedAuditLogs(db, filters = {}) {
   const meta = pagination(filters);
   const total = Number(db.prepare('SELECT COUNT(*) total FROM billing_audit_logs').get()?.total || 0);
-  const items = db.prepare(`SELECT a.*, u.username AS actor_username
-    FROM billing_audit_logs a JOIN users u ON u.id = a.actor_user_id
+  const items = db.prepare(`SELECT a.*, COALESCE(u.username, '未登录请求') AS actor_username
+    FROM billing_audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id
     ORDER BY a.created_at DESC, a.rowid DESC LIMIT ? OFFSET ?`).all(meta.page_size, meta.offset);
   return { items, total, page: meta.page, page_size: meta.page_size };
 }

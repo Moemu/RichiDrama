@@ -20,7 +20,7 @@ const acknowledging = ref(false)
 const activeNotice = computed(() => notices.value[0] || null)
 
 async function loadNotices() {
-  if (route.meta.public || !localStorage.getItem('lmd_auth_token')) { notices.value = []; return }
+  if (route.path === '/change-password' || route.meta.public || !localStorage.getItem('lmd_auth_token')) { notices.value = []; return }
   try { notices.value = await request.get('/notices/active') } catch (_) { notices.value = [] }
 }
 async function acknowledge() {

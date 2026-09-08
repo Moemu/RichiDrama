@@ -1,6 +1,12 @@
 import request from '@/utils/request'
 
 export const accountAPI = {
+  recoveryOptions: () => request.get('/auth/recovery-options'),
+  email: () => request.get('/auth/email'),
+  sendEmailCode: (data) => request.post('/auth/email/code', data),
+  confirmEmail: (data) => request.post('/auth/email/confirm', data),
+  sendPasswordResetCode: (data) => request.post('/auth/password-reset/code', data),
+  confirmPasswordReset: (data) => request.post('/auth/password-reset/confirm', data),
   me: () => request.get('/billing/me'),
   transactions: (params) => request.get('/billing/transactions', { params }),
   usage: (params) => request.get('/billing/usage', { params }),
@@ -19,6 +25,7 @@ export const accountAPI = {
 }
 
 export const adminAPI = {
+  resetPassword: (id) => request.post(`/admin/users/${id}/reset-password`, { confirm: true }),
   users: () => request.get('/admin/users'),
   createUser: (data) => request.post('/admin/users', data),
   updateUser: (id, data) => request.patch(`/admin/users/${id}`, data),

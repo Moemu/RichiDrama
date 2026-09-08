@@ -59,7 +59,7 @@ function verifyPassword(password, encoded) {
 }
 
 function publicUser(row) {
-  return { id: row.id, username: row.username, display_name: row.display_name, role: row.role, console_access: !!row.console_access, account_kind: row.account_kind || (row.role === 'admin' ? 'platform_admin' : 'creator'), is_active: !!row.is_active, created_at: row.created_at, last_login_at: row.last_login_at };
+  return { must_change_password: !!row.must_change_password, id: row.id, username: row.username, display_name: row.display_name, role: row.role, console_access: !!row.console_access, account_kind: row.account_kind || (row.role === 'admin' ? 'platform_admin' : 'creator'), is_active: !!row.is_active, created_at: row.created_at, last_login_at: row.last_login_at };
 }
 
 function ensureBootstrapAdmin(db, log) {
@@ -117,6 +117,7 @@ function sessionCookieOptions(req) {
 function login(db, username, password) {
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username || '').trim());
   if (!user || !user.is_active || !verifyPassword(password, user.password_hash)) return null;
+  if (user.must_change_password && (!user.temporary_password_expires_at || user.temporary_password_expires_at <= now())) return null;
   const at = now();
   db.prepare('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?').run(at, at, user.id);
   return issueSession(db, { ...user, last_login_at: at });
@@ -124,7 +125,7 @@ function login(db, username, password) {
 
 function issueSession(db, user) {
   const publicData = publicUser(user);
-  const token = jwt.sign({ sub: user.id, role: user.role, username: user.username }, jwtSecret(db), { expiresIn: TOKEN_TTL });
+  const token = jwt.sign({ sub: user.id, role: user.role, username: user.username, session_version: user.session_version || 0 }, jwtSecret(db), { expiresIn: TOKEN_TTL });
   return { token, user: publicData };
 }
 
@@ -140,6 +141,7 @@ function normalizeUsername(username) {
 }
 
 function register(db, input) {
+  validateNewPassword(input.password);
   const user = createUser(db, {
     username: input.username,
     password: input.password,
@@ -156,6 +158,8 @@ function authenticate(db, token) {
     error.code = 'ACCOUNT_DISABLED';
     throw error;
   }
+  if ((claims.session_version ?? 0) !== (user.session_version || 0)) throw new jwt.JsonWebTokenError('登录状态已失效');
+  if (user.must_change_password && (!user.temporary_password_expires_at || user.temporary_password_expires_at <= now())) throw new jwt.JsonWebTokenError('临时密码已过期');
   return publicUser(user);
 }
 
@@ -175,10 +179,25 @@ function createUser(db, input, actorId) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
+function validateNewPassword(password) {
+  if (typeof password !== 'string' || Array.from(password).length < 8 || Array.from(password).length > 128) throw Object.assign(new Error('新密码需为 8–128 个字符'), { status: 400, code: 'INVALID_PASSWORD' });
+}
+
+function replacePassword(db, userId, password, temporary = false) {
+  validateNewPassword(password);
+  const expiresAt = temporary ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null;
+  db.prepare(`UPDATE users SET password_hash = ?, session_version = session_version + 1,
+    must_change_password = ?, temporary_password_expires_at = ?, updated_at = ? WHERE id = ?`)
+    .run(hashPassword(password), temporary ? 1 : 0, expiresAt, now(), userId);
+  return expiresAt;
+}
+
 function changePassword(db, userId, oldPassword, newPassword) {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user || !verifyPassword(oldPassword, user.password_hash)) throw new Error('当前密码不正确');
-  db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').run(hashPassword(newPassword), now(), userId);
+  validateNewPassword(newPassword);
+  if (verifyPassword(newPassword, user.password_hash)) throw new Error('新密码不能与当前密码相同');
+  replacePassword(db, userId, newPassword);
 }
 
 function changeUsername(db, userId, username) {
@@ -212,10 +231,10 @@ function updateUser(db, id, input) {
     params.push(platformAdmin ? 'admin' : 'user', platformAdmin ? 1 : 0, platformAdmin ? 'platform_admin' : 'creator');
   }
   if (input.is_active !== undefined) { updates.push('is_active = ?'); params.push(input.is_active ? 1 : 0); }
-  if (input.password) { updates.push('password_hash = ?'); params.push(hashPassword(input.password)); }
+  if (input.password) { validateNewPassword(input.password); updates.push('password_hash = ?', 'session_version = session_version + 1', 'must_change_password = 1', 'temporary_password_expires_at = ?'); params.push(hashPassword(input.password), new Date(Date.now() + 86400000).toISOString()); }
   if (!updates.length) return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   params.push(now(), id);
   db.prepare(`UPDATE users SET ${updates.join(', ')}, updated_at = ? WHERE id = ?`).run(...params);
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
-module.exports = { validateRuntimeSecurity, ensureBootstrapAdmin, sessionCookieOptions, login, register, authenticate, createUser, updateUser, changePassword, changeUsername, changeDisplayName, issueSession, publicUser, jwtSecret };
+module.exports = { verifyPassword, validateNewPassword, replacePassword, validateRuntimeSecurity, ensureBootstrapAdmin, sessionCookieOptions, login, register, authenticate, createUser, updateUser, changePassword, changeUsername, changeDisplayName, issueSession, publicUser, jwtSecret };

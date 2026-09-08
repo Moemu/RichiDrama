@@ -302,7 +302,8 @@ test('passwords have no format rule beyond being non-empty', () => {
 test('self registration creates a normal user and an authenticated session', () => {
   const { db, dbPath } = setup();
   try {
-    const session = auth.register(db, { username: 'new-creator', password: '1', display_name: 'New Creator' });
+    assert.throws(() => auth.register(db, { username: 'weak-password', password: '1' }), /8–128/);
+    const session = auth.register(db, { username: 'new-creator', password: 'Creator123', display_name: 'New Creator', role: 'admin', console_access: true, account_kind: 'platform_admin' });
     assert.equal(session.user.username, 'new-creator');
     assert.equal(session.user.role, 'user');
     assert.ok(auth.authenticate(db, session.token));
