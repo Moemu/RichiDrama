@@ -2,7 +2,7 @@
   <section class="model-catalog" v-loading="loading">
     <header class="catalog-heading">
       <div><h2>模型目录</h2><p>在这里维护模型、价格和上下架。现有配置沿用原行为，主动上下架后纳入目录管理。</p></div>
-      <div class="catalog-actions"><el-button @click="load">刷新</el-button><el-button @click="$emit('connection')">供应商连接</el-button><el-button type="primary" @click="openAdd">添加模型</el-button></div>
+      <div class="catalog-actions"><el-button @click="load">刷新</el-button><el-button @click="$emit('connection')">供应商连接</el-button><el-button @click="showDiscovery = true">获取模型</el-button><el-button type="primary" @click="openAdd">添加模型</el-button></div>
     </header>
     <div v-if="error" role="alert" class="catalog-error">{{ error }} <el-button link @click="load">重试</el-button></div>
     <div class="catalog-filters">
@@ -73,6 +73,7 @@
       <el-form label-position="top"><el-form-item label="发布原因"><el-input v-model="publishReason" /></el-form-item></el-form>
       <template #footer><el-button @click="showPublish = false">保留草稿</el-button><el-button type="primary" :loading="saving" @click="publish">确认发布</el-button></template>
     </el-dialog>
+    <ModelDiscoveryDialog v-model="showDiscovery" @imported="load(); emit('changed')" />
     <details class="provider-sync"><summary>供应商价格同步（火山）</summary><ProviderPriceSyncPanel @published="load" @draft-created="load" /></details>
   </section>
 </template>
@@ -83,6 +84,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/utils/request'
 import { adminAPI } from '@/api/account'
 import ProviderPriceSyncPanel from './ProviderPriceSyncPanel.vue'
+import ModelDiscoveryDialog from './ModelDiscoveryDialog.vue'
 
 const emit = defineEmits(['connection', 'changed'])
 const types = { text: '文本', image: '图片', storyboard_image: '分镜图片', video: '视频', video_postprocess: '视频后处理', tts: '语音' }
@@ -93,6 +95,7 @@ const rows = ref([]); const configs = ref([]); const books = ref([]); const erro
 const search = ref(''); const typeFilter = ref(''); const statusFilter = ref('')
 const showAdd = ref(false); const showDetail = ref(false); const showPublish = ref(false); const selected = ref(null)
 const detailTab = ref('pricing')
+const showDiscovery = ref(false)
 const add = reactive({ config_id: null, model: '', display_name: '' })
 const bookId = ref(null); const billingKey = ref(''); const priceItems = ref([]); const draft = ref(null); const publishReason = ref('')
 const filtered = computed(() => rows.value.filter(row => (!typeFilter.value || row.service_type === typeFilter.value) && (!statusFilter.value || row.status === statusFilter.value) && `${row.display_name} ${row.model} ${row.connections.map(c => c.provider).join(' ')}`.toLowerCase().includes(search.value.trim().toLowerCase())))

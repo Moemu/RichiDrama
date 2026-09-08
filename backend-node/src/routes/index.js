@@ -155,6 +155,10 @@ function setupRouter(cfg, db, log) {
   adminRouter.get('/model-catalog', admin.modelCatalog);
   adminRouter.post('/model-catalog', admin.saveModelCatalog);
   adminRouter.post('/model-catalog/price-draft', admin.modelPriceDraft);
+  const modelDiscovery = require('./modelDiscovery')(db, log, cfg);
+  adminRouter.get('/model-discovery/connections', modelDiscovery.connections);
+  adminRouter.post('/model-discovery/:id/fetch', modelDiscovery.discover);
+  adminRouter.post('/model-discovery/:id/import', modelDiscovery.import);
   adminRouter.post('/price-books', admin.createPriceBook);
   adminRouter.patch('/price-books/:id', admin.updatePriceBook);
   adminRouter.post('/price-books/:id/publish', admin.publishPriceBook);
