@@ -18,7 +18,7 @@
           <el-table-column prop="charge_type" label="计费项" min-width="145"/>
           <el-table-column label="供应商价" min-width="135"><template #default="{row}"><span class="provider-price-value">{{ row.provider_unit_price ?? '—' }} CNY / {{ row.unit_code || '未知单位' }}</span></template></el-table-column>
           <el-table-column label="本地映射" min-width="330"><template #default="{row}"><div class="mapping-fields"><el-input v-model="row.service_type" placeholder="服务"/><el-input v-model="row.billing_key" placeholder="billing_key"/><el-select v-model="row.meter" placeholder="计量器"><el-option v-for="meter in meters" :key="meter" :label="meter" :value="meter"/></el-select><el-input-number v-model="row.unit_size" :min="1" controls-position="right"/></div><small v-if="row.error_summary" class="error">{{ row.error_summary }}</small></template></el-table-column>
-          <el-table-column label="积分变化" min-width="280"><template #default="{row}"><div>{{ points(row.current_unit_price_micro) }} → {{ points(row.new_unit_price_micro) }}</div><div v-if="row.new_conditions" class="condition-change"><span>{{ conditionSummary(row.current_conditions) }}</span><b>→</b><span>{{ conditionSummary(row.new_conditions) }}</span></div></template></el-table-column>
+          <el-table-column label="积分变化" min-width="280"><template #default="{row}"><div>{{ points(row.current_unit_price_micro) }} → {{ points(row.new_unit_price_micro) }}</div><div v-if="row.new_conditions" class="condition-change"><span>当前：{{ conditionSummary(row.current_conditions) }}</span><span>同步后：{{ conditionSummary(row.new_conditions) }}</span></div></template></el-table-column>
           <el-table-column label="审核" width="150"><template #default="{row}"><el-tag :type="reviewTone(row)">{{ reviewLabel(row) }}</el-tag><div class="review-actions"><el-button link type="primary" @click="accept(row)">接受</el-button><el-button link type="danger" @click="reject(row)">排除</el-button></div></template></el-table-column>
         </el-table></div>
         <p v-else class="empty">尚无同步结果。点击“立即同步”读取当前火山账户价。</p>
@@ -35,7 +35,7 @@
       </el-table>
     </section>
 
-    <el-dialog v-model="showPublish" title="审核并发布价目" width="min(620px, 94vw)">
+    <el-dialog class="price-publish-dialog" top="5vh" append-to-body v-model="showPublish" title="审核并发布价目" width="min(620px, 94vw)">
       <el-form label-position="top">
         <el-form-item label="价目版本"><el-input :model-value="draft?.name" disabled/></el-form-item>
         <el-form-item label="发布原因"><el-input v-model="publishForm.reason" maxlength="200" show-word-limit/></el-form-item>
@@ -56,7 +56,7 @@ import { formatChinaDateTime } from '@/utils/time'
 import { compactQuantity } from '@/utils/units'
 
 const emit = defineEmits(['published', 'draft-created'])
-const meters = ['request', 'image', 'second', 'millisecond', 'character', 'input_token', 'output_token']
+const meters = ['request', 'image', 'input_image', 'second', 'millisecond', 'character', 'input_token', 'output_token']
 const detail = ref(null); const probeResult = ref(null); const draft = ref(null); const notices = ref([])
 const probing = ref(false); const syncing = ref(false); const creatingDraft = ref(false); const publishing = ref(false); const showPublish = ref(false)
 const publishForm = reactive({ reason: '', notice_title: '模型调用价格已更新', notice_body: '' })
@@ -66,7 +66,12 @@ const canCreateDraft = computed(() => detail.value?.status === 'completed' && de
 function statusLabel(value) { return ({ success: '通过', failed: '失败', completed: '已读取', unchanged: '无变化', processing: '读取中' })[value] || value || '未知' }
 function formatTime(value) { return value ? formatChinaDateTime(value) : '—' }
 function points(value) { return Number.isSafeInteger(value) ? `${value / 10000} 积分` : '未定价' }
-function conditionSummary(value) { const rates = value?.rates || []; const tiers = value?.usage_tiers || []; if (tiers.length) return tiers.map((tier) => `${compactQuantity(tier.min_inclusive)}-${compactQuantity(tier.max_inclusive)}: ${tier.unit_price_points}`).join('\n'); if (rates.length) return rates.map((rate) => `${rate.id}: ${rate.unit_price_points}`).join('\n'); return value?.unit_size ? `每 ${compactQuantity(value.unit_size)}` : '无条件价' }
+function conditionSummary(value) {
+  if (value?.image_pricing_version === 'seedream-pro-v1') {
+    if (value.free_units === 1) return '每次请求首张输入图免费，第 2 张起按张计费'
+    return (value.rates || []).map(rate => `${rate.when.image_scene === 'layer' ? '图层拆分' : '单图生成'} · ${rate.when.pixel_band === 'small' ? '≤261 万像素' : '>261 万像素'}：${rate.unit_price_points} 积分/张`).join('\n')
+  }
+  const rates = value?.rates || []; const tiers = value?.usage_tiers || []; if (tiers.length) return tiers.map((tier) => `${compactQuantity(tier.min_inclusive)}-${compactQuantity(tier.max_inclusive)}: ${tier.unit_price_points}`).join('\n'); if (rates.length) return rates.map((rate) => `${rate.id}: ${rate.unit_price_points}`).join('\n'); return value?.unit_size ? `每 ${compactQuantity(value.unit_size)}` : '无条件价' }
 function candidateChange(row) { const base = `${row.provider_model} / ${row.meter}: ${points(row.current_unit_price_micro)} → ${points(row.new_unit_price_micro)}（每 ${compactQuantity(row.unit_size)}）`; return row.new_conditions ? `${base}\n  条件价：${conditionSummary(row.current_conditions)} → ${conditionSummary(row.new_conditions)}` : base }
 function reviewLabel(row) { return row.review_status === 'accepted' ? '已接受' : row.review_status === 'rejected' ? '已排除' : row.mapping_status === 'mapped' ? '待审核' : '待映射' }
 function reviewTone(row) { return row.review_status === 'accepted' ? 'success' : row.review_status === 'rejected' ? 'info' : 'warning' }
@@ -87,7 +92,8 @@ onMounted(load)
 <style scoped>
 .price-sync-panel{display:grid;gap:1rem;margin-bottom:1.2rem;padding:1rem;border:1px solid var(--border-subtle);border-radius:.9rem;background:var(--bg-raised)}
 .notice-admin{display:grid;gap:.7rem;padding-top:.8rem;border-top:1px solid var(--border-subtle)}.notice-admin h4{margin:0 0 .2rem}
-.price-sync-panel>header,.detail-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.price-sync-panel h3{margin:.2rem 0;font-size:1.1rem}.price-sync-panel p,.price-sync-panel small{margin:0;color:var(--text-muted)}.actions,.review-actions{display:flex;gap:.4rem}.candidate-area{min-width:0;padding:.8rem;border-top:1px solid var(--border-subtle)}.candidate-table{margin-top:.8rem;overflow-x:auto}.detail-toolbar small{display:block;margin-top:.25rem}.mapping-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.35rem}.error{display:block;margin-top:.3rem;color:var(--status-danger,#c2413b)}.condition-change{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:start;gap:.35rem;margin-top:.25rem;line-height:1.35}.condition-change span{white-space:pre-line}.review-actions{margin-top:.25rem}.empty{padding:1rem;text-align:center}
-.candidate-table :deep(.el-table){font-size:.75rem}.candidate-table :deep(.el-table th.el-table__cell){font-size:.7rem;letter-spacing:.02em}.candidate-table :deep(.cell){line-height:1.3}.candidate-table :deep(.el-input__inner),.candidate-table :deep(.el-select__selected-item),.candidate-table :deep(.el-input-number){font-size:.74rem}.condition-change{font-size:.68rem}
+.price-sync-panel>header,.detail-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.price-sync-panel h3{margin:.2rem 0;font-size:1.1rem}.price-sync-panel p,.price-sync-panel small{margin:0;color:var(--text-muted)}.actions,.review-actions{display:flex;gap:.4rem}.candidate-area{min-width:0;padding:.8rem;border-top:1px solid var(--border-subtle)}.candidate-table{margin-top:.8rem;overflow-x:auto}.detail-toolbar small{display:block;margin-top:.25rem}.mapping-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.35rem}.error{display:block;margin-top:.3rem;color:var(--status-danger,#c2413b)}.condition-change{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;gap:.35rem;margin-top:.25rem;line-height:1.35}.condition-change span{white-space:pre-line}.review-actions{margin-top:.25rem}.empty{padding:1rem;text-align:center}
+.candidate-table :deep(.el-table){font-size:.75rem}.candidate-table :deep(.el-table th.el-table__cell){font-size:.7rem;letter-spacing:.02em}.candidate-table :deep(.cell){line-height:1.3}.candidate-table :deep(.el-input__inner),.candidate-table :deep(.el-select__selected-item),.candidate-table :deep(.el-input-number){font-size:.74rem}.condition-change{font-size:.75rem;line-height:1.5}
 .provider-price-value{display:block;font-size:.68rem;line-height:1.25;overflow-wrap:anywhere;word-break:break-word}
+:global(.el-dialog.price-publish-dialog){display:flex;flex-direction:column;max-height:90dvh;margin-bottom:0}:global(.price-publish-dialog .el-dialog__body){min-height:0;overflow-y:auto}:global(.price-publish-dialog .el-dialog__header),:global(.price-publish-dialog .el-dialog__footer){flex-shrink:0}
 </style>

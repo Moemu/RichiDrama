@@ -65,7 +65,8 @@ function releaseTaskAuthorization(db, taskId, reason) {
     const tryVoid = (authorizationId, why) => {
       if (!authorizationId) return;
       try {
-        billing.voidAuthorization(db, { id: row.owner_user_id, role: 'admin' }, authorizationId, why);
+        const release = table === 'image_generations' ? billing.voidImageAuthorization : billing.voidAuthorization;
+        release(db, { id: row.owner_user_id, role: 'admin' }, authorizationId, why);
       } catch (_) {
         // The original failure must remain terminal even if a historical billing
         // record is malformed; reconciliation tooling can repair that record.
@@ -99,7 +100,7 @@ function updateTaskError(db, taskId, errMsg) {
     } else throw e;
   }
   // Image/video workers share async_tasks.  Terminal task failure must always
-  // release an unsettled reservation; voidAuthorization itself is idempotent.
+  // release unused reservations; dispatched images with unknown outcomes stay frozen.
   releaseTaskAuthorization(db, taskId, errMsg || '异步任务失败，释放预授权');
 }
 

@@ -829,38 +829,33 @@ function migrateStoryboardIdentityAndPosition(database) {
 
 /** 对已打开的 database 执行迁移与兜底补列（供 app 启动时调用） */
 // SQLite cannot widen a CHECK constraint with ALTER COLUMN. Upgrade existing
-// ledgers once before migration 52 publishes the millisecond MediaKit meter.
-function ensureMillisecondBillingMeter(database) {
+// price tables without changing existing prices, IDs or snapshots.
+function ensureSupportedBillingMeters(database) {
   const row = database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='billing_price_book_items'").get();
-  if (!row?.sql || row.sql.includes("'millisecond'")) return;
+  if (!row?.sql || (row.sql.includes("'millisecond'") && row.sql.includes("'input_image'"))) return;
+  const schema = row.sql.replace(/CHECK\s*\(\s*meter\s+IN\s*\(([^)]+)\)\s*\)/i, (_match, values) => {
+    const meters = values.split(',').map(value => value.trim());
+    for (const meter of ["'millisecond'", "'input_image'"]) if (!meters.includes(meter)) meters.push(meter);
+    return `CHECK(meter IN (${meters.join(', ')}))`;
+  });
+  if (schema === row.sql) throw new Error('Cannot expand the billing meter constraint');
+  const objects = database.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='billing_price_book_items' AND type IN ('index','trigger') AND sql IS NOT NULL").all();
+  const columns = database.prepare('PRAGMA table_info(billing_price_book_items)').all()
+    .map(column => '"' + column.name.replace(/"/g, '""') + '"').join(',');
+  const sequence = database.prepare("SELECT seq FROM sqlite_sequence WHERE name='billing_price_book_items'").get()?.seq || 0;
   database.transaction(() => {
-    database.exec(`ALTER TABLE billing_price_book_items RENAME TO billing_price_book_items_legacy_meter;
-      CREATE TABLE billing_price_book_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        price_book_id INTEGER NOT NULL,
-        service_type TEXT NOT NULL,
-        model TEXT NOT NULL,
-        meter TEXT NOT NULL CHECK(meter IN ('request', 'image', 'second', 'millisecond', 'character', 'input_token', 'output_token')),
-        unit_price_micro INTEGER NOT NULL DEFAULT 0 CHECK(unit_price_micro >= 0),
-        is_free INTEGER NOT NULL DEFAULT 0,
-        conditions_json TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(price_book_id, service_type, model, meter)
-      );
-      INSERT INTO billing_price_book_items
-        (id, price_book_id, service_type, model, meter, unit_price_micro, is_free, conditions_json, created_at, updated_at)
-      SELECT id, price_book_id, service_type, model, meter, unit_price_micro, is_free, conditions_json, created_at, updated_at
-      FROM billing_price_book_items_legacy_meter;
-      DROP TABLE billing_price_book_items_legacy_meter;
-      CREATE INDEX IF NOT EXISTS idx_billing_price_items_lookup
-        ON billing_price_book_items(service_type, model, meter, price_book_id);`);
+    database.exec('ALTER TABLE billing_price_book_items RENAME TO billing_price_book_items_legacy_meter');
+    database.exec(schema);
+    database.exec(`INSERT INTO billing_price_book_items (${columns}) SELECT ${columns} FROM billing_price_book_items_legacy_meter`);
+    database.exec('DROP TABLE billing_price_book_items_legacy_meter');
+    for (const object of objects) database.exec(object.sql);
+    database.prepare("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='billing_price_book_items'").run(sequence);
   })();
-  console.log('Expanded billing meter schema for millisecond usage.');
+  console.log('Expanded billing meter schema for millisecond and input image usage.');
 }
 
 function runMigrationsAndEnsure(database) {
-  ensureMillisecondBillingMeter(database);
+  ensureSupportedBillingMeters(database);
   runMigrations(database);
   migrateBillingPrecision(database);
   ensureAllColumns(database);

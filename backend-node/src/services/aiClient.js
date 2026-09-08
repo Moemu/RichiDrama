@@ -153,7 +153,7 @@ function postJSONWithTimeout(url, headers, body, timeoutMs = 600000) {
       res.on('end', () => {
         clearTimeout(timer);
         const raw = Buffer.concat(chunks).toString('utf-8');
-        resolve({ statusCode: res.statusCode || 0, raw });
+        resolve({ statusCode: res.statusCode || 0, raw, headers: res.headers });
       });
       res.on('error', (e) => {
         clearTimeout(timer);

@@ -9,7 +9,7 @@ const BILLING_VERSION = '2022-01-01';
 const POINTS_PER_CNY = 100;
 const MICRO_PER_POINT = 10000;
 const LOCK_MS = 10 * 60 * 1000;
-const MAPPING_RULE_VERSION = 'verified-platform-models-v2';
+const MAPPING_RULE_VERSION = 'verified-platform-models-v3';
 
 function now() { return new Date().toISOString(); }
 function parse(value, fallback = {}) { try { return value ? JSON.parse(value) : fallback; } catch (_) { return fallback; } }
@@ -376,7 +376,7 @@ function sourceUnitSize(unitCode, meter) {
   if (/百万|1m|million/.test(u)) return 1000000;
   if (/千|1k|thousand/.test(u)) return 1000;
   if (/万/.test(u)) return 10000;
-  if (meter === 'image' || meter === 'second' || /每|\/|per/.test(u)) return 1;
+  if (['image', 'input_image'].includes(meter) || meter === 'second' || /每|\/|per/.test(u)) return 1;
   return null;
 }
 
@@ -447,6 +447,8 @@ function normalizedCharge(charge, meter) {
 function priceCore(value) {
   const conditions = typeof value === 'string' ? parse(value, {}) : (value || {});
   return stable({
+    image_pricing_version: conditions.image_pricing_version ?? null,
+    free_units: conditions.free_units ?? null,
     unit_size: conditions.unit_size ?? null,
     default_rate_id: conditions.default_rate_id ?? null,
     rates: Array.isArray(conditions.rates) ? conditions.rates : [],
@@ -505,6 +507,27 @@ function verifiedMultiChargeRows(db, item, groups) {
       { id: 'image_to_image', when: { has_image_input: true } },
       { id: 'text_to_image', when: { has_image_input: false } },
     ], 'text_to_image')];
+  } else if (model === 'doubao-seedream-5-0-pro') {
+    const expected = ['ToIPrompt', 'ToICompletion', 'ToILargeCompletion', 'ToILayerCompletion', 'ToILayerLargeCompletion'];
+    const charges = groups[0]?.ChargeItems || [];
+    if (groups.length !== 1 || charges.length !== expected.length || expected.some(type => charges.filter(charge => charge.Type === type).length !== 1)) return [];
+    serviceTypes = ['image', 'storyboard_image'];
+    const output = compoundSpec(groups, 'image', 'VerifiedSeedreamProOutput',
+      ['ToICompletion', 'ToILargeCompletion', 'ToILayerCompletion', 'ToILayerLargeCompletion'].map(type => chargeIn(groups, type)), [
+        { id: 'single_small', when: { image_scene: 'single', pixel_band: 'small' } },
+        { id: 'single_large', when: { image_scene: 'single', pixel_band: 'large' } },
+        { id: 'layer_small', when: { image_scene: 'layer', pixel_band: 'small' } },
+        { id: 'layer_large', when: { image_scene: 'layer', pixel_band: 'large' } },
+      ], 'single_large');
+    const charge = chargeIn(groups, 'ToIPrompt');
+    const price = normalizedCharge(charge, 'input_image');
+    const version = require('./seedreamProPricing').VERSION;
+    if (output) output.conditions.image_pricing_version = version;
+    specs = [output, charge && price ? {
+      meter: 'input_image', chargeType: 'VerifiedSeedreamProInput', unitCode: charge.UnitCode,
+      unitSize: price.unitSize, unitPriceMicro: price.micro, providerPrice: String(contractPrice(charge)),
+      conditions: { unit_size: 1, free_units: 1, image_pricing_version: version }, raw: groups,
+    } : null];
   } else if (model === 'doubao-seed-2-0-lite') {
     serviceTypes = ['text'];
     for (const [type, meter] of [['InferencePrompt', 'input_token'], ['InferenceCompletion', 'output_token']]) {
@@ -554,8 +577,9 @@ function buildCandidateRows(db, item) {
   const model = String(item.FoundationModelName || item.Name || '').trim();
   const displayName = String(item.DisplayName || model).trim();
   if (!providerModelIsConfigured(db, model)) return [];
-  const multi = Array.isArray(item.MultiChargeItems) ? item.MultiChargeItems : [];
+  let multi = Array.isArray(item.MultiChargeItems) ? item.MultiChargeItems : [];
   const charges = Array.isArray(item.ChargeItems) ? item.ChargeItems : [];
+  if (!multi.length && normalizeName(model) === 'doubao-seedream-5-0-pro' && charges.length) multi = [{ ChargeItems: charges }];
   if (multi.length) {
     const verified = verifiedMultiChargeRows(db, item, multi);
     if (verified?.length) return verified;
@@ -636,7 +660,7 @@ function updateCandidate(db, actorId, syncId, candidateId, input = {}) {
   const billingKey = String(input.billing_key || row.billing_key || '').trim();
   const meter = String(input.meter || row.meter || '').trim();
   const unitSize = Number(input.unit_size || row.unit_size);
-  if (!serviceType || !billingKey || !['request','image','second','millisecond','character','input_token','output_token'].includes(meter) || !Number.isSafeInteger(unitSize) || unitSize <= 0 || !Number.isSafeInteger(row.new_unit_price_micro)) throw new Error('请提供有效的服务、计费键、计量器和计量基数');
+  if (!serviceType || !billingKey || !['request','image','input_image','second','millisecond','character','input_token','output_token'].includes(meter) || !Number.isSafeInteger(unitSize) || unitSize <= 0 || !Number.isSafeInteger(row.new_unit_price_micro)) throw new Error('请提供有效的服务、计费键、计量器和计量基数');
   const current = activeItem(db, serviceType, billingKey, meter);
   const status = input.review_status === 'rejected' ? 'rejected' : 'accepted';
   db.prepare(`UPDATE provider_price_candidates SET service_type=?,billing_key=?,meter=?,unit_size=?,current_unit_price_micro=?,current_price_book_item_id=?,change_ratio=?,mapping_status='mapped',review_status=?,error_summary=NULL,updated_at=? WHERE id=?`)
@@ -717,6 +741,7 @@ function publish(db, actorId, bookId, input = {}) {
   }
   const previous = draft.parent_price_book_id ? db.prepare("SELECT * FROM billing_price_books WHERE id=? AND status='published'").get(draft.parent_price_book_id) : currentSystemBook(db);
   if (!previous) throw new Error('当前有效价目版本不存在，不能发布');
+  require('./seedreamProPricing').validateItems(db.prepare('SELECT * FROM billing_price_book_items WHERE price_book_id=?').all(draft.id));
   const diff = priceDiff(db, previous.id, draft.id);
   if (!diff.length) throw new Error('价目没有变化，无需发布');
   const generated = defaultNotice(diff); const at = now(); const noticeId = randomUUID();

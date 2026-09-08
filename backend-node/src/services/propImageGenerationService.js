@@ -86,6 +86,7 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
       model: model || undefined,
       dramaId: prop.drama_id || null,
       sourceId: `prop_${propId}`,
+      size: imageSize,
       reference_image_urls: opts?.reference_image_urls,
     });
   } catch (billingErr) {
@@ -101,6 +102,7 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
   try {
     result = await imageClient.callImageApi(db, log, {
       prompt: fullPrompt,
+      billing_authorization_id: propBilling?.authorizationId,
       size: imageSize,
       drama_id: prop.drama_id,
       model: model || undefined,
@@ -148,7 +150,7 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
       ? cfg.storage.local_path
       : path.join(process.cwd(), cfg.storage?.local_path || './data/storage');
     const projectSubdir = storageLayout.getProjectStorageSubdir(db, prop.drama_id);
-    localPath = await uploadService.downloadImageToLocal(
+    localPath = result.local_path || await uploadService.downloadImageToLocal(
       storagePath,
       result.image_url,
       'props',
@@ -185,7 +187,7 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
     local_path: localPath,
     prop_id: propId,
   });
-  propBilling?.settle(log, `prop-image:${propId}`);
+  propBilling?.settle(log, `prop-image:${propId}`, result);
   try { require('./assetMappingService').syncEntities(db, log, 'prop', [propId]); } catch (_) {}
   log.info('Prop image generation completed', { prop_id: propId, image_url: result.image_url, local_path: localPath });
 }

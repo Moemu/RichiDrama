@@ -11,13 +11,18 @@ function hasReferenceValue(value) {
 }
 
 function imagePricingContext(input = {}) {
+  let pixelBand = 'large';
+  if (input.size) { try { pixelBand = require('./seedreamProPricing').pixelBand(input.size); } catch (_) { pixelBand = null; } }
   return {
+    input_image_count: require('./seedreamProPricing').referenceCount(input),
+    pixel_band: pixelBand,
+    image_scene: input.layer_decomposition === true ? 'layer' : 'single',
     has_image_input: [input.image_url, input.reference_images, input.reference_image_urls]
       .some(hasReferenceValue),
   };
 }
 
-function createResourceImageBilling(db, { model, dramaId, sourceId, image_url, reference_images, reference_image_urls } = {}) {
+function createResourceImageBilling(db, { model, dramaId, sourceId, size, image_url, reference_images, reference_image_urls } = {}) {
   const ctx = billingRequestContext.current();
   const actor = ctx?.actor;
   if (!actor?.id) {
@@ -33,7 +38,7 @@ function createResourceImageBilling(db, { model, dramaId, sourceId, image_url, r
     service_type: 'image',
     model: billingTarget.billing_key, provider_model: billingTarget.provider_model,
     usage: { image: 1 },
-    pricing_context: imagePricingContext({ image_url, reference_images, reference_image_urls }),
+    pricing_context: imagePricingContext({ size, image_url, reference_images, reference_image_urls }),
     reference_type: 'image_generation',
     reference_id: dramaId || null,
     drama_id: dramaId || null,
@@ -43,11 +48,11 @@ function createResourceImageBilling(db, { model, dramaId, sourceId, image_url, r
   const authorizationId = authorization.authorization_id;
   return {
     authorizationId,
-    settle(log, providerRequestId) {
+    settle(log, providerRequestId, result = {}) {
       try {
-        billing.settleAuthorization(db, actor, authorizationId, {
-          usage: { image: 1 },
-          provider_request_id: providerRequestId,
+        billing.settleAuthorization(db, actor, billing.imageAuthorization(db, authorizationId).id, {
+          usage: result.billing_usage || { image: 1 },
+          provider_request_id: result.billing_usage ? result.provider_request_id : providerRequestId,
         });
       } catch (err) {
         log?.error?.('[billing] resource image settlement failed', { authorization_id: authorizationId, error: err.message });
@@ -55,7 +60,7 @@ function createResourceImageBilling(db, { model, dramaId, sourceId, image_url, r
     },
     void(log, reason) {
       try {
-        billing.voidAuthorization(db, actor, authorizationId, reason || 'resource image generation failed');
+        billing.voidImageAuthorization(db, actor, authorizationId, reason || 'resource image generation failed');
       } catch (err) {
         log?.error?.('[billing] resource image authorization release failed', { authorization_id: authorizationId, error: err.message });
       }
@@ -82,23 +87,30 @@ function quoteResourceImages(db, user, input = {}) {
   if (!target.billing_key) throw new Error(`模型 ${model} 没有可用的计费标识`);
 
   const billing = require('./billingService');
+  const quoteGroup = (request, quantity) => {
+    const single = billing.quote(db, user, request);
+    if (single.rates.some(rate => require('./seedreamProPricing').enabled(rate.conditions))) {
+      return { ...single, usage: { image: quantity }, amount_micro: single.amount_micro * quantity, amount: single.amount * quantity };
+    }
+    return quantity === 1 ? single : billing.quote(db, user, { ...request, usage: { image: quantity } });
+  };
   const groups = [];
   const plainCount = count - imageInputCount;
   if (plainCount > 0) {
-    groups.push(billing.quote(db, user, {
+    groups.push(quoteGroup({
       service_type: 'image',
       model: target.billing_key, provider_model: target.provider_model,
-      usage: { image: plainCount },
-      pricing_context: { has_image_input: false },
-    }));
+      usage: { image: 1 },
+      pricing_context: imagePricingContext({ size: input.size }),
+    }, plainCount));
   }
   if (imageInputCount > 0) {
-    groups.push(billing.quote(db, user, {
+    groups.push(quoteGroup({
       service_type: 'image',
       model: target.billing_key, provider_model: target.provider_model,
-      usage: { image: imageInputCount },
-      pricing_context: { has_image_input: true },
-    }));
+      usage: { image: 1 },
+      pricing_context: imagePricingContext({ size: input.size, reference_images: input.reference_images || ['reference'] }),
+    }, imageInputCount));
   }
   const amountMicro = groups.reduce((sum, quote) => sum + Number(quote.amount_micro || 0), 0);
   return {

@@ -12,7 +12,7 @@ const SERVICE_LABELS = {
 }
 
 const METER_LABELS = {
-  input_token: '输入 Token', output_token: '输出 Token', image: '张图片',
+  input_token: '输入 Token', output_token: '输出 Token', image: '张图片', input_image: '张输入图',
   character: '个字符', second: '秒', request: '次调用',
 }
 
