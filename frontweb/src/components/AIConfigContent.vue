@@ -2,7 +2,8 @@
   <div class="ai-config-content">
     <el-tabs v-model="activeTab" class="config-tabs" @tab-change="onConfigTabChange">
       <el-tab-pane v-if="!tenantId && canManageCatalog" label="模型目录" name="catalog"><ModelCatalog class="tab-content" ref="catalogPanel" @connection="openConnection" @changed="loadList" /></el-tab-pane>
-      <el-tab-pane label="供应商连接" name="configs">
+      <el-tab-pane v-if="!tenantId && canManageCatalog" label="供应商连接" name="connections"><ProviderConnections class="tab-content" ref="connectionsPanel" :locked="vendorLock.enabled" @changed="loadList" @binding="openConnection" @catalog="activeTab = 'catalog'" /></el-tab-pane>
+      <el-tab-pane :label="!tenantId && canManageCatalog ? '旧配置与专用服务' : '供应商连接'" name="configs">
         <div class="tab-content">
           <!-- 普通模式操作栏 -->
           <div v-if="!vendorLock.enabled" class="content-actions">
@@ -118,9 +119,9 @@
           <PromptEditor />
         </div>
       </el-tab-pane>
-      <el-tab-pane v-if="!tenantId" label="高级设置（业务场景）" name="sceneModelMap">
+      <el-tab-pane v-if="!tenantId" label="业务场景" name="sceneModelMap">
         <div class="tab-content">
-          <SceneModelMap />
+          <SceneModelMap v-if="activeTab === 'sceneModelMap'" />
         </div>
       </el-tab-pane>
       <el-tab-pane v-if="!tenantId" label="生成设置" name="generation">
@@ -224,6 +225,7 @@
             <template #label><span class="form-label-tip">API Key</span></template>
             <el-input
               v-model="form.api_key"
+            :disabled="!!form.provider_connection_id"
               type="password"
               :placeholder="form.provider === 'jimeng_ai_api' ? '即梦 Session，多个用英文逗号分隔' : '输入你的 API 密钥'"
               show-password
@@ -257,6 +259,7 @@
 
       <!-- 普通模式：完整表单 -->
       <el-form v-else ref="formRef" :model="form" :rules="rules" label-width="100px">
+        <el-alert v-if="form.provider_connection_id" title="地址与凭据由供应商连接统一管理。此处只修改模型调用设置。" type="info" :closable="false" show-icon />
         <el-form-item prop="service_type">
           <template #label>
             <span class="form-label-tip">服务类型
@@ -275,7 +278,7 @@
               </el-tooltip>
             </span>
           </template>
-          <el-select v-model="form.service_type" placeholder="选择类型" style="width: 100%" @change="onServiceTypeChange">
+          <el-select v-model="form.service_type" :disabled="!!form.provider_connection_id" placeholder="选择类型" style="width: 100%" @change="onServiceTypeChange">
             <el-option label="文本/对话" value="text" />
             <el-option label="文本生成图片" value="image" />
             <el-option label="分镜图片生成" value="storyboard_image" />
@@ -302,6 +305,7 @@
           </template>
           <el-select
             v-model="form.provider"
+            :disabled="!!form.provider_connection_id"
             placeholder="选择预设厂商（自动填充 URL 和模型）"
             clearable
             filterable
@@ -541,6 +545,7 @@ input_reference = (图片文件，可选)</pre>
           </template>
           <el-input
             v-model="form.base_url"
+            :disabled="!!form.provider_connection_id"
             :placeholder="form.provider === 'richbest_asset_v3' ? 'https://api.richbest.cn' : (form.service_type === 'jimeng2_character_auth' ? '如 https://your-gateway.com' : '选择预设厂商后自动填充，可修改')"
           />
         </el-form-item>
@@ -569,6 +574,7 @@ input_reference = (图片文件，可选)</pre>
           </template>
           <el-input
             v-model="form.api_key"
+            :disabled="!!form.provider_connection_id"
             type="password"
             :placeholder="editingId
               ? '已保存（脱敏显示，保持不变无需修改；输入新值即可覆盖）'
@@ -1197,6 +1203,7 @@ input_reference = (图片文件，可选)</pre>
 <script setup>
 import request from '@/utils/request'
 import ModelCatalog from './ModelCatalog.vue'
+import ProviderConnections from './ProviderConnections.vue'
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, MagicStick, QuestionFilled, Download, Upload, Delete, ChatDotRound, Picture, Film, VideoCamera, Key, Microphone, Folder } from '@element-plus/icons-vue'
@@ -1216,9 +1223,10 @@ const tenantBody = () => tenantId.value ? { tenant_id: tenantId.value } : {}
 const canManageCatalog = JSON.parse(localStorage.getItem('lmd_auth_user') || 'null')?.console_access === true
 const activeTab = ref(!tenantId.value && canManageCatalog ? 'catalog' : 'configs')
 const catalogPanel = ref(null)
+const connectionsPanel = ref(null)
 const catalogRows = ref([])
-async function onConfigTabChange(name) { if (name === 'catalog') { await catalogPanel.value?.load(); await loadList() } }
-async function openConnection(id) { activeTab.value = 'configs'; if (id) { const row = list.value.find(item => item.id === id) || await aiAPI.get(id); if (row) openEdit(row) } }
+async function onConfigTabChange(name) { if (name === 'connections') await connectionsPanel.value?.load(); if (name === 'catalog') { await catalogPanel.value?.load(); await loadList() } }
+async function openConnection(id) { if (!id && !tenantId.value && canManageCatalog) { activeTab.value = 'connections'; return }; activeTab.value = 'configs'; if (id) { const row = list.value.find(item => item.id === id) || await aiAPI.get(id); if (row) openEdit(row) } }
 function catalogModels(type, provider) { return catalogRows.value.filter(row => row.service_type === type && row.status !== 'retired' && row.connections.some(c => c.provider === provider)).map(row => row.model) }
 const importFileRef = ref(null)
 
@@ -1978,6 +1986,7 @@ function openEdit(row) {
   }
   form.value = {
     service_type: row.service_type,
+    provider_connection_id: row.provider_connection_id,
     name: row.name,
     provider: row.provider,
     api_protocol: row.api_protocol || '',

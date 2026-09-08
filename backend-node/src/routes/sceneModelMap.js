@@ -36,6 +36,8 @@ function create(db, log) {
     if (!key) {
       return response.badRequest(res, '缺少必填字段: key');
     }
+    try { require('../services/sceneDefaultService').validate(db, { ...body, service_type }); }
+    catch (err) { return response.badRequest(res, err.message); }
     
     const now = new Date().toISOString();
     try {
@@ -46,9 +48,9 @@ function create(db, log) {
       }
       
       const result = db.prepare(`
-        INSERT INTO ai_model_map (key, service_type, config_id, model_override, description, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(key, service_type, config_id || null, model_override || null, description || '', now, now);
+        INSERT INTO ai_model_map (key, service_type, config_id, model_override, description, created_at, updated_at, routing_version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(key, service_type, config_id || null, model_override || null, description || '', now, now, body.routing_version || null);
       
       const row = db.prepare('SELECT * FROM ai_model_map WHERE id = ?').get(result.lastInsertRowid);
       response.created(res, row);
@@ -64,6 +66,8 @@ function update(db, log) {
     const { key } = req.params;
     const body = req.body || {};
     const { service_type, config_id, model_override, description } = body;
+    try { require('../services/sceneDefaultService').validate(db, { ...body, key }); }
+    catch (err) { return response.badRequest(res, err.message); }
     
     const now = new Date().toISOString();
     try {
@@ -74,7 +78,7 @@ function update(db, log) {
       
       db.prepare(`
         UPDATE ai_model_map 
-        SET service_type = ?, config_id = ?, model_override = ?, description = ?, updated_at = ?
+        SET service_type = ?, config_id = ?, model_override = ?, description = ?, updated_at = ?, routing_version = ?
         WHERE key = ?
       `).run(
         service_type || 'text',
@@ -82,6 +86,7 @@ function update(db, log) {
         model_override !== undefined ? model_override : null,
         description !== undefined ? description : '',
         now,
+        body.routing_version || null,
         key
       );
       

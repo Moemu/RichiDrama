@@ -38,8 +38,12 @@ function routes(db, cfg, log) {
         }
         const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id);
         const aiOptions = tenant ? { tenant_id: tenant.id } : {};
-        const imageConfig = require('../services/aiConfigService').listConfigs(db, body.service_type || 'image', aiOptions)[0]
+        let imageConfig = require('../services/aiConfigService').listConfigs(db, body.service_type || 'image', aiOptions)[0]
           || require('../services/aiConfigService').listConfigs(db, 'storyboard_image', aiOptions)[0];
+        if (!body.model && body.storyboard_id) {
+          const sceneDefault = require('../services/aiConfigService').listConfigs(db, 'storyboard_image', aiOptions).find(config => config.scene_default);
+          if (sceneDefault) imageConfig = sceneDefault;
+        }
         const model = String(body.model || imageConfig?.default_model || imageConfig?.model?.[0] || '').trim();
         if (!model) return response.badRequest(res, '请选择图片模型后再生成');
         const billingTarget = require('../services/aiConfigService').resolveBillingTarget(db, body.service_type || 'image', model, body.ai_config_id, aiOptions);

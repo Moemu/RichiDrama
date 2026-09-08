@@ -1426,7 +1426,7 @@ async function callImageApi(db, log, opts) {
     user_negative_prompt,
   } = opts;
   const preferredProvider = preferred_provider ?? opts.preferredProvider;
-  const config = getDefaultImageConfig(db, preferredModel, preferredProvider, imageServiceType, { tenant_id: opts.tenant_id });
+  const config = getDefaultImageConfig(db, preferredModel, preferredProvider, imageServiceType, { tenant_id: opts.tenant_id, scene_defaults: false });
   if (!config) {
     throw new Error('未配置图片模型，请在「AI 配置」中添加 image 类型且已启用的配置');
   }
@@ -1669,6 +1669,10 @@ async function callImageApi(db, log, opts) {
  * 与场景图一致：创建 task 并写入 task_id，便于前端轮询 /tasks/:task_id 获知完成或报错。
  */
 function createAndGenerateImage(db, log, opts) {
+  if (!opts.model) {
+    const selected = getDefaultImageConfig(db, null, null, 'image', { tenant_id: opts.tenant_id });
+    if (selected?.scene_default) opts = { ...opts, model: getModelFromConfig(selected) };
+  }
   const {
     drama_id,
     character_id,

@@ -87,6 +87,10 @@ test('Seedream Pro HTTP generation freezes final inputs, saves original pixels, 
   try {
     provider.listen(0, '127.0.0.1'); await once(provider, 'listening');
     const { cookie } = await configure(f, `http://127.0.0.1:${provider.address().port}/api/v3`);
+    const config = configs.listConfigs(f.db, 'image').find(row => row.model.includes(model));
+    const shared = await f.request('POST', '/admin/provider-connections/convert', { config_id: config.id }, cookie);
+    assert.equal(shared.status, 200, JSON.stringify(shared.body));
+    assert.equal(configs.getConfig(f.db, config.id).provider_connection_id, shared.body.data.id);
     const project = await f.request('POST', '/dramas', { title: 'Pro billing fixture' }, cookie);
     assert.equal(project.status, 201, JSON.stringify(project.body));
     const dramaId = project.body.data.id;
@@ -115,9 +119,14 @@ test('Seedream Pro HTTP generation freezes final inputs, saves original pixels, 
     assert.deepEqual(JSON.parse(usage.usage_json), { image: 1, input_image: 3, image_size: '1024x1024' });
     assert.equal(f.db.prepare('SELECT status FROM billing_reconciliation_cases WHERE authorization_id=?').get(record.billing_authorization_id).status, 'resolved');
     assert.equal(billing.settleAuthorization(f.db, f.admin, record.billing_authorization_id, { usage: { image: 1 } }).reused, true);
+    const defaultScene = await f.request('POST', '/scene-model-map', {
+      key: 'default_resource_image_generation', service_type: 'image', config_id: config.id,
+      model_override: model, routing_version: 'capability-default-v1',
+    }, cookie);
+    assert.equal(defaultScene.status, 201, JSON.stringify(defaultScene.body));
     const at = new Date().toISOString();
     const characterId = Number(f.db.prepare('INSERT INTO characters(drama_id,name,polished_prompt,created_at,updated_at) VALUES (?,?,?,?,?)').run(dramaId, 'Fixture actor', 'A red square', at, at).lastInsertRowid);
-    const character = await f.request('POST', `/characters/${characterId}/generate-image`, { model }, cookie);
+    const character = await f.request('POST', `/characters/${characterId}/generate-image`, {}, cookie);
     assert.equal(character.status, 200, JSON.stringify(character.body));
     const characterImageId = character.body.data.image_generation.id;
     let characterImage;
@@ -132,7 +141,7 @@ test('Seedream Pro HTTP generation freezes final inputs, saves original pixels, 
     assert.equal(f.db.prepare('SELECT charged_micro FROM billing_usage_logs WHERE authorization_id=?').get(characterAuth).charged_micro, 180000);
     const prop = await f.request('POST', '/props', { drama_id: dramaId, name: 'Fixture prop', prompt: 'A red square' }, cookie);
     assert.equal(prop.status, 201, JSON.stringify(prop.body));
-    const propTask = await f.request('POST', `/props/${prop.body.data.id}/generate`, { model }, cookie);
+    const propTask = await f.request('POST', `/props/${prop.body.data.id}/generate`, {}, cookie);
     assert.equal(propTask.status, 200, JSON.stringify(propTask.body));
     let propResult;
     for (let attempt = 0; attempt < 150; attempt++) {

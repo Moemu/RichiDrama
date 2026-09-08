@@ -36,7 +36,11 @@ function list(db) {
     const key = `${config.service_type}\0${model}`;
     if (!rows.has(key)) rows.set(key, { service_type: config.service_type, model, display_name: model, status: 'legacy' });
   }
-  return [...rows.values()].map((row) => {
+  return [...rows.values()].filter(row => {
+    const capability = require('./modelCapabilityService');
+    const known = capability.infer(row.model);
+    return !known || known === capability.canonical(row.service_type) || configs.some(config => config.service_type === row.service_type && config.model.includes(row.model));
+  }).map((row) => {
     const linked = configs.filter((config) => config.service_type === row.service_type && config.model.includes(row.model));
     const keys = [...new Set(linked.map((config) => config.billing_key || row.model))];
     const prices = priceGroups(db, row.service_type, keys.length ? keys : [row.model], books);
@@ -69,7 +73,7 @@ function save(db, actorId, input, log) {
     if (status === 'retired' || (status === 'draft' && db.prepare("SELECT 1 FROM ai_model_catalog WHERE service_type=? AND model=? AND status='active'").get(type, model))) {
       const defaults = linked.filter((config) => config.is_active && (config.default_model || config.model[0]) === model);
       if (defaults.length) throw new Error(`请先在连接中更换默认模型：${defaults.map((config) => config.name).join('、')}`);
-      const scenes = db.prepare('SELECT key FROM ai_model_map WHERE service_type=? AND model_override=?').all(type, model);
+      const scenes = db.prepare("SELECT key FROM ai_model_map WHERE model_override=? AND (service_type=? OR (service_type='storyboard_image' AND ?='image' AND routing_version='capability-default-v1'))").all(model, type, type);
       if (scenes.length) throw new Error('请先在业务场景中更换此默认模型');
     }
     const at = now();

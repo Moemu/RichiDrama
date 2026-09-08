@@ -9,7 +9,7 @@ const BILLING_VERSION = '2022-01-01';
 const POINTS_PER_CNY = 100;
 const MICRO_PER_POINT = 10000;
 const LOCK_MS = 10 * 60 * 1000;
-const MAPPING_RULE_VERSION = 'verified-platform-models-v3';
+const MAPPING_RULE_VERSION = 'verified-platform-models-v4';
 
 function now() { return new Date().toISOString(); }
 function parse(value, fallback = {}) { try { return value ? JSON.parse(value) : fallback; } catch (_) { return fallback; } }
@@ -315,10 +315,17 @@ function releaseLock(db, token, provider = PROVIDER) {
 }
 
 function normalizeName(value) { return String(value || '').trim().toLowerCase().replace(/[._\s]+/g, '-'); }
+function pricingConfigurations(db) {
+  const ai = require('./aiConfigService');
+  return db.prepare('SELECT id FROM ai_service_configs WHERE deleted_at IS NULL ORDER BY id').all()
+    .map(row => ai.getConfig(db, row.id)).filter(config => config.is_active && /(?:volc|doubao|火山)/i.test(config.provider || ''))
+    .map(config => ({ id: config.id, service_type: config.service_type, provider: config.provider,
+      model: JSON.stringify(config.model), billing_key: config.billing_key }));
+}
+
 function configuredTargets(db, providerModel) {
   const needle = normalizeName(providerModel);
-  const rows = db.prepare(`SELECT service_type,provider,model,billing_key FROM ai_service_configs
-    WHERE deleted_at IS NULL AND is_active=1`).all();
+  const rows = pricingConfigurations(db);
   const targets = [];
   for (const row of rows) {
     if (!/(?:volc|doubao|火山)/i.test(String(row.provider || ''))) continue;
@@ -338,8 +345,7 @@ function configuredTargets(db, providerModel) {
 
 function missingConfiguredModelRows(db, providerItems) {
   const providerNames = providerItems.map((item) => normalizeName(item.FoundationModelName || item.Name)).filter(Boolean);
-  const rows = db.prepare(`SELECT service_type,provider,model,billing_key FROM ai_service_configs
-    WHERE deleted_at IS NULL AND is_active=1`).all();
+  const rows = pricingConfigurations(db);
   const warnings = [];
   const seen = new Set();
   for (const row of rows) {
@@ -397,8 +403,7 @@ function activeItem(db, serviceType, model, meter) {
 
 function verifiedTargets(db, providerModel, serviceTypes) {
   const providerName = normalizeName(providerModel);
-  const rows = db.prepare(`SELECT service_type,provider,model,billing_key FROM ai_service_configs
-    WHERE deleted_at IS NULL AND is_active=1`).all();
+  const rows = pricingConfigurations(db);
   const targets = [];
   for (const row of rows) {
     if (!/(?:volc|doubao|火山)/i.test(String(row.provider || ''))) continue;
@@ -414,8 +419,7 @@ function verifiedTargets(db, providerModel, serviceTypes) {
 
 function providerModelIsConfigured(db, providerModel) {
   const providerName = normalizeName(providerModel);
-  const rows = db.prepare(`SELECT provider,model,billing_key FROM ai_service_configs
-    WHERE deleted_at IS NULL AND is_active=1`).all();
+  const rows = pricingConfigurations(db);
   return rows.some((row) => {
     if (!/(?:volc|doubao|火山)/i.test(String(row.provider || ''))) return false;
     const models = (() => { const parsedModels = parse(row.model, null); return Array.isArray(parsedModels) ? parsedModels : String(row.model || '').split(','); })();
@@ -583,7 +587,10 @@ function buildCandidateRows(db, item) {
   if (multi.length) {
     const verified = verifiedMultiChargeRows(db, item, multi);
     if (verified?.length) return verified;
-    return multi.map((raw, index) => ({ provider_model: model, display_name: displayName, charge_type: `MultiChargeItems[${index}]`, unit_code: raw.UnitCode || null, provider_unit_price: raw.Price == null ? null : String(raw.Price), mapping_status: 'unmapped', error_summary: verified ? '已验证模型的必要计费项或本地 billing_key 缺失，不能自动发布' : '复杂条件价格需要人工映射，不能自动发布', raw_item_json: json(raw) }));
+    const capability = require('./modelCapabilityService').infer(model);
+    const missingTarget = capability && !verifiedTargets(db, model, capability === 'image' ? ['image', 'storyboard_image'] : [capability]).length;
+    const mappingError = missingTarget ? `已识别模型能力为 ${capability}，但没有同能力的本地连接。请转换为共享连接后重新导入` : verified ? '供应商的必要计费项或计量单位不完整，不能自动发布' : '复杂条件价格需要人工映射，不能自动发布';
+    return multi.map((raw, index) => ({ provider_model: model, display_name: displayName, charge_type: `MultiChargeItems[${index}]`, unit_code: raw.UnitCode || null, provider_unit_price: raw.Price == null ? null : String(raw.Price), mapping_status: 'unmapped', error_summary: mappingError, raw_item_json: json(raw) }));
   }
   return charges.map((raw) => {
     const meter = chargeMeter(raw.Type, raw.UnitCode);
@@ -619,7 +626,7 @@ async function sync(db, actorId, options = {}) {
       VALUES (?,?,?,?,?,?,?,?)`).run(id, PROVIDER, credential.configId, 'processing', options.triggerType === 'scheduled' ? 'scheduled' : 'manual', actorId || null, at, at);
     const fetched = await fetchAllActivations(credential, options);
     const clean = sanitize(fetched.items);
-    const responseHash = sha256(`${JSON.stringify(stable(clean))}|${MAPPING_RULE_VERSION}`);
+    const responseHash = sha256(`${JSON.stringify(stable(clean))}|${MAPPING_RULE_VERSION}|${JSON.stringify(pricingConfigurations(db))}`);
     const existing = db.prepare(`SELECT id FROM provider_price_syncs WHERE provider=? AND response_hash=? AND status IN ('completed','unchanged') AND id<>? LIMIT 1`).get(PROVIDER, responseHash, id);
     if (existing) {
       db.prepare(`UPDATE provider_price_syncs SET status='unchanged',response_hash=?,provider_request_ids_json=?,raw_response_json=?,fetched_at=?,updated_at=? WHERE id=?`)

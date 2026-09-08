@@ -153,6 +153,10 @@ function setupRouter(cfg, db, log) {
   adminRouter.post('/customer-organizations/:id/balance-adjustments', admin.adjustCustomerOrganizationBalance);
   adminRouter.get('/price-books', admin.priceBooks);
   adminRouter.get('/model-catalog', admin.modelCatalog);
+  adminRouter.get('/provider-connections', admin.providerConnections);
+  adminRouter.post('/provider-connections', admin.saveProviderConnection);
+  adminRouter.patch('/provider-connections/:id', admin.saveProviderConnection);
+  adminRouter.post('/provider-connections/convert', admin.convertProviderConnection);
   adminRouter.post('/model-catalog', admin.saveModelCatalog);
   adminRouter.post('/model-catalog/price-draft', admin.modelPriceDraft);
   const modelDiscovery = require('./modelDiscovery')(db, log, cfg);

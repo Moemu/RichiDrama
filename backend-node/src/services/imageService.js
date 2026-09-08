@@ -722,7 +722,7 @@ async function processImageGeneration(db, log, imageGenId) {
     }
 
     // ── Step 1: 获取 AI 配置 ──────────────────────────────────────────
-    const config = imageClient.getDefaultImageConfig(db, row.model, null, imageServiceType, row.tenant_id ? { tenant_id: row.tenant_id } : {});
+    const config = imageClient.getDefaultImageConfig(db, row.model, null, imageServiceType, { tenant_id: row.tenant_id, scene_defaults: false });
     if (!config) {
       log.error('[图生] ✗ 未找到图片 AI 配置', { id: imageGenId, imageServiceType, elapsed: elapsed() });
       db.prepare('UPDATE image_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run(

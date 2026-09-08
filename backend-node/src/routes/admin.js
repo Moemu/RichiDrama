@@ -23,6 +23,15 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
     return item;
   }
   return {
+    providerConnections: guarded((_req, res) => response.success(res, require('../services/providerConnectionService').list(db))),
+    saveProviderConnection: guarded((req, res) => {
+      if (require('../services/aiConfigService').getVendorLockStatus(cfg).enabled) throw new Error('厂商锁定模式不允许修改供应商连接');
+      response.success(res, require('../services/providerConnectionService').save(db, req.auth.id, req.body || {}, req.params.id));
+    }),
+    convertProviderConnection: guarded((req, res) => {
+      if (require('../services/aiConfigService').getVendorLockStatus(cfg).enabled) throw new Error('厂商锁定模式不允许转换供应商连接');
+      response.success(res, require('../services/providerConnectionService').fromLegacy(db, req.auth.id, req.body?.config_id));
+    }),
     modelCatalog: guarded((_req, res) => response.success(res, require('../services/modelCatalogService').list(db))),
     saveModelCatalog: guarded((req, res) => {
       if (require('../services/aiConfigService').getVendorLockStatus(cfg).enabled) throw new Error('厂商锁定模式不允许修改模型目录');

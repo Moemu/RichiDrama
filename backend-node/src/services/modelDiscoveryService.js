@@ -3,6 +3,8 @@ const ai = require('./aiConfigService');
 const catalog = require('./modelCatalogService');
 const billing = require('./billingService');
 const { signedHeaders } = require('./providerPriceService');
+const capability = require('./modelCapabilityService');
+const providers = require('./providerConnectionService');
 
 const serviceTypes = new Set(['text', 'image', 'storyboard_image', 'video', 'tts']);
 const sources = new Set(['openai', 'volcengine_activations', 'volcengine_endpoints']);
@@ -21,7 +23,8 @@ function listConnections(db) {
   const configs = db.prepare('SELECT id FROM ai_service_configs WHERE deleted_at IS NULL ORDER BY name,id').all().map(row => ai.getConfig(db, row.id));
   const summary = config => ({ id: config.id, name: config.name, service_type: config.service_type, owner_tenant_id: config.owner_tenant_id });
   return {
-    connections: configs.filter(config => serviceTypes.has(config.service_type)).map(config => {
+    connections: [...providers.list(db).map(config => ({ ...config, id: `provider-${config.id}`, service_type: 'provider' })),
+      ...configs.filter(config => serviceTypes.has(config.service_type) && !config.provider_connection_id)].map(config => {
       const source = defaultSource(config);
       return { ...summary(config), source, recommended_source: source === 'volcengine_endpoints' ? 'volcengine_activations' : source };
     }),
@@ -30,6 +33,13 @@ function listConnections(db) {
 }
 
 function connection(db, id) {
+  const sharedId = /^provider-([1-9][0-9]*)$/.exec(String(id));
+  if (sharedId) {
+    const shared = providers.get(db, Number(sharedId[1]));
+    if (!shared) throw new Error('供应商连接不存在');
+    const models = providers.bindings(db, shared.id).flatMap(config => config.model.filter(model => !capability.infer(model) || capability.infer(model) === capability.canonical(config.service_type)));
+    return { ...shared, id: String(id), provider_connection_id: shared.id, service_type: 'provider', model: [...new Set(models)] };
+  }
   if (!Number.isSafeInteger(Number(id)) || Number(id) <= 0) throw new Error('无效的连接 ID');
   const config = ai.getConfig(db, Number(id));
   if (!config || !serviceTypes.has(config.service_type)) throw new Error('连接不存在或不支持模型获取');
@@ -123,7 +133,7 @@ async function discover(db, actorId, configId, input = {}) {
       const activations = source === 'volcengine_activations';
       const id = source === 'openai' ? item?.id : activations ? item?.FoundationModelName || item?.Name : item?.Id;
       if (!validId(id)) { ignored++; continue; }
-      models.set(id, { id, display_name: String((source === 'openai' ? item.name : activations ? item.DisplayName : item.Name) || id).slice(0, 200), provider_status: source === 'openai' ? null : String((activations ? item.State : item.Status) || ''), configured: config.model.includes(id) });
+      models.set(id, { id, capability: capability.infer(id), display_name: String((source === 'openai' ? item.name : activations ? item.DisplayName : item.Name) || id).slice(0, 200), provider_status: source === 'openai' ? null : String((activations ? item.State : item.Status) || ''), configured: config.model.includes(id) });
     }
     const nextPage = source !== 'openai' && page * pageSize < total ? page + 1 : null;
     if (nextPage && !raw.length) throw new Error('供应商分页响应不完整，请重新获取');
@@ -142,6 +152,15 @@ function importModels(db, actorId, configId, input, log) {
   if (models.some(model => !validId(model))) throw new Error('包含无效模型 ID，未导入任何模型');
   return db.transaction(() => {
     const config = connection(db, configId);
+    if (config.service_type === 'provider') return providers.importModels(db, actorId, config.provider_connection_id, input, log);
+    for (const model of models) {
+      const selected = input.capabilities?.[model];
+      const known = capability.infer(model);
+      // Old clients can still import unknown IDs into their typed connection.
+      // The new UI explicitly chooses unknown capabilities and validates them.
+      const type = selected || known ? capability.resolve(model, selected) : capability.canonical(config.service_type);
+      if (type !== capability.canonical(config.service_type)) throw new Error(`模型 ${model} 的能力是 ${type}，请先将此旧配置转换为共享连接，再按模型能力导入`);
+    }
     const added = models.filter(model => !config.model.includes(model));
     if (added.length) {
       const updated = ai.updateConfig(db, log, config.id, { model: [...config.model, ...added] });

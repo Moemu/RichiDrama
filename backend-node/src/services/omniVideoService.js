@@ -1069,7 +1069,7 @@ async function cancelJob(db, log, jobId, user) {
   if (['completed', 'failed', 'invalid'].includes(generation.status)) throw new Error('任务已结束，无需取消');
   if (generation.provider_task_id && String(generation.provider_task_id).trim()) {
     const videoClient = require('./videoClient');
-    const config = videoClient.getDefaultVideoConfig(db, generation.model, generation.tenant_id ? { tenant_id: generation.tenant_id } : {});
+    const config = videoClient.getDefaultVideoConfig(db, generation.model, { tenant_id: generation.tenant_id, scene_defaults: false });
     if (!config) throw new Error('找不到该任务的视频模型配置，不能安全取消');
     const upstream = await videoClient.cancelVideoTask(config, log, String(generation.provider_task_id).trim());
     if (!upstream.cancelled) {

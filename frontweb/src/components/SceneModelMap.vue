@@ -1,5 +1,6 @@
 <template>
   <div class="scene-model-map-page">
+    <SceneDefaults />
     <div class="page-header">
       <div class="header-left">
         <p class="page-desc">
@@ -65,7 +66,10 @@
     <el-dialog
       v-model="dialogVisible"
       :title="editingKey ? '编辑业务场景映射' : '添加业务场景映射'"
-      width="560px"
+      width="min(560px, 94vw)"
+      class="scene-map-dialog"
+      top="5vh"
+      append-to-body
       :close-on-click-modal="false"
       @closed="resetForm"
     >
@@ -157,6 +161,7 @@ import { Plus } from '@element-plus/icons-vue'
 import { sceneModelMapAPI } from '@/api/sceneModelMap'
 import { aiAPI } from '@/api/ai'
 import { getSelectableModels } from '@/utils/modelSelection'
+import SceneDefaults from './SceneDefaults.vue'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -262,7 +267,7 @@ async function load() {
     configs.value = configsData || []
 
     // 合并配置名称
-    list.value = (mapsData || []).map(item => {
+    list.value = (mapsData || []).filter(item => item.routing_version !== 'capability-default-v1').map(item => {
       const config = configs.value.find(c => c.id === item.config_id)
       return {
         ...item,
@@ -412,5 +417,15 @@ onMounted(() => {
   font-size: 12px;
   color: #999;
   line-height: 1.4;
+}
+</style>
+<style>
+.el-dialog.scene-map-dialog { max-height: 90dvh; display: flex; flex-direction: column; }
+.scene-map-dialog .el-dialog__body { overflow-y: auto; min-height: 0; }
+.scene-map-dialog .el-dialog__header, .scene-map-dialog .el-dialog__footer { flex-shrink: 0; }
+@media (max-width: 600px) {
+  .scene-map-dialog .el-form-item { display: block; }
+  .scene-map-dialog .el-form-item__label { width: auto !important; justify-content: flex-start; }
+  .scene-map-dialog .el-form-item__content { margin-left: 0 !important; }
 }
 </style>

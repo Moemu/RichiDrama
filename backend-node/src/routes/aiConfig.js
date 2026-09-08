@@ -21,7 +21,7 @@ function list(db) {
       return response.success(res, maskConfigs(aiConfigService.listOwnedTenantConfigs(db, requestedTenantId, req.query.service_type)));
     }
     const tenant = require('../services/tenantService').tenantForUser(db, req.auth?.id);
-    const options = tenant ? { tenant_id: tenant.id } : {};
+    const options = tenant && !(req.auth?.role === 'admin' && req.query.platform === 'true') ? { tenant_id: tenant.id } : {};
     const list = req.auth?.role === 'admin'
       ? aiConfigService.listConfigs(db, req.query.service_type, options)
       : aiConfigService.listPublicConfigs(db, req.query.service_type, { ...options, user_id: req.auth.id });
@@ -133,7 +133,9 @@ function update(db, log, cfg) {
     } catch (err) {
       return response.badRequest(res, err.message);
     }
-    const config = aiConfigService.updateConfig(db, log, id, body);
+    let config;
+    try { config = aiConfigService.updateConfig(db, log, id, body); }
+    catch (err) { return response.badRequest(res, err.message); }
     if (!config) return response.notFound(res, '配置不存在');
     // 仅当配置真正归属该组时才更新分组绑定;bindOwnedConfig 会拒绝
     // 绑定全局配置(legacy 视图编辑全局配置的场景)。

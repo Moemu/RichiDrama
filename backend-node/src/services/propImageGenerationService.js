@@ -75,7 +75,11 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
     opts?.use_quad_grid === true
   );
   // 与角色/场景一致：使用前端「图片生成模型」选择的 model；未传时用 YAML default_image_provider 兜底
-  const model = (opts && opts.model) ? String(opts.model).trim() || null : null;
+  let model = (opts && opts.model) ? String(opts.model).trim() || null : null;
+  if (!model) {
+    const selected = imageClient.getDefaultImageConfig(db);
+    if (selected?.scene_default) model = selected.default_model;
+  }
   const preferredProvider = !model && cfg?.ai?.default_image_provider ? cfg.ai.default_image_provider : null;
   const userNeg = imageClient.resolveAssetUserNegativeForApi(model, prop.negative_prompt);
 
