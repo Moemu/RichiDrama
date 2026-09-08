@@ -123,6 +123,62 @@ test('Volcengine endpoint discovery signs a single requested page and never subs
   } finally { t.mock.restoreAll(); await f.close(); }
 });
 
+test('Volcengine account discovery uses activations and preserves endpoint imports and legacy callers', async t => {
+  const f = await modelCatalogFixture();
+  const nativeFetch = global.fetch;
+  const requests = [];
+  t.mock.method(global, 'fetch', async (url, init) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return nativeFetch(url, init);
+    const action = new URL(url).searchParams.get('Action');
+    const body = JSON.parse(init.body);
+    requests.push({ action, body });
+    assert.equal(new URL(url).host, 'open.volcengineapi.com');
+    assert.match(init.headers.Authorization, /^HMAC-SHA256 Credential=TEST_AK\//);
+    if (action === 'ListEndpoints') return new Response(JSON.stringify({ Result: { TotalCount: 1, Items: [{ Id: 'ep-existing', Name: '旧端点' }] } }));
+    assert.equal(action, 'ListModelActivations');
+    assert.deepEqual(body, { PageNumber: body.PageNumber, PageSize: 100, WithPrice: false, WithFreeUsage: false, Filter: { States: ['Available'] } });
+    const items = body.PageNumber === 1
+      ? Array.from({ length: 100 }, (_, i) => ({ FoundationModelName: `doubao-model-${i}`, DisplayName: `模型 ${i}`, State: 'Available', Id: 'not-the-model-id' }))
+      : [{ FoundationModelName: 'doubao-seedream-4-0-250828', DisplayName: 'Seedream 4.0', State: 'Available' }];
+    return new Response(JSON.stringify({ ResponseMetadata: { RequestId: 'activation-request' }, Result: { TotalCount: 101, Items: items } }));
+  });
+  try {
+    const login = await f.request('POST', '/auth/login', { username: 'catalog-admin', password: 'fixture-password' });
+    const call = (method, route, body) => f.request(method, route, body, login.cookie);
+    await call('PUT', `/ai-configs/${f.config.id}`, { provider: 'volcengine', model: [...f.config.model, 'ep-existing'] });
+    const credential = await call('POST', '/ai-configs', { service_type: 'model_ark_asset', name: 'ModelArk test', provider: 'volcengine', base_url: 'https://ark.cn-beijing.volces.com/api/v3', settings: JSON.stringify({ access_key_id: 'TEST_AK', secret_access_key: 'TEST_SK', sign_region: 'cn-beijing', project_name: 'must-not-limit-account-query' }), model: [] });
+    assert.equal(credential.status, 201);
+    const connections = (await call('GET', '/admin/model-discovery/connections')).body.data.connections;
+    const target = connections.find(config => config.id === f.config.id);
+    assert.equal(target.source, 'volcengine_endpoints');
+    assert.equal(target.recommended_source, 'volcengine_activations');
+    const path = `/admin/model-discovery/${f.config.id}`;
+    const credentialBody = { credential_config_id: credential.body.data.id };
+    const legacy = await call('POST', `${path}/fetch`, credentialBody);
+    assert.equal(legacy.body.data.models[0].id, 'ep-existing');
+    const body = { ...credentialBody, source: 'volcengine_activations' };
+    const first = await call('POST', `${path}/fetch`, body);
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(first.body.data.next_page, 2);
+    assert.equal(first.body.data.provider_request_id, 'activation-request');
+    assert.equal(first.body.data.models[0].id, 'doubao-model-0');
+    assert.equal(first.body.data.models[0].display_name, '模型 0');
+    assert.equal(first.body.data.models[0].provider_status, 'Available');
+    assert.equal(JSON.stringify(first.body).includes('not-the-model-id'), false);
+    const second = await call('POST', `${path}/fetch`, { ...body, page: 2 });
+    assert.equal(second.body.data.next_page, null);
+    const model = second.body.data.models[0].id;
+    assert.equal((await call('POST', `${path}/import`, { models: [model] })).status, 200);
+    assert.deepEqual((await call('POST', `${path}/import`, { models: [model] })).body.data.added, []);
+    await f.restart();
+    const rows = (await call('GET', '/admin/model-catalog')).body.data;
+    assert.equal(rows.find(row => row.model === model).status, 'draft');
+    assert.equal(rows.find(row => row.model === 'ep-existing').status, 'legacy');
+    assert.equal((await call('GET', `/ai-configs/${f.config.id}`)).body.data.default_model, 'existing-image');
+    assert.deepEqual(requests.map(request => request.action), ['ListEndpoints', 'ListModelActivations', 'ListModelActivations']);
+  } finally { t.mock.restoreAll(); await f.close(); }
+});
+
 test('OpenAI model URLs preserve custom base paths and reject embedded credentials or query overrides', () => {
   assert.equal(modelsUrl('https://api.openai.com'), 'https://api.openai.com/v1/models');
   assert.equal(modelsUrl('https://example.com/v1/'), 'https://example.com/v1/models');

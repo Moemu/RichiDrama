@@ -2,7 +2,7 @@
   <el-dialog :model-value="modelValue" class="catalog-dialog discovery-dialog" title="获取模型" top="5vh" width="min(820px, 94vw)" append-to-body :close-on-click-modal="false" :before-close="close">
     <p class="discovery-intro">读取供应商列表，选择后导入当前连接。新型号保存为待上架。</p>
     <div v-if="error" class="discovery-error" role="alert">{{ error }}<el-button v-if="!connections.length" link @click="loadConnections">重试</el-button></div>
-    <div v-if="fetched" class="discovery-current"><div><strong>{{ target?.name }}</strong><small>{{ types[target?.service_type] }} · {{ source === 'openai' ? 'OpenAI / OpenAI 兼容' : '火山方舟 · 已部署模型' }}</small></div><el-button link :disabled="fetching || saving" @click="showSource = !showSource">{{ showSource ? '收起来源' : '更改来源' }}</el-button><el-button link :loading="fetching" :disabled="saving" @click="fetchModels()">重新获取</el-button></div>
+    <div v-if="fetched" class="discovery-current"><div><strong>{{ target?.name }}</strong><small>{{ types[target?.service_type] }} · {{ sourceNames[source] }}</small></div><el-button link :disabled="fetching || saving" @click="showSource = !showSource">{{ showSource ? '收起来源' : '更改来源' }}</el-button><el-button link :loading="fetching" :disabled="saving" @click="fetchModels()">重新获取</el-button></div>
     <el-form v-show="showSource || !fetched" label-position="top" v-loading="loading">
       <el-form-item label="导入到连接">
         <el-select v-model="configId" filterable placeholder="选择已保存的连接" :disabled="fetching || saving" @change="changeConnection" class="discovery-full">
@@ -12,20 +12,20 @@
       <div class="discovery-source-fields">
         <el-form-item label="模型列表来源">
           <el-select v-model="source" :disabled="fetching || saving" @change="resetResults" class="discovery-full">
-            <el-option label="OpenAI / OpenAI 兼容" value="openai" />
-            <el-option label="火山方舟 · 已部署模型" value="volcengine_endpoints" />
+            <el-option v-for="(label, value) in sourceNames" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="source === 'volcengine_endpoints'" label="ModelArk 管理凭据">
+        <el-form-item v-if="source !== 'openai'" label="ModelArk 管理凭据">
           <el-select v-model="credentialId" placeholder="选择同一火山账号的 AK/SK 配置" :disabled="fetching || saving" @change="resetResults" class="discovery-full">
             <el-option v-for="config in availableCredentials" :key="config.id" :label="config.name" :value="config.id" />
           </el-select>
         </el-form-item>
       </div>
       <p class="discovery-help" v-if="source === 'openai'">使用连接中已保存的地址和 API Key 读取 /models。仅适用于支持该接口的供应商。</p>
+      <p class="discovery-help" v-else-if="source === 'volcengine_activations'">读取火山账户已开通且可用的模型，无需先部署端点。请选择与目标连接同账号、同区域的 ModelArk 配置。</p>
       <p class="discovery-help" v-else>读取已部署的 ep-… 模型 ID。请选择与目标连接同账号、同区域的 ModelArk 配置；不包含未部署的公共模型。</p>
-      <p class="discovery-help" v-if="source === 'volcengine_endpoints' && !availableCredentials.length">暂无可用管理凭据。请先在供应商连接中保存 ModelArk 资产库的长期 AK/SK，并授予 ListEndpoints 读取权限。</p>
-      <div class="discovery-fetch"><el-button type="primary" :loading="fetching" :disabled="!configId || saving || (source === 'volcengine_endpoints' && !credentialId)" @click="fetchModels()">{{ fetched ? '重新获取' : '获取模型列表' }}</el-button><span v-if="target">将导入为「{{ types[target.service_type] }}」模型，请确认所选型号支持该用途。</span></div>
+      <p class="discovery-help" v-if="source !== 'openai' && !availableCredentials.length">暂无可用管理凭据。请先在供应商连接中保存 ModelArk 资产库的长期 AK/SK，并授予 {{ source === 'volcengine_activations' ? 'ListModelActivations' : 'ListEndpoints' }} 读取权限。</p>
+      <div class="discovery-fetch"><el-button type="primary" :loading="fetching" :disabled="!configId || saving || (source !== 'openai' && !credentialId)" @click="fetchModels()">{{ fetched ? '重新获取' : '获取模型列表' }}</el-button><span v-if="target">将导入为「{{ types[target.service_type] }}」模型，请确认所选型号支持该用途。</span></div>
     </el-form>
 
     <section v-if="fetched" class="discovery-results" aria-label="获取结果">
@@ -54,6 +54,7 @@ import { modelDiscoveryAPI } from '@/api/modelDiscovery'
 const props = defineProps({ modelValue: Boolean })
 const emit = defineEmits(['update:modelValue', 'imported'])
 const types = { text: '文本', image: '图片', storyboard_image: '分镜图片', video: '视频', tts: '语音' }
+const sourceNames = { openai: 'OpenAI / OpenAI 兼容', volcengine_activations: '火山方舟 · 账户可用模型', volcengine_endpoints: '火山方舟 · 已部署端点' }
 const connections = ref([]); const credentials = ref([]); const configId = ref(null); const credentialId = ref(null); const source = ref('openai')
 const loading = ref(false); const fetching = ref(false); const saving = ref(false); const error = ref('')
 const models = ref([]); const chosen = ref([]); const fetched = ref(false); const nextPage = ref(null); const total = ref(0); const ignored = ref(0)
@@ -66,7 +67,7 @@ const visibleModels = computed(() => matching.value.slice((page.value - 1) * 20,
 watch(search, () => { page.value = 1 })
 watch(() => props.modelValue, open => { if (open) loadConnections(); else { requestVersion++; fetching.value = false } })
 function resetResults() { requestVersion++; models.value = []; chosen.value = []; fetched.value = false; nextPage.value = null; total.value = 0; ignored.value = 0; search.value = ''; page.value = 1; error.value = ''; showSource.value = true }
-function changeConnection() { source.value = target.value?.source || 'openai'; credentialId.value = null; resetResults() }
+function changeConnection() { source.value = target.value?.recommended_source || target.value?.source || 'openai'; credentialId.value = null; resetResults() }
 async function loadConnections() {
   resetResults(); configId.value = null; credentialId.value = null; source.value = 'openai'; connections.value = []; credentials.value = []; loading.value = true
   const version = requestVersion

@@ -41,8 +41,9 @@ AI 配置默认打开模型目录。管理员可以从同一个模型条目查�
 在模型目录点击“获取模型”，选择已保存的目标连接和来源。获取成功后可搜索、分页选择并导入，单次最多导入 200 个型号。
 
 - **OpenAI / OpenAI 兼容**：使用该连接保存的 API Key，读取 Base URL 下的 `GET /models`。根域名补 `/v1/models`，已有版本路径不重复拼接。兼容供应商必须支持此接口；接口返回的型号可能包含其他用途，管理员需确认与目标连接的服务类型一致。
-- **火山方舟 · 已部署模型**：选择同账号、同区域的 ModelArk 资产库长期 AK/SK 配置，调用 `ListEndpoints`，导入供应商返回的 `Id`（`ep-…`）。需要 `ark:ListEndpoints` 读取权限。使用配置中的国内区域和可选项目名称。每次请求读取一页，后续页点击“继续获取”。
-- 火山来源不包含未部署的公共基础模型，不拼接模型家族名与版本号。仅有推理 API Key、没有管理 AK/SK 时，仍可手动添加型号。
+- **火山方舟 · 账户可用模型（默认）**：选择同账号、同区域的 ModelArk 资产库长期 AK/SK 配置，调用 `ListModelActivations`，过滤 `States: ["Available"]`，不请求价格及免费额度。型号、显示名称和状态分别读取 `FoundationModelName`（兼容 `Name`）、`DisplayName` 和 `State`，不拼接版本号。需要 `ark:ListModelActivations` 读取权限；这是账户级查询，不附加端点项目筛选。
+- **火山方舟 · 已部署端点**：保留 `ListEndpoints` 来源，导入供应商返回的 `Id`（`ep-…`）。需要 `ark:ListEndpoints` 读取权限，使用配置中的国内区域和可选项目名称。两种火山来源均每次读取一页，后续页点击“继续获取”。
+- 账户可用模型和已部署端点是不同列表。前者不要求事先创建端点，但也不等于平台全部未开通模型。仅有推理 API Key、没有管理 AK/SK 时，仍可手动添加型号。
 - 获取是管理员的只读元数据操作。仅通过项目 HTTP 路由调用后端原生 HTTP 适配器，不调用推理或计费接口，不创建预授权。业务请求 ID 和供应商请求 ID 记入审计。
 - 前端仅传已保存的连接 ID；地址、API Key 和签名密钥留在后端。请求 15 秒超时，禁止自动跟随重定向；异常响应不回显供应商原文或密钥。
 - 只追加确认选中的型号。新型号进入待上架；目录中已有型号保留原状态，其他连接中的历史型号仍为 legacy。重复导入跳过已有项。默认模型、原数组项、价格、项目组绑定与历史任务均不重写。
@@ -51,17 +52,19 @@ AI 配置默认打开模型目录。管理员可以从同一个模型条目查�
 
 | 接口 | 行为与消费者 |
 | --- | --- |
-| `GET /api/v1/admin/model-discovery/connections` | 返回目标连接和可选 ModelArk 凭据的非敏感摘要，包含空型号连接。由 `ModelDiscoveryDialog` 读取。 |
+| `GET /api/v1/admin/model-discovery/connections` | 返回目标连接和可选 ModelArk 凭据的非敏感摘要，包含空型号连接。新增可选 `recommended_source` 供新版弹窗选择账户可用模型；保留原 `source` 字段和值供旧客户端使用。 |
 | `POST /api/v1/admin/model-discovery/:id/fetch` | 接收 `source`、可选 `credential_config_id` 与 `page`；返回规范化型号、已有标记、下一页及请求 ID。只读，不同步目录状态。 |
 | `POST /api/v1/admin/model-discovery/:id/import` | 接收 `models` ID 数组；事务内追加并复用 `registerNewModels`。厂商锁定模式拒绝导入。返回新增和跳过数量。 |
 
 导入后刷新模型目录、AI 配置和创作选项。已有 `/ai-configs`、`/models/available`、生成路由及价格发布接口保持原合约。重启读取继续使用原配置表和目录表，无新增迁移或后台任务。
 
+新版弹窗显式发送 `source: "volcengine_activations"`。旧客户端的 `volcengine_endpoints` 请求及省略来源的请求保留原查询语义。此前导入的端点、历史模型和价格均不改写。
+
 接口依据：[OpenAI List models](https://developers.openai.com/api/reference/resources/models/methods/list)、[火山官方 ListEndpoints 请求定义](https://github.com/volcengine/volcengine-nodejs-sdk/blob/master/service/ark/src/types/list-endpoints-request.ts)、[火山官方响应型号定义](https://github.com/volcengine/volcengine-nodejs-sdk/blob/master/service/ark/src/types/item-for-list-endpoints-output.ts)。仅参考官方接口定义，未引入供应商 SDK。
 
 ## 验证
 
-- 后端测试 382 项通过；前端测试 146 项通过；production build 通过。
+- 后端测试 383 项通过；前端测试 146 项通过；production build 通过。
 - HTTP 集成覆盖权限、目录新增、缺价格拒绝上架、价格草稿及发布确认、新连接型号注册、下架后生成拒绝。
 - 重启后目录状态和原配置仍可读取。下架前预授权可重复读取，并使用原价幂等结算。
 - 使用独立 SQLite 数据库和无效供应商地址。未执行真实生成或供应商调用。
@@ -69,5 +72,6 @@ AI 配置默认打开模型目录。管理员可以从同一个模型条目查�
 - 实查 `1280×720`、`1440×900`、`1920×1080` 和 `390×844`。修复标签容器截断和窄屏列宽撑开问题；表格横向滚动与内容纵向滚动分开。
 - 自动获取测试覆盖管理员权限、已保存密钥、响应去重、错误及重定向拒绝、空列表、原子导入、重复导入、旧状态和默认值保留、火山签名与分页、重启读取。
 - 获取弹窗实查以上四档视口，覆盖搜索、跨页选择、已有型号禁选、导入后刷新、火山后续页和失败重试。供应商使用本地 HTTP 模拟及固定响应，未连接真实供应商账号。
+- 账户列表回归覆盖 `ListModelActivations` 的请求参数、字段解析、分页、重复导入与重启读取，以及旧端点请求和历史 `ep-…` 记录兼容。该上游接口已由用户使用 curl 验证可返回账户模型列表。
 
 预览部署由 PR 工作流执行；合并及生产发布另行确认。

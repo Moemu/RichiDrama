@@ -5,7 +5,7 @@ const billing = require('./billingService');
 const { signedHeaders } = require('./providerPriceService');
 
 const serviceTypes = new Set(['text', 'image', 'storyboard_image', 'video', 'tts']);
-const sources = new Set(['openai', 'volcengine_endpoints']);
+const sources = new Set(['openai', 'volcengine_activations', 'volcengine_endpoints']);
 const pageSize = 100;
 
 function settings(config) {
@@ -21,7 +21,10 @@ function listConnections(db) {
   const configs = db.prepare('SELECT id FROM ai_service_configs WHERE deleted_at IS NULL ORDER BY name,id').all().map(row => ai.getConfig(db, row.id));
   const summary = config => ({ id: config.id, name: config.name, service_type: config.service_type, owner_tenant_id: config.owner_tenant_id });
   return {
-    connections: configs.filter(config => serviceTypes.has(config.service_type)).map(config => ({ ...summary(config), source: defaultSource(config) })),
+    connections: configs.filter(config => serviceTypes.has(config.service_type)).map(config => {
+      const source = defaultSource(config);
+      return { ...summary(config), source, recommended_source: source === 'volcengine_endpoints' ? 'volcengine_activations' : source };
+    }),
     credentials: configs.filter(config => config.service_type === 'model_ark_asset' && config.is_active && settings(config).access_key_id && settings(config).secret_access_key).map(summary),
   };
 }
@@ -86,7 +89,11 @@ async function discover(db, actorId, configId, input = {}) {
     const region = value.sign_region || 'cn-beijing';
     if (!/^cn-[a-z0-9-]+$/.test(region)) throw new Error('此来源仅支持火山国内区域，请选择对应的 ModelArk 配置');
     credentialId = credential.id;
-    const signed = signedHeaders({ accessKeyId: value.access_key_id, secretAccessKey: value.secret_access_key, region, service: 'ark', action: 'ListEndpoints', version: '2024-01-01', body: { PageNumber: page, PageSize: pageSize, ...(value.project_name ? { ProjectName: value.project_name } : {}) } });
+    const activations = source === 'volcengine_activations';
+    const body = activations
+      ? { PageNumber: page, PageSize: pageSize, WithPrice: false, WithFreeUsage: false, Filter: { States: ['Available'] } }
+      : { PageNumber: page, PageSize: pageSize, ...(value.project_name ? { ProjectName: value.project_name } : {}) };
+    const signed = signedHeaders({ accessKeyId: value.access_key_id, secretAccessKey: value.secret_access_key, region, service: 'ark', action: activations ? 'ListModelActivations' : 'ListEndpoints', version: '2024-01-01', body });
     url = signed.url;
     init = { method: 'POST', headers: signed.headers, body: signed.bodyText };
   }
@@ -113,11 +120,12 @@ async function discover(db, actorId, configId, input = {}) {
     if (!Number.isSafeInteger(total) || total < 0) throw new Error('供应商响应缺少有效的模型总数');
     const models = new Map(); let ignored = 0;
     for (const item of raw) {
-      const id = source === 'openai' ? item?.id : item?.Id;
+      const activations = source === 'volcengine_activations';
+      const id = source === 'openai' ? item?.id : activations ? item?.FoundationModelName || item?.Name : item?.Id;
       if (!validId(id)) { ignored++; continue; }
-      models.set(id, { id, display_name: String((source === 'openai' ? item.name : item.Name) || id).slice(0, 200), provider_status: source === 'openai' ? null : String(item.Status || ''), configured: config.model.includes(id) });
+      models.set(id, { id, display_name: String((source === 'openai' ? item.name : activations ? item.DisplayName : item.Name) || id).slice(0, 200), provider_status: source === 'openai' ? null : String((activations ? item.State : item.Status) || ''), configured: config.model.includes(id) });
     }
-    const nextPage = source === 'volcengine_endpoints' && page * pageSize < total ? page + 1 : null;
+    const nextPage = source !== 'openai' && page * pageSize < total ? page + 1 : null;
     if (nextPage && !raw.length) throw new Error('供应商分页响应不完整，请重新获取');
     billing.audit(db, actorId, 'model_catalog.discover', 'ai_config', config.id, { request_id: requestId, provider_request_id: providerRequestId, source, credential_config_id: credentialId, page, count: models.size });
     return { request_id: requestId, provider_request_id: providerRequestId, source, service_type: config.service_type, models: [...models.values()].sort((a, b) => a.id.localeCompare(b.id)), total, next_page: nextPage, ignored };
