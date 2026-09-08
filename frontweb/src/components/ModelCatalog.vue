@@ -36,23 +36,35 @@
 
     <el-dialog class="catalog-dialog" top="5vh" v-model="showDetail" :title="selected?.display_name || '模型管理'" width="min(860px, 94vw)" append-to-body>
       <template v-if="selected">
-        <p class="model-identity">{{ types[selected.service_type] }} · {{ selected.model }}</p>
-        <el-alert :closable="false" type="info" :title="selected.status === 'legacy' ? '现有配置：未自动改价或停用。上下架操作仅影响后续新请求。' : '上下架仅影响新请求。历史记录和已预授权任务保留原价格快照。'" />
-        <div class="detail-actions"><el-tag>{{ statuses[selected.status] }}</el-tag><el-button v-if="selected.status !== 'active'" type="primary" :loading="saving" @click="setStatus('active')">上架模型</el-button><el-button v-if="selected.status !== 'retired'" type="danger" plain :loading="saving" @click="setStatus('retired')">下架模型</el-button><el-button @click="$emit('connection', selected.connections[0]?.id); showDetail = false">编辑连接 / 默认模型</el-button></div>
-        <h3>模型价格</h3>
-        <p>选择需要调整的价目表。其他模型的计价项会完整保留。各项目组仍使用各自绑定的价目表。</p>
+        <div class="model-summary"><span>{{ types[selected.service_type] }}</span><el-tag size="small">{{ statuses[selected.status] }}</el-tag><span v-if="selected.display_name !== selected.model" class="model-identity">{{ selected.model }}</span></div>
+        <el-tabs v-model="detailTab">
+        <el-tab-pane label="价格配置" name="pricing">
+        <div class="pricing-intro">保存草稿后审核发布，新请求才会使用新价格。</div>
+        <el-form label-position="top" class="price-book-form"><el-form-item label="调整的价目表">
         <el-select v-model="bookId" placeholder="选择已发布价目表" class="full" @change="loadPriceItems"><el-option v-for="book in publishedBooks" :key="book.id" :label="book.name" :value="book.id" /></el-select>
+        </el-form-item></el-form>
+        <p class="pricing-help">仅调整当前模型。各项目组继续使用各自绑定的价目表。</p>
         <p v-if="!publishedBooks.length">尚无已发布价目表，请先在运营工作台初始化价目。</p>
         <el-select v-if="billingKeys.length > 1" v-model="billingKey" class="full" @change="loadPriceItems"><el-option v-for="key in billingKeys" :key="key" :label="key" :value="key" /></el-select>
         <div v-for="(item, index) in priceItems" :key="index" class="catalog-price-item">
-          <div class="price-inputs"><el-select v-model="item.meter" aria-label="计量单位"><el-option v-for="meter in meters" :key="meter" :value="meter" :label="meterNames[meter]" /></el-select><el-input-number v-model="item.unit_price" :min="0" :precision="4" aria-label="单价积分" /><span>积分</span><el-checkbox v-model="item.is_free">免费</el-checkbox><el-button link type="danger" @click="priceItems.splice(index, 1)">删除</el-button></div>
+          <div class="price-item-heading"><strong>计价项 {{ index + 1 }}</strong><el-button link type="danger" @click="priceItems.splice(index, 1)">删除</el-button></div>
+          <div class="price-inputs"><label class="price-field"><span>计量单位</span><el-select v-model="item.meter" aria-label="计量单位"><el-option v-for="meter in meters" :key="meter" :value="meter" :label="meterNames[meter]" /></el-select></label><label class="price-field"><span>单价（积分）</span><el-input-number v-model="item.unit_price" :disabled="item.is_free" :min="0" :precision="4" controls-position="right" aria-label="单价积分" /></label><el-checkbox v-model="item.is_free">免费</el-checkbox></div>
           <el-collapse><el-collapse-item title="计价条件（单位数量、分档与规格）" :name="index"><el-input v-model="item.conditions_text" type="textarea" :rows="4" placeholder='可选 JSON，例如 {"unit_size": 1000000}' /></el-collapse-item></el-collapse>
         </div>
         <el-button @click="addPriceItem">添加计价项</el-button>
-        <h3>已有价格版本</h3>
+        <el-collapse class="price-history"><el-collapse-item :title="`价格版本（${selected.prices.length}）`" name="versions">
+        <p v-if="!selected.prices.length" class="pricing-help">此模型暂无价格版本。保存草稿后可在这里查看。</p>
         <div v-for="book in selected.prices" :key="book.id" class="price-version"><strong>{{ book.name }} · {{ book.status === 'published' ? '已发布' : book.status === 'draft' ? '草稿' : '历史版本' }}</strong><small v-for="item in book.items" :key="item.id">{{ meterNames[item.meter] }}：{{ item.is_free ? '免费' : `${item.unit_price} 积分` }} / {{ item.conditions_json?.unit_size || 1 }} 单位</small><el-button v-if="book.status === 'draft'" link type="primary" @click="reviewDraft(book)">审核草稿</el-button></div>
+        </el-collapse-item></el-collapse>
+        </el-tab-pane>
+        <el-tab-pane label="模型管理" name="management">
+        <p class="pricing-help">上下架仅影响新请求。历史记录和已预授权任务保持原价格。</p>
+        <p v-if="selected.status === 'legacy'">此模型沿用现有配置。主动上下架后纳入目录管理。</p>
+        <div class="detail-actions"><el-button v-if="selected.status !== 'active'" type="primary" :loading="saving" @click="setStatus('active')">上架模型</el-button><el-button v-if="selected.status !== 'retired'" type="danger" plain :loading="saving" @click="setStatus('retired')">下架模型</el-button><el-button @click="$emit('connection', selected.connections[0]?.id); showDetail = false">编辑连接 / 默认模型</el-button></div>
+        </el-tab-pane>
+        </el-tabs>
       </template>
-      <template #footer><el-button @click="showDetail = false">关闭</el-button><el-button type="primary" :disabled="!bookId" :loading="saving" @click="saveDraft">保存调价草稿</el-button></template>
+      <template #footer><el-button @click="showDetail = false">关闭</el-button><el-button v-if="detailTab === 'pricing'" type="primary" :disabled="!bookId" :loading="saving" @click="saveDraft">保存调价草稿</el-button></template>
     </el-dialog>
 
     <el-dialog class="catalog-dialog" top="5vh" v-model="showPublish" title="审核调价草稿" width="min(680px, 94vw)" append-to-body>
@@ -80,6 +92,7 @@ const meters = Object.keys(meterNames)
 const rows = ref([]); const configs = ref([]); const books = ref([]); const error = ref(''); const loading = ref(false); const saving = ref(false)
 const search = ref(''); const typeFilter = ref(''); const statusFilter = ref('')
 const showAdd = ref(false); const showDetail = ref(false); const showPublish = ref(false); const selected = ref(null)
+const detailTab = ref('pricing')
 const add = reactive({ config_id: null, model: '', display_name: '' })
 const bookId = ref(null); const billingKey = ref(''); const priceItems = ref([]); const draft = ref(null); const publishReason = ref('')
 const filtered = computed(() => rows.value.filter(row => (!typeFilter.value || row.service_type === typeFilter.value) && (!statusFilter.value || row.status === statusFilter.value) && `${row.display_name} ${row.model} ${row.connections.map(c => c.provider).join(' ')}`.toLowerCase().includes(search.value.trim().toLowerCase())))
@@ -110,7 +123,7 @@ async function saveAdd() {
   saving.value = true
   try { await request.post('/admin/model-catalog', { ...add, service_type: config.service_type, status: 'draft' }); showAdd.value = false; await load(); emit('changed'); ElMessage.success('模型已保存，请完成定价后上架') } catch (e) { ElMessage.error(e.message) } finally { saving.value = false }
 }
-function openDetail(row) { selected.value = row; billingKey.value = row.connections[0]?.billing_key || row.model; bookId.value = row.prices.find(b => b.status === 'published')?.id || publishedBooks.value[0]?.id || null; loadPriceItems(); showDetail.value = true }
+function openDetail(row) { selected.value = row; detailTab.value = 'pricing'; billingKey.value = row.connections[0]?.billing_key || row.model; bookId.value = row.prices.find(b => b.status === 'published')?.id || publishedBooks.value[0]?.id || null; loadPriceItems(); showDetail.value = true }
 function loadPriceItems() {
   const source = books.value.find(b => b.id === bookId.value)?.items.filter(item => item.service_type === selected.value.service_type && item.model === billingKey.value) || []
   priceItems.value = source.map(item => ({ ...item, conditions_text: item.conditions_json ? JSON.stringify(item.conditions_json, null, 2) : '' }))
@@ -144,6 +157,7 @@ defineExpose({ load })
 </script>
 
 <style scoped>
+.model-summary{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem;margin:0 0 1rem;color:var(--text-muted);font-size:13px}.pricing-intro{margin:.25rem 0 1.25rem;line-height:1.6}.pricing-help{font-size:13px;color:var(--text-muted);line-height:1.6;margin:.5rem 0 1rem}.price-book-form :deep(.el-form-item){margin-bottom:0}.price-book-form .full{margin:0}.price-item-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem}.catalog-dialog .catalog-price-item{padding:1rem;margin:1rem 0;border:1px solid var(--el-border-color);border-radius:10px}.price-field{display:grid;gap:.5rem;min-width:0;flex:1}.price-field>span{font-size:13px;color:var(--text-muted)}.price-field .el-select,.price-field .el-input-number{width:100%}.catalog-dialog .price-inputs{align-items:end;margin-bottom:.75rem}.catalog-dialog .price-inputs>.el-checkbox{margin:0 0 .2rem .25rem}.price-history{margin-top:1.5rem}.catalog-dialog :deep(.el-tabs__content){overflow:visible}.catalog-dialog :deep(.el-collapse-item__header){line-height:1.5;height:auto;min-height:44px;padding:.5rem 0}@media(max-width:600px){.price-field{flex-basis:100%}}
 .model-catalog{min-width:0}.catalog-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}.catalog-heading h2{margin:0 0 .5rem}.catalog-heading p,.model-catalog p{color:var(--text-muted);line-height:1.6}.catalog-actions,.catalog-filters,.detail-actions{display:flex;flex-wrap:wrap;gap:.65rem;align-items:center}.catalog-actions{flex-shrink:0}.catalog-filters{margin:1.25rem 0}.catalog-filters>.el-input{width:18rem}.catalog-filters>.el-select{width:9rem}.catalog-table{width:100%;overflow-x:auto}.catalog-table small,.price-version small{display:block;overflow-wrap:anywhere;color:var(--text-muted);margin-top:.3rem}.connection-name{display:block;overflow-wrap:anywhere}.catalog-error{color:var(--el-color-danger);padding:1rem 0}.full{width:100%;margin-bottom:.7rem}.detail-actions{margin:1rem 0}.catalog-price-item{padding:.8rem 0;border-bottom:1px solid var(--el-border-color)}.price-inputs{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center}.price-inputs>.el-select{width:10rem}.price-version{padding:.75rem 0;border-bottom:1px solid var(--el-border-color)}.model-identity{overflow-wrap:anywhere}.provider-sync{margin-top:1.5rem}.provider-sync>summary{cursor:pointer;padding:1rem 0;font-weight:600}@media(max-width:900px){.catalog-heading{flex-direction:column}.catalog-actions{flex-shrink:1}}@media(max-width:600px){.catalog-filters>.el-input{width:100%}.catalog-filters>.el-select{flex:1}.price-inputs>.el-select{width:100%}}
 </style>
 
