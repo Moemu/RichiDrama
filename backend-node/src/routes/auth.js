@@ -29,8 +29,12 @@ module.exports = function authRoutes(db) {
     },
     changePassword: (req, res) => {
       try {
-        authService.changePassword(db, req.auth.id, req.body?.old_password, req.body?.new_password);
-        response.success(res, { message: '密码已更新' });
+        db.transaction(() => {
+          authService.changePassword(db, req.auth.id, req.body?.old_password, req.body?.new_password);
+          require('../services/billingService').audit(db, req.auth.id, 'user.password.change', 'user', req.auth.id, { result: 'success' });
+        })();
+        res.clearCookie('lmd_session', { path: '/' });
+        response.success(res, { message: '密码已更新，请重新登录' });
       } catch (err) { response.badRequest(res, err.message); }
     },
     changeUsername: (req, res) => {

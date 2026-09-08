@@ -29,11 +29,15 @@ const { ownershipGuard } = require('../middleware/ownership');
 function setupRouter(cfg, db, log) {
   const r = express.Router();
   const auth = authRoutes(db);
+  const recovery = require('./passwordRecovery')(db);
   const billing = billingRoutes(db);
   const admin = adminRoutes(db, log, cfg);
   const paymentService = require('../services/paymentService').createPaymentService(db, cfg, log);
   const payments = require('./payments')(paymentService, log);
   // Public signup/login endpoints; all workspace data derives identity from JWT.
+  r.get('/auth/recovery-options', recovery.capabilities);
+  r.post('/auth/password-reset/code', recovery.resetCode);
+  r.post('/auth/password-reset/confirm', recovery.resetConfirm);
   r.post('/auth/login', auth.login);
   r.post('/auth/register', auth.register);
   // Provider callbacks are public but cryptographically authenticated.
@@ -46,6 +50,9 @@ function setupRouter(cfg, db, log) {
     const tenant = require('../services/tenantService').tenantForUser(db, req.auth?.id);
     return require('../services/billingRequestContext').run({ actor: req.auth, tenant_id: tenant?.id || null, db, log, cfg }, next);
   });
+  r.get('/auth/email', recovery.email);
+  r.post('/auth/email/code', recovery.bindCode);
+  r.post('/auth/email/confirm', recovery.bindConfirm);
   r.get('/auth/me', auth.me);
   r.post('/auth/session-cookie', auth.sessionCookie);
   r.post('/auth/logout', auth.logout);
@@ -136,6 +143,7 @@ function setupRouter(cfg, db, log) {
   adminRouter.use(requireAdmin);
   adminRouter.get('/users', admin.users);
   adminRouter.post('/users', admin.createUser);
+  adminRouter.post('/users/:id/reset-password', recovery.adminReset);
   adminRouter.patch('/users/:id', admin.updateUser);
   adminRouter.post('/users/:id/balance-adjustments', admin.balanceAdjustment);
   adminRouter.post('/users/:id/balance-corrections', admin.balanceCorrection);

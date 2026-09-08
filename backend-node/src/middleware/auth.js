@@ -3,6 +3,9 @@ const authService = require('../services/authService');
 const logger = require('../logger');
 const crypto = require('crypto');
 const { TokenExpiredError, JsonWebTokenError } = require('jsonwebtoken');
+const PASSWORD_CHANGE_ALLOWED_PATHS = new Set([
+  '/api/v1/auth/me', '/api/v1/auth/change-password', '/api/v1/auth/logout', '/api/v1/auth/session-cookie',
+]);
 
 function readCookie(req, name) {
   const encoded = String(req.headers.cookie || '').split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
@@ -46,6 +49,9 @@ function requireAuth(db) {
       // Keep the authenticated credential available to routes that need to
       // establish a browser cookie for protected static media.
       req.authToken = token;
+      if (req.auth.must_change_password && !PASSWORD_CHANGE_ALLOWED_PATHS.has(String(req.originalUrl || '').split('?')[0].replace(/\/$/, ''))) {
+        return response.error(res, 403, 'PASSWORD_CHANGE_REQUIRED', '请先修改临时密码');
+      }
       return next();
     }
     catch (err) {

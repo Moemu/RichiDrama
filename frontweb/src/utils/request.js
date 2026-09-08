@@ -108,6 +108,12 @@ request.interceptors.response.use(
 
       if (!failedToken || currentToken === failedToken) clearCurrentSession()
     }
+    if (status === 403 && error.response?.data?.error?.code === 'PASSWORD_CHANGE_REQUIRED') {
+      const user = JSON.parse(localStorage.getItem('lmd_auth_user') || '{}')
+      localStorage.setItem('lmd_auth_user', JSON.stringify({ ...user, must_change_password: true }))
+      if (window.location.pathname !== '/change-password') window.location.replace('/change-password')
+      return Promise.reject(error)
+    }
     if (status === 403 && window.location.pathname.startsWith('/admin')) {
       // Server-side access is authoritative. Clear only the cached display
       // identity so a demoted account cannot keep seeing administrator UI.
