@@ -22,6 +22,12 @@ const SQL_BY_KIND = {
 
 function ownershipGuard(db) {
   return (req, res, next) => {
+    // Console ledger queries use drama_id as an audit filter, not as permission
+    // to use the project's creative resources. The admin router still checks access.
+    if (req.method === 'GET' && req.auth?.role === 'admin' && req.auth?.console_access
+      && ['/admin/usage', '/admin/usage-summary', '/admin/transactions'].includes(req.path)) {
+      return next();
+    }
     // 管理员只拥有后台管理权限，不自动获得其他用户创作资源的使用权。
     // 这样既保证项目隔离，也避免管理员能够提交一个子账号资源导致
     // 生成任务归属、扣费账号与素材归属不一致。
