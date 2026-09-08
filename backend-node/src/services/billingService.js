@@ -181,6 +181,7 @@ function proratedPoints(quantity, unitPrice, unitSize) {
 function quote(db, user, input) {
   const serviceType = String(input.service_type || '').trim(); const model = String(input.model || '').trim();
   if (!serviceType || !model) throw new Error('service_type 和 model 必填');
+  require('./modelCatalogService').assertAvailable(db, serviceType, input.provider_model || model);
   const usage = normalizeUsage(input.usage);
   const rows = activePriceItems(db, user.id, serviceType, model);
   const byMeter = new Map(); for (const row of rows) if (!byMeter.has(row.meter)) byMeter.set(row.meter, row);

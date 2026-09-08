@@ -253,7 +253,7 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
   const characters = require('./billingUsageService').unicodeCharacterCount(text);
   billingAuthorization = billing.createAuthorization(db, billingActor, {
     idempotency_key: `tts:${billingActor.id}:${randomUUID()}`,
-    service_type: 'tts', model: billingTarget.billing_key, usage: { character: characters },
+    service_type: 'tts', model: billingTarget.billing_key, provider_model: billingTarget.provider_model, usage: { character: characters },
     reference_type: billing_reference?.type || 'tts', reference_id: billing_reference?.id || storyboard_id || null,
     drama_id: billingDramaId, source_kind: 'storyboard_tts', source_id: storyboard_id || null,
   });

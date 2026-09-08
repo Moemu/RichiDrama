@@ -148,7 +148,7 @@ onBeforeUnmount(() => clearTimeout(quoteTimer))
 function configModels(configs) { return [...new Set((configs || []).filter((item) => item.is_active !== false).flatMap((item) => Array.isArray(item.model) ? item.model : item.model ? [item.model] : []).filter(Boolean))] }
 onMounted(async () => {
   if (!modelOptionsPromise) {
-    modelOptionsPromise = Promise.allSettled([aiAPI.list('text'), omniVideoAPI.capabilities()]).then(([text, video]) => ({
+    modelOptionsPromise = Promise.allSettled([aiAPI.list('text', { selectable: true }), omniVideoAPI.capabilities()]).then(([text, video]) => ({
       text: text.status === 'fulfilled' ? configModels(text.value) : [],
       video: video.status === 'fulfilled' && Array.isArray(video.value) ? video.value : [],
     })).then((result) => { modelOptionsCache = result; return result })

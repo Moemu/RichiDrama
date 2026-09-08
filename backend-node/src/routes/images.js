@@ -45,7 +45,7 @@ function routes(db, cfg, log) {
         if (!String(body.idempotency_key || '').trim()) return response.badRequest(res, '图片生成请求缺少幂等键，请刷新后重试');
         const authorization = billing.createAuthorization(db, req.auth, {
           idempotency_key: String(body.idempotency_key).trim(),
-          service_type: body.service_type || 'image', model: billingTarget.billing_key,
+          service_type: body.service_type || 'image', model: billingTarget.billing_key, provider_model: billingTarget.provider_model,
           usage: { image: 1 },
           pricing_context: require('../services/imageBillingService').imagePricingContext(body),
           reference_type: 'image_generation', reference_id: body.drama_id || null, drama_id: body.drama_id || null, source_kind: 'image_generation', source_id: body.storyboard_id || null,

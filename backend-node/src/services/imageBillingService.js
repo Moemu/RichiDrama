@@ -31,7 +31,7 @@ function createResourceImageBilling(db, { model, dramaId, sourceId, image_url, r
   const authorization = billing.createAuthorization(db, actor, {
     idempotency_key: `resource-image:${randomUUID()}`,
     service_type: 'image',
-    model: billingTarget.billing_key,
+    model: billingTarget.billing_key, provider_model: billingTarget.provider_model,
     usage: { image: 1 },
     pricing_context: imagePricingContext({ image_url, reference_images, reference_image_urls }),
     reference_type: 'image_generation',
@@ -87,7 +87,7 @@ function quoteResourceImages(db, user, input = {}) {
   if (plainCount > 0) {
     groups.push(billing.quote(db, user, {
       service_type: 'image',
-      model: target.billing_key,
+      model: target.billing_key, provider_model: target.provider_model,
       usage: { image: plainCount },
       pricing_context: { has_image_input: false },
     }));
@@ -95,7 +95,7 @@ function quoteResourceImages(db, user, input = {}) {
   if (imageInputCount > 0) {
     groups.push(billing.quote(db, user, {
       service_type: 'image',
-      model: target.billing_key,
+      model: target.billing_key, provider_model: target.provider_model,
       usage: { image: imageInputCount },
       pricing_context: { has_image_input: true },
     }));

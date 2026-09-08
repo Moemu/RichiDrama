@@ -24,8 +24,11 @@ function list(db) {
     const options = tenant ? { tenant_id: tenant.id } : {};
     const list = req.auth?.role === 'admin'
       ? aiConfigService.listConfigs(db, req.query.service_type, options)
-      : aiConfigService.listPublicConfigs(db, req.query.service_type, options);
-    response.success(res, maskConfigs(list));
+      : aiConfigService.listPublicConfigs(db, req.query.service_type, { ...options, user_id: req.auth.id });
+    const visible = req.auth?.role === 'admin' && req.query?.selectable === 'true'
+      ? require('../services/modelCatalogService').filterConfigs(db, list, req.auth.id)
+      : list;
+    response.success(res, maskConfigs(visible));
   };
 }
 
@@ -74,6 +77,7 @@ function create(db, log, cfg) {
       // 新建的全局配置要立即补绑到 legacy 项目组,否则在这些组里不可见,
       // 生成与计费解析也选不到它(表现:添加成功但列表不显示、模型不走计费)。
       else require('../services/tenantService').bindGlobalConfigToLegacyTenants(db, config);
+      if (body.catalog_managed === true) require('../services/modelCatalogService').registerNewModels(db, config);
       response.created(res, maskConfig(config));
     } catch (err) {
       log.errorw('Create AI config failed', { error: err.message });
@@ -134,6 +138,7 @@ function update(db, log, cfg) {
     // 仅当配置真正归属该组时才更新分组绑定;bindOwnedConfig 会拒绝
     // 绑定全局配置(legacy 视图编辑全局配置的场景)。
     if (tenantId && !editingGlobalFromTenantView) require('../services/tenantService').bindOwnedConfig(db, tenantId, config, { is_default: req.body?.is_default !== false, priority: req.body?.priority });
+    if (body.catalog_managed === true) require('../services/modelCatalogService').registerNewModels(db, config, owned.model);
     response.success(res, maskConfig(config));
   };
 }

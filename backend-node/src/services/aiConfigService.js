@@ -172,7 +172,7 @@ function publicConfig(config) {
 }
 
 function listPublicConfigs(db, serviceType, options = {}) {
-  return listConfigs(db, serviceType, options).map(publicConfig);
+  return require('./modelCatalogService').filterConfigs(db, listConfigs(db, serviceType, options), options.user_id).map(publicConfig);
 }
 
 function resolveBillingTarget(db, serviceType, model, configId, options = {}) {

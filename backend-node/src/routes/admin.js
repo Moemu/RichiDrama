@@ -23,6 +23,12 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
     return item;
   }
   return {
+    modelCatalog: guarded((_req, res) => response.success(res, require('../services/modelCatalogService').list(db))),
+    saveModelCatalog: guarded((req, res) => {
+      if (require('../services/aiConfigService').getVendorLockStatus(cfg).enabled) throw new Error('厂商锁定模式不允许修改模型目录');
+      response.success(res, require('../services/modelCatalogService').save(db, req.auth.id, req.body || {}, log));
+    }),
+    modelPriceDraft: guarded((req, res) => response.created(res, require('../services/modelCatalogService').createPriceDraft(db, req.auth.id, req.body || {}))),
     users: (_req, res) => response.success(res, billing.listUsers(db)),
     createUser: guarded((req, res) => {
       const user = auth.createUser(db, req.body || {}, req.auth.id);

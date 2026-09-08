@@ -2,7 +2,7 @@ import request from '@/utils/request'
 
 export const aiAPI = {
   list(serviceType, options = {}) {
-    const params = { ...(serviceType ? { service_type: serviceType } : {}), ...(options.tenantId ? { tenant_id: options.tenantId } : {}) }
+    const params = { ...(serviceType ? { service_type: serviceType } : {}), ...(options.tenantId ? { tenant_id: options.tenantId } : {}), ...(options.selectable ? { selectable: true } : {}) }
     return request.get('/ai-configs', { params })
   },
   get(id, options = {}) {
