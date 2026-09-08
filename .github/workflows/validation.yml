@@ -41,6 +41,8 @@ jobs:
           shellcheck -e SC1091 \
             deploy/lib.sh deploy/preview-deploy deploy/preview-payment-smoke deploy/preview-remove deploy/preview-show deploy/preview-cleanup \
             deploy/release-deploy deploy/release-rollback deploy/install-operations
+      - name: Test production approval queue
+        run: node --test .github/scripts/prepare-production-deploy.test.cjs
       - name: Install backend dependencies
         working-directory: backend-node
         run: npm ci --no-audit --no-fund

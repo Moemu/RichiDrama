@@ -10,6 +10,18 @@
 
 合并到 `main` 后，`Validation` 必须先成功。然后 `Production Deploy` 等待 `production` environment 批准。
 
+### 生产审批队列
+
+`Production Deploy` 的 `prepare` 作业不占用发布并发锁。它先确认待发布提交仍是最新 `main`，再拒绝同一工作流中更早运行的、尚待批准的 `production` 部署。晚完成的旧版本验证会直接跳过发布。手动触发也要求当前 `main` 的 Validation 成功。
+
+实际 `deploy` 作业保留 `production` 人工审批，并使用 `deploy-production` 并发组及 `cancel-in-progress: false`。清理只调用待审批环境的拒绝接口，不取消 workflow run，不中断已批准的发布。服务器端提交一致性检查和发布锁保持不变。被淘汰的旧任务会显示为审批拒绝导致的失败。
+
+自动淘汰需显式启用：将生产环境所列审核者的细粒度令牌保存为仓库 Actions secret `DEPLOY_REVIEW_TOKEN`，仅授权此仓库的 Contents read、Actions read 和 Deployments write。令牌必须属于有生产审核资格的身份，不能仅靠增加 `GITHUB_TOKEN` 权限代替。不要将此 secret 放在 `production` environment 中，否则清理任务自身也会等待审批。
+
+未配置该 secret 时，清理任务显示警告并保留原有人工处理方式；不会自动批准或拒绝任何部署。已配置但权限不足、令牌失效或 API 请求失败时，准备任务明确失败，需修正配置后重跑。若人工审批先于清理完成，脚本重新确认审批已离开等待状态后保留该发布。
+
+本地验证：`node --test .github/scripts/prepare-production-deploy.test.cjs`。测试使用虚构令牌与隔离 HTTP 服务，不操作真实 GitHub 部署或生产数据。Validation 工作流运行同一组测试。启用后应以两次真实 main 合并验收旧审批淘汰，再验证执行中的发布不会被后续合并打断。
+
 ## 服务器目录
 
 - 服务器本地包：`/data/minidrama-incoming/<sha>.tar.gz`

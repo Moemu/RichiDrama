@@ -9,28 +9,44 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
-
 jobs:
-  deploy:
+  prepare:
     if: >-
-      (github.event_name == 'workflow_dispatch') ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      deploy: ${{ steps.prepare.outputs.deploy }}
+      revision: ${{ steps.prepare.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Supersede old production approvals
+        id: prepare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEPLOY_REVIEW_TOKEN: ${{ secrets.DEPLOY_REVIEW_TOKEN }}
+        run: node .github/scripts/prepare-production-deploy.cjs
+
+  deploy:
+    needs: prepare
+    if: needs.prepare.outputs.deploy == 'true'
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 50
     environment: production
     steps:
-      - name: Resolve release revision
-        id: revision
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          if [[ "$EVENT_NAME" == workflow_run ]]; then sha="$WORKFLOW_SHA"; else sha="${GITHUB_SHA}"; fi
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Deploy approved release from a server-side fetch
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -41,7 +57,7 @@ jobs:
           command_timeout: 45m
           script: |
             set -euo pipefail
-            sha='${{ steps.revision.outputs.sha }}'
+            sha='${{ needs.prepare.outputs.revision }}'
             [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
             repo='/data/apps/LocalMiniDrama'
             test -d "$repo/.git"
