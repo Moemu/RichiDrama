@@ -157,6 +157,8 @@ function setupRouter(cfg, db, log) {
   adminRouter.post('/provider-connections', admin.saveProviderConnection);
   adminRouter.patch('/provider-connections/:id', admin.saveProviderConnection);
   adminRouter.post('/provider-connections/convert', admin.convertProviderConnection);
+  adminRouter.get('/provider-connections/:id/candidates', admin.providerAttachmentCandidates);
+  adminRouter.post('/provider-connections/:id/attach', admin.attachProviderConfigs);
   adminRouter.post('/model-catalog', admin.saveModelCatalog);
   adminRouter.post('/model-catalog/price-draft', admin.modelPriceDraft);
   const modelDiscovery = require('./modelDiscovery')(db, log, cfg);
