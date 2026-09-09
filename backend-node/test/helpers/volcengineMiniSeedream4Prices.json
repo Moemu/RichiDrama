@@ -1,0 +1,550 @@
+[
+  {
+    "FoundationModelName": "doubao-seed-2-0-mini",
+    "State": "Available",
+    "VendorName": "字节跳动",
+    "DisplayName": "Doubao-Seed-2.0-mini",
+    "ChargeItems": [
+      {
+        "Price": 0.01,
+        "UnitCode": "千tokens",
+        "Type": "LoraFinetune",
+        "OriginalPrice": 0.01
+      },
+      {
+        "Price": 0.02,
+        "UnitCode": "千tokens",
+        "Type": "Finetune",
+        "OriginalPrice": 0.02
+      },
+      {
+        "Price": 0.002,
+        "UnitCode": "千tokens",
+        "Type": "InferenceCompletion",
+        "OriginalPrice": 0.002
+      },
+      {
+        "Price": 0.00004,
+        "UnitCode": "千tokens",
+        "Type": "BatchInferenceCacheHit",
+        "OriginalPrice": 0.00004
+      },
+      {
+        "Price": 0.0006,
+        "UnitCode": "千tokens",
+        "Type": "AudioCacheHit",
+        "OriginalPrice": 0.0006
+      },
+      {
+        "Price": 0.006,
+        "UnitCode": "千tokens",
+        "Type": "FinetuneAudioPrompt",
+        "OriginalPrice": 0.006
+      },
+      {
+        "Price": 0.0006,
+        "UnitCode": "千tokens",
+        "Type": "BatchAudioCacheHit",
+        "OriginalPrice": 0.0006
+      },
+      {
+        "Price": 0.0004,
+        "UnitCode": "千tokens",
+        "Type": "FinetuneInferencePrompt",
+        "OriginalPrice": 0.0004
+      },
+      {
+        "Price": 0.004,
+        "UnitCode": "千tokens",
+        "Type": "FinetuneInferenceCompletion",
+        "OriginalPrice": 0.004
+      },
+      {
+        "Price": 0.006,
+        "UnitCode": "千tokens",
+        "Type": "FastAudioPrompt",
+        "OriginalPrice": 0.006
+      },
+      {
+        "Price": 0.003,
+        "UnitCode": "千tokens",
+        "Type": "AudioPrompt",
+        "OriginalPrice": 0.003
+      },
+      {
+        "Price": 0.004,
+        "UnitCode": "千tokens",
+        "Type": "FastInferenceCompletion",
+        "OriginalPrice": 0.004
+      },
+      {
+        "Price": 0.0012,
+        "UnitCode": "千tokens",
+        "Type": "FastAudioCacheHit",
+        "OriginalPrice": 0.0012
+      },
+      {
+        "Price": 0.00004,
+        "UnitCode": "千tokens",
+        "Type": "ContextSessionHit",
+        "OriginalPrice": 0.00004
+      },
+      {
+        "Price": 0.000017,
+        "UnitCode": "千tokens/小时",
+        "Type": "ContextSessionStorage",
+        "OriginalPrice": 0.000017
+      },
+      {
+        "Price": 0.00008,
+        "UnitCode": "千tokens",
+        "Type": "FastInferenceCacheHit",
+        "OriginalPrice": 0.00008
+      },
+      {
+        "Price": 0.001,
+        "UnitCode": "千tokens",
+        "Type": "BatchInferenceCompletion",
+        "OriginalPrice": 0.001
+      },
+      {
+        "Price": 0.0004,
+        "UnitCode": "千tokens",
+        "Type": "FastInferencePrompt",
+        "OriginalPrice": 0.0004
+      },
+      {
+        "Price": 0.0002,
+        "UnitCode": "千tokens",
+        "Type": "InferencePrompt",
+        "OriginalPrice": 0.0002
+      },
+      {
+        "Price": 0.0001,
+        "UnitCode": "千tokens",
+        "Type": "BatchInferencePrompt",
+        "OriginalPrice": 0.0001
+      },
+      {
+        "Price": 0.0015,
+        "UnitCode": "千tokens",
+        "Type": "BatchAudioPrompt",
+        "OriginalPrice": 0.0015
+      }
+    ],
+    "MultiChargeItems": [
+      {
+        "ChargeItems": [
+          {
+            "Price": 0.0001,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferencePrompt",
+            "OriginalPrice": 0.0001
+          },
+          {
+            "Price": 0.00004,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCacheHit",
+            "OriginalPrice": 0.00004
+          },
+          {
+            "Price": 0.003,
+            "UnitCode": "千tokens",
+            "Type": "AudioPrompt",
+            "OriginalPrice": 0.003
+          },
+          {
+            "Price": 0.0004,
+            "UnitCode": "千tokens",
+            "Type": "FastInferencePrompt",
+            "OriginalPrice": 0.0004
+          },
+          {
+            "Price": 0.006,
+            "UnitCode": "千tokens",
+            "Type": "FastAudioPrompt",
+            "OriginalPrice": 0.006
+          },
+          {
+            "Price": 0.004,
+            "UnitCode": "千tokens",
+            "Type": "FinetuneInferenceCompletion",
+            "OriginalPrice": 0.004
+          },
+          {
+            "Price": 0.002,
+            "UnitCode": "千tokens",
+            "Type": "InferenceCompletion",
+            "OriginalPrice": 0.002
+          },
+          {
+            "Price": 0.0015,
+            "UnitCode": "千tokens",
+            "Type": "BatchAudioPrompt",
+            "OriginalPrice": 0.0015
+          },
+          {
+            "Price": 0.001,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCompletion",
+            "OriginalPrice": 0.001
+          },
+          {
+            "Price": 0.0002,
+            "UnitCode": "千tokens",
+            "Type": "InferencePrompt",
+            "OriginalPrice": 0.0002
+          },
+          {
+            "Price": 0.0006,
+            "UnitCode": "千tokens",
+            "Type": "BatchAudioCacheHit",
+            "OriginalPrice": 0.0006
+          },
+          {
+            "Price": 0.0012,
+            "UnitCode": "千tokens",
+            "Type": "FastAudioCacheHit",
+            "OriginalPrice": 0.0012
+          },
+          {
+            "Price": 0.006,
+            "UnitCode": "千tokens",
+            "Type": "FinetuneAudioPrompt",
+            "OriginalPrice": 0.006
+          },
+          {
+            "Price": 0.0006,
+            "UnitCode": "千tokens",
+            "Type": "AudioCacheHit",
+            "OriginalPrice": 0.0006
+          },
+          {
+            "Price": 0.0004,
+            "UnitCode": "千tokens",
+            "Type": "FinetuneInferencePrompt",
+            "OriginalPrice": 0.0004
+          },
+          {
+            "Price": 0.004,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCompletion",
+            "OriginalPrice": 0.004
+          },
+          {
+            "Price": 0.00008,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCacheHit",
+            "OriginalPrice": 0.00008
+          },
+          {
+            "Price": 0.00004,
+            "UnitCode": "千tokens",
+            "Type": "ContextSessionHit",
+            "OriginalPrice": 0.00004
+          }
+        ],
+        "MaxPromptTokens": 32768,
+        "Name": "输入32K以内",
+        "Description": "输入小于≤32k"
+      },
+      {
+        "ChargeItems": [
+          {
+            "Price": 0.0008,
+            "UnitCode": "千tokens",
+            "Type": "FastInferencePrompt",
+            "OriginalPrice": 0.0008
+          },
+          {
+            "Price": 0.008,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCompletion",
+            "OriginalPrice": 0.008
+          },
+          {
+            "Price": 0.006,
+            "UnitCode": "千tokens",
+            "Type": "AudioPrompt",
+            "OriginalPrice": 0.006
+          },
+          {
+            "Price": 0.00016,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCacheHit",
+            "OriginalPrice": 0.00016
+          },
+          {
+            "Price": 0.0008,
+            "UnitCode": "千tokens",
+            "Type": "FinetuneInferencePrompt",
+            "OriginalPrice": 0.0008
+          },
+          {
+            "Price": 0.003,
+            "UnitCode": "千tokens",
+            "Type": "BatchAudioPrompt",
+            "OriginalPrice": 0.003
+          },
+          {
+            "Price": 0.0012,
+            "UnitCode": "千tokens",
+            "Type": "BatchAudioCacheHit",
+            "OriginalPrice": 0.0012
+          },
+          {
+            "Price": 0.004,
+            "UnitCode": "千tokens",
+            "Type": "InferenceCompletion",
+            "OriginalPrice": 0.004
+          },
+          {
+            "Price": 0.012,
+            "UnitCode": "千tokens",
+            "Type": "FinetuneAudioPrompt",
+            "OriginalPrice": 0.012
+          },
+          {
+            "Price": 0.0012,
+            "UnitCode": "千tokens",
+            "Type": "AudioCacheHit",
+            "OriginalPrice": 0.0012
+          },
+          {
+            "Price": 0.0024,
+            "UnitCode": "千tokens",
+            "Type": "FastAudioCacheHit",
+            "OriginalPrice": 0.0024
+          },
+          {
+            "Price": 0.0002,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferencePrompt",
+            "OriginalPrice": 0.0002
+          },
+          {
+            "Price": 0.008,
+            "UnitCode": "千tokens",
+            "Type": "FinetuneInferenceCompletion",
+            "OriginalPrice": 0.008
+          },
+          {
+            "Price": 0.0004,
+            "UnitCode": "千tokens",
+            "Type": "InferencePrompt",
+            "OriginalPrice": 0.0004
+          },
+          {
+            "Price": 0.002,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCompletion",
+            "OriginalPrice": 0.002
+          },
+          {
+            "Price": 0.00008,
+            "UnitCode": "千tokens",
+            "Type": "ContextSessionHit",
+            "OriginalPrice": 0.00008
+          },
+          {
+            "Price": 0.00008,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCacheHit",
+            "OriginalPrice": 0.00008
+          },
+          {
+            "Price": 0.012,
+            "UnitCode": "千tokens",
+            "Type": "FastAudioPrompt",
+            "OriginalPrice": 0.012
+          }
+        ],
+        "MaxPromptTokens": 131072,
+        "Name": "输入128K以内",
+        "Description": "32k<输入<=128K"
+      },
+      {
+        "ChargeItems": [
+          {
+            "Price": 0.0024,
+            "UnitCode": "千tokens",
+            "Type": "AudioCacheHit",
+            "OriginalPrice": 0.0024
+          },
+          {
+            "Price": 0.00016,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCacheHit",
+            "OriginalPrice": 0.00016
+          },
+          {
+            "Price": 0.016,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCompletion",
+            "OriginalPrice": 0.016
+          },
+          {
+            "Price": 0.0004,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferencePrompt",
+            "OriginalPrice": 0.0004
+          },
+          {
+            "Price": 0.016,
+            "UnitCode": "千tokens",
+            "Type": "FinetuneInferenceCompletion",
+            "OriginalPrice": 0.016
+          },
+          {
+            "Price": 0.006,
+            "UnitCode": "千tokens",
+            "Type": "BatchAudioPrompt",
+            "OriginalPrice": 0.006
+          },
+          {
+            "Price": 0.008,
+            "UnitCode": "千tokens",
+            "Type": "InferenceCompletion",
+            "OriginalPrice": 0.008
+          },
+          {
+            "Price": 0.024,
+            "UnitCode": "千tokens",
+            "Type": "FinetuneAudioPrompt",
+            "OriginalPrice": 0.024
+          },
+          {
+            "Price": 0.004,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCompletion",
+            "OriginalPrice": 0.004
+          },
+          {
+            "Price": 0.0008,
+            "UnitCode": "千tokens",
+            "Type": "InferencePrompt",
+            "OriginalPrice": 0.0008
+          },
+          {
+            "Price": 0.024,
+            "UnitCode": "千tokens",
+            "Type": "FastAudioPrompt",
+            "OriginalPrice": 0.024
+          },
+          {
+            "Price": 0.0024,
+            "UnitCode": "千tokens",
+            "Type": "BatchAudioCacheHit",
+            "OriginalPrice": 0.0024
+          },
+          {
+            "Price": 0.0016,
+            "UnitCode": "千tokens",
+            "Type": "FastInferencePrompt",
+            "OriginalPrice": 0.0016
+          },
+          {
+            "Price": 0.0048,
+            "UnitCode": "千tokens",
+            "Type": "FastAudioCacheHit",
+            "OriginalPrice": 0.0048
+          },
+          {
+            "Price": 0.0016,
+            "UnitCode": "千tokens",
+            "Type": "FinetuneInferencePrompt",
+            "OriginalPrice": 0.0016
+          },
+          {
+            "Price": 0.012,
+            "UnitCode": "千tokens",
+            "Type": "AudioPrompt",
+            "OriginalPrice": 0.012
+          },
+          {
+            "Price": 0.00016,
+            "UnitCode": "千tokens",
+            "Type": "ContextSessionHit",
+            "OriginalPrice": 0.00016
+          },
+          {
+            "Price": 0.00032,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCacheHit",
+            "OriginalPrice": 0.00032
+          }
+        ],
+        "Name": "输入256K以内",
+        "Description": "128k<输入<=256K"
+      }
+    ],
+    "FreeResourcePackItems": [],
+    "SubServices": [
+      {
+        "SubService": "base",
+        "Status": "Available"
+      },
+      {
+        "SubService": "context-cache",
+        "Status": "Unavailable"
+      },
+      {
+        "SubService": "fast-infer",
+        "Status": "Unavailable"
+      }
+    ],
+    "Instruction": "https://www.volcengine.com/docs/82379/1494384",
+    "IsOverdue": false,
+    "IsLimitedActivation": false,
+    "IsDeprecated": false
+  },
+  {
+    "FoundationModelName": "doubao-seedream-4-0",
+    "State": "Available",
+    "VendorName": "字节跳动",
+    "DisplayName": "Doubao-Seedream-4.0",
+    "ChargeItems": [
+      {
+        "Price": 0.2,
+        "UnitCode": "张",
+        "Type": "T2ICompletion",
+        "OriginalPrice": 0.2
+      },
+      {
+        "Price": 0.2,
+        "UnitCode": "张",
+        "Type": "I2ICompletion",
+        "OriginalPrice": 0.2
+      }
+    ],
+    "MultiChargeItems": [
+      {
+        "ChargeItems": [
+          {
+            "Price": 0.2,
+            "UnitCode": "张",
+            "Type": "I2ICompletion",
+            "OriginalPrice": 0.2
+          },
+          {
+            "Price": 0.2,
+            "UnitCode": "张",
+            "Type": "T2ICompletion",
+            "OriginalPrice": 0.2
+          }
+        ]
+      }
+    ],
+    "FreeResourcePackItems": [],
+    "SubServices": [
+      {
+        "SubService": "base",
+        "Status": "Available"
+      }
+    ],
+    "Instruction": "https://www.volcengine.com/docs/82379/1541523",
+    "IsOverdue": false,
+    "IsLimitedActivation": false,
+    "IsDeprecated": false
+  }
+]

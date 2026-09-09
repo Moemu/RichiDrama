@@ -29,11 +29,15 @@ const { ownershipGuard } = require('../middleware/ownership');
 function setupRouter(cfg, db, log) {
   const r = express.Router();
   const auth = authRoutes(db);
+  const recovery = require('./passwordRecovery')(db);
   const billing = billingRoutes(db);
   const admin = adminRoutes(db, log, cfg);
   const paymentService = require('../services/paymentService').createPaymentService(db, cfg, log);
   const payments = require('./payments')(paymentService, log);
   // Public signup/login endpoints; all workspace data derives identity from JWT.
+  r.get('/auth/recovery-options', recovery.capabilities);
+  r.post('/auth/password-reset/code', recovery.resetCode);
+  r.post('/auth/password-reset/confirm', recovery.resetConfirm);
   r.post('/auth/login', auth.login);
   r.post('/auth/register', auth.register);
   // Provider callbacks are public but cryptographically authenticated.
@@ -46,6 +50,9 @@ function setupRouter(cfg, db, log) {
     const tenant = require('../services/tenantService').tenantForUser(db, req.auth?.id);
     return require('../services/billingRequestContext').run({ actor: req.auth, tenant_id: tenant?.id || null, db, log, cfg }, next);
   });
+  r.get('/auth/email', recovery.email);
+  r.post('/auth/email/code', recovery.bindCode);
+  r.post('/auth/email/confirm', recovery.bindConfirm);
   r.get('/auth/me', auth.me);
   r.post('/auth/session-cookie', auth.sessionCookie);
   r.post('/auth/logout', auth.logout);
@@ -137,6 +144,7 @@ function setupRouter(cfg, db, log) {
   adminRouter.use('/costs', require('./costs')(db));
   adminRouter.get('/users', admin.users);
   adminRouter.post('/users', admin.createUser);
+  adminRouter.post('/users/:id/reset-password', recovery.adminReset);
   adminRouter.patch('/users/:id', admin.updateUser);
   adminRouter.post('/users/:id/balance-adjustments', admin.balanceAdjustment);
   adminRouter.post('/users/:id/balance-corrections', admin.balanceCorrection);
@@ -158,6 +166,8 @@ function setupRouter(cfg, db, log) {
   adminRouter.post('/provider-connections', admin.saveProviderConnection);
   adminRouter.patch('/provider-connections/:id', admin.saveProviderConnection);
   adminRouter.post('/provider-connections/convert', admin.convertProviderConnection);
+  adminRouter.get('/provider-connections/:id/candidates', admin.providerAttachmentCandidates);
+  adminRouter.post('/provider-connections/:id/attach', admin.attachProviderConfigs);
   adminRouter.post('/model-catalog', admin.saveModelCatalog);
   adminRouter.post('/model-catalog/price-draft', admin.modelPriceDraft);
   const modelDiscovery = require('./modelDiscovery')(db, log, cfg);

@@ -11,7 +11,7 @@
       </el-form-item>
       <div class="discovery-source-fields">
         <el-form-item label="模型列表来源">
-          <el-select v-model="source" :disabled="fetching || saving" @change="resetResults" class="discovery-full">
+          <el-select v-model="source" :disabled="fetching || saving" @change="changeSource" class="discovery-full">
             <el-option v-for="(label, value) in sourceNames" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
@@ -22,23 +22,27 @@
         </el-form-item>
       </div>
       <p class="discovery-help" v-if="source === 'openai'">使用连接中已保存的地址和 API Key 读取 /models。仅适用于支持该接口的供应商。</p>
-      <p class="discovery-help" v-else-if="source === 'volcengine_activations'">读取火山账户已开通且可用的模型，无需先部署端点。请选择与目标连接同账号、同区域的 ModelArk 配置。</p>
+      <p class="discovery-help" v-else-if="source === 'volcengine_activations'">读取账户已开通的基础型号。请点击“查看版本”，再导入带日期的调用 ID。请选择与目标连接同账号、同区域的 ModelArk 配置。</p>
+      <p class="discovery-help" v-else-if="source === 'volcengine_versions'">读取所选基础型号的日期版本。请确认账号权限后选择所需版本，不会自动切换已有默认模型。</p>
       <p class="discovery-help" v-else>读取已部署的 ep-… 模型 ID。请选择与目标连接同账号、同区域的 ModelArk 配置；不包含未部署的公共模型。</p>
-      <p class="discovery-help" v-if="source !== 'openai' && !availableCredentials.length">暂无可用管理凭据。请先在供应商连接中保存 ModelArk 资产库的长期 AK/SK，并授予 {{ source === 'volcengine_activations' ? 'ListModelActivations' : 'ListEndpoints' }} 读取权限。</p>
+      <p class="discovery-help" v-if="source !== 'openai' && !availableCredentials.length">暂无可用管理凭据。请先在供应商连接中保存 ModelArk 资产库的长期 AK/SK，并授予 {{ source === 'volcengine_activations' ? 'ListModelActivations' : source === 'volcengine_versions' ? 'ListFoundationModelVersions' : 'ListEndpoints' }} 读取权限。</p>
+      <el-form-item v-if="source === 'volcengine_versions'" label="基础型号"><el-input v-model="foundationModel" placeholder="例如 doubao-seed-2-1-turbo" :disabled="fetching || saving" @change="resetResults" /></el-form-item>
       <div class="discovery-fetch"><el-button type="primary" :loading="fetching" :disabled="!configId || saving || (source !== 'openai' && !credentialId)" @click="fetchModels()">{{ fetched ? '重新获取' : '获取模型列表' }}</el-button><span v-if="target">{{ target.service_type === 'provider' ? '共享连接可同时导入多种能力的模型。' : '旧配置仅接受同类能力；跨能力导入请先转换为共享连接。' }}</span></div>
     </el-form>
 
     <section v-if="fetched" class="discovery-results" aria-label="获取结果">
+      <el-button v-if="source === 'volcengine_versions'" link :disabled="fetching || saving" @click="backToFamilies">返回基础型号列表</el-button>
       <div class="discovery-results-heading"><h3>获取结果 <small>{{ models.length }} 个</small></h3><span>已选 {{ chosen.length }} / 200</span></div>
       <p v-if="ignored" class="discovery-help">{{ ignored }} 条无效型号已跳过。</p>
       <el-input v-model="search" placeholder="搜索已获取的模型 ID 或名称" clearable aria-label="搜索获取结果" :disabled="saving" />
       <div class="discovery-selection"><el-button link :disabled="saving || !visibleModels.length" @click="selectPage">选择本页</el-button><el-button link :disabled="saving || !chosen.length" @click="chosen = []">清空选择</el-button><span>{{ matching.length }} 个匹配</span></div>
       <div v-if="!matching.length" class="discovery-empty">{{ models.length ? '没有匹配型号，请调整搜索条件。' : '供应商未返回模型。请检查账号权限或部署状态。' }}</div>
       <div v-for="model in visibleModels" :key="model.id" class="discovery-model">
-        <el-checkbox :model-value="chosen.includes(model.id)" :disabled="saving || model.configured || incompatible(model) || (chosen.length >= 200 && !chosen.includes(model.id))" :aria-label="`选择 ${model.id}`" @change="checked => toggle(model.id, checked)" />
+        <el-checkbox :model-value="chosen.includes(model.id)" :disabled="saving || model.importable === false || model.configured || incompatible(model) || (chosen.length >= 200 && !chosen.includes(model.id))" :aria-label="`选择 ${model.id}`" @change="checked => toggle(model.id, checked)" />
         <div class="discovery-model-name"><strong>{{ model.id }}</strong><small v-if="model.display_name !== model.id">{{ model.display_name }}</small><small v-if="model.provider_status">供应商状态：{{ model.provider_status }}</small></div>
         <el-tag v-if="model.capability" size="small" :type="incompatible(model) ? 'warning' : 'info'">{{ types[model.capability] }}{{ incompatible(model) ? ' · 与旧配置不符' : '' }}</el-tag>
         <el-select v-else-if="!model.configured" v-model="selectedCapabilities[model.id]" :aria-label="`${model.id} 的能力`" placeholder="选择能力" class="capability-select" :disabled="saving"><el-option v-for="type in ['text','image','video','tts']" :key="type" :value="type" :label="types[type]" /></el-select>
+        <el-button v-if="model.importable === false" link type="primary" :disabled="fetching || saving" @click="viewVersions(model)">查看版本</el-button>
         <el-tag v-if="model.configured" size="small" type="info">已在连接中</el-tag>
       </div>
       <el-pagination v-if="matching.length > 20" v-model:current-page="page" :page-size="20" :total="matching.length" layout="prev, pager, next" :pager-count="5" :disabled="saving" class="discovery-pagination" />
@@ -56,12 +60,16 @@ import { modelDiscoveryAPI } from '@/api/modelDiscovery'
 const props = defineProps({ modelValue: Boolean, initialConnectionId: { type: [String, Number], default: null } })
 const emit = defineEmits(['update:modelValue', 'imported'])
 const types = { provider: '共享连接', text: '文本', image: '图片', storyboard_image: '分镜图片', video: '视频', tts: '语音' }
-const sourceNames = { openai: 'OpenAI / OpenAI 兼容', volcengine_activations: '火山方舟 · 账户可用模型', volcengine_endpoints: '火山方舟 · 已部署端点' }
+const sourceNames = { openai: 'OpenAI / OpenAI 兼容', volcengine_activations: '火山方舟 · 账户基础型号', volcengine_versions: '火山方舟 · 模型日期版本', volcengine_endpoints: '火山方舟 · 已部署端点' }
 const connections = ref([]); const credentials = ref([]); const configId = ref(null); const credentialId = ref(null); const source = ref('openai')
 const loading = ref(false); const fetching = ref(false); const saving = ref(false); const error = ref('')
 const models = ref([]); const chosen = ref([]); const fetched = ref(false); const nextPage = ref(null); const total = ref(0); const ignored = ref(0)
 const search = ref(''); const page = ref(1); const showSource = ref(true)
 const selectedCapabilities = ref({})
+const foundationModel = ref('')
+function changeSource() { foundationModel.value = ''; resetResults() }
+async function viewVersions(model) { foundationModel.value = model.foundation_model; source.value = 'volcengine_versions'; await fetchModels() }
+async function backToFamilies() { source.value = 'volcengine_activations'; foundationModel.value = ''; await fetchModels() }
 const missingCapability = computed(() => chosen.value.some(id => !models.value.find(model => model.id === id)?.capability && !selectedCapabilities.value[id]))
 function incompatible(model) { return target.value?.service_type !== 'provider' && model.capability && model.capability !== (target.value?.service_type === 'storyboard_image' ? 'image' : target.value?.service_type) }
 let requestVersion = 0
@@ -72,9 +80,9 @@ const visibleModels = computed(() => matching.value.slice((page.value - 1) * 20,
 watch(search, () => { page.value = 1 })
 watch(() => props.modelValue, open => { if (open) loadConnections(); else { requestVersion++; fetching.value = false } })
 function resetResults() { selectedCapabilities.value = {}; requestVersion++; models.value = []; chosen.value = []; fetched.value = false; nextPage.value = null; total.value = 0; ignored.value = 0; search.value = ''; page.value = 1; error.value = ''; showSource.value = true }
-function changeConnection() { source.value = target.value?.recommended_source || target.value?.source || 'openai'; credentialId.value = null; resetResults() }
+function changeConnection() { foundationModel.value = ''; source.value = target.value?.recommended_source || target.value?.source || 'openai'; credentialId.value = null; resetResults() }
 async function loadConnections() {
-  resetResults(); configId.value = null; credentialId.value = null; source.value = 'openai'; connections.value = []; credentials.value = []; loading.value = true
+  foundationModel.value = ''; resetResults(); configId.value = null; credentialId.value = null; source.value = 'openai'; connections.value = []; credentials.value = []; loading.value = true
   const version = requestVersion
   try { const data = await modelDiscoveryAPI.connections(); if (version !== requestVersion) return; connections.value = data.connections; credentials.value = data.credentials; if (props.initialConnectionId && connections.value.some(row => row.id === props.initialConnectionId)) { configId.value = props.initialConnectionId; source.value = target.value?.recommended_source || target.value?.source || 'openai' }; if (!connections.value.length) error.value = '暂无连接，请先在供应商连接中保存接入信息' }
   catch (e) { if (version === requestVersion) error.value = e.message || '读取连接失败' }
@@ -84,7 +92,7 @@ async function fetchModels(next = 1) {
   if (next === 1) resetResults()
   const version = requestVersion; fetching.value = true; error.value = ''
   try {
-    const data = await modelDiscoveryAPI.fetch(configId.value, { source: source.value, credential_config_id: credentialId.value, page: next })
+    const data = await modelDiscoveryAPI.fetch(configId.value, { source: source.value, credential_config_id: credentialId.value, page: next, ...(source.value === 'volcengine_versions' ? { foundation_model: foundationModel.value } : {}) })
     if (version !== requestVersion) return
     models.value = [...new Map([...models.value, ...data.models].map(model => [model.id, model])).values()]
     nextPage.value = data.next_page; total.value = data.total; ignored.value += data.ignored; fetched.value = true; showSource.value = false
@@ -92,11 +100,11 @@ async function fetchModels(next = 1) {
   finally { if (version === requestVersion) fetching.value = false }
 }
 function toggle(id, checked) { chosen.value = checked ? [...chosen.value, id] : chosen.value.filter(value => value !== id) }
-function selectPage() { chosen.value = [...new Set([...chosen.value, ...visibleModels.value.filter(model => !model.configured && !incompatible(model)).map(model => model.id)])].slice(0, 200) }
+function selectPage() { chosen.value = [...new Set([...chosen.value, ...visibleModels.value.filter(model => model.importable !== false && !model.configured && !incompatible(model)).map(model => model.id)])].slice(0, 200) }
 function close(done) { if (saving.value) return; emit('update:modelValue', false); if (typeof done === 'function') done() }
 async function importModels() {
   saving.value = true; error.value = ''
-  try { const result = await modelDiscoveryAPI.import(configId.value, chosen.value, Object.fromEntries(chosen.value.map(id => [id, models.value.find(model => model.id === id)?.capability || selectedCapabilities.value[id]]))); ElMessage.success(`已导入 ${result.added.length} 个模型${result.skipped ? `，跳过 ${result.skipped} 个已有型号` : ''}`); emit('imported'); emit('update:modelValue', false) }
+  try { const result = await modelDiscoveryAPI.import(configId.value, chosen.value, Object.fromEntries(chosen.value.map(id => [id, models.value.find(model => model.id === id)?.capability || selectedCapabilities.value[id]])), source.value); ElMessage.success(`已导入 ${result.added.length} 个模型${result.skipped ? `，跳过 ${result.skipped} 个已有型号` : ''}`); emit('imported'); emit('update:modelValue', false) }
   catch (e) { error.value = e.message || '导入失败，请重试' }
   finally { saving.value = false }
 }

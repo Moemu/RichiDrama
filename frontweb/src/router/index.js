@@ -9,6 +9,8 @@ const TITLE_BADGE = import.meta.env.VITE_TITLE_BADGE || ''
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    { path: '/forgot-password', component: () => import('@/views/PasswordRecovery.vue'), meta: { public: true, title: '找回密码' } },
+    { path: '/change-password', component: () => import('@/views/PasswordRecovery.vue'), meta: { title: '设置新密码' } },
     { path: '/login', name: 'login', component: () => import('@/views/Login.vue'), meta: { public: true, title: '登录' } },
     { path: '/account', name: 'account', component: () => import('@/views/AccountCenter.vue'), meta: { title: '账户中心' } },
     { path: '/admin/costs', name: 'admin-costs', component: () => import('@/views/CostAccounting.vue'), meta: { title: '消耗与成本', admin: true } },
@@ -98,6 +100,8 @@ router.beforeEach((to) => {
   }
   const user = readAuthUser()
   if (!to.meta.public && !localStorage.getItem('lmd_auth_token')) return { path: '/login', query: { redirect: to.fullPath } }
+  if (user?.must_change_password && localStorage.getItem('lmd_auth_token') && to.path !== '/change-password') return '/change-password'
+  if (to.path === '/change-password' && !user?.must_change_password) return '/account'
   if (to.meta.admin && user?.console_access !== true) return '/'
   if (to.path === '/login' && localStorage.getItem('lmd_auth_token')) {
     return safeRedirectPath(to.query.redirect, '/')

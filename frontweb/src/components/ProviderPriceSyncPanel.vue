@@ -13,13 +13,15 @@
 
     <div class="candidate-area">
         <div v-if="detail" class="detail-toolbar"><div><b>当前生效价目 → 最新火山账户价</b><small>{{ formatTime(detail.fetched_at || detail.created_at) }} · {{ detail.changed_count }} 项变化 · {{ detail.mapped_count }}/{{ detail.candidate_count }} 已映射</small></div><el-button type="success" :disabled="!canCreateDraft" :loading="creatingDraft" @click="createDraft">生成价目草稿</el-button></div>
-        <div v-if="detail" class="candidate-table"><el-table :data="detail.candidates" row-key="id" size="small">
+        <div v-if="detail" class="candidate-filter"><el-checkbox v-model="showUnchanged">显示价格相同项（{{ unchangedCount }}）</el-checkbox><span v-if="!actionableCandidates.length">没有需要处理的价格变化。</span></div>
+        <div v-if="detail" class="candidate-table"><el-table :data="visibleCandidates" row-key="id" size="small">
           <el-table-column prop="provider_model" label="火山模型" min-width="190" show-overflow-tooltip/>
           <el-table-column prop="charge_type" label="计费项" min-width="145"/>
           <el-table-column label="供应商价" min-width="135"><template #default="{row}"><span class="provider-price-value">{{ row.provider_unit_price ?? '—' }} CNY / {{ row.unit_code || '未知单位' }}</span></template></el-table-column>
-          <el-table-column label="本地映射" min-width="330"><template #default="{row}"><div class="mapping-fields"><el-input v-model="row.service_type" placeholder="服务"/><el-input v-model="row.billing_key" placeholder="billing_key"/><el-select v-model="row.meter" placeholder="计量器"><el-option v-for="meter in meters" :key="meter" :label="meter" :value="meter"/></el-select><el-input-number v-model="row.unit_size" :min="1" controls-position="right"/></div><small v-if="row.error_summary" class="error">{{ row.error_summary }}</small></template></el-table-column>
+          <el-table-column label="本地映射" min-width="330"><template #default="{row}"><div class="mapping-fields"><el-input v-model="row.service_type" :disabled="row.is_unchanged" placeholder="服务"/><el-input v-model="row.billing_key" :disabled="row.is_unchanged" placeholder="billing_key"/><el-select v-model="row.meter" :disabled="row.is_unchanged" placeholder="计量器"><el-option v-for="meter in meters" :key="meter" :label="meter" :value="meter"/></el-select><el-input-number v-model="row.unit_size" :disabled="row.is_unchanged" :min="1" controls-position="right"/></div><small v-if="row.error_summary" class="error">{{ row.error_summary }}</small></template></el-table-column>
           <el-table-column label="积分变化" min-width="280"><template #default="{row}"><div>{{ points(row.current_unit_price_micro) }} → {{ points(row.new_unit_price_micro) }}</div><div v-if="row.new_conditions" class="condition-change"><span>当前：{{ conditionSummary(row.current_conditions) }}</span><span>同步后：{{ conditionSummary(row.new_conditions) }}</span></div></template></el-table-column>
-          <el-table-column label="审核" width="150"><template #default="{row}"><el-tag :type="reviewTone(row)">{{ reviewLabel(row) }}</el-tag><div class="review-actions"><el-button link type="primary" @click="accept(row)">接受</el-button><el-button link type="danger" @click="reject(row)">排除</el-button></div></template></el-table-column>
+          <el-table-column label="审核" width="150"><template #default="{row}"><el-tag :type="reviewTone(row)">{{ reviewLabel(row) }}</el-tag><div v-if="!row.is_unchanged" class="review-actions"><el-button link type="primary" @click="accept(row)">接受</el-button><el-button link type="danger" @click="reject(row)">排除</el-button></div></template></el-table-column>
+          <template #empty>没有需要处理的价格变化。可勾选“显示价格相同项”查看。</template>
         </el-table></div>
         <p v-else class="empty">尚无同步结果。点击“立即同步”读取当前火山账户价。</p>
     </div>
@@ -39,8 +41,9 @@
       <el-form label-position="top">
         <el-form-item label="价目版本"><el-input :model-value="draft?.name" disabled/></el-form-item>
         <el-form-item label="发布原因"><el-input v-model="publishForm.reason" maxlength="200" show-word-limit/></el-form-item>
-        <el-form-item label="用户通知标题"><el-input v-model="publishForm.notice_title" maxlength="80" show-word-limit/></el-form-item>
-        <el-form-item label="用户通知正文"><el-input v-model="publishForm.notice_body" type="textarea" :rows="7" maxlength="1600" show-word-limit/></el-form-item>
+        <el-form-item><el-checkbox v-model="publishForm.notify_users">通知用户价格更新</el-checkbox></el-form-item>
+        <el-form-item v-if="publishForm.notify_users" label="用户通知标题"><el-input v-model="publishForm.notice_title" maxlength="80" show-word-limit/></el-form-item>
+        <el-form-item v-if="publishForm.notify_users" label="用户通知正文"><el-input v-model="publishForm.notice_body" type="textarea" :rows="7" maxlength="1600" show-word-limit/></el-form-item>
         <el-alert type="warning" :closable="false" title="发布后立即生效。进行中任务继续使用原价格快照。"/>
       </el-form>
       <template #footer><el-button @click="showPublish=false">稍后发布</el-button><el-button type="primary" :loading="publishing" @click="publish">确认发布</el-button></template>
@@ -59,9 +62,13 @@ const emit = defineEmits(['published', 'draft-created'])
 const meters = ['request', 'image', 'input_image', 'second', 'millisecond', 'character', 'input_token', 'output_token']
 const detail = ref(null); const probeResult = ref(null); const draft = ref(null); const notices = ref([])
 const probing = ref(false); const syncing = ref(false); const creatingDraft = ref(false); const publishing = ref(false); const showPublish = ref(false)
-const publishForm = reactive({ reason: '', notice_title: '模型调用价格已更新', notice_body: '' })
+const publishForm = reactive({ reason: '', notify_users: true, notice_title: '模型调用价格已更新', notice_body: '' })
 const probeReady = computed(() => probeResult.value?.ark_status === 'success' && probeResult.value?.billing_status === 'success')
-const canCreateDraft = computed(() => detail.value?.status === 'completed' && detail.value.candidates?.length && detail.value.candidates.every((row) => row.review_status !== 'pending' && (row.review_status === 'rejected' || row.mapping_status === 'mapped')))
+const showUnchanged = ref(false)
+const actionableCandidates = computed(() => (detail.value?.candidates || []).filter(row => !row.is_unchanged))
+const unchangedCount = computed(() => (detail.value?.candidates || []).length - actionableCandidates.value.length)
+const visibleCandidates = computed(() => showUnchanged.value ? detail.value?.candidates || [] : actionableCandidates.value)
+const canCreateDraft = computed(() => detail.value?.status === 'completed' && actionableCandidates.value.some(row => row.review_status === 'accepted') && actionableCandidates.value.every(row => row.review_status !== 'pending' && (row.review_status === 'rejected' || row.mapping_status === 'mapped')))
 
 function statusLabel(value) { return ({ success: '通过', failed: '失败', completed: '已读取', unchanged: '无变化', processing: '读取中' })[value] || value || '未知' }
 function formatTime(value) { return value ? formatChinaDateTime(value) : '—' }
@@ -73,17 +80,17 @@ function conditionSummary(value) {
   }
   const rates = value?.rates || []; const tiers = value?.usage_tiers || []; if (tiers.length) return tiers.map((tier) => `${compactQuantity(tier.min_inclusive)}-${compactQuantity(tier.max_inclusive)}: ${tier.unit_price_points}`).join('\n'); if (rates.length) return rates.map((rate) => `${rate.id}: ${rate.unit_price_points}`).join('\n'); return value?.unit_size ? `每 ${compactQuantity(value.unit_size)}` : '无条件价' }
 function candidateChange(row) { const base = `${row.provider_model} / ${row.meter}: ${points(row.current_unit_price_micro)} → ${points(row.new_unit_price_micro)}（每 ${compactQuantity(row.unit_size)}）`; return row.new_conditions ? `${base}\n  条件价：${conditionSummary(row.current_conditions)} → ${conditionSummary(row.new_conditions)}` : base }
-function reviewLabel(row) { return row.review_status === 'accepted' ? '已接受' : row.review_status === 'rejected' ? '已排除' : row.mapping_status === 'mapped' ? '待审核' : '待映射' }
-function reviewTone(row) { return row.review_status === 'accepted' ? 'success' : row.review_status === 'rejected' ? 'info' : 'warning' }
-async function load() { const [latestSyncs, noticeRows, lastProbe] = await Promise.all([adminAPI.providerPriceSyncs({ limit: 1 }), adminAPI.notices({ limit: 50 }), adminAPI.volcenginePriceProbeStatus()]); notices.value = noticeRows; probeResult.value = lastProbe; detail.value = latestSyncs.length ? await adminAPI.providerPriceSync(latestSyncs[0].id) : null }
-async function openSync(id) { detail.value = await adminAPI.providerPriceSync(id) }
+function reviewLabel(row) { if (row.is_unchanged) return '价格相同'; return row.review_status === 'accepted' ? '已接受' : row.review_status === 'rejected' ? '已排除' : row.mapping_status === 'mapped' ? '待审核' : '待映射' }
+function reviewTone(row) { if (row.is_unchanged) return 'info'; return row.review_status === 'accepted' ? 'success' : row.review_status === 'rejected' ? 'info' : 'warning' }
+async function load() { const [latestSyncs, noticeRows, lastProbe] = await Promise.all([adminAPI.providerPriceSyncs({ limit: 1 }), adminAPI.notices({ limit: 50 }), adminAPI.volcenginePriceProbeStatus()]); notices.value = noticeRows; probeResult.value = lastProbe; if (latestSyncs.length) await openSync(latestSyncs[0].id); else detail.value = null }
+async function openSync(id) { const result = await adminAPI.providerPriceSync(id); detail.value = result.reused_from_sync_id ? await adminAPI.providerPriceSync(result.reused_from_sync_id) : result }
 async function probe() { probing.value = true; try { probeResult.value = await adminAPI.probeVolcenginePrices(); ElMessage.success(probeReady.value ? '只读权限诊断通过' : '诊断完成，请检查权限提示') } finally { probing.value = false } }
-async function runSync() { syncing.value = true; try { const result = await adminAPI.syncVolcenginePrices(); await load(); await openSync(result.id); ElMessage.success(result.status === 'unchanged' ? '价格没有变化' : '价格同步完成，请人工审核') } finally { syncing.value = false } }
-async function review(row, status) { const updated = await adminAPI.updateProviderPriceCandidate(detail.value.id, row.id, { service_type: row.service_type, billing_key: row.billing_key, meter: row.meter, unit_size: row.unit_size, review_status: status }); Object.assign(row, updated); ElMessage.success(status === 'accepted' ? '候选价格已接受' : '候选价格已排除') }
+async function runSync() { syncing.value = true; try { const result = await adminAPI.syncVolcenginePrices(); await load(); await openSync(result.id); ElMessage.success(!actionableCandidates.value.length ? '价格没有变化' : result.status === 'unchanged' ? '供应商报价未变，请继续审核现有变化' : '价格同步完成，请人工审核') } finally { syncing.value = false } }
+async function review(row, status) { const updated = await adminAPI.updateProviderPriceCandidate(detail.value.id, row.id, { service_type: row.service_type, billing_key: row.billing_key, meter: row.meter, unit_size: row.unit_size, review_status: status }); Object.assign(row, updated); await openSync(detail.value.id); ElMessage.success(status === 'accepted' ? '候选价格已接受' : '候选价格已排除') }
 async function accept(row) { await review(row, 'accepted') }
 async function reject(row) { await review(row, 'rejected') }
-async function createDraft() { creatingDraft.value = true; try { draft.value = await adminAPI.createProviderPriceDraft(detail.value.id); publishForm.reason = `审核并发布火山价目同步批次 ${detail.value.id.slice(0, 8)}`; const changed = detail.value.candidates.filter((row) => row.review_status === 'accepted').map(candidateChange); publishForm.notice_body = `生效时间：发布后立即生效。\n受影响价格：\n${changed.join('\n')}\n进行中的任务继续使用原价格快照。`; showPublish.value = true; emit('draft-created', draft.value) } finally { creatingDraft.value = false } }
-async function publish() { if (!publishForm.reason.trim() || !publishForm.notice_title.trim() || !publishForm.notice_body.trim()) return ElMessage.warning('请填写发布原因和通知内容'); publishing.value = true; try { await adminAPI.publishPriceBook(draft.value.id, { confirm: true, reason: publishForm.reason.trim(), idempotency_key: `provider-price-publish:${draft.value.id}:${Date.now()}`, notice_title: publishForm.notice_title.trim(), notice_body: publishForm.notice_body.trim() }); showPublish.value = false; await load(); emit('published'); ElMessage.success('新价格已发布，用户横幅已生效') } finally { publishing.value = false } }
+async function createDraft() { creatingDraft.value = true; try { draft.value = await adminAPI.createProviderPriceDraft(detail.value.id); publishForm.notify_users = true; publishForm.reason = `审核并发布火山价目同步批次 ${detail.value.id.slice(0, 8)}`; const changed = actionableCandidates.value.filter((row) => row.review_status === 'accepted').map(candidateChange); publishForm.notice_body = `生效时间：发布后立即生效。\n受影响价格：\n${changed.join('\n')}\n进行中的任务继续使用原价格快照。`; showPublish.value = true; emit('draft-created', draft.value) } finally { creatingDraft.value = false } }
+async function publish() { if (!publishForm.reason.trim()) return ElMessage.warning('请填写发布原因'); if (publishForm.notify_users && (!publishForm.notice_title.trim() || !publishForm.notice_body.trim())) return ElMessage.warning('请填写通知标题和正文'); publishing.value = true; try { await adminAPI.publishPriceBook(draft.value.id, { confirm: true, reason: publishForm.reason.trim(), idempotency_key: `provider-price-publish:${draft.value.id}:${Date.now()}`, notify_users: publishForm.notify_users, notice_title: publishForm.notice_title.trim(), notice_body: publishForm.notice_body.trim() }); showPublish.value = false; await load(); emit('published'); ElMessage.success(publishForm.notify_users ? '新价格已发布，用户横幅已生效' : '新价格已发布，未发送用户通知') } finally { publishing.value = false } }
 async function archive(row) { await adminAPI.archiveNotice(row.id); await load(); ElMessage.success('通知已归档，确认历史已保留') }
 
 onMounted(load)
@@ -91,6 +98,7 @@ onMounted(load)
 
 <style scoped>
 .price-sync-panel{display:grid;gap:1rem;margin-bottom:1.2rem;padding:1rem;border:1px solid var(--border-subtle);border-radius:.9rem;background:var(--bg-raised)}
+.candidate-filter{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-top:.7rem}.candidate-filter span{font-size:.8rem;color:var(--text-muted)}
 .notice-admin{display:grid;gap:.7rem;padding-top:.8rem;border-top:1px solid var(--border-subtle)}.notice-admin h4{margin:0 0 .2rem}
 .price-sync-panel>header,.detail-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.price-sync-panel h3{margin:.2rem 0;font-size:1.1rem}.price-sync-panel p,.price-sync-panel small{margin:0;color:var(--text-muted)}.actions,.review-actions{display:flex;gap:.4rem}.candidate-area{min-width:0;padding:.8rem;border-top:1px solid var(--border-subtle)}.candidate-table{margin-top:.8rem;overflow-x:auto}.detail-toolbar small{display:block;margin-top:.25rem}.mapping-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.35rem}.error{display:block;margin-top:.3rem;color:var(--status-danger,#c2413b)}.condition-change{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;gap:.35rem;margin-top:.25rem;line-height:1.35}.condition-change span{white-space:pre-line}.review-actions{margin-top:.25rem}.empty{padding:1rem;text-align:center}
 .candidate-table :deep(.el-table){font-size:.75rem}.candidate-table :deep(.el-table th.el-table__cell){font-size:.7rem;letter-spacing:.02em}.candidate-table :deep(.cell){line-height:1.3}.candidate-table :deep(.el-input__inner),.candidate-table :deep(.el-select__selected-item),.candidate-table :deep(.el-input-number){font-size:.74rem}.condition-change{font-size:.75rem;line-height:1.5}

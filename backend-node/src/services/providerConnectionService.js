@@ -15,7 +15,7 @@ function view(db, row) {
   if (!row) return null;
   return { id: row.id, name: row.name, provider: row.provider, base_url: row.base_url, has_api_key: !!row.api_key,
     is_active: !!row.is_active, owner_tenant_id: row.owner_tenant_id,
-    bindings: bindings(db, row.id).map(config => ({ id: config.id, service_type: config.service_type, model: config.model,
+    bindings: bindings(db, row.id).map(config => ({ id: config.id, name: config.name, service_type: config.service_type, model: config.model,
       default_model: config.default_model, billing_key: config.billing_key, is_active: config.is_active })) };
 }
 
@@ -64,6 +64,70 @@ function fromLegacy(db, actorId, configId) {
   })();
 }
 
+function providerFamily(provider) {
+  const name = String(provider || '').trim().toLowerCase();
+  return ['volces', 'volcengine', 'volc'].includes(name) ? 'volcengine' : name;
+}
+
+function connectionAddress(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
+    return url.toString().replace(/\/+$/, '');
+  } catch { return null; }
+}
+
+function attachmentProblem(shared, config) {
+  if (!config) return '配置不存在或已删除';
+  if (config.owner_tenant_id) return '项目组独立配置不能关联到平台连接';
+  if (!capability.capabilities.includes(capability.canonical(config.service_type))) return '专用服务不支持关联';
+  if (config.provider_connection_id && config.provider_connection_id !== shared.id) return '已属于其他共享连接';
+  if (!shared.is_active) return '请先启用目标供应商连接';
+  if (providerFamily(config.provider) !== providerFamily(shared.provider)) return '供应商不一致';
+  const address = connectionAddress(shared.base_url);
+  if (!address || connectionAddress(config.base_url) !== address) return 'Base URL 不一致';
+  if (!shared.api_key || config.api_key !== shared.api_key) return 'API Key 不一致或未填写';
+  const defaultCapability = capability.infer(config.default_model || config.model[0]);
+  if (defaultCapability && defaultCapability !== capability.canonical(config.service_type)) return '默认模型能力不匹配，请先修正旧配置';
+  return null;
+}
+
+function attachmentCandidates(db, id) {
+  const shared = get(db, id);
+  if (!shared) throw new Error('供应商连接不存在');
+  const ai = require('./aiConfigService');
+  return db.prepare('SELECT id FROM ai_service_configs WHERE deleted_at IS NULL AND provider_connection_id IS NULL AND owner_tenant_id IS NULL ORDER BY name,id').all()
+    .map(row => ai.getConfig(db, row.id))
+    .filter(config => capability.capabilities.includes(capability.canonical(config.service_type)))
+    .map(config => {
+      const reason = attachmentProblem(shared, config);
+      return { id: config.id, name: config.name, provider: config.provider, base_url: config.base_url,
+        service_type: config.service_type, default_model: config.default_model, eligible: !reason, reason };
+    });
+}
+
+function attach(db, actorId, id, configIds) {
+  if (!Array.isArray(configIds) || !configIds.length || configIds.length > 200 ||
+    configIds.some(value => !Number.isSafeInteger(value) || value <= 0)) throw new Error('请选择 1 至 200 条现有配置');
+  return db.transaction(() => {
+    const shared = get(db, id);
+    if (!shared) throw new Error('供应商连接不存在');
+    const ai = require('./aiConfigService');
+    const configs = [...new Set(configIds)].map(configId => ai.getConfig(db, configId));
+    for (const config of configs) {
+      const reason = attachmentProblem(shared, config);
+      if (reason) throw new Error(`${config?.name || '所选配置'}：${reason}，未关联任何配置`);
+    }
+    const added = configs.filter(config => !config.provider_connection_id);
+    const at = now();
+    for (const config of added) {
+      db.prepare('UPDATE ai_service_configs SET provider_connection_id=?,api_key=?,updated_at=? WHERE id=?').run(shared.id, '', at, config.id);
+    }
+    if (added.length) require('./billingService').audit(db, actorId, 'provider_connection.attach', 'provider_connection', shared.id, { config_ids: added.map(config => config.id) });
+    return { connection: view(db, get(db, id)), attached: added.map(config => config.id), skipped: configs.length - added.length };
+  })();
+}
+
 function importModels(db, actorId, id, input, log) {
   const shared = get(db, id);
   if (!shared) throw new Error('供应商连接不存在');
@@ -96,4 +160,4 @@ function importModels(db, actorId, id, input, log) {
   })();
 }
 
-module.exports = { get, list, view, bindings, save, fromLegacy, importModels };
+module.exports = { get, list, view, bindings, save, fromLegacy, attachmentCandidates, attach, importModels };
