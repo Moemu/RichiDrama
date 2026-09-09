@@ -354,7 +354,7 @@ function missingConfiguredModelRows(db, providerItems) {
     const configured = (() => { const parsedModels = parse(row.model, null); return Array.isArray(parsedModels) ? parsedModels : String(row.model || '').split(','); })();
     for (const modelValue of configured) {
       const model = String(modelValue || '').trim();
-      if (!model) continue;
+      if (!model || require('./supplierCostRates').fixedRate(model)) continue;
       const needle = normalizeName(model);
       const exists = providerNames.some((name) => name === needle || name.startsWith(`${needle}-`) || needle.startsWith(`${name}-`));
       const billingKey = String(row.billing_key || model).trim();
@@ -503,7 +503,7 @@ function compoundSpec(groups, meter, chargeType, charges, rates, defaultRateId) 
   };
 }
 
-function verifiedMultiChargeRows(db, item, groups) {
+function verifiedMultiChargeSpecs(item, groups) {
   const model = normalizeName(item.FoundationModelName || item.Name);
   let serviceTypes = []; let specs = [];
   if (['doubao-seedream-4-0', 'doubao-seedream-4-5', 'doubao-seedream-5-0'].includes(model)) {
@@ -585,15 +585,20 @@ function verifiedMultiChargeRows(db, item, groups) {
     }
     specs = [compoundSpec(groups, 'output_token', 'VerifiedVideoInputResolutionRates', types.map((type) => chargeIn(groups, type)), rates, 'no_video_input')];
   } else return null;
-  const targets = verifiedTargets(db, model, serviceTypes);
-  if (!targets.length || specs.some((spec) => !spec)) return [];
-  return targets.flatMap((target) => specs.map((spec) => mappedCandidate(db, item, target, spec)));
+  return specs.some(spec => !spec) ? [] : { serviceTypes, specs };
+}
+
+function verifiedMultiChargeRows(db, item, groups) {
+  const decoded = verifiedMultiChargeSpecs(item, groups);
+  if (!decoded || Array.isArray(decoded)) return decoded;
+  const targets = verifiedTargets(db, item.FoundationModelName || item.Name, decoded.serviceTypes);
+  return targets.flatMap(target => decoded.specs.map(spec => mappedCandidate(db, item, target, spec)));
 }
 
 function buildCandidateRows(db, item) {
   const model = String(item.FoundationModelName || item.Name || '').trim();
   const displayName = String(item.DisplayName || model).trim();
-  if (!providerModelIsConfigured(db, model)) return [];
+  if (require('./supplierCostRates').fixedRate(model) || !providerModelIsConfigured(db, model)) return [];
   let multi = Array.isArray(item.MultiChargeItems) ? item.MultiChargeItems : [];
   const charges = Array.isArray(item.ChargeItems) ? item.ChargeItems : [];
   if (!multi.length && normalizeName(model) === 'doubao-seedream-5-0-pro' && charges.length) multi = [{ ChargeItems: charges }];
@@ -628,7 +633,7 @@ function syncView(db, id) {
   if (!sync) return null;
   const currentConditions = db.prepare('SELECT conditions_json FROM billing_price_book_items WHERE id=?');
   const reused = sync.status === 'unchanged' ? db.prepare("SELECT id FROM provider_price_syncs WHERE response_hash=? AND status='completed' AND id<>? ORDER BY created_at DESC LIMIT 1").get(sync.response_hash, id) : null;
-  return { ...sync, ...(reused ? { reused_from_sync_id: reused.id } : {}), provider_request_ids: parse(sync.provider_request_ids_json, []), candidates: db.prepare('SELECT * FROM provider_price_candidates WHERE sync_id=? ORDER BY provider_model,charge_type,id').all(id).map((row) => ({ ...row, is_unchanged: candidateUnchanged(row), conditions_changed: !!row.conditions_changed, current_conditions: parse(currentConditions.get(row.current_price_book_item_id)?.conditions_json, null), new_conditions: parse(row.new_conditions_json, null), raw_item: parse(row.raw_item_json, null) })) };
+  return { ...sync, ...(reused ? { reused_from_sync_id: reused.id } : {}), provider_request_ids: parse(sync.provider_request_ids_json, []), candidates: db.prepare('SELECT * FROM provider_price_candidates WHERE sync_id=? ORDER BY provider_model,charge_type,id').all(id).map((row) => ({ ...row, excluded_from_sync: !!require('./supplierCostRates').fixedRate(row.provider_model), is_unchanged: candidateUnchanged(row), conditions_changed: !!row.conditions_changed, current_conditions: parse(currentConditions.get(row.current_price_book_item_id)?.conditions_json, null), new_conditions: parse(row.new_conditions_json, null), raw_item: parse(row.raw_item_json, null) })) };
 }
 
 function listSyncs(db, limit = 30) {
@@ -678,6 +683,7 @@ async function sync(db, actorId, options = {}) {
 function updateCandidate(db, actorId, syncId, candidateId, input = {}) {
   const row = db.prepare('SELECT * FROM provider_price_candidates WHERE id=? AND sync_id=?').get(candidateId, syncId);
   if (!row) throw new Error('候选价格不存在');
+  if (require('./supplierCostRates').fixedRate(row.provider_model) || require('./supplierCostRates').fixedRate(input.billing_key)) throw new Error('MediaKit 使用账单固定成本费率，不参与价目同步审核');
   if (input.review_status === 'rejected') {
     db.prepare("UPDATE provider_price_candidates SET review_status='rejected',updated_at=? WHERE id=?").run(now(), row.id);
     const updated = db.prepare('SELECT * FROM provider_price_candidates WHERE id=?').get(row.id);
@@ -719,7 +725,7 @@ function createDraft(db, actorId, syncId) {
   const priorBook = db.prepare('SELECT id,status FROM billing_price_books WHERE source_sync_id=? ORDER BY id DESC LIMIT 1').get(syncId);
   if (priorBook?.status === 'draft') return require('./billingService').listPriceBooks(db).find((book) => book.id === priorBook.id);
   if (priorBook) throw new Error('此同步批次已用于价目版本，不能重复生成草稿');
-  const actionable = db.prepare('SELECT * FROM provider_price_candidates WHERE sync_id=?').all(syncId).filter(row => !candidateUnchanged(row));
+  const actionable = db.prepare('SELECT * FROM provider_price_candidates WHERE sync_id=?').all(syncId).filter(row => !require('./supplierCostRates').fixedRate(row.provider_model) && !require('./supplierCostRates').fixedRate(row.billing_key) && !candidateUnchanged(row));
   const blockers = actionable.filter(row => row.review_status === 'pending' || (row.review_status === 'accepted' && row.mapping_status !== 'mapped')).length;
   if (blockers) throw new Error(`仍有 ${blockers} 条价格未完成人工审核或映射`);
   const candidates = actionable.filter(row => row.mapping_status === 'mapped' && row.review_status === 'accepted');
@@ -848,7 +854,7 @@ function startHourlySync(db, log = console) {
 
 module.exports = {
   PROVIDER, signedHeaders, callOpenApi, fetchAllActivations, fetchBillDetails, chargeMeter, sourceUnitSize, normalizedPriceMicro, providerBillSummary, platformUsageSummary,
-  contractPrice, verifiedMultiChargeRows, buildCandidateRows,
+  contractPrice, verifiedMultiChargeSpecs, verifiedMultiChargeRows, buildCandidateRows,
   probe, sourceCheck, sync, syncView, listSyncs, updateCandidate, createDraft, publish, rollback,
   activeNotices, listNotices, acknowledgeNotice, archiveNotice, startHourlySync, credentials,
 };

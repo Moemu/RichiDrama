@@ -1,6 +1,9 @@
 'use strict';
 const billing = require('./billingService');
 const ledger = require('./costLedgerService');
+const supplierSnapshots = require('./supplierCostSnapshotService');
+const supplierRates = require('./supplierCostRates');
+const DAILY_BASIS = 'supplier_daily_v1';
 const { boundary } = require('./costQueryService');
 const parse = value => { try { return JSON.parse(value || '{}'); } catch (_) { return {}; } };
 const METERS = ['input_token', 'cache_token', 'output_token', 'image', 'input_image', 'millisecond', 'second', 'character', 'request'];
@@ -30,7 +33,7 @@ const SOURCE = `WITH activity AS (
  WHERE c.origin='live' AND NOT EXISTS(SELECT 1 FROM billing_transactions a WHERE a.id=c.authorization_id AND a.type='authorization')
  AND NOT EXISTS(SELECT 1 FROM billing_usage_logs l WHERE l.authorization_id=c.authorization_id)
 )
-SELECT x.*,c.config_id,c.connection_id,c.provider,c.user_name recorded_user_name,c.organization_name recorded_organization_name,
+SELECT x.*,(SELECT a.created_at FROM billing_transactions a WHERE a.id=x.authorization_id AND a.type='authorization') authorization_at,c.submitted_at,c.config_id,c.connection_id,c.provider,c.user_name recorded_user_name,c.organization_name recorded_organization_name,
  c.context_json,c.status attempt_status,r.usage_json observed_usage_json,
  (SELECT b.observed_usage_json FROM billing_reconciliation_cases b WHERE b.authorization_id=x.authorization_id AND b.observed_usage_json IS NOT NULL ORDER BY b.created_at DESC LIMIT 1) reconciliation_usage,
  COALESCE((SELECT SUM(-t.amount_micro) FROM billing_transactions t WHERE t.authorization_id=x.authorization_id AND t.type='adjustment'
@@ -79,7 +82,8 @@ function present(row) {
     drama_id: row.drama_id, project_title: row.project_title, source_kind: row.source_kind, service_type: row.service_type,
     model: log.provider_model || auth.provider_model || row.model, billing_model: row.model, occurred_at: row.occurred_at,
     time_basis: row.status === 'settled' ? 'settlement' : row.call_id ? 'supplier_submission' : 'authorization',
-    status: row.status, usage, pricing_context: snapshot.pricing_context || parse(row.context_json),
+    status: row.status, usage, pricing_context: { ...parse(row.context_json), ...snapshot.pricing_context },
+    price_at: row.submitted_at || row.authorization_at || row.occurred_at,
     config_id: row.config_id, connection_id: row.connection_id, config_name: row.config_name, provider: row.provider,
     provider_request_id: row.provider_request_id, original_charged_micro: row.charged_micro == null ? null : row.charged_micro - row.supplement_micro,
     supplement_micro: row.supplement_micro, charged_micro: row.charged_micro,
@@ -108,12 +112,19 @@ function present(row) {
 }
 
 function* records(db, input = {}, cursor = {}) {
+  const daily = input.basis === DAILY_BASIS;
+  const sources = daily ? supplierSnapshots.snapshots(db) : null;
   let { sql, args } = selection(input);
   if (cursor.after) { sql += (sql ? ' AND ' : ' WHERE ') + '(x.occurred_at,x.id)<(?,?)'; args.push(cursor.after.occurred_at, cursor.after.id); }
   const limit = cursor.limit ? ' LIMIT ?' : '';
   if (cursor.limit) args.push(cursor.limit);
   for (const raw of db.prepare(SOURCE + sql + ' ORDER BY x.occurred_at DESC,x.id DESC' + limit).iterate(...args)) {
     const row = present(raw);
+    if (daily) {
+      row.supplier = supplierRates.estimate(row, sources);
+      row.platform_reason = row.reason; row.platform_cost_status = row.cost_status;
+      row.supplier_amount_micro = row.supplier.amount_micro; row.cost_status = row.supplier.status; row.reason = row.supplier.reason;
+    }
     if (input.customer_kind && input.customer_kind !== row.customer_kind || input.cost_status && input.cost_status !== row.cost_status || input.status && input.status !== row.status) continue;
     yield row;
   }
@@ -121,7 +132,7 @@ function* records(db, input = {}, cursor = {}) {
 function totals() {
   return { calls: 0, calculated_calls: 0, supplier_priced_calls: 0, charged_calls: 0, processing_calls: 0, released_calls: 0, missing_usage_calls: 0,
     missing_price_calls: 0, unverified_calls: 0, model_amount_micro: 0, supplier_amount_micro: 0, charged_micro: 0,
-    difference_calls: 0, total_tokens: 0, video_output_token: 0, ...Object.fromEntries(METERS.map(k => [k, 0])) };
+    supplier_stale_calls: 0, supplier_fixed_calls: 0, difference_calls: 0, total_tokens: 0, video_output_token: 0, ...Object.fromEntries(METERS.map(k => [k, 0])) };
 }
 function add(total, row) {
   total.calls++;
@@ -130,6 +141,8 @@ function add(total, row) {
     if (!Number.isSafeInteger(row[amount]) || !Number.isSafeInteger(total[amount] + row[amount])) throw new Error('汇总金额超出安全范围，请缩小查询范围');
     total[count]++; total[amount] += row[amount];
   }
+  if (row.supplier?.stale && row.supplier_amount_micro != null) total.supplier_stale_calls++;
+  if (row.supplier?.source === 'mediakit_bill_202609') total.supplier_fixed_calls++;
   if (row.difference_micro) total.difference_calls++;
   if (['processing', 'reconciliation'].includes(row.status)) total.processing_calls++;
   if (row.cost_status === 'released') total.released_calls++;
@@ -164,13 +177,13 @@ function activity(db, input = {}) {
     if (!groups.get(g.key).label && g.label) groups.get(g.key).label = g.label;
     add(groups.get(g.key), row);
   }
-  return { basis: 'billing_activity_v1', generated_at: new Date().toISOString(), timezone: 'Asia/Shanghai', summary,
+  return { basis: input.basis === DAILY_BASIS ? DAILY_BASIS : 'billing_activity_v1', ...(input.basis === DAILY_BASIS ? { supplier_prices: supplierSnapshots.status(db) } : {}), generated_at: new Date().toISOString(), timezone: 'Asia/Shanghai', summary,
     calls: { items, total: summary.calls, page, page_size: size },
-    breakdown: { items: Array.from(groups.values()).sort((a, b) => b.model_amount_micro - a.model_amount_micro || a.key.localeCompare(b.key)).slice((groupPage - 1) * size, groupPage * size).map(g => ({ ...g, label: g.label || (g.key === 'unknown' ? '未关联' : `#${g.key}`) })), total: groups.size, page: groupPage, page_size: size } };
+    breakdown: { items: Array.from(groups.values()).sort((a, b) => (input.basis === DAILY_BASIS ? b.supplier_amount_micro - a.supplier_amount_micro : b.model_amount_micro - a.model_amount_micro) || a.key.localeCompare(b.key)).slice((groupPage - 1) * size, groupPage * size).map(g => ({ ...g, label: g.label || (g.key === 'unknown' ? '未关联' : `#${g.key}`) })), total: groups.size, page: groupPage, page_size: size } };
 }
-function detail(db, id) {
+function detail(db, id, input = {}) {
   let row;
-  for (const item of records(db, { id })) { row = item; break; }
+  for (const item of records(db, { id, basis: input.basis })) { row = item; break; }
   if (!row) throw new Error('调用记录不存在');
   row.attempts = db.prepare('SELECT id FROM cost_calls WHERE authorization_id=? OR id=? OR source_key=? ORDER BY submitted_at,id')
     .all(row.authorization_id, id.startsWith('attempt:') ? id.slice(8) : '', row.usage_id ? `legacy_usage:${row.usage_id}` : '').map(x => ledger.get(db, x.id));
@@ -182,11 +195,11 @@ function createReport(db, actor, input) {
   const last = new Date(Date.UTC(Number(from.slice(0, 4)), Number(from.slice(5, 7)), 0)).toISOString().slice(0, 10);
   const organization = db.prepare('SELECT id,name FROM customer_organizations WHERE id=?').get(Number(input.organization_id));
   if (!organization) throw new Error('客户不存在');
-  const filters = { organization_id: organization.id, date_from: from, date_to: last };
+  const filters = { organization_id: organization.id, date_from: from, date_to: last, ...(input.basis === DAILY_BASIS ? { basis: DAILY_BASIS } : {}) };
   return db.transaction(() => {
     const id = require('node:crypto').randomUUID(), at = new Date().toISOString();
     const version = db.prepare('SELECT COALESCE(MAX(version),0)+1 n FROM cost_reports WHERE organization_id=? AND month=?').get(organization.id, input.month).n;
-    const summary = { ...totals(), basis: 'billing_activity_v1', organization_name: organization.name, filters, generated_at: at };
+    const summary = { ...totals(), basis: input.basis === DAILY_BASIS ? DAILY_BASIS : 'billing_activity_v1', organization_name: organization.name, filters, generated_at: at };
     db.prepare('INSERT INTO cost_reports VALUES(?,?,?,?,?,?,?)').run(id, organization.id, input.month, version, at, actor, '{}');
     const insert = db.prepare('INSERT INTO cost_report_items VALUES(?,?,NULL,?)');
     let after;

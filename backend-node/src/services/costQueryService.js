@@ -115,6 +115,26 @@ function csvCell(value) { let s = String(value ?? ''); if (/^[=+@\-\t\r]/.test(s
 function* reportCsvChunks(db, id, detail = false) {
   const r = report(db, id); if (!r) throw new Error('月报不存在');
   const line = values => values.map(csvCell).join(',') + '\r\n';
+  if (r.summary.basis === 'supplier_daily_v1') {
+    yield '\uFEFF' + line(['客户','月份','版本','保存时间（北京时间）','口径']);
+    yield line([r.summary.organization_name,r.month,r.version,chinaTime(r.generated_at),'供应商每日价格 × 实际用量；MediaKit 使用账单固定费率；非实付账单']);
+    yield line(['业务记录','成本已计价记录','供应商成本估算（元）','沿用旧价格记录','账单固定费率记录','缺用量','缺价格或规格','原扣费（积分）']);
+    yield line([r.summary.calls,r.summary.supplier_priced_calls,r.summary.supplier_priced_calls ? r.summary.supplier_amount_micro / 1e6 : '未确定',r.summary.supplier_stale_calls,r.summary.supplier_fixed_calls,r.summary.missing_usage_calls,r.summary.missing_price_calls,r.summary.charged_micro / 10000]);
+    if (detail) {
+      yield line(['记录ID','项目','模型','时间（北京时间）','价格适用时间（北京时间）','实际用量','供应商成本估算（元）','原扣费（积分）','成本状态','说明','价格日期','来源','供应商计费明细']);
+      let after = '';
+      for (;;) {
+        const items = db.prepare('SELECT call_id,detail_json FROM cost_report_items WHERE report_id=? AND call_id>? ORDER BY call_id LIMIT 500').all(id,after);
+        if (!items.length) break;
+        for (const item of items) {
+          const c = parse(item.detail_json);
+          yield line([c.id,c.project_title,c.model,chinaTime(c.occurred_at),chinaTime(c.price_at),JSON.stringify(c.usage),c.supplier_amount_micro == null ? '未确定' : c.supplier_amount_micro / 1e6,c.charged_micro == null ? '未结算' : c.charged_micro / 10000,c.cost_status,c.reason,c.supplier.price_day,c.supplier.source,JSON.stringify(c.supplier.rates)]);
+        }
+        after = items.at(-1).call_id;
+      }
+    }
+    return;
+  }
   if (r.summary.basis === 'billing_activity_v1') {
     yield '\uFEFF' + line(['客户', '月份', '版本', '保存时间（北京时间）', '口径']);
     yield line([r.summary.organization_name, r.month, r.version, chinaTime(r.generated_at), '原调用价格快照；已结算按结算日期，未结算按预授权日期；非实付账单']);
