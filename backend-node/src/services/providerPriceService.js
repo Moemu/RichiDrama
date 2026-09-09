@@ -9,7 +9,7 @@ const BILLING_VERSION = '2022-01-01';
 const POINTS_PER_CNY = 100;
 const MICRO_PER_POINT = 10000;
 const LOCK_MS = 10 * 60 * 1000;
-const MAPPING_RULE_VERSION = 'verified-platform-models-v5';
+const MAPPING_RULE_VERSION = 'verified-platform-models-v6';
 
 function now() { return new Date().toISOString(); }
 function parse(value, fallback = {}) { try { return value ? JSON.parse(value) : fallback; } catch (_) { return fallback; } }
@@ -505,8 +505,8 @@ function compoundSpec(groups, meter, chargeType, charges, rates, defaultRateId) 
 function verifiedMultiChargeRows(db, item, groups) {
   const model = normalizeName(item.FoundationModelName || item.Name);
   let serviceTypes = []; let specs = [];
-  if (['doubao-seedream-4-0', 'doubao-seedream-5-0'].includes(model)) {
-    if (model === 'doubao-seedream-4-0' && (groups.length !== 1 ||
+  if (['doubao-seedream-4-0', 'doubao-seedream-4-5', 'doubao-seedream-5-0'].includes(model)) {
+    if (['doubao-seedream-4-0', 'doubao-seedream-4-5'].includes(model) && (groups.length !== 1 ||
       Object.keys(groups[0]).some(key => key !== 'ChargeItems') ||
       !Array.isArray(groups[0].ChargeItems) || groups[0].ChargeItems.length !== 2 ||
       groups[0].ChargeItems.some(charge => charge.UnitCode !== '张' || charge.Price == null) ||
@@ -537,8 +537,8 @@ function verifiedMultiChargeRows(db, item, groups) {
       unitSize: price.unitSize, unitPriceMicro: price.micro, providerPrice: String(contractPrice(charge)),
       conditions: { unit_size: 1, free_units: 1, image_pricing_version: version }, raw: groups,
     } : null];
-  } else if (['doubao-seed-2-0-mini', 'doubao-seed-2-0-lite'].includes(model)) {
-    if (model === 'doubao-seed-2-0-mini' && (groups.length !== 3 || groups.some((group, index) =>
+  } else if (['doubao-seed-2-0-mini', 'doubao-seed-2-0-lite', 'doubao-seed-2-0-pro'].includes(model)) {
+    if (['doubao-seed-2-0-mini', 'doubao-seed-2-0-pro'].includes(model) && (groups.length !== 3 || groups.some((group, index) =>
       Object.keys(group).some(key => !['ChargeItems', 'MaxPromptTokens', 'Name', 'Description'].includes(key)) ||
       (index < 2 ? group.MaxPromptTokens !== [32768, 131072][index] :
         group.MaxPromptTokens != null && group.MaxPromptTokens !== 262144) ||

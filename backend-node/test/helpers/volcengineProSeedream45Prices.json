@@ -1,0 +1,322 @@
+[
+  {
+    "FoundationModelName": "doubao-seed-2-0-pro",
+    "State": "Available",
+    "VendorName": "字节跳动",
+    "DisplayName": "Doubao-Seed-2.0-pro",
+    "ChargeItems": [
+      {
+        "Price": 0.008,
+        "UnitCode": "千tokens",
+        "Type": "BatchInferenceCompletion",
+        "OriginalPrice": 0.008
+      },
+      {
+        "Price": 0.0016,
+        "UnitCode": "千tokens",
+        "Type": "BatchInferencePrompt",
+        "OriginalPrice": 0.0016
+      },
+      {
+        "Price": 0.00064,
+        "UnitCode": "千tokens",
+        "Type": "BatchInferenceCacheHit",
+        "OriginalPrice": 0.00064
+      },
+      {
+        "Price": 0.000017,
+        "UnitCode": "千tokens/小时",
+        "Type": "ContextSessionStorage",
+        "OriginalPrice": 0.000017
+      },
+      {
+        "Price": 0.00064,
+        "UnitCode": "千tokens",
+        "Type": "ContextSessionHit",
+        "OriginalPrice": 0.00064
+      },
+      {
+        "Price": 0.00192,
+        "UnitCode": "千tokens",
+        "Type": "FastInferenceCacheHit",
+        "OriginalPrice": 0.00192
+      },
+      {
+        "Price": 0.0096,
+        "UnitCode": "千tokens",
+        "Type": "FastInferencePrompt",
+        "OriginalPrice": 0.0096
+      },
+      {
+        "Price": 0.048,
+        "UnitCode": "千tokens",
+        "Type": "FastInferenceCompletion",
+        "OriginalPrice": 0.048
+      },
+      {
+        "Price": 0.016,
+        "UnitCode": "千tokens",
+        "Type": "InferenceCompletion",
+        "OriginalPrice": 0.016
+      },
+      {
+        "Price": 0.0032,
+        "UnitCode": "千tokens",
+        "Type": "InferencePrompt",
+        "OriginalPrice": 0.0032
+      }
+    ],
+    "MultiChargeItems": [
+      {
+        "ChargeItems": [
+          {
+            "Price": 0.0096,
+            "UnitCode": "千tokens",
+            "Type": "FastInferencePrompt",
+            "OriginalPrice": 0.0096
+          },
+          {
+            "Price": 0.0016,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferencePrompt",
+            "OriginalPrice": 0.0016
+          },
+          {
+            "Price": 0.008,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCompletion",
+            "OriginalPrice": 0.008
+          },
+          {
+            "Price": 0.00192,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCacheHit",
+            "OriginalPrice": 0.00192
+          },
+          {
+            "Price": 0.048,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCompletion",
+            "OriginalPrice": 0.048
+          },
+          {
+            "Price": 0.016,
+            "UnitCode": "千tokens",
+            "Type": "InferenceCompletion",
+            "OriginalPrice": 0.016
+          },
+          {
+            "Price": 0.0032,
+            "UnitCode": "千tokens",
+            "Type": "InferencePrompt",
+            "OriginalPrice": 0.0032
+          },
+          {
+            "Price": 0.00064,
+            "UnitCode": "千tokens",
+            "Type": "ContextSessionHit",
+            "OriginalPrice": 0.00064
+          },
+          {
+            "Price": 0.00064,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCacheHit",
+            "OriginalPrice": 0.00064
+          }
+        ],
+        "MaxPromptTokens": 32768,
+        "Name": "输入32K以内",
+        "Description": "输入小于≤32k"
+      },
+      {
+        "ChargeItems": [
+          {
+            "Price": 0.00096,
+            "UnitCode": "千tokens",
+            "Type": "ContextSessionHit",
+            "OriginalPrice": 0.00096
+          },
+          {
+            "Price": 0.012,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCompletion",
+            "OriginalPrice": 0.012
+          },
+          {
+            "Price": 0.072,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCompletion",
+            "OriginalPrice": 0.072
+          },
+          {
+            "Price": 0.00288,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCacheHit",
+            "OriginalPrice": 0.00288
+          },
+          {
+            "Price": 0.00096,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCacheHit",
+            "OriginalPrice": 0.00096
+          },
+          {
+            "Price": 0.00384,
+            "UnitCode": "千tokens",
+            "Type": "InferencePrompt",
+            "OriginalPrice": 0.0048
+          },
+          {
+            "Price": 0.0024,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferencePrompt",
+            "OriginalPrice": 0.0024
+          },
+          {
+            "Price": 0.0144,
+            "UnitCode": "千tokens",
+            "Type": "FastInferencePrompt",
+            "OriginalPrice": 0.0144
+          },
+          {
+            "Price": 0.0192,
+            "UnitCode": "千tokens",
+            "Type": "InferenceCompletion",
+            "OriginalPrice": 0.024
+          }
+        ],
+        "MaxPromptTokens": 131072,
+        "Name": "输入128K以内",
+        "Description": "32k<输入<=128K"
+      },
+      {
+        "ChargeItems": [
+          {
+            "Price": 0.0096,
+            "UnitCode": "千tokens",
+            "Type": "InferencePrompt",
+            "OriginalPrice": 0.0096
+          },
+          {
+            "Price": 0.0048,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferencePrompt",
+            "OriginalPrice": 0.0048
+          },
+          {
+            "Price": 0.024,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCompletion",
+            "OriginalPrice": 0.024
+          },
+          {
+            "Price": 0.144,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCompletion",
+            "OriginalPrice": 0.144
+          },
+          {
+            "Price": 0.00576,
+            "UnitCode": "千tokens",
+            "Type": "FastInferenceCacheHit",
+            "OriginalPrice": 0.00576
+          },
+          {
+            "Price": 0.00192,
+            "UnitCode": "千tokens",
+            "Type": "BatchInferenceCacheHit",
+            "OriginalPrice": 0.00192
+          },
+          {
+            "Price": 0.0288,
+            "UnitCode": "千tokens",
+            "Type": "FastInferencePrompt",
+            "OriginalPrice": 0.0288
+          },
+          {
+            "Price": 0.048,
+            "UnitCode": "千tokens",
+            "Type": "InferenceCompletion",
+            "OriginalPrice": 0.048
+          },
+          {
+            "Price": 0.00192,
+            "UnitCode": "千tokens",
+            "Type": "ContextSessionHit",
+            "OriginalPrice": 0.00192
+          }
+        ],
+        "Name": "输入256K以内",
+        "Description": "128k<输入<=256K"
+      }
+    ],
+    "FreeResourcePackItems": [],
+    "SubServices": [
+      {
+        "SubService": "base",
+        "Status": "Available"
+      },
+      {
+        "SubService": "context-cache",
+        "Status": "Unavailable"
+      },
+      {
+        "SubService": "fast-infer",
+        "Status": "Unavailable"
+      }
+    ],
+    "Instruction": "https://www.volcengine.com/docs/82379/1494384",
+    "IsOverdue": false,
+    "IsLimitedActivation": false,
+    "IsDeprecated": false
+  },
+  {
+    "FoundationModelName": "doubao-seedream-4-5",
+    "State": "Available",
+    "VendorName": "字节跳动",
+    "DisplayName": "Doubao-Seedream-4.5",
+    "ChargeItems": [
+      {
+        "Price": 0.25,
+        "UnitCode": "张",
+        "Type": "T2ICompletion",
+        "OriginalPrice": 0.25
+      },
+      {
+        "Price": 0.195,
+        "UnitCode": "张",
+        "Type": "I2ICompletion",
+        "OriginalPrice": 0.25
+      }
+    ],
+    "MultiChargeItems": [
+      {
+        "ChargeItems": [
+          {
+            "Price": 0.195,
+            "UnitCode": "张",
+            "Type": "I2ICompletion",
+            "OriginalPrice": 0.25
+          },
+          {
+            "Price": 0.25,
+            "UnitCode": "张",
+            "Type": "T2ICompletion",
+            "OriginalPrice": 0.25
+          }
+        ]
+      }
+    ],
+    "FreeResourcePackItems": [],
+    "SubServices": [
+      {
+        "SubService": "base",
+        "Status": "Available"
+      }
+    ],
+    "Instruction": "https://www.volcengine.com/docs/82379/1541523",
+    "IsOverdue": false,
+    "IsLimitedActivation": false,
+    "IsDeprecated": false
+  }
+]
