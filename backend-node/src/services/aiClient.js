@@ -1,3 +1,4 @@
+const costTransport = require('./costTransport');
 // 与 Go pkg/ai + application/services/ai_service 对齐：读取 ai_service_configs，调用 OpenAI 兼容的 chat completions
 const aiConfigService = require('./aiConfigService');
 const { applyDeepSeekChatOptions } = require('./deepseekConfig');
@@ -99,7 +100,7 @@ function postJSONNonStream(url, headers, body, timeoutMs = 120000) {
       res.on('end', () => {
         const raw = Buffer.concat(chunks).toString('utf-8');
         if (res.statusCode < 200 || res.statusCode >= 300) {
-          return reject(new Error(`HTTP ${res.statusCode}: ${raw.slice(0, 500)}`));
+          return reject(Object.assign(new Error(`HTTP ${res.statusCode}: ${raw.slice(0, 500)}`), { cost_evidence: { status: res.statusCode, raw } }));
         }
         try {
           const json = JSON.parse(raw);
@@ -218,7 +219,8 @@ function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress
         res.on('data', (c) => errChunks.push(c));
         res.on('end', () => {
           clearTimeout(silenceTimer);
-          reject(new Error(`HTTP ${statusCode}: ${Buffer.concat(errChunks).toString('utf-8').slice(0, 500)}`));
+          const raw = Buffer.concat(errChunks).toString('utf-8');
+          reject(Object.assign(new Error(`HTTP ${statusCode}: ${raw.slice(0, 500)}`), { cost_evidence: { status: statusCode, raw } }));
         });
         return;
       }
@@ -492,7 +494,7 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
   const startMs = Date.now();
   log.info('AI generateText request', { url: url.slice(0, 60), model, max_tokens: finalMaxTokens ?? '(model default)', json_mode, stream: true });
   let res;
-  try { res = await postJSONStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 60000, (receivedLen, event, accumulated) => {
+  try { res = await costTransport.run(db, { config, model, service_type: 'text', authorization_id: billingTicket?.authorization.authorization_id }, () => costTransport.submit(() => postJSONStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 60000, (receivedLen, event, accumulated) => {
     if (event === 'first_token') {
       log.info('AI stream first token', { model, ttft_ms: Date.now() - startMs });
     } else if (receivedLen > 0 && receivedLen % 500 < 20) {
@@ -501,7 +503,7 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
     }
     // 调用者提供的流式回调（如分镜增量解析），传入当前已积累的完整文本
     if (streamCallback && accumulated) streamCallback(accumulated);
-  });
+  })));
   // 流式模式下 res.body 已是拼接好的完整文本内容（非 JSON）
   const content = res.body;
   const elapsedMs = Date.now() - startMs;
@@ -612,7 +614,7 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
   });
   let lastLen = 0;
   let res;
-  try { res = await postJSONStream(
+  try { res = await costTransport.run(db, { config, model, service_type: 'text', authorization_id: billingTicket?.authorization.authorization_id }, () => costTransport.submit(() => postJSONStream(
     url,
     { Authorization: 'Bearer ' + (config.api_key || '') },
     body,
@@ -626,7 +628,7 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
       lastLen = accumulated.length;
       if (onDelta && delta) onDelta(delta);
     }
-  );
+  )));
   const content = res.body;
   if (!content) {
     throw new Error('AI 返回内容为空');
@@ -786,7 +788,7 @@ async function generateTextWithVision(db, log, serviceType, userPrompt, systemPr
   let res;
   try {
     // 使用非流式请求：视觉分析响应短，且流式对推理模型（o1/o3/o4）和部分代理兼容性差
-    res = await postJSONNonStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 120000);
+    res = await costTransport.run(db, { config, model, service_type: 'text', authorization_id: billingTicket?.authorization.authorization_id }, () => costTransport.submit(() => postJSONNonStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 120000)));
   } catch (httpErr) {
     voidAutomaticTextAuthorization(billingTicket, httpErr.message);
     log.error('[Vision] HTTP 请求失败', { model, url: url.slice(0, 80), error: httpErr.message });

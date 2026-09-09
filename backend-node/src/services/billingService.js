@@ -237,6 +237,9 @@ function createAuthorization(db, user, input) {
     const snapshot = { ...priced, tenant_id: tenantId, ...project, source_kind: sourceKind, source_id: sourceId, reference_type: input.reference_type || null, reference_id: input.reference_id || null };
     snapshot.organization_id = acct.organization_id || null;
     snapshot.account_scope = acct.account_scope;
+    snapshot.cost_operation_id = require('./billingRequestContext').current()?.cost_operation_id || id;
+    const identity = db.prepare('SELECT username,display_name FROM users WHERE id=?').get(user.id);
+    snapshot.cost_attribution = { user_name: identity?.display_name || identity?.username || null, organization_name: acct.organization_id ? db.prepare('SELECT name FROM customer_organizations WHERE id=?').get(acct.organization_id)?.name || null : null };
     db.prepare(`INSERT INTO billing_transactions (id, user_id, tenant_id, organization_id, drama_id, project_title_snapshot, source_kind, source_id, type, amount_micro, balance_after_micro, frozen_after_micro, authorization_id, idempotency_key, reference_type, reference_id, reason, snapshot_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'authorization', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, user.id, tenantId, acct.organization_id || null, project.drama_id, project.project_title_snapshot, sourceKind, sourceId == null ? null : String(sourceId), priced.amount_micro, acct.balance_micro, frozenAfter, id, idempotencyKey, input.reference_type || null, input.reference_id || null, input.reason || null, json(snapshot), at);

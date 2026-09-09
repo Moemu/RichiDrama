@@ -533,6 +533,14 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
     if (localStaticPath && fs.existsSync(path.join(storagePath, localStaticPath))) localPath = localStaticPath;
     else localPath = await downloadVideoToLocal(storagePath, videoUrl, videoGenId, log, projectSubdir);
     maybeNormalizeVideoAfterDownload(storagePath, localPath, rowForAspect, videoGenId, log);
+    try {
+      const sourceProbe = require('./videoMediaProbeService').probeVideoMedia(path.join(storagePath, localPath));
+      require('./costLedgerService').forAuthorization(db, row.billing_authorization_id, {
+        status: 'completed', usage: { millisecond: sourceProbe.duration_ms, ...(require('./costLedgerService').normalizeUsage(providerUsage) || {}) },
+        provider_request_id: providerRequestId, evidence_kind: 'provider_usage_and_local_source_media',
+      });
+    } catch (error) { log.warn('Cost source duration unavailable', { video_gen_id: videoGenId, error: error.message }); }
+
     // 全能工作台选择“成片后混音”时，生成完成后创建新成片，不覆盖原供应商结果。
     const postMix = db.prepare(`SELECT a.snapshot_json, j.request_snapshot_json FROM omni_video_jobs j
       JOIN omni_video_job_assets a ON a.omni_job_id = j.id

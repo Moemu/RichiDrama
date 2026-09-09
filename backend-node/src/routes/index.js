@@ -134,6 +134,7 @@ function setupRouter(cfg, db, log) {
   // ---------- administration ----------
   const adminRouter = express.Router();
   adminRouter.use(requireAdmin);
+  adminRouter.use('/costs', require('./costs')(db));
   adminRouter.get('/users', admin.users);
   adminRouter.post('/users', admin.createUser);
   adminRouter.patch('/users/:id', admin.updateUser);

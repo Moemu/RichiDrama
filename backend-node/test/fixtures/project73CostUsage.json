@@ -1,0 +1,187 @@
+{
+  "label": "Isolated rule estimate; not a verified supplier bill",
+  "rows": [
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 324900
+      },
+      "charged_micro": 12021300
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 324900
+      },
+      "charged_micro": 12021300
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 15105
+      },
+      "charged_micro": 2517500
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 15105
+      },
+      "charged_micro": 2517500
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 324900
+      },
+      "charged_micro": 12021300
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 324900
+      },
+      "charged_micro": 12021300
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 15105
+      },
+      "charged_micro": 2517500
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 15105
+      },
+      "charged_micro": 2517500
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 324900
+      },
+      "charged_micro": 12021300
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 324900
+      },
+      "charged_micro": 12021300
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 324900
+      },
+      "charged_micro": 12021300
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 15105
+      },
+      "charged_micro": 2517500
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 15105
+      },
+      "charged_micro": 2517500
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 324900
+      },
+      "charged_micro": 12021300
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 15105
+      },
+      "charged_micro": 2517500
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 15105
+      },
+      "charged_micro": 2517500
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 324900
+      },
+      "charged_micro": 12021300
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 324900
+      },
+      "charged_micro": 12021300
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 15105
+      },
+      "charged_micro": 2517500
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 15105
+      },
+      "charged_micro": 2517500
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 216900
+      },
+      "charged_micro": 8025300
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 10080
+      },
+      "charged_micro": 1680000
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 216900
+      },
+      "charged_micro": 8025300
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 10080
+      },
+      "charged_micro": 1680000
+    },
+    {
+      "service_type": "video",
+      "usage": {
+        "output_token": 324900
+      },
+      "charged_micro": 12021300
+    },
+    {
+      "service_type": "video_postprocess",
+      "usage": {
+        "millisecond": 15105
+      },
+      "charged_micro": 2517500
+    }
+  ]
+}

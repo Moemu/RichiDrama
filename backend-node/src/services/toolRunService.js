@@ -299,6 +299,7 @@ async function executeAnalysis(db, log, id, onDelta) {
   const run = get(db, id, true);
   const input = run.input;
   disableToolRunAutoBilling();
+  if (billingRequestContext.current()) billingRequestContext.current().cost_authorization_id = run.billing_authorization_id;
   set(db, id, { status: 'processing', streamed_text: '' });
   const usage = createUsageCollector();
   let text = '';
@@ -344,6 +345,7 @@ async function executeAnalysis(db, log, id, onDelta) {
 async function executeStory(db, log, id) {
   const run = get(db, id, true);
   disableToolRunAutoBilling();
+  if (billingRequestContext.current()) billingRequestContext.current().cost_authorization_id = run.billing_authorization_id;
   set(db, id, { status: 'processing' });
   const usage = createUsageCollector();
   try {
@@ -378,6 +380,7 @@ async function executeReverse(db, log, id) {
   // The route-level tool authorization covers the complete reverse workflow.
   // Vision and final text calls only report usage to this collector.
   disableToolRunAutoBilling();
+  if (billingRequestContext.current()) billingRequestContext.current().cost_authorization_id = run.billing_authorization_id;
   set(db, id, { status: 'processing' });
 
   const temporaryFrames = [];

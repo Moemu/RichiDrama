@@ -11,6 +11,7 @@ const router = createRouter({
   routes: [
     { path: '/login', name: 'login', component: () => import('@/views/Login.vue'), meta: { public: true, title: '登录' } },
     { path: '/account', name: 'account', component: () => import('@/views/AccountCenter.vue'), meta: { title: '账户中心' } },
+    { path: '/admin/costs', name: 'admin-costs', component: () => import('@/views/CostAccounting.vue'), meta: { title: '消耗与成本', admin: true } },
     { path: '/admin/operations', name: 'admin-operations', component: () => import('@/views/OperationsScale.vue'), meta: { title: '运营告警与报表', admin: true } },
     { path: '/admin', name: 'admin', component: () => import('@/views/AdminConsole.vue'), meta: { title: '后台管理', admin: true } },
     {

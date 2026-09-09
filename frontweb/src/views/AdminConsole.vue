@@ -7,6 +7,7 @@
         <h1>运营工作台</h1>
       </div>
       <div class="header-actions">
+        <el-button @click="$router.push('/admin/costs')">消耗与成本</el-button>
         <el-button @click="$router.push('/')">返回主页</el-button>
         <span class="updated" aria-live="polite">数据截至 {{ overview?.generated_at ? formatChinaDateTime(overview.generated_at) : '加载中' }}</span>
         <el-button @click="refresh">刷新态势</el-button>
@@ -407,7 +408,7 @@ html.light .console{--ink:var(--text-primary);--muted:var(--text-muted);--line:v
 .overview-mode .metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.75rem;margin:1rem 0;border:0}.overview-mode .metric-card{min-block-size:8.8rem;padding:1.05rem;border:1px solid var(--border-subtle);border-radius:.85rem;background:var(--bg-surface);box-shadow:none;text-align:start}.overview-mode .metric-card:not(:last-child){border-right:1px solid var(--border-subtle)}.overview-mode .metric-card strong{font-size:clamp(1.55rem,2.2vw,2rem)}.overview-mode .pipeline-card{padding-right:clamp(1rem,2vw,1.5rem)!important;border-right:1px solid var(--border-subtle)!important}.pipeline{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem;margin:1.1rem 0 0}.pipeline li{padding:0;border:0}.pipeline-bar{height:.48rem;background:var(--bg-hover)}.pipeline-bar i{background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 55%,#fff),var(--accent))}
 .overview-mode .trend-card{padding:clamp(1rem,2vw,1.5rem)!important}.overview-mode .trend-actions{gap:.65rem;margin-top:.8rem;padding-top:.8rem}.overview-mode .trend-actions button{padding:.65rem;border:1px solid var(--border-subtle);border-radius:.7rem;background:var(--bg-raised)}.overview-mode .trend-actions button:hover,.overview-mode .trend-actions button:focus-visible{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--bg-surface));color:var(--text-primary)}
 .workspace-mode>.workbench{display:block;padding:clamp(1rem,2.4vw,1.7rem);overflow:visible}.workspace-mode>.workbench>.table-scroll{overflow-x:auto}.console :deep(.el-table){border-radius:.75rem}.console :deep(.el-table th.el-table__cell){background:var(--bg-raised)!important}.console :deep(.el-table td.el-table__cell){border-bottom-color:var(--border-subtle)}
-@media(max-width:64rem){.console,.console.overview-mode,.console.workspace-mode{margin:0;border-radius:0;border-inline:0}.overview-mode .hero-grid,.overview-mode .dashboard-grid{grid-template-columns:1fr}.overview-mode .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-mode .pipeline-card{border-right:0!important}.workspace-nav{overflow-x:auto}.workspace-nav button{min-width:7.2rem}}
+@media(max-width:64rem){.console,.console.overview-mode,.console.workspace-mode{margin:0;border-radius:0;border-inline:0}.overview-mode .hero-grid,.overview-mode .dashboard-grid{grid-template-columns:minmax(0,1fr)}.overview-mode .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-mode .pipeline-card{border-right:0!important}.workspace-nav{overflow-x:auto}.workspace-nav button{min-width:7.2rem}}
 
 /* Icons provide a fast visual scan without turning the operating view into a dashboard wall. */
 .workspace-nav button .el-icon{display:grid;flex:0 0 auto;width:1.1rem;height:1.1rem;place-items:center;color:var(--text-faint);font-size:1rem;transition:color var(--motion-fast) var(--motion-ease),transform var(--motion-fast) var(--motion-ease)}
@@ -436,18 +437,18 @@ html.light .console{--ink:var(--text-primary);--muted:var(--text-muted);--line:v
 .overview-mode .metric-card>.el-icon{inset-inline-start:.9rem;inset-block-start:.9rem}
 .overview-mode .metric-card strong{font-size:clamp(1.45rem,2vw,1.9rem);line-height:1}
 .overview-mode .dashboard-grid{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:1rem;margin-top:0}
-.overview-mode .dashboard-grid>.command-card{min-height:18rem;padding:1rem 1.15rem}
+.overview-mode .dashboard-grid>.command-card{min-width:0;min-height:18rem;padding:1rem 1.15rem}
 .overview-mode .pipeline-card{border-right:0!important}
 .overview-mode .pipeline{grid-template-columns:repeat(2,minmax(0,1fr));gap:.35rem .8rem;margin-top:.65rem}
 .overview-mode .pipeline li{padding:.28rem 0}
 .overview-mode .trend-card{display:flex;flex-direction:column}
-.overview-mode .trend-card :deep(.operations-echart){height:11rem;min-height:11rem}
+.overview-mode .trend-card :deep(.operations-echart){height:11rem;min-width:0;min-height:11rem}
 .drawer-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.failure-snapshot{display:grid;gap:10px;margin:18px 0;padding:16px;border:1px solid var(--border-color);border-radius:12px;background:var(--bg-raised)}.failure-snapshot h3{margin:4px 0 0}.failure-snapshot label{font-size:12px;color:var(--text-secondary)}.snapshot-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0}.snapshot-settings div{padding:9px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-surface)}.snapshot-settings dt{font-size:11px;color:var(--text-secondary)}.snapshot-settings dd{margin:4px 0 0;word-break:break-word}.snapshot-material-heading{display:flex;align-items:baseline;justify-content:space-between;gap:10px}.snapshot-material-heading small{color:var(--text-secondary)}.snapshot-materials{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.snapshot-materials article{display:grid;grid-template-columns:68px minmax(0,1fr);gap:10px;min-width:0;padding:8px;border:1px solid var(--border-color);border-radius:9px;background:var(--bg-surface)}.snapshot-materials img,.snapshot-materials article>span{width:68px;height:58px;object-fit:cover;border-radius:6px;background:var(--bg-muted);display:grid;place-items:center;color:var(--text-secondary)}.snapshot-materials article div{display:grid;align-content:center;gap:3px;min-width:0}.snapshot-materials b,.snapshot-materials small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.snapshot-materials small{color:var(--text-secondary)}@media(max-width:720px){.snapshot-settings{grid-template-columns:repeat(2,minmax(0,1fr))}.snapshot-materials{grid-template-columns:1fr}.drawer-heading{align-items:stretch;flex-direction:column}}
 .overview-mode .trend-actions{margin-top:auto;padding-top:.65rem}
 .overview-mode .trend-actions button{padding:.55rem}
 .overview-mode .action-board{display:grid;grid-template-columns:11rem 1fr;margin-top:.8rem;padding:1rem 1.15rem}
 .overview-mode .action-grid button{padding:.2rem .8rem;min-height:3.6rem}
-@media(max-width:64rem){.overview-mode .hero-grid,.overview-mode .dashboard-grid{grid-template-columns:1fr}.overview-mode .hero-grid>.command-card{max-height:none}.overview-mode .action-board{grid-template-columns:1fr}.overview-mode .action-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:64rem){.overview-mode .hero-grid,.overview-mode .dashboard-grid{grid-template-columns:minmax(0,1fr)}.overview-mode .hero-grid>.command-card{max-height:none}.overview-mode .action-board{grid-template-columns:1fr}.overview-mode .action-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 /* 列表内的低风险操作不使用历史亮蓝按钮，也不抢占主操作的紫色层级。 */
 :global(body){overflow-x:hidden!important;overflow-y:auto!important}
 .console,.console.overview-mode,.console.workspace-mode{height:auto!important;max-height:none!important;overflow:visible!important;overscroll-behavior:auto}
