@@ -7,7 +7,9 @@ const uploadService = require('./uploadService');
 const storageLayout = require('./storageLayout');
 const taskService = require('./taskService');
 const { loadConfig } = require('../config');
-const { postJSONWithTimeout } = require('./aiClient');
+const { postJSONWithTimeout: postJSONRaw } = require('./aiClient');
+const costTransport = require('./costTransport');
+const postJSONWithTimeout = (...args) => costTransport.submit(() => postJSONRaw(...args), args[2]);
 const seedance2AssetGuards = require('../utils/seedance2AssetGuards');
 const assetSd2Service = require('./assetSd2Service');
 
@@ -507,6 +509,7 @@ async function callKlingImageApi(config, log, opts) {
       const queryRes = await fetch(buildKlingQueryUrl(taskId), { method: 'GET', headers });
       if (!queryRes.ok) continue;
       const queryData = JSON.parse(await queryRes.text());
+      costTransport.observeResponse(queryData);
       const status = queryData?.data?.task_status;
       log.info('[Kling图生] 轮询状态', { image_gen_id, task_id: taskId, attempt, status });
       if (status === 'succeed') {
@@ -736,6 +739,7 @@ async function callNanoBananaImageApi(config, log, opts) {
       let queryData;
       try {
         queryData = JSON.parse(queryRaw);
+        costTransport.observeResponse(queryData);
       } catch (parseErr) {
         log.warn('NanoBanana poll JSON parse error', {
           image_gen_id, task_id: taskId, attempt,
@@ -1408,6 +1412,15 @@ async function callGeminiImageApi(db, config, log, opts) {
  * @returns {Promise<{ image_url?: string, error?: string }>}
  */
 async function callImageApi(db, log, opts) {
+  const config = getDefaultImageConfig(db, opts.model, opts.preferred_provider ?? opts.preferredProvider, opts.imageServiceType, { tenant_id: opts.tenant_id, scene_defaults: false });
+  const row = opts.image_gen_id ? db.prepare('SELECT * FROM image_generations WHERE id=?').get(opts.image_gen_id) : null;
+  return costTransport.run(db, { config, model: config ? getModelFromConfig(config, opts.model) : opts.model,
+    service_type: 'image', authorization_id: opts.billing_authorization_id || row?.billing_authorization_id,
+    user_id: row?.owner_user_id, drama_id: opts.drama_id || row?.drama_id,
+    pricing_context: { ...(opts.resolution ? { resolution: opts.resolution } : {}), has_video_input: !!(opts.reference_video_urls?.length || opts.video_url) },
+  }, () => executeImageApi(db, log, opts));
+}
+async function executeImageApi(db, log, opts) {
   const {
     prompt,
     model: preferredModel,

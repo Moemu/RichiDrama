@@ -224,6 +224,12 @@ test('setupRouter tool writing and reverse workflows settle one authorization wi
     assertLedger(videoRun, { request: 1, input_token: 13, output_token: 6 });
     assert.equal(providerCalls.filter((call) => call.kind === 'vision').length, 4);
     assert.equal(providerCalls.filter((call) => call.kind === 'text').length, 2);
+    const costCalls = db.prepare('SELECT c.*,r.usage_json FROM cost_calls c JOIN cost_revisions r ON r.id=c.latest_revision_id WHERE c.authorization_id=? ORDER BY c.attempt').all(videoRun.billing_authorization_id);
+    assert.equal(costCalls.length, 4, 'three vision requests plus synthesis are separate supplier attempts');
+    assert.equal(new Set(costCalls.map(call => call.operation_id)).size, 1);
+    assert.equal(costCalls.reduce((n, call) => n + JSON.parse(call.usage_json).input_token, 0), 13);
+    assert.equal(costCalls.reduce((n, call) => n + JSON.parse(call.usage_json).output_token, 0), 6);
+    assert.ok(costCalls.every(call => call.drama_id === dramaId && call.config_id === config.id));
     assert.equal(fs.readdirSync(path.join(storage, 'tool-reverse')).length, 0, 'temporary reverse frames must be cleaned');
 
     failNextProviderCall = true;
@@ -244,6 +250,7 @@ test('setupRouter tool writing and reverse workflows settle one authorization wi
     const restored = await request('GET', `/tool-runs/${videoRun.id}`);
     assert.equal(restored.status, 200);
     assert.equal(restored.body.data.status, 'completed');
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM cost_calls WHERE authorization_id=?').get(videoRun.billing_authorization_id).n, 4);
     assert.equal(restored.body.data.output.prompt, 'fixture video prompt');
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM billing_usage_logs WHERE authorization_id=?').get(videoRun.billing_authorization_id).count, 1);
   } finally {

@@ -61,7 +61,9 @@ async function submit(db, input) {
 
 async function retrieve(db, taskId) {
   const cfg = config(db);
-  return jsonRequest(`${cfg.base_url}/api/v1/tasks/${encodeURIComponent(taskId)}`, cfg.api_key);
+  const result = await jsonRequest(`${cfg.base_url}/api/v1/tasks/${encodeURIComponent(taskId)}`, cfg.api_key);
+  require('./costLedgerService').byTask(db, taskId, { status: ['completed','failed'].includes(result.status) ? result.status : 'processing', usage: result.usage, provider_request_id: result.request_id }, cfg.id);
+  return result;
 }
 
 module.exports = { config, uploadLocalVideo, submit, retrieve, jsonRequest };

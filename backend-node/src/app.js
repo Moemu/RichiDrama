@@ -102,6 +102,7 @@ function createApp() {
   startPendingVideoArchiveRetry(db, log);
   require('./services/operationsReportService').startDailyReporting(db, log);
   require('./services/providerPriceService').startHourlySync(db, log);
+  if (require('./config').getActiveProfile() !== 'dev') require('./services/supplierCostSnapshotService').startDailySync(db, log);
   require('./services/assetSd2Service').resumePendingCertifications(db, log, config);
   require('./services/richbestAssetRebindService').startRecovery(db, log, config);
   require('./services/omniVideoService').startSd2WaitingGenerationRecovery(db, log);

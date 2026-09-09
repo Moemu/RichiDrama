@@ -1,3 +1,4 @@
+const fetch = (...args) => costTransport.fetchSubmission(...args);
 // ? Go pkg/video + VideoGenerationService ????????? API??????(????)
 const fs = require('fs');
 const path = require('path');
@@ -5,7 +6,9 @@ const aiConfigService = require('./aiConfigService');
 let sharp; try { sharp = require('sharp'); } catch (_) { sharp = null; }
 const { uploadLocalImageToProxy, uploadToImageProxy } = require('./uploadService');
 const imageClient = require('./imageClient');
-const { postJSONWithTimeout } = require('./aiClient');
+const { postJSONWithTimeout: postJSONRaw } = require('./aiClient');
+const costTransport = require('./costTransport');
+const postJSONWithTimeout = (...args) => costTransport.submit(() => postJSONRaw(...args), args[2]);
 const {
   clampToGeminiImageAspectRatio,
   clampToViduAspectRatio,
@@ -3720,6 +3723,15 @@ function resolveLocalAudioToBase64(rawUrl, filesBaseUrl, storageLocalPath, log, 
  * @returns {Promise<{ task_id?: string, video_url?: string, error?: string }>}
  */
 async function callVideoApi(db, log, opts) {
+  const config = getDefaultVideoConfig(db, opts.model);
+  const row = opts.video_gen_id ? db.prepare('SELECT * FROM video_generations WHERE id=?').get(opts.video_gen_id) : null;
+  return costTransport.run(db, { config, model: config ? getModelFromConfig(config, opts.model) : opts.model,
+    service_type: 'video', authorization_id: opts.billing_authorization_id || row?.billing_authorization_id,
+    user_id: row?.owner_user_id, drama_id: opts.drama_id || row?.drama_id,
+    pricing_context: { ...(opts.resolution ? { resolution: opts.resolution } : {}), has_video_input: !!(opts.reference_video_urls?.length || opts.video_url) },
+  }, () => executeVideoApi(db, log, opts));
+}
+async function executeVideoApi(db, log, opts) {
   const {
     prompt,
     model: preferredModel,
@@ -4088,7 +4100,15 @@ async function callVideoApi(db, log, opts) {
 /**
  * ??????????????????/ChatFire ? ???? DashScope?
  */
-async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 300, intervalMs = 10000, onProgress = null) {
+async function pollVideoTask(db, log, videoGenId, taskId, config, ...args) {
+  const result = await executePollVideoTask(db, log, videoGenId, taskId, config, ...args);
+  require('./costLedgerService').byTask(db, taskId, {
+    status: result.error ? 'failed' : result.video_url ? 'completed' : 'processing',
+    usage: result.usage, provider_request_id: result.provider_request_id,
+  }, config?.id);
+  return result;
+}
+async function executePollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 300, intervalMs = 10000, onProgress = null) {
   const provider = (config.provider || '').toLowerCase();
   const protocol = resolveVideoProtocol(config);
   const isDashScope = protocol === 'dashscope';
@@ -4218,6 +4238,11 @@ async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 
         continue;
       }
 
+      require('./costLedgerService').byTask(db, taskId, {
+        status: isPollTaskFailed(extractPollTaskStatus(data)) ? 'failed' : 'processing',
+        usage: extractVideoProviderUsage(data).usage,
+        provider_request_id: data.request_id || data.data?.request_id,
+      }, config?.id);
       if (typeof onProgress === 'function') {
         const observedStatus = extractPollTaskStatus(data)
           || data?.data?.task_status

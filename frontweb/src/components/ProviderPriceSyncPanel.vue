@@ -65,9 +65,10 @@ const probing = ref(false); const syncing = ref(false); const creatingDraft = re
 const publishForm = reactive({ reason: '', notify_users: true, notice_title: '模型调用价格已更新', notice_body: '' })
 const probeReady = computed(() => probeResult.value?.ark_status === 'success' && probeResult.value?.billing_status === 'success')
 const showUnchanged = ref(false)
-const actionableCandidates = computed(() => (detail.value?.candidates || []).filter(row => !row.is_unchanged))
-const unchangedCount = computed(() => (detail.value?.candidates || []).length - actionableCandidates.value.length)
-const visibleCandidates = computed(() => showUnchanged.value ? detail.value?.candidates || [] : actionableCandidates.value)
+const syncCandidates = computed(() => (detail.value?.candidates || []).filter(row => !row.excluded_from_sync))
+const actionableCandidates = computed(() => syncCandidates.value.filter(row => !row.is_unchanged))
+const unchangedCount = computed(() => syncCandidates.value.length - actionableCandidates.value.length)
+const visibleCandidates = computed(() => showUnchanged.value ? syncCandidates.value : actionableCandidates.value)
 const canCreateDraft = computed(() => detail.value?.status === 'completed' && actionableCandidates.value.some(row => row.review_status === 'accepted') && actionableCandidates.value.every(row => row.review_status !== 'pending' && (row.review_status === 'rejected' || row.mapping_status === 'mapped')))
 
 function statusLabel(value) { return ({ success: '通过', failed: '失败', completed: '已读取', unchanged: '无变化', processing: '读取中' })[value] || value || '未知' }

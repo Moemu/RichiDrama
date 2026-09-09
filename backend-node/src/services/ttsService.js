@@ -56,7 +56,7 @@ async function synthesizeWithMinimax(text, voiceId, apiKey, groupId, model) {
         }
         const audioHex = data.data?.audio;
         if (!audioHex) { reject(new Error('MiniMax TTS 未返回音频')); return; }
-        resolve(Buffer.from(audioHex, 'hex'));
+        resolve({ buffer: Buffer.from(audioHex, 'hex'), request_id: data.trace_id || res.headers['x-request-id'] || null });
       });
     });
     req.on('error', reject);
@@ -101,7 +101,7 @@ async function synthesizeWithOpenai(text, voice, apiKey, baseUrl, model, speed) 
           reject(new Error(`OpenAI TTS HTTP ${res.statusCode}: ${buf.toString('utf-8').slice(0, 500)}`));
           return;
         }
-        resolve(buf);
+        resolve({ buffer: buf, request_id: res.headers['x-request-id'] || null });
       });
     });
     const timer = setTimeout(() => { req.destroy(); reject(new Error('OpenAI TTS 请求超时')); }, 120000);
@@ -198,7 +198,7 @@ function synthesizeWithDoubao(text, opts) {
         const audioHex = data.data;
         if (!audioHex) { reject(new Error('豆包 TTS 未返回音频数据')); return; }
         // data 是 base64 编码的音频
-        resolve(Buffer.from(audioHex, 'base64'));
+        resolve({ buffer: Buffer.from(audioHex, 'base64'), request_id: data.reqid || res.headers['x-tt-logid'] || res.headers['x-request-id'] || null });
       });
     });
     const timer = setTimeout(() => { req.destroy(); reject(new Error('豆包 TTS 请求超时')); }, 30000);
@@ -258,10 +258,14 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
     drama_id: billingDramaId, source_kind: 'storyboard_tts', source_id: storyboard_id || null,
   });
   let audioBuffer;
+  let ttsResult;
+  let costCallId;
 
   try {
+  if (!['minimax', 'doubao', '豆包语音', 'volcengine_tts', 'openai'].includes(provider) && !ttsConfig.base_url) throw new Error(`不支持的 TTS provider: ${provider}`);
+  costCallId = require('./costLedgerService').begin(db, { config: ttsConfig, model: ttsModel, service_type: 'tts', authorization_id: billingAuthorization.authorization_id });
   if (provider === 'minimax') {
-    audioBuffer = await synthesizeWithMinimax(
+    ttsResult = await synthesizeWithMinimax(
       text,
       voiceId || 'female-shaonv',
       ttsConfig.api_key,
@@ -270,13 +274,13 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
     );
   } else if (provider === 'doubao' || provider === '豆包语音' || provider === 'volcengine_tts') {
     // 豆包语音（火山引擎 TTS）：必须在 openai/base_url 分支之前判断，否则会被当作 OpenAI 兼容接口导致 404
-    audioBuffer = await synthesizeWithDoubao(text, {
+    ttsResult = await synthesizeWithDoubao(text, {
       apiKey: ttsConfig.api_key,
       baseUrl: ttsConfig.base_url,
       settings: ttsSettings,
     });
   } else if (provider === 'openai' || ttsConfig.base_url) {
-    audioBuffer = await synthesizeWithOpenai(
+    ttsResult = await synthesizeWithOpenai(
       text,
       voiceId || 'alloy',
       ttsConfig.api_key,
@@ -288,6 +292,8 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
     throw new Error(`不支持的 TTS provider: ${provider}，目前支持 openai、minimax、doubao(豆包语音)`);
   }
 
+  audioBuffer = ttsResult.buffer;
+  require('./costLedgerService').record(db, costCallId, { status: 'completed', usage: { character: characters, request: 1 }, provider_request_id: ttsResult.request_id, evidence_kind: 'submitted_unicode_characters' });
   billing.settleAuthorization(db, billingActor, billingAuthorization.authorization_id, {
     usage: { character: characters }, provider_request_id: `tts:${billingAuthorization.authorization_id}`,
   });
@@ -303,6 +309,7 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
   try { const cs = require('./cloudService'); cs.reportUsage('tts', ttsModel || '', '', 0); } catch (_) {}
   return { local_path: localPath, billed_characters: characters };
   } catch (error) {
+    if (costCallId && !audioBuffer) require('./costLedgerService').record(db, costCallId, { status: 'unknown' });
     if (billingAuthorization) {
       try { billing.voidAuthorization(db, billingActor, billingAuthorization.authorization_id, error.message); } catch (_) {}
     }

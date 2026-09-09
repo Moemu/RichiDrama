@@ -116,6 +116,9 @@ test('image HTTP generation uses the project group credential and preserves its 
     assert.equal(restored.local_path, result.local_path);
     assert.equal(restored.status, 'completed');
     assert.equal(keys.length, 1);
+    const costs = db.prepare('SELECT c.*,r.usage_json FROM cost_calls c JOIN cost_revisions r ON r.id=c.latest_revision_id').all();
+    assert.equal(costs.length, 1, 'image restore must not create another supplier attempt');
+    assert.deepEqual(JSON.parse(costs[0].usage_json), { request: 1, image: 1 });
   } finally {
     await stop();
     await new Promise((resolve) => provider.close(resolve));

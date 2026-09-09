@@ -121,10 +121,10 @@ async function process(db, log, videoGenerationId, storagePath) {
     }
     if (!job.provider_task_id) {
       const uploaded = await client.uploadLocalVideo(db, path.join(storagePath, row.source_local_path));
-      const submitted = await client.submit(db, {
+      const submitted = await require('./costLedgerService').track(db, { config: client.config(db), model: BILLING_MODEL, service_type: 'video_postprocess', authorization_id: job.billing_authorization_id, operation_id: job.billing_authorization_id, parent_operation_id: row.billing_authorization_id ? billing.getAuthorization(db, row.billing_authorization_id)?.snapshot.cost_operation_id || row.billing_authorization_id : null, user_id: row.owner_user_id, drama_id: row.drama_id, pricing_context: { resolution: job.target_resolution, fps_tier: job.target_fps } }, () => client.submit(db, {
         video_url: uploaded.file_id, resolution: job.target_resolution, client_token: `vg-up-${row.id}`,
         callback_args: JSON.stringify({ video_generation_id: row.id, stage: 'upscale' }),
-      });
+      }), result => ({ status: 'processing', provider_task_id: result.task_id, provider_request_id: result.request_id, usage: { request: 1 } }));
       const now = new Date().toISOString();
       db.prepare("UPDATE video_upscale_jobs SET provider_task_id=?, provider_request_id=?, input_video_url=?, status='processing', attempts=attempts+1, updated_at=? WHERE id=?")
         .run(submitted.task_id, submitted.request_id || uploaded.request_id, uploaded.file_id, now, job.id);
@@ -151,6 +151,7 @@ async function process(db, log, videoGenerationId, storagePath) {
       throw new Error(`超分阶段画幅比例偏差过大：${sourceProbe.width}x${sourceProbe.height} → ${outputProbe.width}x${outputProbe.height}`);
     }
     try {
+      require('./costLedgerService').forAuthorization(db, job.billing_authorization_id, { status: 'completed', usage: { millisecond: outputProbe.duration_ms }, evidence_kind: 'verified_local_media_duration' });
       billing.settleAuthorization(db, { id: row.owner_user_id, role: 'admin' }, job.billing_authorization_id, {
         usage: { millisecond: outputProbe.duration_ms }, provider_request_id: result.request_id || job.provider_request_id || job.provider_task_id,
       });
