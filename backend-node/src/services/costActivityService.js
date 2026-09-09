@@ -4,6 +4,7 @@ const ledger = require('./costLedgerService');
 const { boundary } = require('./costQueryService');
 const parse = value => { try { return JSON.parse(value || '{}'); } catch (_) { return {}; } };
 const METERS = ['input_token', 'cache_token', 'output_token', 'image', 'input_image', 'millisecond', 'second', 'character', 'request'];
+const OFFICIAL_PRODUCT_SOURCES = new Set(['https://www.volcengine.com/product/yunque', 'https://www.volcengine.com/product/doubao/']);
 
 // One business record per usage log or unsettled authorization. Attempt evidence
 // stays attached to that record; historical imports never become extra usage.
@@ -58,7 +59,7 @@ function selection(input) {
 function providerSource(rate) {
   const c = rate.conditions || {};
   return c.currency === 'CNY' && c.provider === 'volcengine' &&
-    ((c.source === 'ListModelActivations' && !!c.source_sync_id) || /^https:\/\/www\.volcengine\.com\/docs\//.test(c.source || ''));
+    ((c.source === 'ListModelActivations' && !!c.source_sync_id) || OFFICIAL_PRODUCT_SOURCES.has(c.source) || /^https:\/\/www\.volcengine\.com\/docs\//.test(c.source || ''));
 }
 
 function present(row) {
@@ -89,6 +90,7 @@ function present(row) {
       row.settlement_amount != null && (row.settlement_amount !== -(row.charged_micro - row.supplement_micro) || row.settlement_authorization_id !== row.authorization_id)) {
     return { ...result, usage: null, usage_evidence: { logged, settled }, cost_status: 'unverified', reason: '原用量或结算关联存在冲突，用量与估算暂不汇总' };
   }
+  if (!usage && row.status === 'released') return { ...result, cost_status: 'released', reason: '预授权已释放，没有实际用量记录' };
   if (!usage || !snapshot.rates?.length) return result;
   try {
     const calculation = billing.snapshotCalculation(snapshot, raw);
@@ -117,7 +119,7 @@ function* records(db, input = {}, cursor = {}) {
   }
 }
 function totals() {
-  return { calls: 0, calculated_calls: 0, supplier_priced_calls: 0, charged_calls: 0, processing_calls: 0, missing_usage_calls: 0,
+  return { calls: 0, calculated_calls: 0, supplier_priced_calls: 0, charged_calls: 0, processing_calls: 0, released_calls: 0, missing_usage_calls: 0,
     missing_price_calls: 0, unverified_calls: 0, model_amount_micro: 0, supplier_amount_micro: 0, charged_micro: 0,
     difference_calls: 0, total_tokens: 0, video_output_token: 0, ...Object.fromEntries(METERS.map(k => [k, 0])) };
 }
@@ -130,6 +132,7 @@ function add(total, row) {
   }
   if (row.difference_micro) total.difference_calls++;
   if (['processing', 'reconciliation'].includes(row.status)) total.processing_calls++;
+  if (row.cost_status === 'released') total.released_calls++;
   if (row.cost_status === 'missing_usage') total.missing_usage_calls++;
   if (row.cost_status === 'missing_price') total.missing_price_calls++;
   if (row.cost_status === 'unverified') total.unverified_calls++;
@@ -141,7 +144,7 @@ function group(row, key) {
   const fields = { customer: ['organization_id', 'organization_name'], project: ['drama_id', 'project_title'], user: ['user_id', 'user_name'], model: ['model', 'model'], operation: ['source_kind', 'source_kind'] };
   if (fields[key]) {
     const [id, label] = fields[key];
-    return { key: String(row[id] ?? (key === 'customer' ? row.customer_kind : 'unknown')), label: row[label] || (key === 'customer' ? row.customer_kind === 'personal' ? '个人账户' : row.organization_id ? `客户 #${row.organization_id}` : '未知客户' : '未关联') };
+    return { key: String(row[id] ?? (key === 'customer' ? row.customer_kind : 'unknown')), label: row[label] || (key === 'customer' ? row.customer_kind === 'personal' ? '个人账户' : row.organization_id ? `客户 #${row.organization_id}` : '未知客户' : null) };
   }
   const date = new Date(Date.parse(row.occurred_at) + 28800000).toISOString();
   const value = key === 'hour' ? date.slice(0, 13).replace('T', ' ') + ':00' : date.slice(0, key === 'month' ? 7 : 10);
@@ -158,11 +161,12 @@ function activity(db, input = {}) {
     add(summary, row);
     const g = group(row, key);
     if (!groups.has(g.key)) groups.set(g.key, { ...g, ...totals() });
+    if (!groups.get(g.key).label && g.label) groups.get(g.key).label = g.label;
     add(groups.get(g.key), row);
   }
   return { basis: 'billing_activity_v1', generated_at: new Date().toISOString(), timezone: 'Asia/Shanghai', summary,
     calls: { items, total: summary.calls, page, page_size: size },
-    breakdown: { items: Array.from(groups.values()).sort((a, b) => b.model_amount_micro - a.model_amount_micro || a.key.localeCompare(b.key)).slice((groupPage - 1) * size, groupPage * size), total: groups.size, page: groupPage, page_size: size } };
+    breakdown: { items: Array.from(groups.values()).sort((a, b) => b.model_amount_micro - a.model_amount_micro || a.key.localeCompare(b.key)).slice((groupPage - 1) * size, groupPage * size).map(g => ({ ...g, label: g.label || (g.key === 'unknown' ? '未关联' : `#${g.key}`) })), total: groups.size, page: groupPage, page_size: size } };
 }
 function detail(db, id) {
   let row;

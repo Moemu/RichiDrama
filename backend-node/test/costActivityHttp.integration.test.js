@@ -11,6 +11,7 @@ test('activity reads original prices and usage without setup, imports or reprici
   try {
     let db = f.db;
     seedCostActivity(db, f.admin.id);
+    db.prepare("UPDATE billing_usage_logs SET project_title_snapshot=NULL,created_at='2026-09-08T04:00:00.000Z' WHERE id='legacy-0'").run();
     const cookie = (await f.request('POST', '/auth/login', { username: f.admin.username, password: 'fixture-password' })).cookie;
     async function get(suffix) { const r = await f.request('GET', '/admin/costs/activity' + suffix, undefined, cookie); assert.equal(r.status, 200, JSON.stringify(r.body)); return r.body.data; }
     assert.equal((await f.request('GET', '/admin/costs/activity')).status, 401);
@@ -25,6 +26,7 @@ test('activity reads original prices and usage without setup, imports or reprici
     assert.equal(result.summary.model_amount_micro, 1651658800);
     assert.equal(result.summary.charged_micro, 1651658800);
     assert.equal(result.summary.difference_calls, 0);
+    assert.equal(result.breakdown.items[0].label, '历史项目名称', 'an unnamed latest record does not hide the known project snapshot');
     assert.equal(result.calls.items.length, 20);
     assert.equal((await get('?drama_id=73&page=12')).calls.items.length, 2);
     const video = await get('?drama_id=73&service_type=video');
@@ -34,6 +36,8 @@ test('activity reads original prices and usage without setup, imports or reprici
     const detail = await get('/usage:legacy-0');
     assert.equal(detail.rates[0].quantity, 324900, 'real usage, not the much larger authorization quote');
     assert.equal(detail.rates[0].subtotal_micro, 12021300);
+    assert.equal(detail.rates[0].unit_size, 1000000);
+    assert.equal(detail.supplier_amount_micro, 12021300, 'original official product-page price sources remain recognized');
     assert.equal(detail.config_id, null, 'no inferred supplier account');
     db.prepare("UPDATE billing_usage_logs SET usage_json='{}' WHERE id='legacy-0'").run();
     assert.equal((await get('/usage:legacy-0')).model_amount_micro, 12021300, 'settlement actual usage is a safe fallback');
@@ -95,6 +99,8 @@ test('shared pricing handles complex text, tiers, differences, missing usage and
     assert.equal(result.summary.calls, 1); assert.equal(result.summary.model_amount_micro, 42000); assert.equal(result.summary.supplier_amount_micro, 42000);
     assert.equal((await api('GET', '/activity?date_to=2026-09-08')).summary.calls, 0, 'Shanghai date boundary');
     seed('custom', { input_token: 2000, output_token: 1000 }, { rates: rates.map(r => ({ ...r, conditions: {} })) }, 42000);
+    seed('official-product', { input_token: 2000, output_token: 1000 }, { rates: rates.map(r => ({ ...r, conditions: { ...r.conditions, source: 'https://www.volcengine.com/product/doubao/' } })) }, 42000);
+    assert.equal((await api('GET', '/activity/usage:official-product')).supplier_amount_micro, 42000);
     seed('tier', { input_token: 40000 }, { rates: [{ meter: 'input_token', unit_price_micro: 1000, unit_size: 1000,
       conditions: { usage_tiers: [{ id: 'small', selector_meter: 'input_token', min_inclusive: 0, max_inclusive: 32768, unit_price_points: 0.1, unit_size: 1000 },
         { id: 'large', selector_meter: 'input_token', min_inclusive: 32769, max_inclusive: 131072, unit_price_points: 0.2, unit_size: 1000 }] } }] }, 40000);
@@ -111,13 +117,19 @@ test('shared pricing handles complex text, tiers, differences, missing usage and
     db.prepare(`INSERT INTO billing_transactions(id,user_id,organization_id,type,amount_micro,balance_after_micro,frozen_after_micro,snapshot_json,created_at)
       VALUES('pending',?,?,'authorization',1000000,0,0,?,'2026-09-09T01:00:00.000Z')`).run(f.admin.id, org.id, JSON.stringify({ service_type: 'text', model, rates, usage: { output_token: 999999 } }));
     assert.equal((await api('GET', '/activity/authorization:pending')).usage, null);
+    db.prepare(`INSERT INTO billing_transactions(id,user_id,type,amount_micro,balance_after_micro,frozen_after_micro,authorization_id,snapshot_json,created_at)
+      VALUES('void-pending',?,'void',0,0,0,'pending','{}','2026-09-09T01:01:00.000Z')`).run(f.admin.id);
+    assert.equal((await api('GET', '/activity/authorization:pending')).cost_status, 'released');
+    assert.equal((await api('GET', '/activity?cost_status=released')).summary.released_calls, 1);
+    assert.equal((await api('GET', '/activity?cost_status=released')).summary.missing_usage_calls, 0);
+    db.prepare("DELETE FROM billing_transactions WHERE id='void-pending'").run();
     const observed = ledger.begin(db, { config: f.config, authorization_id: 'pending', model, service_type: 'text' });
     ledger.observe(db, observed, { status: 'completed', usage: { output_token: 1000 } });
     assert.equal((await api('GET', '/activity/authorization:pending')).model_amount_micro, 30000);
     result = await api('GET', '/activity?organization_id=' + org.id);
-    assert.equal(result.summary.calls, 6); assert.equal(result.summary.calculated_calls, 4); assert.equal(result.summary.supplier_priced_calls, 2);
+    assert.equal(result.summary.calls, 7); assert.equal(result.summary.calculated_calls, 5); assert.equal(result.summary.supplier_priced_calls, 3);
     assert.equal((await api('GET', '/activity/usage:custom')).supplier_amount_micro, null);
-    db.transaction(() => { for (let i = 0; i < 1001; i++) seed('extra-' + i, { output_token: 1 }, { rates }, 30); })();
+    db.transaction(() => { for (let i = 0; i < 1000; i++) seed('extra-' + i, { output_token: 1 }, { rates }, 30); })();
     result = await api('GET', '/activity?organization_id=' + org.id);
     assert.equal(result.summary.calls, 1007, 'report reads are not limited by old 1000-row backfill batches');
     const report = await api('POST', '/reports', { organization_id: org.id, month: '2026-09', basis: 'billing_activity_v1' });
