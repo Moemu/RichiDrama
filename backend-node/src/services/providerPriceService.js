@@ -749,6 +749,7 @@ function defaultNotice(diff) {
 }
 
 function publish(db, actorId, bookId, input = {}) {
+  if (input.notify_users !== undefined && typeof input.notify_users !== 'boolean') throw new Error('是否通知用户必须是布尔值');
   if (input.confirm !== true || !String(input.reason || '').trim() || !String(input.idempotency_key || '').trim()) throw new Error('发布必须确认、填写原因并携带幂等键');
   const reused = db.prepare('SELECT * FROM billing_price_books WHERE publish_idempotency_key=?').get(String(input.idempotency_key).trim());
   if (reused) return { reused: true, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === reused.id) };
@@ -763,21 +764,23 @@ function publish(db, actorId, bookId, input = {}) {
   require('./seedreamProPricing').validateItems(db.prepare('SELECT * FROM billing_price_book_items WHERE price_book_id=?').all(draft.id));
   const diff = priceDiff(db, previous.id, draft.id);
   if (!diff.length) throw new Error('价目没有变化，无需发布');
-  const generated = defaultNotice(diff); const at = now(); const noticeId = randomUUID();
+  const notifyUsers = input.notify_users !== false;
+  const generated = defaultNotice(diff); const at = now(); const noticeId = notifyUsers ? randomUUID() : null;
   const title = String(input.notice_title || generated.title).trim(); const body = String(input.notice_body || generated.body).trim();
-  if (!title || !body) throw new Error('通知标题和正文必填');
+  if (notifyUsers && (!title || !body)) throw new Error('通知标题和正文必填');
   db.transaction(() => {
     db.prepare("UPDATE billing_price_books SET status='archived',effective_to=?,updated_at=? WHERE id=? AND status='published'").run(at, at, previous.id);
     db.prepare(`UPDATE billing_price_books SET status='published',effective_from=?,effective_to=NULL,published_by=?,published_at=?,publish_reason=?,publish_idempotency_key=?,reviewed_by=COALESCE(reviewed_by,?),reviewed_at=COALESCE(reviewed_at,?),updated_at=? WHERE id=? AND status='draft'`)
       .run(at, actorId, at, String(input.reason).trim(), String(input.idempotency_key).trim(), actorId, at, at, draft.id);
     db.prepare('UPDATE tenant_price_book_bindings SET price_book_id=?,active_at=?,updated_at=? WHERE price_book_id=?').run(draft.id, at, at, previous.id);
-    db.prepare(`INSERT INTO system_notices(id,type,title,body,status,price_book_id,effective_at,published_by,published_at,created_at,updated_at) VALUES (?,'pricing',?,?,'active',?,?,?,?,?,?)`).run(noticeId, title, body, draft.id, at, actorId, at, at, at);
-    require('./billingService').audit(db, actorId, 'price_book.publish', 'price_book', draft.id, { previous_price_book_id: previous.id, source_sync_id: draft.source_sync_id || null, reason: String(input.reason).trim(), notice_id: noticeId, diff });
+    if (notifyUsers) db.prepare(`INSERT INTO system_notices(id,type,title,body,status,price_book_id,effective_at,published_by,published_at,created_at,updated_at) VALUES (?,'pricing',?,?,'active',?,?,?,?,?,?)`).run(noticeId, title, body, draft.id, at, actorId, at, at, at);
+    require('./billingService').audit(db, actorId, 'price_book.publish', 'price_book', draft.id, { previous_price_book_id: previous.id, source_sync_id: draft.source_sync_id || null, reason: String(input.reason).trim(), notify_users: notifyUsers, notice_id: noticeId, diff });
   })();
   return { reused: false, notice_id: noticeId, diff, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === Number(draft.id)) };
 }
 
 function rollback(db, actorId, historicalId, input = {}) {
+  if (input.notify_users !== undefined && typeof input.notify_users !== 'boolean') throw new Error('是否通知用户必须是布尔值');
   if (input.confirm !== true || !String(input.reason || '').trim() || !String(input.idempotency_key || '').trim()) throw new Error('回滚必须确认、填写原因并携带幂等键');
   const reused = db.prepare('SELECT * FROM billing_price_books WHERE publish_idempotency_key=?').get(String(input.idempotency_key).trim());
   if (reused) return { reused: true, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === reused.id) };

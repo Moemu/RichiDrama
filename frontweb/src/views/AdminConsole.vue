@@ -184,7 +184,7 @@
 <script setup>
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox, ElPagination } from 'element-plus'
+import { ElMessage, ElMessageBox, ElPagination, ElCheckbox } from 'element-plus'
 import { CircleCheckFilled, PictureFilled, Setting, VideoCamera, WalletFilled, WarningFilled } from '@element-plus/icons-vue'
 import { adminAPI } from '@/api/account'
 import request from '@/utils/request'
@@ -348,7 +348,7 @@ async function adjustBalance() { if (!selected.value) return; if (balance.mode =
 function addPriceItem() { price.items.push({ service_type: 'image', model: '', meter: 'image', unit_price: 0, is_free: false }) }
 function openPrice(book) { if (book && book.status !== 'draft') return ElMessage.warning('已发布或已归档价目不可原地修改'); editingPriceId.value = book?.id || null; Object.assign(price, book ? { name: book.name, status: 'draft', items: (book.items || []).map((item) => ({ ...item })) } : { name: '', status: 'draft', items: [] }); if (!price.items.length) addPriceItem(); showPrice.value = true }
 async function savePrice() { if (!price.name || !price.items.length) return ElMessage.warning('请填写名称和至少一项计价规则'); try { const payload = { name: price.name, status: 'draft', items: price.items.map((item) => ({ ...item, unit_price: Number(item.unit_price || 0) })) }; if (editingPriceId.value) await adminAPI.updatePriceBook(editingPriceId.value, payload); else await adminAPI.createPriceBook(payload); showPrice.value = false; await loadGovernance(); ElMessage.success('价目草稿已保存') } catch (error) { ElMessage.error(error?.message || '保存失败') } }
-async function rollbackPrice(book) { try { await ElMessageBox.confirm(`将创建新版本，并把价格回滚到“${book.name}”。发布后立即生效。`, '确认价目回滚', { type: 'warning', confirmButtonText: '确认回滚' }); await adminAPI.rollbackPriceBook(book.id, { confirm: true, reason: `管理员回滚到历史价目 ${book.name}`, idempotency_key: createClientRequestId(`price-rollback-${book.id}`), notice_title: '模型调用价格已回滚', notice_body: `价格配置已回滚到历史版本“${book.name}”。新请求立即使用回滚后的价格。` }); await loadGovernance(); ElMessage.success('价目已回滚，新版本已发布') } catch (error) { if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.message || '回滚失败') } }
+async function rollbackPrice(book) { const notifyUsers = ref(true); try { await ElMessageBox.confirm(() => h('div', [h('p', `将创建新版本，并把价格回滚到“${book.name}”。发布后立即生效。`), h(ElCheckbox, { modelValue: notifyUsers.value, 'onUpdate:modelValue': value => { notifyUsers.value = value } }, () => '通知用户价格更新')]), '确认价目回滚', { type: 'warning', confirmButtonText: '确认回滚' }); await adminAPI.rollbackPriceBook(book.id, { confirm: true, reason: `管理员回滚到历史价目 ${book.name}`, idempotency_key: createClientRequestId(`price-rollback-${book.id}`), notify_users: notifyUsers.value, notice_title: '模型调用价格已回滚', notice_body: `价格配置已回滚到历史版本“${book.name}”。新请求立即使用回滚后的价格。` }); await loadGovernance(); ElMessage.success('价目已回滚，新版本已发布') } catch (error) { if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.message || '回滚失败') } }
 let pollTimer; let pollTick = 0
 onMounted(async () => {
   await loadCurrent()

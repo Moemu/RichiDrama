@@ -39,8 +39,9 @@
       <el-form label-position="top">
         <el-form-item label="价目版本"><el-input :model-value="draft?.name" disabled/></el-form-item>
         <el-form-item label="发布原因"><el-input v-model="publishForm.reason" maxlength="200" show-word-limit/></el-form-item>
-        <el-form-item label="用户通知标题"><el-input v-model="publishForm.notice_title" maxlength="80" show-word-limit/></el-form-item>
-        <el-form-item label="用户通知正文"><el-input v-model="publishForm.notice_body" type="textarea" :rows="7" maxlength="1600" show-word-limit/></el-form-item>
+        <el-form-item><el-checkbox v-model="publishForm.notify_users">通知用户价格更新</el-checkbox></el-form-item>
+        <el-form-item v-if="publishForm.notify_users" label="用户通知标题"><el-input v-model="publishForm.notice_title" maxlength="80" show-word-limit/></el-form-item>
+        <el-form-item v-if="publishForm.notify_users" label="用户通知正文"><el-input v-model="publishForm.notice_body" type="textarea" :rows="7" maxlength="1600" show-word-limit/></el-form-item>
         <el-alert type="warning" :closable="false" title="发布后立即生效。进行中任务继续使用原价格快照。"/>
       </el-form>
       <template #footer><el-button @click="showPublish=false">稍后发布</el-button><el-button type="primary" :loading="publishing" @click="publish">确认发布</el-button></template>
@@ -59,7 +60,7 @@ const emit = defineEmits(['published', 'draft-created'])
 const meters = ['request', 'image', 'input_image', 'second', 'millisecond', 'character', 'input_token', 'output_token']
 const detail = ref(null); const probeResult = ref(null); const draft = ref(null); const notices = ref([])
 const probing = ref(false); const syncing = ref(false); const creatingDraft = ref(false); const publishing = ref(false); const showPublish = ref(false)
-const publishForm = reactive({ reason: '', notice_title: '模型调用价格已更新', notice_body: '' })
+const publishForm = reactive({ reason: '', notify_users: true, notice_title: '模型调用价格已更新', notice_body: '' })
 const probeReady = computed(() => probeResult.value?.ark_status === 'success' && probeResult.value?.billing_status === 'success')
 const canCreateDraft = computed(() => detail.value?.status === 'completed' && detail.value.candidates?.length && detail.value.candidates.every((row) => row.review_status !== 'pending' && (row.review_status === 'rejected' || row.mapping_status === 'mapped')))
 
@@ -82,8 +83,8 @@ async function runSync() { syncing.value = true; try { const result = await admi
 async function review(row, status) { const updated = await adminAPI.updateProviderPriceCandidate(detail.value.id, row.id, { service_type: row.service_type, billing_key: row.billing_key, meter: row.meter, unit_size: row.unit_size, review_status: status }); Object.assign(row, updated); ElMessage.success(status === 'accepted' ? '候选价格已接受' : '候选价格已排除') }
 async function accept(row) { await review(row, 'accepted') }
 async function reject(row) { await review(row, 'rejected') }
-async function createDraft() { creatingDraft.value = true; try { draft.value = await adminAPI.createProviderPriceDraft(detail.value.id); publishForm.reason = `审核并发布火山价目同步批次 ${detail.value.id.slice(0, 8)}`; const changed = detail.value.candidates.filter((row) => row.review_status === 'accepted').map(candidateChange); publishForm.notice_body = `生效时间：发布后立即生效。\n受影响价格：\n${changed.join('\n')}\n进行中的任务继续使用原价格快照。`; showPublish.value = true; emit('draft-created', draft.value) } finally { creatingDraft.value = false } }
-async function publish() { if (!publishForm.reason.trim() || !publishForm.notice_title.trim() || !publishForm.notice_body.trim()) return ElMessage.warning('请填写发布原因和通知内容'); publishing.value = true; try { await adminAPI.publishPriceBook(draft.value.id, { confirm: true, reason: publishForm.reason.trim(), idempotency_key: `provider-price-publish:${draft.value.id}:${Date.now()}`, notice_title: publishForm.notice_title.trim(), notice_body: publishForm.notice_body.trim() }); showPublish.value = false; await load(); emit('published'); ElMessage.success('新价格已发布，用户横幅已生效') } finally { publishing.value = false } }
+async function createDraft() { creatingDraft.value = true; try { draft.value = await adminAPI.createProviderPriceDraft(detail.value.id); publishForm.notify_users = true; publishForm.reason = `审核并发布火山价目同步批次 ${detail.value.id.slice(0, 8)}`; const changed = detail.value.candidates.filter((row) => row.review_status === 'accepted').map(candidateChange); publishForm.notice_body = `生效时间：发布后立即生效。\n受影响价格：\n${changed.join('\n')}\n进行中的任务继续使用原价格快照。`; showPublish.value = true; emit('draft-created', draft.value) } finally { creatingDraft.value = false } }
+async function publish() { if (!publishForm.reason.trim()) return ElMessage.warning('请填写发布原因'); if (publishForm.notify_users && (!publishForm.notice_title.trim() || !publishForm.notice_body.trim())) return ElMessage.warning('请填写通知标题和正文'); publishing.value = true; try { await adminAPI.publishPriceBook(draft.value.id, { confirm: true, reason: publishForm.reason.trim(), idempotency_key: `provider-price-publish:${draft.value.id}:${Date.now()}`, notify_users: publishForm.notify_users, notice_title: publishForm.notice_title.trim(), notice_body: publishForm.notice_body.trim() }); showPublish.value = false; await load(); emit('published'); ElMessage.success(publishForm.notify_users ? '新价格已发布，用户横幅已生效' : '新价格已发布，未发送用户通知') } finally { publishing.value = false } }
 async function archive(row) { await adminAPI.archiveNotice(row.id); await load(); ElMessage.success('通知已归档，确认历史已保留') }
 
 onMounted(load)

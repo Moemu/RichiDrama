@@ -70,7 +70,7 @@
     <el-dialog class="catalog-dialog" top="5vh" v-model="showPublish" title="审核调价草稿" width="min(680px, 94vw)" append-to-body>
       <p>{{ draft?.name }}</p><p>下列计价项将在发布后立即生效。已预授权任务保持原价格。</p>
       <div v-for="item in draftItems" :key="`${item.service_type}:${item.model}:${item.meter}`" class="price-version"><strong>{{ item.model }} · {{ meterNames[item.meter] }}：{{ item.is_free ? '免费' : `${item.unit_price} 积分` }}</strong><small>{{ JSON.stringify(item.conditions_json || {}) }}</small></div>
-      <el-form label-position="top"><el-form-item label="发布原因"><el-input v-model="publishReason" /></el-form-item></el-form>
+      <el-form label-position="top"><el-form-item label="发布原因"><el-input v-model="publishReason" /></el-form-item><el-form-item><el-checkbox v-model="notifyUsers">通知用户价格更新</el-checkbox></el-form-item></el-form>
       <template #footer><el-button @click="showPublish = false">保留草稿</el-button><el-button type="primary" :loading="saving" @click="publish">确认发布</el-button></template>
     </el-dialog>
     <ModelDiscoveryDialog v-model="showDiscovery" @imported="load(); emit('changed')" />
@@ -97,7 +97,7 @@ const showAdd = ref(false); const showDetail = ref(false); const showPublish = r
 const detailTab = ref('pricing')
 const showDiscovery = ref(false)
 const add = reactive({ config_id: null, model: '', display_name: '' })
-const bookId = ref(null); const billingKey = ref(''); const priceItems = ref([]); const draft = ref(null); const publishReason = ref('')
+const bookId = ref(null); const billingKey = ref(''); const priceItems = ref([]); const draft = ref(null); const publishReason = ref(''); const notifyUsers = ref(true)
 const filtered = computed(() => rows.value.filter(row => (!typeFilter.value || row.service_type === typeFilter.value) && (!statusFilter.value || row.status === statusFilter.value) && `${row.display_name} ${row.model} ${row.connections.map(c => c.provider).join(' ')}`.toLowerCase().includes(search.value.trim().toLowerCase())))
 const publishedBooks = computed(() => books.value.filter(book => book.status === 'published'))
 const billingKeys = computed(() => [...new Set((selected.value?.connections || []).map(c => c.billing_key))])
@@ -136,7 +136,7 @@ function loadPriceItems() {
   }
 }
 function addPriceItem() { priceItems.value.push({ meter: 'request', unit_price: 0, is_free: false, conditions_text: '' }) }
-function reviewDraft(book) { draft.value = books.value.find(item => item.id === book.id); publishReason.value = `调整 ${selected.value.display_name} 价格`; showPublish.value = true }
+function reviewDraft(book) { draft.value = books.value.find(item => item.id === book.id); notifyUsers.value = true; publishReason.value = `调整 ${selected.value.display_name} 价格`; showPublish.value = true }
 async function setStatus(status) {
   try { await ElMessageBox.confirm(status === 'retired' ? '下架后禁止新的生成请求。请确认已处理默认模型和业务场景。' : '确认上架此模型？项目组权限和价目表仍分别生效。', status === 'retired' ? '下架模型' : '上架模型', { type: 'warning' }) } catch { return }
   saving.value = true
@@ -147,13 +147,13 @@ async function saveDraft() {
   try {
     const items = priceItems.value.map(item => ({ meter: item.meter, unit_price: item.unit_price, is_free: item.is_free, conditions_json: item.conditions_text.trim() ? JSON.parse(item.conditions_text) : null }))
     draft.value = await request.post('/admin/model-catalog/price-draft', { service_type: selected.value.service_type, model: selected.value.model, billing_key: billingKey.value, price_book_id: bookId.value, items })
-    publishReason.value = `调整 ${selected.value.display_name} 价格`; showPublish.value = true; await load()
+    notifyUsers.value = true; publishReason.value = `调整 ${selected.value.display_name} 价格`; showPublish.value = true; await load()
   } catch (e) { ElMessage.error(e instanceof SyntaxError ? '计价条件必须是有效 JSON' : e.message) } finally { saving.value = false }
 }
 async function publish() {
   if (!publishReason.value.trim()) return ElMessage.warning('请填写发布原因')
   saving.value = true
-  try { await adminAPI.publishPriceBook(draft.value.id, { confirm: true, reason: publishReason.value, idempotency_key: `catalog-publish:${draft.value.id}`, notice_title: '模型价格已更新', notice_body: `${selected.value.display_name} 价格已更新。新请求立即生效，已预授权任务保持原价格。` }); showPublish.value = false; await load(); emit('changed'); ElMessage.success('价格已发布'); bookId.value = draft.value.id; loadPriceItems() } catch (e) { ElMessage.error(e.message) } finally { saving.value = false }
+  try { await adminAPI.publishPriceBook(draft.value.id, { confirm: true, reason: publishReason.value, idempotency_key: `catalog-publish:${draft.value.id}`, notify_users: notifyUsers.value, notice_title: '模型价格已更新', notice_body: `${selected.value.display_name} 价格已更新。新请求立即生效，已预授权任务保持原价格。` }); showPublish.value = false; await load(); emit('changed'); ElMessage.success('价格已发布'); bookId.value = draft.value.id; loadPriceItems() } catch (e) { ElMessage.error(e.message) } finally { saving.value = false }
 }
 onMounted(load)
 defineExpose({ load })
