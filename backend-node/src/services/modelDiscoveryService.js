@@ -7,7 +7,7 @@ const capability = require('./modelCapabilityService');
 const providers = require('./providerConnectionService');
 
 const serviceTypes = new Set(['text', 'image', 'storyboard_image', 'video', 'tts']);
-const sources = new Set(['openai', 'volcengine_activations', 'volcengine_endpoints']);
+const sources = new Set(['openai', 'volcengine_activations', 'volcengine_versions', 'volcengine_endpoints']);
 const pageSize = 100;
 
 function settings(config) {
@@ -80,6 +80,9 @@ async function discover(db, actorId, configId, input = {}) {
   const config = connection(db, configId);
   const source = input.source || defaultSource(config);
   if (!sources.has(source)) throw new Error('不支持此模型列表来源');
+  const versionSource = source === 'volcengine_versions';
+  const foundationModel = String(input.foundation_model || '').trim();
+  if (versionSource && (!validId(foundationModel) || !foundationModel.startsWith('doubao-') || /-\d{6}$/.test(foundationModel))) throw new Error('请选择有效的火山基础型号，再读取版本');
   const page = Number(input.page ?? 1);
   if (!Number.isSafeInteger(page) || page < 1 || page > 1000 || (source === 'openai' && page !== 1)) throw new Error('无效的模型列表页码');
   const requestId = randomUUID();
@@ -102,8 +105,9 @@ async function discover(db, actorId, configId, input = {}) {
     const activations = source === 'volcengine_activations';
     const body = activations
       ? { PageNumber: page, PageSize: pageSize, WithPrice: false, WithFreeUsage: false, Filter: { States: ['Available'] } }
+      : versionSource ? { FoundationModelName: foundationModel, PageNumber: page, PageSize: pageSize }
       : { PageNumber: page, PageSize: pageSize, ...(value.project_name ? { ProjectName: value.project_name } : {}) };
-    const signed = signedHeaders({ accessKeyId: value.access_key_id, secretAccessKey: value.secret_access_key, region, service: 'ark', action: activations ? 'ListModelActivations' : 'ListEndpoints', version: '2024-01-01', body });
+    const signed = signedHeaders({ accessKeyId: value.access_key_id, secretAccessKey: value.secret_access_key, region, service: 'ark', action: activations ? 'ListModelActivations' : versionSource ? 'ListFoundationModelVersions' : 'ListEndpoints', version: '2024-01-01', body });
     url = signed.url;
     init = { method: 'POST', headers: signed.headers, body: signed.bodyText };
   }
@@ -131,9 +135,11 @@ async function discover(db, actorId, configId, input = {}) {
     const models = new Map(); let ignored = 0;
     for (const item of raw) {
       const activations = source === 'volcengine_activations';
-      const id = source === 'openai' ? item?.id : activations ? item?.FoundationModelName || item?.Name : item?.Id;
+      const id = versionSource
+        ? item?.FoundationModelName === foundationModel && /^\d{6}$/.test(String(item?.ModelVersion || '')) ? `${foundationModel}-${item.ModelVersion}` : null
+        : source === 'openai' ? item?.id : activations ? item?.FoundationModelName || item?.Name : item?.Id;
       if (!validId(id)) { ignored++; continue; }
-      models.set(id, { id, capability: capability.infer(id), display_name: String((source === 'openai' ? item.name : activations ? item.DisplayName : item.Name) || id).slice(0, 200), provider_status: source === 'openai' ? null : String((activations ? item.State : item.Status) || ''), configured: config.model.includes(id) });
+      models.set(id, { id, ...(activations && id.startsWith('doubao-') && !/-\d{6}$/.test(id) ? { importable: false, foundation_model: id } : {}), ...(versionSource ? { foundation_model: foundationModel } : {}), capability: capability.infer(id), display_name: String((source === 'openai' ? item.name : activations ? item.DisplayName : versionSource ? item.Description : item.Name) || id).slice(0, 200), provider_status: source === 'openai' ? null : String((activations ? item.State : item.Status) || ''), configured: config.model.includes(id) });
     }
     const nextPage = source !== 'openai' && page * pageSize < total ? page + 1 : null;
     if (nextPage && !raw.length) throw new Error('供应商分页响应不完整，请重新获取');
@@ -149,6 +155,7 @@ async function discover(db, actorId, configId, input = {}) {
 function importModels(db, actorId, configId, input, log) {
   if (!Array.isArray(input.models) || !input.models.length || input.models.length > 200) throw new Error('请选择 1 至 200 个模型');
   const models = [...new Set(input.models)];
+  if (input.source === 'volcengine_activations' && models.some(model => typeof model === 'string' && model.startsWith('doubao-') && !/-\d{6}$/.test(model))) throw new Error('基础型号不是调用 ID，请查看版本并导入带日期的模型 ID');
   if (models.some(model => !validId(model))) throw new Error('包含无效模型 ID，未导入任何模型');
   return db.transaction(() => {
     const config = connection(db, configId);
