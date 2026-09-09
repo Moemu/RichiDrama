@@ -1,5 +1,6 @@
 <template>
   <div class="scene-model-map-page">
+    <SceneDefaults />
     <div class="page-header">
       <div class="header-left">
         <p class="page-desc">
@@ -37,7 +38,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="config_name" label="AI 配置" min-width="180">
+        <el-table-column prop="config_name" label="供应商连接" min-width="180">
           <template #default="{ row }">
             <span v-if="row.config_id">{{ row.config_name || '配置 #' + row.config_id }}</span>
             <el-tag v-else type="info" size="small">使用默认配置</el-tag>
@@ -65,7 +66,10 @@
     <el-dialog
       v-model="dialogVisible"
       :title="editingKey ? '编辑业务场景映射' : '添加业务场景映射'"
-      width="560px"
+      width="min(560px, 94vw)"
+      class="scene-map-dialog"
+      top="5vh"
+      append-to-body
       :close-on-click-modal="false"
       @closed="resetForm"
     >
@@ -101,18 +105,18 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item label="AI 配置">
+        <el-form-item label="供应商连接">
           <el-select
-            v-model="form.config_id"
+            v-model="selectedProvider"
             clearable
             placeholder="留空使用该服务的默认配置"
             style="width: 100%"
             @change="onConfigChange"
           >
             <el-option
-              v-for="c in filteredConfigs"
+              v-for="c in connectionGroups"
               :key="c.id"
-              :label="`${c.name} (${c.provider})`"
+              :label="c.name"
               :value="c.id"
             />
           </el-select>
@@ -125,6 +129,7 @@
             placeholder="留空使用配置默认"
             style="width: 100%"
             :disabled="!selectedConfigModels.length"
+            @change="onModelChange"
           >
             <el-option
               v-for="m in selectedConfigModels"
@@ -157,6 +162,8 @@ import { Plus } from '@element-plus/icons-vue'
 import { sceneModelMapAPI } from '@/api/sceneModelMap'
 import { aiAPI } from '@/api/ai'
 import { getSelectableModels } from '@/utils/modelSelection'
+import { providerGroups, resolveProviderConfig } from '@/utils/providerModelSelection'
+import SceneDefaults from './SceneDefaults.vue'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -193,16 +200,19 @@ const predefinedKeys = [
   { value: 'story_generation', label: 'story_generation - 故事生成', service_type: 'text' },
 ]
 
-// 根据服务类型筛选配置
-const filteredConfigs = computed(() => {
-  const currentServiceType = form.value.service_type
-  return configs.value.filter(c => c.service_type === currentServiceType && c.is_active)
+const connectionGroups = computed(() => providerGroups(configs.value, form.value.service_type))
+const selectedProvider = computed({
+  get: () => connectionGroups.value.find(group => group.configs.some(config => config.id === form.value.config_id))?.id || '',
+  set: id => { form.value.config_id = connectionGroups.value.find(group => group.id === id)?.configs[0]?.id || null }
 })
-
-// 获取选中配置的可用模型列表
 const selectedConfigModels = computed(() => {
-  return getSelectableModels(configs.value, form.value.service_type, form.value.config_id)
+  const group = connectionGroups.value.find(group => group.id === selectedProvider.value)
+  return group?.models || getSelectableModels(configs.value, form.value.service_type, form.value.config_id)
 })
+function onModelChange(model) {
+  const group = connectionGroups.value.find(group => group.id === selectedProvider.value)
+  if (group) form.value.config_id = resolveProviderConfig(group, model, form.value.service_type, form.value.config_id)?.id || null
+}
 
 function serviceTypeLabel(type) {
   const map = {
@@ -262,11 +272,11 @@ async function load() {
     configs.value = configsData || []
 
     // 合并配置名称
-    list.value = (mapsData || []).map(item => {
+    list.value = (mapsData || []).filter(item => item.routing_version !== 'capability-default-v1').map(item => {
       const config = configs.value.find(c => c.id === item.config_id)
       return {
         ...item,
-        config_name: config?.name || null
+        config_name: config?.provider_connection_name || config?.name || null
       }
     })
   } catch (err) {
@@ -412,5 +422,15 @@ onMounted(() => {
   font-size: 12px;
   color: #999;
   line-height: 1.4;
+}
+</style>
+<style>
+.el-dialog.scene-map-dialog { max-height: 90dvh; display: flex; flex-direction: column; }
+.scene-map-dialog .el-dialog__body { overflow-y: auto; min-height: 0; }
+.scene-map-dialog .el-dialog__header, .scene-map-dialog .el-dialog__footer { flex-shrink: 0; }
+@media (max-width: 600px) {
+  .scene-map-dialog .el-form-item { display: block; }
+  .scene-map-dialog .el-form-item__label { width: auto !important; justify-content: flex-start; }
+  .scene-map-dialog .el-form-item__content { margin-left: 0 !important; }
 }
 </style>

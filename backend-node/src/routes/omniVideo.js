@@ -46,7 +46,13 @@ module.exports = function routes(db, log, cfg) { return {
   importRealPersonAsset(req, res) { try { response.created(res, omniVideoService.importRealPersonFailureAsset(db, log, req.params.id, req.auth, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
   importCopyrightAssets(req, res) { try { response.created(res, omniVideoService.importCopyrightFailureAssets(db, log, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
   get(req, res) { try { const job = omniVideoService.get(db, req.params.id); if (!job || (Number(job.owner_user_id) !== Number(req.auth.id) && req.auth.role !== 'admin')) return response.notFound(res, '全能视频任务不存在'); response.success(res, job); } catch (err) { response.internalError(res, err.message); } },
-  capabilities(req, res) { const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id); response.success(res, capabilityService.list(db, tenant ? { tenant_id: tenant.id } : {})); },
+  capabilities(req, res) {
+    const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id);
+    const scope = tenant ? { tenant_id: tenant.id } : {};
+    const configs = require('../services/aiConfigService').listConfigs(db, 'video', scope);
+    const visible = require('../services/modelCatalogService').filterConfigs(db, configs, req.auth.id);
+    response.success(res, capabilityService.list(db, scope).filter(item => visible.some(config => config.id === item.config_id && config.model.includes(item.model))));
+  },
   listSequences(req, res) { try { response.success(res, sequenceService.list(db, { owner_user_id: req.auth.id })); } catch (err) { response.internalError(res, err.message); } },
   listDeletedSequences(req, res) { try { response.success(res, sequenceService.list(db, { deleted: true, owner_user_id: req.auth.id })); } catch (err) { response.internalError(res, err.message); } },
   defaultSequence(req, res) { try { response.success(res, sequenceService.ensureDefault(db, req.auth.id)); } catch (err) { response.internalError(res, err.message); } },

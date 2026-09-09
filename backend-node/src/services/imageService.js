@@ -591,18 +591,20 @@ function create(db, log, req) {
   return { id: imageGenId, task_id: taskId, status: 'pending', ...getById(db, imageGenId) };
 }
 
-function settleImageBilling(db, log, row) {
+function settleImageBilling(db, log, row, result = {}) {
   if (!row?.billing_authorization_id || !row.owner_user_id) return;
   try {
-    require('./billingService').settleAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, {
-      usage: { image: 1 }, provider_request_id: `image-generation:${row.id}`,
+    require('./billingService').settleAuthorization(db, { id: row.owner_user_id, role: 'admin' }, require('./billingService').imageAuthorization(db, row.billing_authorization_id).id, {
+      usage: result.billing_usage || { image: 1 }, provider_request_id: result.billing_usage ? result.provider_request_id : `image-generation:${row.id}`,
     });
   } catch (err) { log.error('[billing] image settlement failed', { image_gen_id: row.id, error: err.message }); }
 }
 
 function voidImageBilling(db, log, row, reason) {
   if (!row?.billing_authorization_id || !row.owner_user_id) return;
-  try { require('./billingService').voidAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, reason); }
+  try {
+    require('./billingService').voidImageAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, reason);
+  }
   catch (err) { log.error('[billing] image authorization release failed', { image_gen_id: row.id, error: err.message }); }
 }
 
@@ -720,7 +722,7 @@ async function processImageGeneration(db, log, imageGenId) {
     }
 
     // ── Step 1: 获取 AI 配置 ──────────────────────────────────────────
-    const config = imageClient.getDefaultImageConfig(db, row.model, null, imageServiceType, row.tenant_id ? { tenant_id: row.tenant_id } : {});
+    const config = imageClient.getDefaultImageConfig(db, row.model, null, imageServiceType, { tenant_id: row.tenant_id, scene_defaults: false });
     if (!config) {
       log.error('[图生] ✗ 未找到图片 AI 配置', { id: imageGenId, imageServiceType, elapsed: elapsed() });
       db.prepare('UPDATE image_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run(
@@ -1398,6 +1400,7 @@ async function processImageGeneration(db, log, imageGenId) {
       drama_id: row.drama_id,
       character_id: row.character_id,
       image_gen_id: imageGenId,
+      billing_authorization_id: row.billing_authorization_id,
       imageServiceType,
       reference_image_urls: reference_image_urls || undefined,
       files_base_url: filesBaseUrl,
@@ -1436,7 +1439,7 @@ async function processImageGeneration(db, log, imageGenId) {
       const category =
         row.scene_id != null ? 'scenes' : row.character_id != null ? 'characters' : 'images';
       const projectSubdir = storageLayout.getProjectStorageSubdir(db, row.drama_id);
-      localPath = await uploadService.downloadImageToLocal(
+      localPath = result.local_path || await uploadService.downloadImageToLocal(
         storagePath,
         result.image_url,
         category,
@@ -1487,7 +1490,7 @@ async function processImageGeneration(db, log, imageGenId) {
         db, mirrorCfg, mirrorStorageRoot, localPath, 'image_generation', imageGenId, log
       ).catch((error) => log.warn('[图生] OSS 镜像待重试，本地文件保持可用', { id: imageGenId, local_path: localPath, error: error.message })));
     }
-    settleImageBilling(db, log, row);
+    settleImageBilling(db, log, row, result);
     if (row.task_id) {
       taskService.updateTaskResult(db, row.task_id, {
         image_generation_id: imageGenId,

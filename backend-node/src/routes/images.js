@@ -18,6 +18,7 @@ function routes(db, cfg, log) {
     create: (req, res) => {
       try {
         const body = req.body || {};
+        if (body.layer_decomposition === true) return response.badRequest(res, '当前图片生成接口不支持图层拆分');
         if (!Number.isInteger(Number(body.drama_id)) || Number(body.drama_id) <= 0) return response.badRequest(res, '请选择计费归属项目后再生成');
         if (body.drama_id) {
           const own = db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id);
@@ -37,15 +38,19 @@ function routes(db, cfg, log) {
         }
         const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id);
         const aiOptions = tenant ? { tenant_id: tenant.id } : {};
-        const imageConfig = require('../services/aiConfigService').listConfigs(db, body.service_type || 'image', aiOptions)[0]
+        let imageConfig = require('../services/aiConfigService').listConfigs(db, body.service_type || 'image', aiOptions)[0]
           || require('../services/aiConfigService').listConfigs(db, 'storyboard_image', aiOptions)[0];
+        if (!body.model && body.storyboard_id) {
+          const sceneDefault = require('../services/aiConfigService').listConfigs(db, 'storyboard_image', aiOptions).find(config => config.scene_default);
+          if (sceneDefault) imageConfig = sceneDefault;
+        }
         const model = String(body.model || imageConfig?.default_model || imageConfig?.model?.[0] || '').trim();
         if (!model) return response.badRequest(res, '请选择图片模型后再生成');
         const billingTarget = require('../services/aiConfigService').resolveBillingTarget(db, body.service_type || 'image', model, body.ai_config_id, aiOptions);
         if (!String(body.idempotency_key || '').trim()) return response.badRequest(res, '图片生成请求缺少幂等键，请刷新后重试');
         const authorization = billing.createAuthorization(db, req.auth, {
           idempotency_key: String(body.idempotency_key).trim(),
-          service_type: body.service_type || 'image', model: billingTarget.billing_key,
+          service_type: body.service_type || 'image', model: billingTarget.billing_key, provider_model: billingTarget.provider_model,
           usage: { image: 1 },
           pricing_context: require('../services/imageBillingService').imagePricingContext(body),
           reference_type: 'image_generation', reference_id: body.drama_id || null, drama_id: body.drama_id || null, source_kind: 'image_generation', source_id: body.storyboard_id || null,

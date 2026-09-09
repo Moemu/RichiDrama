@@ -23,6 +23,26 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
     return item;
   }
   return {
+    providerConnections: guarded((_req, res) => response.success(res, require('../services/providerConnectionService').list(db))),
+    providerAttachmentCandidates: guarded((req, res) => response.success(res, require('../services/providerConnectionService').attachmentCandidates(db, req.params.id))),
+    attachProviderConfigs: guarded((req, res) => {
+      if (require('../services/aiConfigService').getVendorLockStatus(cfg).enabled) throw new Error('厂商锁定模式不允许关联供应商连接');
+      response.success(res, require('../services/providerConnectionService').attach(db, req.auth.id, req.params.id, req.body?.config_ids));
+    }),
+    saveProviderConnection: guarded((req, res) => {
+      if (require('../services/aiConfigService').getVendorLockStatus(cfg).enabled) throw new Error('厂商锁定模式不允许修改供应商连接');
+      response.success(res, require('../services/providerConnectionService').save(db, req.auth.id, req.body || {}, req.params.id));
+    }),
+    convertProviderConnection: guarded((req, res) => {
+      if (require('../services/aiConfigService').getVendorLockStatus(cfg).enabled) throw new Error('厂商锁定模式不允许转换供应商连接');
+      response.success(res, require('../services/providerConnectionService').fromLegacy(db, req.auth.id, req.body?.config_id));
+    }),
+    modelCatalog: guarded((_req, res) => response.success(res, require('../services/modelCatalogService').list(db))),
+    saveModelCatalog: guarded((req, res) => {
+      if (require('../services/aiConfigService').getVendorLockStatus(cfg).enabled) throw new Error('厂商锁定模式不允许修改模型目录');
+      response.success(res, require('../services/modelCatalogService').save(db, req.auth.id, req.body || {}, log));
+    }),
+    modelPriceDraft: guarded((req, res) => response.created(res, require('../services/modelCatalogService').createPriceDraft(db, req.auth.id, req.body || {}))),
     users: (_req, res) => response.success(res, billing.listUsers(db)),
     createUser: guarded((req, res) => {
       auth.validateNewPassword(req.body?.password);

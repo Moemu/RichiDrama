@@ -9,7 +9,7 @@ const BILLING_VERSION = '2022-01-01';
 const POINTS_PER_CNY = 100;
 const MICRO_PER_POINT = 10000;
 const LOCK_MS = 10 * 60 * 1000;
-const MAPPING_RULE_VERSION = 'verified-platform-models-v2';
+const MAPPING_RULE_VERSION = 'verified-platform-models-v7';
 
 function now() { return new Date().toISOString(); }
 function parse(value, fallback = {}) { try { return value ? JSON.parse(value) : fallback; } catch (_) { return fallback; } }
@@ -168,21 +168,40 @@ async function fetchAllActivations(credential, options = {}) {
   const requestIds = [];
   let page = 1;
   let total = Infinity;
+  let pageSize = 20;
   const deadline = Date.now() + 45000;
   while (items.length < total && page <= 100) {
-    const result = await callOpenApi(credential, {
-      ...options, deadline, service: 'ark', action: 'ListModelActivations', version: ARK_VERSION,
-      body: { PageNumber: page, PageSize: 100, WithPrice: true, WithFreeUsage: false, Filter: { States: ['Available'], IncludeDeprecatedModels: true } },
-    }).catch((error) => {
-      error.requestIds = [...requestIds, ...(error.requestIds || [])];
+    let result;
+    try {
+      result = await callOpenApi(credential, {
+        ...options, deadline, service: 'ark', action: 'ListModelActivations', version: ARK_VERSION,
+        body: { PageNumber: page, PageSize: pageSize, WithPrice: true, WithFreeUsage: false, Filter: { States: ['Available'], IncludeDeprecatedModels: true } },
+      });
+    } catch (error) {
+      requestIds.push(...(error.requestIds || []));
+      if (error.code === 'InternalServiceTimeout' && pageSize > 5 && Date.now() < deadline) {
+        pageSize /= 2;
+        // Changing page size changes offsets, so discard the partial snapshot.
+        items.length = 0;
+        page = 1;
+        total = Infinity;
+        continue;
+      }
+      error.requestIds = [...requestIds];
       throw error;
-    });
+    }
     requestIds.push(...result.requestIds);
     const pageItems = Array.isArray(result.payload?.Result?.Items) ? result.payload.Result.Items : [];
     items.push(...pageItems);
     total = Number(result.payload?.Result?.TotalCount ?? items.length);
     if (!pageItems.length) break;
     page += 1;
+  }
+  if (items.length < total) {
+    throw Object.assign(new Error('火山价格分页结果不完整'), {
+      httpStatus: 502, publicCode: 'PROVIDER_API_ERROR', requestIds, action: 'ListModelActivations',
+      publicMessage: '火山价格列表未读取完整，请稍后重试；当前已发布价目表未改变。',
+    });
   }
   return { items, requestIds };
 }
@@ -296,10 +315,17 @@ function releaseLock(db, token, provider = PROVIDER) {
 }
 
 function normalizeName(value) { return String(value || '').trim().toLowerCase().replace(/[._\s]+/g, '-'); }
+function pricingConfigurations(db) {
+  const ai = require('./aiConfigService');
+  return db.prepare('SELECT id FROM ai_service_configs WHERE deleted_at IS NULL ORDER BY id').all()
+    .map(row => ai.getConfig(db, row.id)).filter(config => config.is_active && /(?:volc|doubao|火山)/i.test(config.provider || ''))
+    .map(config => ({ id: config.id, service_type: config.service_type, provider: config.provider,
+      model: JSON.stringify(config.model), billing_key: config.billing_key }));
+}
+
 function configuredTargets(db, providerModel) {
   const needle = normalizeName(providerModel);
-  const rows = db.prepare(`SELECT service_type,provider,model,billing_key FROM ai_service_configs
-    WHERE deleted_at IS NULL AND is_active=1`).all();
+  const rows = pricingConfigurations(db);
   const targets = [];
   for (const row of rows) {
     if (!/(?:volc|doubao|火山)/i.test(String(row.provider || ''))) continue;
@@ -319,8 +345,7 @@ function configuredTargets(db, providerModel) {
 
 function missingConfiguredModelRows(db, providerItems) {
   const providerNames = providerItems.map((item) => normalizeName(item.FoundationModelName || item.Name)).filter(Boolean);
-  const rows = db.prepare(`SELECT service_type,provider,model,billing_key FROM ai_service_configs
-    WHERE deleted_at IS NULL AND is_active=1`).all();
+  const rows = pricingConfigurations(db);
   const warnings = [];
   const seen = new Set();
   for (const row of rows) {
@@ -357,7 +382,7 @@ function sourceUnitSize(unitCode, meter) {
   if (/百万|1m|million/.test(u)) return 1000000;
   if (/千|1k|thousand/.test(u)) return 1000;
   if (/万/.test(u)) return 10000;
-  if (meter === 'image' || meter === 'second' || /每|\/|per/.test(u)) return 1;
+  if (['image', 'input_image'].includes(meter) || meter === 'second' || /每|\/|per/.test(u)) return 1;
   return null;
 }
 
@@ -378,25 +403,24 @@ function activeItem(db, serviceType, model, meter) {
 
 function verifiedTargets(db, providerModel, serviceTypes) {
   const providerName = normalizeName(providerModel);
-  const rows = db.prepare(`SELECT service_type,provider,model,billing_key FROM ai_service_configs
-    WHERE deleted_at IS NULL AND is_active=1`).all();
+  const rows = pricingConfigurations(db);
   const targets = [];
   for (const row of rows) {
     if (!/(?:volc|doubao|火山)/i.test(String(row.provider || ''))) continue;
     if (!serviceTypes.includes(String(row.service_type || ''))) continue;
     const models = (() => { const parsedModels = parse(row.model, null); return Array.isArray(parsedModels) ? parsedModels : String(row.model || '').split(','); })();
-    const matchedModel = models.filter(Boolean).map((value) => String(value).trim()).find((value) => normalizeName(value).replace(/-\d{6}$/, '') === providerName);
+    const matchedModels = models.filter(Boolean).map((value) => String(value).trim()).filter((value) => normalizeName(value).replace(/-\d{6}$/, '') === providerName);
     const billingKeyMatches = row.billing_key && normalizeName(row.billing_key).replace(/-\d{6}$/, '') === providerName;
-    if (!matchedModel && !billingKeyMatches) continue;
-    targets.push({ service_type: String(row.service_type), billing_key: String(row.billing_key || matchedModel || providerModel).trim() });
+    if (!matchedModels.length && !billingKeyMatches) continue;
+    const keys = row.billing_key ? [row.billing_key] : matchedModels;
+    for (const key of keys) targets.push({ service_type: String(row.service_type), billing_key: String(key).trim() });
   }
   return [...new Map(targets.map((target) => [`${target.service_type}\0${target.billing_key}`, target])).values()];
 }
 
 function providerModelIsConfigured(db, providerModel) {
   const providerName = normalizeName(providerModel);
-  const rows = db.prepare(`SELECT provider,model,billing_key FROM ai_service_configs
-    WHERE deleted_at IS NULL AND is_active=1`).all();
+  const rows = pricingConfigurations(db);
   return rows.some((row) => {
     if (!/(?:volc|doubao|火山)/i.test(String(row.provider || ''))) return false;
     const models = (() => { const parsedModels = parse(row.model, null); return Array.isArray(parsedModels) ? parsedModels : String(row.model || '').split(','); })();
@@ -428,6 +452,8 @@ function normalizedCharge(charge, meter) {
 function priceCore(value) {
   const conditions = typeof value === 'string' ? parse(value, {}) : (value || {});
   return stable({
+    image_pricing_version: conditions.image_pricing_version ?? null,
+    free_units: conditions.free_units ?? null,
     unit_size: conditions.unit_size ?? null,
     default_rate_id: conditions.default_rate_id ?? null,
     rates: Array.isArray(conditions.rates) ? conditions.rates : [],
@@ -480,13 +506,46 @@ function compoundSpec(groups, meter, chargeType, charges, rates, defaultRateId) 
 function verifiedMultiChargeRows(db, item, groups) {
   const model = normalizeName(item.FoundationModelName || item.Name);
   let serviceTypes = []; let specs = [];
-  if (model === 'doubao-seedream-5-0') {
+  if (['doubao-seedream-4-0', 'doubao-seedream-4-5', 'doubao-seedream-5-0'].includes(model)) {
+    if (['doubao-seedream-4-0', 'doubao-seedream-4-5'].includes(model) && (groups.length !== 1 ||
+      Object.keys(groups[0]).some(key => key !== 'ChargeItems') ||
+      !Array.isArray(groups[0].ChargeItems) || groups[0].ChargeItems.length !== 2 ||
+      groups[0].ChargeItems.some(charge => charge.UnitCode !== '张' || charge.Price == null) ||
+      ['I2ICompletion', 'T2ICompletion'].some(type => groups[0].ChargeItems.filter(charge => charge.Type === type).length !== 1))) return [];
     serviceTypes = ['image', 'storyboard_image'];
     specs = [compoundSpec(groups, 'image', 'VerifiedImageGeneration', [chargeIn(groups, 'I2ICompletion'), chargeIn(groups, 'T2ICompletion')], [
       { id: 'image_to_image', when: { has_image_input: true } },
       { id: 'text_to_image', when: { has_image_input: false } },
     ], 'text_to_image')];
-  } else if (model === 'doubao-seed-2-0-lite') {
+  } else if (model === 'doubao-seedream-5-0-pro') {
+    const expected = ['ToIPrompt', 'ToICompletion', 'ToILargeCompletion', 'ToILayerCompletion', 'ToILayerLargeCompletion'];
+    const charges = groups[0]?.ChargeItems || [];
+    if (groups.length !== 1 || charges.length !== expected.length || expected.some(type => charges.filter(charge => charge.Type === type).length !== 1)) return [];
+    serviceTypes = ['image', 'storyboard_image'];
+    const output = compoundSpec(groups, 'image', 'VerifiedSeedreamProOutput',
+      ['ToICompletion', 'ToILargeCompletion', 'ToILayerCompletion', 'ToILayerLargeCompletion'].map(type => chargeIn(groups, type)), [
+        { id: 'single_small', when: { image_scene: 'single', pixel_band: 'small' } },
+        { id: 'single_large', when: { image_scene: 'single', pixel_band: 'large' } },
+        { id: 'layer_small', when: { image_scene: 'layer', pixel_band: 'small' } },
+        { id: 'layer_large', when: { image_scene: 'layer', pixel_band: 'large' } },
+      ], 'single_large');
+    const charge = chargeIn(groups, 'ToIPrompt');
+    const price = normalizedCharge(charge, 'input_image');
+    const version = require('./seedreamProPricing').VERSION;
+    if (output) output.conditions.image_pricing_version = version;
+    specs = [output, charge && price ? {
+      meter: 'input_image', chargeType: 'VerifiedSeedreamProInput', unitCode: charge.UnitCode,
+      unitSize: price.unitSize, unitPriceMicro: price.micro, providerPrice: String(contractPrice(charge)),
+      conditions: { unit_size: 1, free_units: 1, image_pricing_version: version }, raw: groups,
+    } : null];
+  } else if (['doubao-seed-2-0-mini', 'doubao-seed-2-0-lite', 'doubao-seed-2-0-pro'].includes(model)) {
+    if (['doubao-seed-2-0-mini', 'doubao-seed-2-0-pro'].includes(model) && (groups.length !== 3 || groups.some((group, index) =>
+      Object.keys(group).some(key => !['ChargeItems', 'MaxPromptTokens', 'Name', 'Description'].includes(key)) ||
+      (index < 2 ? group.MaxPromptTokens !== [32768, 131072][index] :
+        group.MaxPromptTokens != null && group.MaxPromptTokens !== 262144) ||
+      ['InferencePrompt', 'InferenceCompletion'].some(type =>
+        !Array.isArray(group.ChargeItems) || group.ChargeItems.filter(charge => charge.Type === type).length !== 1 ||
+        group.ChargeItems.some(charge => charge.Type === type && (charge.Price == null || !/^千\s*tokens$/.test(charge.UnitCode))))))) return [];
     serviceTypes = ['text'];
     for (const [type, meter] of [['InferencePrompt', 'input_token'], ['InferenceCompletion', 'output_token']]) {
       const charges = [0, 1, 2].map((index) => chargeIn(groups, type, index));
@@ -535,12 +594,16 @@ function buildCandidateRows(db, item) {
   const model = String(item.FoundationModelName || item.Name || '').trim();
   const displayName = String(item.DisplayName || model).trim();
   if (!providerModelIsConfigured(db, model)) return [];
-  const multi = Array.isArray(item.MultiChargeItems) ? item.MultiChargeItems : [];
+  let multi = Array.isArray(item.MultiChargeItems) ? item.MultiChargeItems : [];
   const charges = Array.isArray(item.ChargeItems) ? item.ChargeItems : [];
+  if (!multi.length && normalizeName(model) === 'doubao-seedream-5-0-pro' && charges.length) multi = [{ ChargeItems: charges }];
   if (multi.length) {
     const verified = verifiedMultiChargeRows(db, item, multi);
     if (verified?.length) return verified;
-    return multi.map((raw, index) => ({ provider_model: model, display_name: displayName, charge_type: `MultiChargeItems[${index}]`, unit_code: raw.UnitCode || null, provider_unit_price: raw.Price == null ? null : String(raw.Price), mapping_status: 'unmapped', error_summary: verified ? '已验证模型的必要计费项或本地 billing_key 缺失，不能自动发布' : '复杂条件价格需要人工映射，不能自动发布', raw_item_json: json(raw) }));
+    const capability = require('./modelCapabilityService').infer(model);
+    const missingTarget = capability && !verifiedTargets(db, model, capability === 'image' ? ['image', 'storyboard_image'] : [capability]).length;
+    const mappingError = missingTarget ? `已识别模型能力为 ${capability}，但没有同能力的本地连接。请转换为共享连接后重新导入` : verified ? '供应商的必要计费项或计量单位不完整，不能自动发布' : '复杂条件价格需要人工映射，不能自动发布';
+    return multi.map((raw, index) => ({ provider_model: model, display_name: displayName, charge_type: `MultiChargeItems[${index}]`, unit_code: raw.UnitCode || null, provider_unit_price: raw.Price == null ? null : String(raw.Price), mapping_status: 'unmapped', error_summary: mappingError, raw_item_json: json(raw) }));
   }
   return charges.map((raw) => {
     const meter = chargeMeter(raw.Type, raw.UnitCode);
@@ -551,15 +614,21 @@ function buildCandidateRows(db, item) {
       return { provider_model: model, display_name: displayName, charge_type: String(raw.Type || 'unknown'), unit_code: raw.UnitCode || null, provider_unit_price: raw.Price == null ? null : String(raw.Price), meter, unit_size: normalized?.unitSize || null, new_unit_price_micro: normalized?.micro || null, mapping_status: targets.length > 1 ? 'ambiguous' : 'unmapped', error_summary: !meter || !normalized ? '未知计费类型或计量单位' : targets.length > 1 ? '模型对应多个本地计费键' : '找不到本地 billing_key', raw_item_json: json(raw) };
     }
     const target = targets[0]; const current = activeItem(db, target.service_type, target.billing_key, meter);
-    return { provider_model: model, display_name: displayName, charge_type: String(raw.Type || 'unknown'), unit_code: raw.UnitCode || null, provider_unit_price: String(raw.Price), service_type: target.service_type, billing_key: target.billing_key, meter, unit_size: normalized.unitSize, new_unit_price_micro: normalized.micro, current_unit_price_micro: current?.unit_price_micro ?? null, current_price_book_item_id: current?.id ?? null, change_ratio: current?.unit_price_micro ? (normalized.micro - current.unit_price_micro) / current.unit_price_micro : null, mapping_status: 'mapped', error_summary: null, raw_item_json: json(raw) };
+    return { provider_model: model, display_name: displayName, charge_type: String(raw.Type || 'unknown'), unit_code: raw.UnitCode || null, provider_unit_price: String(raw.Price), service_type: target.service_type, billing_key: target.billing_key, meter, unit_size: normalized.unitSize, conditions_changed: samePriceCore(current?.conditions_json, { ...parse(current?.conditions_json, {}), unit_size: normalized.unitSize }) ? 0 : 1, new_unit_price_micro: normalized.micro, current_unit_price_micro: current?.unit_price_micro ?? null, current_price_book_item_id: current?.id ?? null, change_ratio: current?.unit_price_micro ? (normalized.micro - current.unit_price_micro) / current.unit_price_micro : null, mapping_status: 'mapped', error_summary: null, raw_item_json: json(raw) };
   });
+}
+
+function candidateUnchanged(row) {
+  return row.mapping_status === 'mapped' && row.current_unit_price_micro != null &&
+    row.new_unit_price_micro === row.current_unit_price_micro && !row.conditions_changed;
 }
 
 function syncView(db, id) {
   const sync = db.prepare('SELECT * FROM provider_price_syncs WHERE id=?').get(id);
   if (!sync) return null;
   const currentConditions = db.prepare('SELECT conditions_json FROM billing_price_book_items WHERE id=?');
-  return { ...sync, provider_request_ids: parse(sync.provider_request_ids_json, []), candidates: db.prepare('SELECT * FROM provider_price_candidates WHERE sync_id=? ORDER BY provider_model,charge_type,id').all(id).map((row) => ({ ...row, conditions_changed: !!row.conditions_changed, current_conditions: parse(currentConditions.get(row.current_price_book_item_id)?.conditions_json, null), new_conditions: parse(row.new_conditions_json, null), raw_item: parse(row.raw_item_json, null) })) };
+  const reused = sync.status === 'unchanged' ? db.prepare("SELECT id FROM provider_price_syncs WHERE response_hash=? AND status='completed' AND id<>? ORDER BY created_at DESC LIMIT 1").get(sync.response_hash, id) : null;
+  return { ...sync, ...(reused ? { reused_from_sync_id: reused.id } : {}), provider_request_ids: parse(sync.provider_request_ids_json, []), candidates: db.prepare('SELECT * FROM provider_price_candidates WHERE sync_id=? ORDER BY provider_model,charge_type,id').all(id).map((row) => ({ ...row, is_unchanged: candidateUnchanged(row), conditions_changed: !!row.conditions_changed, current_conditions: parse(currentConditions.get(row.current_price_book_item_id)?.conditions_json, null), new_conditions: parse(row.new_conditions_json, null), raw_item: parse(row.raw_item_json, null) })) };
 }
 
 function listSyncs(db, limit = 30) {
@@ -576,14 +645,16 @@ async function sync(db, actorId, options = {}) {
       VALUES (?,?,?,?,?,?,?,?)`).run(id, PROVIDER, credential.configId, 'processing', options.triggerType === 'scheduled' ? 'scheduled' : 'manual', actorId || null, at, at);
     const fetched = await fetchAllActivations(credential, options);
     const clean = sanitize(fetched.items);
-    const responseHash = sha256(`${JSON.stringify(stable(clean))}|${MAPPING_RULE_VERSION}`);
-    const existing = db.prepare(`SELECT id FROM provider_price_syncs WHERE provider=? AND response_hash=? AND status IN ('completed','unchanged') AND id<>? LIMIT 1`).get(PROVIDER, responseHash, id);
+    const rows = [...clean.flatMap((item) => buildCandidateRows(db, item)), ...missingConfiguredModelRows(db, clean)];
+    const currentPrice = db.prepare('SELECT id,unit_price_micro,is_free,conditions_json FROM billing_price_book_items WHERE id=?');
+    const baseline = rows.map(row => row.current_price_book_item_id ? currentPrice.get(row.current_price_book_item_id) : null);
+    const responseHash = sha256(`${JSON.stringify(stable(clean))}|${MAPPING_RULE_VERSION}|${JSON.stringify(pricingConfigurations(db))}|${JSON.stringify(stable(baseline))}`);
+    const existing = db.prepare(`SELECT id FROM provider_price_syncs WHERE provider=? AND response_hash=? AND status='completed' AND id<>? LIMIT 1`).get(PROVIDER, responseHash, id);
     if (existing) {
       db.prepare(`UPDATE provider_price_syncs SET status='unchanged',response_hash=?,provider_request_ids_json=?,raw_response_json=?,fetched_at=?,updated_at=? WHERE id=?`)
         .run(responseHash, json(fetched.requestIds), json(clean), now(), now(), id);
       return { ...syncView(db, id), reused_from_sync_id: existing.id };
     }
-    const rows = [...clean.flatMap((item) => buildCandidateRows(db, item)), ...missingConfiguredModelRows(db, clean)];
     const insert = db.prepare(`INSERT INTO provider_price_candidates
       (sync_id,provider,provider_model,display_name,charge_type,unit_code,currency,provider_unit_price,service_type,billing_key,meter,unit_size,new_unit_price_micro,new_conditions_json,conditions_changed,current_unit_price_micro,current_price_book_item_id,change_ratio,mapping_status,review_status,error_summary,raw_item_json,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)`);
@@ -617,11 +688,13 @@ function updateCandidate(db, actorId, syncId, candidateId, input = {}) {
   const billingKey = String(input.billing_key || row.billing_key || '').trim();
   const meter = String(input.meter || row.meter || '').trim();
   const unitSize = Number(input.unit_size || row.unit_size);
-  if (!serviceType || !billingKey || !['request','image','second','millisecond','character','input_token','output_token'].includes(meter) || !Number.isSafeInteger(unitSize) || unitSize <= 0 || !Number.isSafeInteger(row.new_unit_price_micro)) throw new Error('请提供有效的服务、计费键、计量器和计量基数');
+  if (!serviceType || !billingKey || !['request','image','input_image','second','millisecond','character','input_token','output_token'].includes(meter) || !Number.isSafeInteger(unitSize) || unitSize <= 0 || !Number.isSafeInteger(row.new_unit_price_micro)) throw new Error('请提供有效的服务、计费键、计量器和计量基数');
   const current = activeItem(db, serviceType, billingKey, meter);
+  const conditions = { ...parse(row.new_conditions_json, parse(current?.conditions_json, {})), unit_size: unitSize };
+  const conditionsChanged = !samePriceCore(current?.conditions_json, conditions);
   const status = input.review_status === 'rejected' ? 'rejected' : 'accepted';
-  db.prepare(`UPDATE provider_price_candidates SET service_type=?,billing_key=?,meter=?,unit_size=?,current_unit_price_micro=?,current_price_book_item_id=?,change_ratio=?,mapping_status='mapped',review_status=?,error_summary=NULL,updated_at=? WHERE id=?`)
-    .run(serviceType, billingKey, meter, unitSize, current?.unit_price_micro ?? null, current?.id ?? null, current?.unit_price_micro ? (row.new_unit_price_micro - current.unit_price_micro) / current.unit_price_micro : null, status, now(), row.id);
+  db.prepare(`UPDATE provider_price_candidates SET service_type=?,billing_key=?,meter=?,unit_size=?,current_unit_price_micro=?,current_price_book_item_id=?,change_ratio=?,conditions_changed=?,mapping_status='mapped',review_status=?,error_summary=NULL,updated_at=? WHERE id=?`)
+    .run(serviceType, billingKey, meter, unitSize, current?.unit_price_micro ?? null, current?.id ?? null, current?.unit_price_micro ? (row.new_unit_price_micro - current.unit_price_micro) / current.unit_price_micro : null, conditionsChanged ? 1 : 0, status, now(), row.id);
   const updated = db.prepare('SELECT * FROM provider_price_candidates WHERE id=?').get(row.id);
   require('./billingService').audit(db, actorId, 'provider_price.candidate.review', 'provider_price_candidate', row.id, { sync_id: syncId, review_status: status, service_type: serviceType, billing_key: billingKey, meter, unit_size: unitSize });
   return updated;
@@ -646,8 +719,11 @@ function createDraft(db, actorId, syncId) {
   const priorBook = db.prepare('SELECT id,status FROM billing_price_books WHERE source_sync_id=? ORDER BY id DESC LIMIT 1').get(syncId);
   if (priorBook?.status === 'draft') return require('./billingService').listPriceBooks(db).find((book) => book.id === priorBook.id);
   if (priorBook) throw new Error('此同步批次已用于价目版本，不能重复生成草稿');
-  const blockers = db.prepare("SELECT COUNT(*) count FROM provider_price_candidates WHERE sync_id=? AND (review_status='pending' OR (review_status='accepted' AND mapping_status<>'mapped'))").get(syncId).count;
+  const actionable = db.prepare('SELECT * FROM provider_price_candidates WHERE sync_id=?').all(syncId).filter(row => !candidateUnchanged(row));
+  const blockers = actionable.filter(row => row.review_status === 'pending' || (row.review_status === 'accepted' && row.mapping_status !== 'mapped')).length;
   if (blockers) throw new Error(`仍有 ${blockers} 条价格未完成人工审核或映射`);
+  const candidates = actionable.filter(row => row.mapping_status === 'mapped' && row.review_status === 'accepted');
+  if (!candidates.length) throw new Error('没有已接受的价格变化，无需生成草稿');
   const base = currentSystemBook(db);
   if (!base) throw new Error('没有可克隆的系统管理火山价目表');
   const at = now(); let draftId;
@@ -656,7 +732,6 @@ function createDraft(db, actorId, syncId) {
       (name,owner_user_id,status,effective_from,effective_to,created_by,created_at,updated_at,version,parent_price_book_id,source_sync_id,system_managed,reviewed_by,reviewed_at)
       VALUES (?,NULL,'draft',NULL,NULL,?,?,?,?,?,?,1,?,?)`).run(`火山引擎同步价目 v${Number(base.version || 1) + 1}`, actorId, at, at, Number(base.version || 1) + 1, base.id, syncId, actorId, at).lastInsertRowid);
     cloneItems(db, base.id, draftId, at);
-    const candidates = db.prepare("SELECT * FROM provider_price_candidates WHERE sync_id=? AND mapping_status='mapped' AND review_status='accepted'").all(syncId);
     for (const candidate of candidates) {
       const existing = db.prepare('SELECT * FROM billing_price_book_items WHERE price_book_id=? AND service_type=? AND model=? AND meter=?').get(draftId, candidate.service_type, candidate.billing_key, candidate.meter);
       const conditions = candidate.new_conditions_json ? parse(candidate.new_conditions_json, {}) : parse(existing?.conditions_json, {});
@@ -687,6 +762,7 @@ function defaultNotice(diff) {
 }
 
 function publish(db, actorId, bookId, input = {}) {
+  if (input.notify_users !== undefined && typeof input.notify_users !== 'boolean') throw new Error('是否通知用户必须是布尔值');
   if (input.confirm !== true || !String(input.reason || '').trim() || !String(input.idempotency_key || '').trim()) throw new Error('发布必须确认、填写原因并携带幂等键');
   const reused = db.prepare('SELECT * FROM billing_price_books WHERE publish_idempotency_key=?').get(String(input.idempotency_key).trim());
   if (reused) return { reused: true, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === reused.id) };
@@ -698,23 +774,26 @@ function publish(db, actorId, bookId, input = {}) {
   }
   const previous = draft.parent_price_book_id ? db.prepare("SELECT * FROM billing_price_books WHERE id=? AND status='published'").get(draft.parent_price_book_id) : currentSystemBook(db);
   if (!previous) throw new Error('当前有效价目版本不存在，不能发布');
+  require('./seedreamProPricing').validateItems(db.prepare('SELECT * FROM billing_price_book_items WHERE price_book_id=?').all(draft.id));
   const diff = priceDiff(db, previous.id, draft.id);
   if (!diff.length) throw new Error('价目没有变化，无需发布');
-  const generated = defaultNotice(diff); const at = now(); const noticeId = randomUUID();
+  const notifyUsers = input.notify_users !== false;
+  const generated = defaultNotice(diff); const at = now(); const noticeId = notifyUsers ? randomUUID() : null;
   const title = String(input.notice_title || generated.title).trim(); const body = String(input.notice_body || generated.body).trim();
-  if (!title || !body) throw new Error('通知标题和正文必填');
+  if (notifyUsers && (!title || !body)) throw new Error('通知标题和正文必填');
   db.transaction(() => {
     db.prepare("UPDATE billing_price_books SET status='archived',effective_to=?,updated_at=? WHERE id=? AND status='published'").run(at, at, previous.id);
     db.prepare(`UPDATE billing_price_books SET status='published',effective_from=?,effective_to=NULL,published_by=?,published_at=?,publish_reason=?,publish_idempotency_key=?,reviewed_by=COALESCE(reviewed_by,?),reviewed_at=COALESCE(reviewed_at,?),updated_at=? WHERE id=? AND status='draft'`)
       .run(at, actorId, at, String(input.reason).trim(), String(input.idempotency_key).trim(), actorId, at, at, draft.id);
     db.prepare('UPDATE tenant_price_book_bindings SET price_book_id=?,active_at=?,updated_at=? WHERE price_book_id=?').run(draft.id, at, at, previous.id);
-    db.prepare(`INSERT INTO system_notices(id,type,title,body,status,price_book_id,effective_at,published_by,published_at,created_at,updated_at) VALUES (?,'pricing',?,?,'active',?,?,?,?,?,?)`).run(noticeId, title, body, draft.id, at, actorId, at, at, at);
-    require('./billingService').audit(db, actorId, 'price_book.publish', 'price_book', draft.id, { previous_price_book_id: previous.id, source_sync_id: draft.source_sync_id || null, reason: String(input.reason).trim(), notice_id: noticeId, diff });
+    if (notifyUsers) db.prepare(`INSERT INTO system_notices(id,type,title,body,status,price_book_id,effective_at,published_by,published_at,created_at,updated_at) VALUES (?,'pricing',?,?,'active',?,?,?,?,?,?)`).run(noticeId, title, body, draft.id, at, actorId, at, at, at);
+    require('./billingService').audit(db, actorId, 'price_book.publish', 'price_book', draft.id, { previous_price_book_id: previous.id, source_sync_id: draft.source_sync_id || null, reason: String(input.reason).trim(), notify_users: notifyUsers, notice_id: noticeId, diff });
   })();
   return { reused: false, notice_id: noticeId, diff, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === Number(draft.id)) };
 }
 
 function rollback(db, actorId, historicalId, input = {}) {
+  if (input.notify_users !== undefined && typeof input.notify_users !== 'boolean') throw new Error('是否通知用户必须是布尔值');
   if (input.confirm !== true || !String(input.reason || '').trim() || !String(input.idempotency_key || '').trim()) throw new Error('回滚必须确认、填写原因并携带幂等键');
   const reused = db.prepare('SELECT * FROM billing_price_books WHERE publish_idempotency_key=?').get(String(input.idempotency_key).trim());
   if (reused) return { reused: true, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === reused.id) };

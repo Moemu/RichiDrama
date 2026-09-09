@@ -152,7 +152,11 @@ function listConfigs(db, serviceType, options = {}) {
     }
   }
   const rows = params.length ? db.prepare(sql).all(...params) : db.prepare(sql).all();
-  return rows.map(rowToConfig);
+  const configs = rows.map(row => rowToConfig(row, db));
+  if (serviceType === 'storyboard_image') {
+    configs.push(...listConfigs(db, 'image', options).filter(config => config.provider_connection_id).map(config => ({ ...config, is_default: false })));
+  }
+  return options.scene_defaults === false ? configs : require('./sceneDefaultService').apply(db, serviceType, configs);
 }
 
 // Creators only need model choices. Provider credentials and transport
@@ -172,7 +176,7 @@ function publicConfig(config) {
 }
 
 function listPublicConfigs(db, serviceType, options = {}) {
-  return listConfigs(db, serviceType, options).map(publicConfig);
+  return require('./modelCatalogService').filterConfigs(db, listConfigs(db, serviceType, options), options.user_id).map(publicConfig);
 }
 
 function resolveBillingTarget(db, serviceType, model, configId, options = {}) {
@@ -191,7 +195,7 @@ function clearOtherDefault(db, serviceType, exceptId, ownerTenantId = null) {
 
 function getConfig(db, id) {
   const row = db.prepare('SELECT * FROM ai_service_configs WHERE id = ? AND deleted_at IS NULL').get(id);
-  return row ? rowToConfig(row) : null;
+  return row ? rowToConfig(row, db) : null;
 }
 
 function listOwnedTenantConfigs(db, tenantId, serviceType) {
@@ -205,7 +209,7 @@ function listOwnedTenantConfigs(db, tenantId, serviceType) {
   params.push(Number(tenantId));
   if (serviceType) { sql += ' AND c.service_type = ?'; params.push(serviceType); }
   sql += ' ORDER BY b.is_default DESC, b.priority DESC, c.created_at DESC';
-  return db.prepare(sql).all(...params).map(rowToConfig);
+  return db.prepare(sql).all(...params).map(row => rowToConfig(row, db));
 }
 
 function createConfig(db, log, req) {
@@ -286,6 +290,23 @@ function createConfig(db, log, req) {
 function updateConfig(db, log, id, req) {
   const existing = getConfig(db, id);
   if (!existing) return null;
+  if (existing.provider_connection_id) {
+    if (req.service_type != null && req.service_type !== existing.service_type) throw new Error('模型绑定不能更换能力，请在供应商连接中重新导入');
+    if (req.model != null) {
+      const capability = require('./modelCapabilityService');
+      for (const model of modelList(req.model).filter(model => !existing.model.includes(model))) {
+        const known = capability.infer(model);
+        if (known && known !== capability.canonical(existing.service_type)) throw new Error('模型能力与绑定不匹配，请在共享连接中导入模型');
+      }
+    }
+    for (const key of ['provider', 'base_url', 'api_key']) {
+      if (req[key] != null && req[key] !== existing[key] && !(key === 'api_key' && isMaskedApiKey(req[key]))) {
+        throw new Error('请在供应商连接中修改共享地址和凭据');
+      }
+    }
+    req = { ...req };
+    delete req.provider; delete req.base_url; delete req.api_key;
+  }
   const updates = [];
   const params = [];
   if (req.name != null) {
@@ -362,15 +383,18 @@ function deleteConfig(db, log, id) {
   return true;
 }
 
-function rowToConfig(r) {
+function rowToConfig(r, db) {
+  const connection = r.provider_connection_id ? require('./providerConnectionService').get(db, r.provider_connection_id) : null;
   const cfg = {
     id: r.id,
+    provider_connection_id: r.provider_connection_id || null,
+    provider_connection_name: connection?.name || null,
     service_type: r.service_type,
     provider: r.provider,
     api_protocol: r.api_protocol || '',
     name: r.name,
-    base_url: r.base_url,
-    api_key: r.api_key,
+    base_url: connection?.base_url ?? r.base_url,
+    api_key: r.provider_connection_id ? connection?.api_key || '' : r.api_key,
     model: modelFromDb(r.model),
     default_model: r.default_model ? String(r.default_model).trim() : null,
     billing_key: r.billing_key ? String(r.billing_key).trim() : null,
@@ -379,12 +403,16 @@ function rowToConfig(r) {
     priority: r.tenant_priority ?? r.priority ?? 0,
     is_default: r.tenant_is_default == null ? !!r.is_default : !!r.tenant_is_default,
     platform_is_default: !!r.is_default,
-    is_active: r.is_active == null ? true : !!r.is_active,
+    is_active: (r.is_active == null ? true : !!r.is_active) && (!r.provider_connection_id || !!connection?.is_active),
     settings: r.settings,
     created_at: r.created_at,
     updated_at: r.updated_at,
     owner_tenant_id: r.owner_tenant_id == null ? null : Number(r.owner_tenant_id),
   };
+  if (connection) {
+    const capability = require('./modelCapabilityService');
+    cfg.model = cfg.model.filter(model => !capability.infer(model) || capability.infer(model) === capability.canonical(cfg.service_type));
+  }
   // TTS 配置：从 settings JSON 展开 voice_id / group_id 供 ttsService 直接读取
   if (r.service_type === 'tts' && r.settings) {
     try {

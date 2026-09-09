@@ -130,7 +130,7 @@ function setupRouter(cfg, db, log) {
     const configs = require('../services/aiConfigService').listConfigs(db, null, tenant ? { tenant_id: tenant.id } : {});
     const billingService = require('../services/billingService');
     const out = [];
-    for (const config of configs) {
+    for (const config of require('../services/modelCatalogService').filterConfigs(db, configs, req.auth.id).filter(config => config.is_active)) {
       for (const model of config.model || []) {
         out.push({ service_type: config.service_type, model, provider: config.provider, config_id: config.id });
       }
@@ -160,6 +160,19 @@ function setupRouter(cfg, db, log) {
   adminRouter.put('/customer-organizations/:id/members', admin.replaceCustomerOrganizationMembers);
   adminRouter.post('/customer-organizations/:id/balance-adjustments', admin.adjustCustomerOrganizationBalance);
   adminRouter.get('/price-books', admin.priceBooks);
+  adminRouter.get('/model-catalog', admin.modelCatalog);
+  adminRouter.get('/provider-connections', admin.providerConnections);
+  adminRouter.post('/provider-connections', admin.saveProviderConnection);
+  adminRouter.patch('/provider-connections/:id', admin.saveProviderConnection);
+  adminRouter.post('/provider-connections/convert', admin.convertProviderConnection);
+  adminRouter.get('/provider-connections/:id/candidates', admin.providerAttachmentCandidates);
+  adminRouter.post('/provider-connections/:id/attach', admin.attachProviderConfigs);
+  adminRouter.post('/model-catalog', admin.saveModelCatalog);
+  adminRouter.post('/model-catalog/price-draft', admin.modelPriceDraft);
+  const modelDiscovery = require('./modelDiscovery')(db, log, cfg);
+  adminRouter.get('/model-discovery/connections', modelDiscovery.connections);
+  adminRouter.post('/model-discovery/:id/fetch', modelDiscovery.discover);
+  adminRouter.post('/model-discovery/:id/import', modelDiscovery.import);
   adminRouter.post('/price-books', admin.createPriceBook);
   adminRouter.patch('/price-books/:id', admin.updatePriceBook);
   adminRouter.post('/price-books/:id/publish', admin.publishPriceBook);

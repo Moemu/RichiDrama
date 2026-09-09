@@ -44,6 +44,8 @@ function createApp() {
   // A successful call without verifiable usage remains frozen for reconciliation.
   // This sweep makes the timeout release deterministic even if no request follows it.
   const billingService = require('./services/billingService');
+  try { billingService.recoverInterruptedImageReconciliations(db); }
+  catch (error) { logger.warn('interrupted image billing recovery failed', { error: error.message }); }
   try {
     const result = billingService.recoverCompletedVideoReconciliations(db);
     if (result.recovered) logger.warn('recovered completed video billing reconciliations', result);

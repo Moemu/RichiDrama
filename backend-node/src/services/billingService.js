@@ -1,4 +1,5 @@
 const { v4: uuid } = require('uuid');
+const seedreamPricing = require('./seedreamProPricing');
 
 function now() { return new Date().toISOString(); }
 function json(v) { return JSON.stringify(v == null ? {} : v); }
@@ -118,7 +119,7 @@ function activeMeters(db, user, serviceType, model) {
 }
 
 function normalizeUsage(usage) {
-  const allowed = ['request', 'image', 'second', 'millisecond', 'character', 'input_token', 'output_token'];
+  const allowed = ['request', 'image', 'input_image', 'second', 'millisecond', 'character', 'input_token', 'output_token'];
   const clean = {};
   for (const meter of allowed) {
     const v = Number(usage?.[meter] || 0);
@@ -153,6 +154,10 @@ function tierFor(conditions, usage) {
 function rateFor(row, context = {}, usage = {}) {
   const conditions = parseConditions(row.conditions_json);
   const rates = Array.isArray(conditions.rates) ? conditions.rates : [];
+  if (seedreamPricing.enabled(conditions) && row.meter === 'image'
+      && !rates.some(rate => Object.entries(rate.when || {}).every(([key, value]) => context[key] === value))) {
+    throw new Error('Seedream Pro 报价需要明确的像素档位和生成场景');
+  }
   // Prefer the most specific matching condition instead of trusting the
   // administrator's JSON-array order. Price-book validation rejects equally
   // specific overlapping rules, so this remains deterministic.
@@ -181,20 +186,29 @@ function proratedPoints(quantity, unitPrice, unitSize) {
 function quote(db, user, input) {
   const serviceType = String(input.service_type || '').trim(); const model = String(input.model || '').trim();
   if (!serviceType || !model) throw new Error('service_type 和 model 必填');
+  require('./modelCatalogService').assertAvailable(db, serviceType, input.provider_model || model);
   const usage = normalizeUsage(input.usage);
   const rows = activePriceItems(db, user.id, serviceType, model);
   const byMeter = new Map(); for (const row of rows) if (!byMeter.has(row.meter)) byMeter.set(row.meter, row);
+  const imageConditions = parseConditions(byMeter.get('image')?.conditions_json);
+  if (seedreamPricing.enabled(imageConditions)) {
+    if (!seedreamPricing.enabled(parseConditions(byMeter.get('input_image')?.conditions_json))) throw new Error('Seedream Pro 输入图价格缺失，已拒绝调用');
+    const count = input.pricing_context?.input_image_count;
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error('Seedream Pro 需要每次请求的输入图数量');
+    if (usage.image !== 1) throw new Error('Seedream Pro 请逐次请求报价，不能合并首张免费额度');
+    usage.input_image = count;
+  }
   const rates = []; let amountMicro = 0;
   for (const [meter, qty] of Object.entries(usage)) {
     const price = byMeter.get(meter);
     if (!price) throw new Error(`模型 ${model} 的 ${meter} 未定价，已拒绝调用`);
     const rate = rateFor(price, input.pricing_context || {}, usage);
-    const subtotal = price.is_free ? 0 : proratedPoints(qty, rate.unit_price_micro, rate.unit_size);
+    const subtotal = price.is_free ? 0 : proratedPoints(seedreamPricing.billableQuantity(rate.conditions, qty), rate.unit_price_micro, rate.unit_size);
     amountMicro += subtotal;
     if (!Number.isSafeInteger(amountMicro)) throw new Error('计费金额超出安全范围');
     rates.push({ meter, quantity: qty, unit_price_micro: rate.unit_price_micro, unit_size: rate.unit_size, rate_id: rate.rate_id, conditions: rate.conditions, is_free: !!price.is_free, subtotal_micro: subtotal, price_book_id: price.price_book_id, price_book_name: price.price_book_name });
   }
-  return { user_id: user.id, service_type: serviceType, model, usage, pricing_context: input.pricing_context || {}, amount_micro: amountMicro, amount: microToCredits(amountMicro), rates, quoted_at: now() };
+  return { user_id: user.id, service_type: serviceType, model, provider_model: input.provider_model || model, usage, pricing_context: input.pricing_context || {}, amount_micro: amountMicro, amount: microToCredits(amountMicro), rates, quoted_at: now() };
 }
 
 function projectSnapshot(db, userId, input = {}) {
@@ -236,16 +250,78 @@ function getAuthorization(db, authorizationId) {
   return row ? { ...row, snapshot: parse(row.snapshot_json) } : null;
 }
 
+function imageAuthorization(db, authorizationId) {
+  const replacement = db.prepare("SELECT id FROM billing_transactions WHERE type='authorization' AND idempotency_key=?")
+    .get(`image-dispatch:${authorizationId}`);
+  return getAuthorization(db, replacement?.id || authorizationId);
+}
+
+function voidImageAuthorization(db, user, authorizationId, reason) {
+  const auth = imageAuthorization(db, authorizationId);
+  if (!auth || (auth.user_id !== user.id && user.role !== 'admin')) throw new Error('预授权不存在');
+  if (auth.snapshot.image_request_finalized && db.prepare("SELECT 1 FROM billing_reconciliation_cases WHERE authorization_id=? AND status='pending'").get(auth.id)) {
+    return { authorization_id: auth.id, pending_reconciliation: true };
+  }
+  return voidAuthorization(db, user, auth.id, reason);
+}
+
+// Final references are assembled by the image worker. Replace the estimate
+// before dispatch, retaining its prices and payer and leaving the ledger intact.
+function authorizeImageRequest(db, authorizationId, context, imageGenerationId) {
+  const original = getAuthorization(db, authorizationId);
+  if (!original || !original.snapshot.rates?.some(rate => seedreamPricing.enabled(rate.conditions))) return null;
+  return db.transaction(() => {
+    if (original.snapshot.image_request_finalized || imageAuthorization(db, authorizationId)?.id !== original.id) {
+      throw new Error('图片请求已提交或等待对账，不能重复调用供应商');
+    }
+    if (db.prepare("SELECT 1 FROM billing_transactions WHERE authorization_id=? AND type IN ('void','settlement')").get(original.id)) throw new Error('图片预授权已结束');
+    const usage = { image: 1, input_image: context.input_image_count };
+    if (!Number.isSafeInteger(usage.input_image) || usage.input_image < 0) throw new Error('输入图数量无效');
+    const rates = original.snapshot.rates.map(previous => {
+      const selected = rateFor({ meter: previous.meter, model: original.snapshot.model, unit_price_micro: previous.unit_price_micro, conditions_json: json(previous.conditions) }, context, usage);
+      const quantity = usage[previous.meter];
+      const subtotal = previous.is_free ? 0 : proratedPoints(seedreamPricing.billableQuantity(selected.conditions, quantity), selected.unit_price_micro, selected.unit_size);
+      return { ...previous, ...selected, quantity, subtotal_micro: subtotal };
+    });
+    const amount = safeMicroAdd(...rates.map(rate => rate.subtotal_micro));
+    const actor = { id: original.user_id };
+    voidAuthorization(db, actor, original.id, '按最终图片请求重新预授权，保留原价快照');
+    const acct = payerAccountForAuthorization(db, original);
+    if (safeMicroAdd(acct.balance_micro, -acct.frozen_micro) < amount) throw new Error('最终参考图数量对应的余额不足，未调用供应商');
+    const frozen = safeMicroAdd(acct.frozen_micro, amount);
+    const id = uuid(); const at = now();
+    const snapshot = { ...original.snapshot, usage, rates, pricing_context: context, amount_micro: amount, amount: microToCredits(amount), original_authorization_id: original.id, image_request_finalized: true };
+    updatePayerAccount(db, acct, { frozen_micro: frozen });
+    db.prepare(`INSERT INTO billing_transactions (id,user_id,tenant_id,organization_id,drama_id,project_title_snapshot,source_kind,source_id,type,amount_micro,balance_after_micro,frozen_after_micro,authorization_id,idempotency_key,reference_type,reference_id,reason,snapshot_json,created_at)
+      VALUES (?,?,?,?,?,?,?,?,'authorization',?,?,?,?,?,?,?,?,?,?)`).run(id,original.user_id,original.tenant_id,original.organization_id,original.drama_id,original.project_title_snapshot,original.source_kind,original.source_id,amount,acct.balance_micro,frozen,id,`image-dispatch:${original.id}`,original.reference_type,original.reference_id,'最终图片请求预授权',json(snapshot),at);
+    if (imageGenerationId) {
+      const linked = db.prepare('UPDATE image_generations SET billing_authorization_id=? WHERE id=? AND billing_authorization_id=?').run(id, imageGenerationId, original.id);
+      if (!linked.changes) throw new Error('图片任务预授权关联已改变，未调用供应商');
+    }
+    return { authorization_id: id, snapshot };
+  })();
+}
+
 function calculateFromSnapshot(snapshot, actualUsage) {
+  if (snapshot.image_request_finalized && (actualUsage?.image !== 1 || !actualUsage?.image_size)) {
+    throw new Error('图片结算需要本地校验后的单张图片尺寸');
+  }
   const usage = normalizeUsage(actualUsage || snapshot.usage); let amount = 0;
+  if ((snapshot.rates || []).some(rate => rate.meter === 'input_image' && seedreamPricing.enabled(rate.conditions))) {
+    usage.input_image = snapshot.usage.input_image || 0;
+  }
   for (const [meter, qty] of Object.entries(usage)) {
     const rate = (snapshot.rates || []).find((r) => r.meter === meter);
     if (!rate) throw new Error(`预授权快照中没有 ${meter} 价格`);
     const tier = tierFor(rate.conditions || {}, usage);
-    const unitPrice = tier ? creditsToMicro(tier.unit_price_points) : rate.unit_price_micro;
+    const imageRate = meter === 'image' && seedreamPricing.enabled(rate.conditions) && actualUsage?.image_size
+      ? rateFor({ meter, model: snapshot.model, conditions_json: json(rate.conditions), unit_price_micro: rate.unit_price_micro },
+        { ...snapshot.pricing_context, pixel_band: seedreamPricing.pixelBand(actualUsage.image_size) }, usage) : null;
+    const unitPrice = imageRate ? imageRate.unit_price_micro : tier ? creditsToMicro(tier.unit_price_points) : rate.unit_price_micro;
     const unitSize = Number(tier?.unit_size ?? rate.unit_size ?? 1);
-    amount += rate.is_free ? 0 : proratedPoints(qty, unitPrice, unitSize);
+    amount += rate.is_free ? 0 : proratedPoints(seedreamPricing.billableQuantity(rate.conditions, qty), unitPrice, unitSize);
   }
+  if (actualUsage?.image_size && snapshot.image_request_finalized) usage.image_size = actualUsage.image_size;
   return { usage, amount_micro: amount };
 }
 
@@ -254,7 +330,12 @@ function settleAuthorization(db, user, authorizationId, input = {}) {
   if (!auth || (auth.user_id !== user.id && user.role !== 'admin')) throw new Error('预授权不存在');
   const completed = db.prepare('SELECT * FROM billing_usage_logs WHERE authorization_id = ?').get(authorizationId);
   if (completed) return { transaction_id: completed.transaction_id, charged_micro: completed.charged_micro, charged: microToCredits(completed.charged_micro), reused: true };
-  const snapshot = parse(auth.snapshot_json); const actual = calculateFromSnapshot(snapshot, input.usage); const at = now(); const id = uuid();
+  const snapshot = parse(auth.snapshot_json);
+  if (snapshot.rates?.some(rate => seedreamPricing.enabled(rate.conditions))
+      && (!snapshot.image_request_finalized || db.prepare("SELECT 1 FROM billing_transactions WHERE authorization_id=? AND type='void'").get(auth.id))) {
+    throw new Error('图片请求未提交或预授权已释放，不能结算');
+  }
+  const actual = calculateFromSnapshot(snapshot, input.usage); const at = now(); const id = uuid();
   // The authorization is an estimate, not a settlement cap. Once a provider
   // returns verifiable usage we must charge that real usage, including the
   // supplemental amount above the reservation. Do this atomically only when
@@ -283,8 +364,11 @@ function settleAuthorization(db, user, authorizationId, input = {}) {
     db.prepare(`INSERT INTO billing_usage_logs (id, user_id, tenant_id, organization_id, drama_id, project_title_snapshot, source_kind, source_id, transaction_id, authorization_id, service_type, model, usage_json, charged_micro, provider_request_id, reference_type, reference_id, snapshot_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(uuid(), auth.user_id, auth.tenant_id || null, auth.organization_id || null, auth.drama_id || null, auth.project_title_snapshot || null, auth.source_kind || auth.reference_type || null, auth.source_id || auth.reference_id || null, id, authorizationId, snapshot.service_type, snapshot.model, json(actual.usage), chargedMicro, input.provider_request_id || null, auth.reference_type, auth.reference_id, json(snapshot), at);
+    if (snapshot.image_request_finalized) db.prepare("UPDATE billing_reconciliation_cases SET status='resolved',resolved_at=?,resolved_by=?,resolution_json=? WHERE authorization_id=? AND status='pending'")
+      .run(at, user.id, json({ transaction_id: id, charged_micro: chargedMicro, usage: actual.usage }), authorizationId);
   });
-  execute(); return { transaction_id: id, charged_micro: chargedMicro, charged: microToCredits(chargedMicro), supplemental_charged_micro: supplementalMicro, overage_micro: supplementalMicro, reused: false };
+  execute();
+  return { transaction_id: id, charged_micro: chargedMicro, charged: microToCredits(chargedMicro), supplemental_charged_micro: supplementalMicro, overage_micro: supplementalMicro, reused: false };
 }
 
 // Historical capped settlements must be repaired through a linked, idempotent
@@ -457,6 +541,20 @@ function markPendingReconciliation(db, user, authorizationId, input = {}) {
 // provider succeeds but before it writes the reconciliation case, keep the
 // reservation visible and recover it on the next application start.  We do
 // not estimate a charge here: only a later provider usage record can settle it.
+function recoverInterruptedImageReconciliations(db) {
+  const rows = db.prepare(`SELECT a.* FROM billing_transactions a
+    LEFT JOIN billing_transactions done ON done.authorization_id=a.id AND done.type IN ('void','settlement')
+    LEFT JOIN billing_reconciliation_cases c ON c.authorization_id=a.id
+    WHERE a.type='authorization' AND a.idempotency_key LIKE 'image-dispatch:%' AND done.id IS NULL AND c.id IS NULL`).all();
+  let recovered = 0;
+  for (const row of rows) {
+    if (!parse(row.snapshot_json).image_request_finalized) continue;
+    markPendingReconciliation(db, { id: row.user_id }, row.id, { reason: '图片请求中断，保留预授权等待对账；不重复提交供应商' });
+    recovered++;
+  }
+  return { recovered };
+}
+
 function recoverCompletedVideoReconciliations(db) {
   const rows = db.prepare(`SELECT v.id, v.owner_user_id, v.billing_authorization_id, v.provider_task_id
     FROM video_generations v
@@ -819,7 +917,8 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
   if (effectiveFrom && effectiveTo && new Date(effectiveFrom) >= new Date(effectiveTo)) {
     throw new Error('生效结束时间必须晚于生效开始时间');
   }
-  const supportedMeters = new Set(['request','image','second','millisecond','character','input_token','output_token']);
+  seedreamPricing.validateItems(items);
+  const supportedMeters = new Set(['request','image','input_image','second','millisecond','character','input_token','output_token']);
   if (status === 'published' && !items.length) throw new Error('发布价目表至少需要一个价目');
   const seen = new Set();
   for (const item of items) {
@@ -836,6 +935,7 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
     if (unitPrice < 0) throw new Error('单价必须是非负积分，且最多四位小数');
     if (status === 'published' && !item.is_free && unitPrice <= 0) throw new Error(`${serviceType}/${model}/${meter} 的免费价目必须显式勾选免费`);
     const conditions = item.conditions_json || {};
+    seedreamPricing.validate(conditions, meter);
     const rates = Array.isArray(conditions.rates) ? conditions.rates : [];
     const rateWhen = [];
     for (const rate of rates) {
@@ -843,7 +943,7 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
       try { ratePrice = creditsToMicro(rate.unit_price_points); } catch (_) { throw new Error('条件价格必须使用非负积分（最多四位小数）和整数计量单位'); }
       if (ratePrice < 0 || !Number.isSafeInteger(Number(rate.unit_size || conditions.unit_size || 1)) || Number(rate.unit_size || conditions.unit_size || 1) <= 0) throw new Error('条件价格必须使用非负积分（最多四位小数）和整数计量单位');
       const keys = Object.keys(rate.when || {});
-      if (keys.some((key) => !['has_video_input', 'has_image_input', 'resolution', 'has_audio'].includes(key))) throw new Error('条件价格只能使用请求明确传入的 has_video_input、has_image_input、resolution、has_audio 字段');
+      if (keys.some((key) => !['has_video_input', 'has_image_input', 'resolution', 'has_audio', 'pixel_band', 'image_scene'].includes(key))) throw new Error('条件价格只能使用请求明确传入的 has_video_input、has_image_input、resolution、has_audio、pixel_band、image_scene 字段');
       rateWhen.push(rate.when || {});
     }
     for (let left = 0; left < rateWhen.length; left += 1) {
@@ -920,7 +1020,7 @@ function savePriceBook(db, actorId, input, id) {
     const stmt = db.prepare(`INSERT INTO billing_price_book_items (price_book_id, service_type, model, meter, unit_price_micro, is_free, conditions_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const item of items) {
-      const meter = String(item.meter || '').trim(); if (!['request','image','second','millisecond','character','input_token','output_token'].includes(meter)) throw new Error('不支持的计量器');
+      const meter = String(item.meter || '').trim(); if (!['request','image','input_image','second','millisecond','character','input_token','output_token'].includes(meter)) throw new Error('不支持的计量器');
       const serviceType = String(item.service_type || '').trim(); const model = String(item.model || '').trim(); if (!serviceType || !model) throw new Error('价目项需要 service_type 和 model');
       stmt.run(bookId, serviceType, model, meter, creditsToMicro(item.unit_price ?? microToCredits(item.unit_price_micro || 0)), item.is_free ? 1 : 0, item.conditions_json ? json(item.conditions_json) : null, at, at);
     }
@@ -1248,4 +1348,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { account, payerAccount, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, recoverResolvedVideoReconciliations, recordVideoReconciliationRecovery, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, adjustOrganizationBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };
+module.exports = { account, payerAccount, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, imageAuthorization, voidImageAuthorization, authorizeImageRequest, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverInterruptedImageReconciliations, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, recoverResolvedVideoReconciliations, recordVideoReconciliationRecovery, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, adjustOrganizationBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };

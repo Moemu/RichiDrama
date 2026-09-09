@@ -1,7 +1,9 @@
 <template>
   <div class="ai-config-content">
-    <el-tabs v-model="activeTab" class="config-tabs">
-      <el-tab-pane label="AI 配置" name="configs">
+    <el-tabs v-model="activeTab" class="config-tabs" @tab-change="onConfigTabChange">
+      <el-tab-pane v-if="!tenantId && canManageCatalog" label="模型目录" name="catalog"><ModelCatalog class="tab-content" ref="catalogPanel" @connection="openConnection" @changed="loadList" /></el-tab-pane>
+      <el-tab-pane v-if="!tenantId && canManageCatalog" label="供应商连接" name="connections"><ProviderConnections class="tab-content" ref="connectionsPanel" :locked="vendorLock.enabled" @changed="loadList" @binding="openConnection" @catalog="activeTab = 'catalog'" /></el-tab-pane>
+      <el-tab-pane :label="!tenantId && canManageCatalog ? '待迁移配置与专用服务' : '供应商连接'" name="configs">
         <div class="tab-content">
           <!-- 普通模式操作栏 -->
           <div v-if="!vendorLock.enabled" class="content-actions">
@@ -65,7 +67,7 @@
           </div>
           <el-table
             v-loading="loading"
-            :data="list"
+            :data="legacyList"
             stripe
             style="width: 100%"
             @selection-change="onSelectionChange"
@@ -117,9 +119,9 @@
           <PromptEditor />
         </div>
       </el-tab-pane>
-      <el-tab-pane v-if="!tenantId" label="高级设置（业务场景）" name="sceneModelMap">
+      <el-tab-pane v-if="!tenantId" label="业务场景" name="sceneModelMap">
         <div class="tab-content">
-          <SceneModelMap />
+          <SceneModelMap v-if="activeTab === 'sceneModelMap'" />
         </div>
       </el-tab-pane>
       <el-tab-pane v-if="!tenantId" label="生成设置" name="generation">
@@ -205,7 +207,7 @@
     <el-dialog
       v-model="dialogVisible"
       class="config-editor-dialog"
-      :title="vendorLock.enabled ? '修改 API Key / 默认模型' : (editingId ? '编辑配置' : '添加配置')"
+      :title="form.provider_connection_id ? `${form.provider_connection_name || '供应商连接'} · ${serviceTypeLabel(form.service_type)}调用设置` : vendorLock.enabled ? '修改 API Key / 默认模型' : (editingId ? '编辑配置' : '添加配置')"
       width="min(640px, calc(100vw - 32px))"
       append-to-body
       :close-on-click-modal="false"
@@ -219,10 +221,11 @@
           <el-descriptions-item label="厂商">{{ form.provider }}</el-descriptions-item>
         </el-descriptions>
         <el-form ref="formRef" :model="form" label-width="100px">
-          <el-form-item prop="api_key" :rules="[{ required: true, message: '请输入 API Key', trigger: 'blur' }]">
+          <el-form-item v-if="!form.provider_connection_id" prop="api_key" :rules="[{ required: true, message: '请输入 API Key', trigger: 'blur' }]">
             <template #label><span class="form-label-tip">API Key</span></template>
             <el-input
               v-model="form.api_key"
+            :disabled="!!form.provider_connection_id"
               type="password"
               :placeholder="form.provider === 'jimeng_ai_api' ? '即梦 Session，多个用英文逗号分隔' : '输入你的 API 密钥'"
               show-password
@@ -256,7 +259,8 @@
 
       <!-- 普通模式：完整表单 -->
       <el-form v-else ref="formRef" :model="form" :rules="rules" label-width="100px">
-        <el-form-item prop="service_type">
+        <el-alert v-if="form.provider_connection_id" title="地址与凭据由供应商连接统一管理。此处只修改模型调用设置。" type="info" :closable="false" show-icon />
+        <el-form-item v-if="!form.provider_connection_id" prop="service_type">
           <template #label>
             <span class="form-label-tip">服务类型
               <el-tooltip placement="top" :show-arrow="true" popper-class="cfg-tip-popper">
@@ -274,7 +278,7 @@
               </el-tooltip>
             </span>
           </template>
-          <el-select v-model="form.service_type" placeholder="选择类型" style="width: 100%" @change="onServiceTypeChange">
+          <el-select v-model="form.service_type" :disabled="!!form.provider_connection_id" placeholder="选择类型" style="width: 100%" @change="onServiceTypeChange">
             <el-option label="文本/对话" value="text" />
             <el-option label="文本生成图片" value="image" />
             <el-option label="分镜图片生成" value="storyboard_image" />
@@ -284,13 +288,13 @@
             <el-option label="素材库上传" value="jimeng2_character_auth" />
           </el-select>
         </el-form-item>
-        <el-form-item prop="provider">
+        <el-form-item v-if="!form.provider_connection_id" prop="provider">
           <template #label>
             <span class="form-label-tip">厂商
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
                 <template #content>
                   <div class="cfg-tip-content">
-                    从下拉选择预设厂商，会自动填入 Base URL 和模型列表。<br>
+                    选择厂商后填入 Base URL，模型从已保存的目录读取。<br>
                     也可直接输入自定义厂商名（需手动填写其他字段）。<br>
                     <b>推荐</b>：通义千问 / 火山引擎，国内访问稳定。
                   </div>
@@ -301,6 +305,7 @@
           </template>
           <el-select
             v-model="form.provider"
+            :disabled="!!form.provider_connection_id"
             placeholder="选择预设厂商（自动填充 URL 和模型）"
             clearable
             filterable
@@ -506,7 +511,7 @@ input_reference = (图片文件，可选)</pre>
             <el-button @click="showProtocolHelp = false">关闭</el-button>
           </template>
         </el-dialog>
-        <el-form-item prop="name">
+        <el-form-item v-if="!form.provider_connection_id" prop="name">
           <template #label>
             <span class="form-label-tip">名称
               <el-tooltip content="用于区分不同配置；选择厂商后自动生成。" placement="top" popper-class="cfg-tip-popper">
@@ -516,7 +521,7 @@ input_reference = (图片文件，可选)</pre>
           </template>
           <el-input v-model="form.name" placeholder="如：OpenAI 图文" />
         </el-form-item>
-        <el-form-item prop="base_url">
+        <el-form-item v-if="!form.provider_connection_id" prop="base_url">
           <template #label>
             <span class="form-label-tip">{{ form.service_type === 'jimeng2_character_auth' && form.provider !== 'richbest_asset_v3' ? '网关 URL' : 'Base URL' }}
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
@@ -540,10 +545,11 @@ input_reference = (图片文件，可选)</pre>
           </template>
           <el-input
             v-model="form.base_url"
+            :disabled="!!form.provider_connection_id"
             :placeholder="form.provider === 'richbest_asset_v3' ? 'https://api.richbest.cn' : (form.service_type === 'jimeng2_character_auth' ? '如 https://your-gateway.com' : '选择预设厂商后自动填充，可修改')"
           />
         </el-form-item>
-        <el-form-item prop="api_key">
+        <el-form-item v-if="!form.provider_connection_id" prop="api_key">
           <template #label>
             <span class="form-label-tip">{{ form.service_type === 'jimeng2_character_auth' && form.provider !== 'richbest_asset_v3' ? 'Token' : 'API Key' }}
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
@@ -568,6 +574,7 @@ input_reference = (图片文件，可选)</pre>
           </template>
           <el-input
             v-model="form.api_key"
+            :disabled="!!form.provider_connection_id"
             type="password"
             :placeholder="editingId
               ? '已保存（脱敏显示，保持不变无需修改；输入新值即可覆盖）'
@@ -840,7 +847,7 @@ input_reference = (图片文件，可选)</pre>
                 <template #content>
                   <div class="cfg-tip-content">
                     该厂商下可用的模型，多个用逗号或换行分隔。<br>
-                    可从上方「追加预设模型」下拉快速添加，也可手动输入。
+                    可从上方「追加目录模型」下拉快速添加，也可手动输入。
                   </div>
                 </template>
                 <el-icon class="tip-icon"><QuestionFilled /></el-icon>
@@ -850,7 +857,7 @@ input_reference = (图片文件，可选)</pre>
           <div class="model-row">
             <el-select
               v-model="presetModelPick"
-              placeholder="追加预设模型"
+              placeholder="追加目录模型"
               clearable
               filterable
               style="width: 220px; margin-bottom: 8px"
@@ -982,13 +989,7 @@ input_reference = (图片文件，可选)</pre>
       <div class="one-key-help">
         <div class="one-key-section">
           <div class="one-key-section-title">📋 将自动创建以下配置</div>
-          <ul class="one-key-list">
-            <li><b>文本/对话</b>：通义千问（qwen-plus）— 生成故事剧本</li>
-            <li><b>文本生成图片</b>：通义万象（wan2.6-image）— 角色/场景/道具图</li>
-            <li><b>文本生成图片</b>：通义千问图像（qwen-image-max）— 角色/场景图备选</li>
-            <li><b>分镜图片生成</b>：通义万象（wan2.6-image）— 支持角色参考图</li>
-            <li><b>视频生成</b>：通义万相（wan2.2-kf2v-flash）— 生成视频片段</li>
-          </ul>
+          <ul><li v-for="config in TONGYI_CONFIGS" :key="config.service_type + config.provider"><b>{{ config.name }}</b>：{{ config.model.join('、') }}</li></ul><p v-if="!TONGYI_CONFIGS.length">目录中暂无此厂商模型，请先添加连接和模型。</p>
         </div>
         <div class="one-key-section">
           <div class="one-key-section-title">🔑 如何申请 API Key</div>
@@ -1031,12 +1032,7 @@ input_reference = (图片文件，可选)</pre>
       <div class="one-key-help">
         <div class="one-key-section">
           <div class="one-key-section-title">📋 将自动创建以下配置</div>
-          <ul class="one-key-list">
-            <li><b>文本/对话</b>：DeepSeek V3（deepseek-v3-2-251201）— 生成故事剧本</li>
-            <li><b>文本生成图片</b>：即梦 4.5（doubao-seedream-4-5-251128）— 角色/场景/道具图</li>
-            <li><b>分镜图片生成</b>：即梦 4.5（doubao-seedream-4-5-251128）— 支持角色参考图</li>
-            <li><b>视频生成</b>：即梦 Seedance 1.5 Pro — 生成视频片段</li>
-          </ul>
+          <ul><li v-for="config in VOLCENGINE_CONFIGS" :key="config.service_type + config.provider"><b>{{ config.name }}</b>：{{ config.model.join('、') }}</li></ul><p v-if="!VOLCENGINE_CONFIGS.length">目录中暂无此厂商模型，请先添加连接和模型。</p>
         </div>
         <div class="one-key-section">
           <div class="one-key-section-title">🔑 如何申请 API Key</div>
@@ -1080,12 +1076,7 @@ input_reference = (图片文件，可选)</pre>
       <div class="one-key-help">
         <div class="one-key-section">
           <div class="one-key-section-title">📋 将自动创建以下配置</div>
-          <ul class="one-key-list">
-            <li><b>文本/对话</b>：Agnes 2.0 Flash（agnes-2.0-flash）— 生成故事剧本</li>
-            <li><b>文本生成图片</b>：Agnes Image 2.1 Flash — 角色/场景/道具图</li>
-            <li><b>分镜图片生成</b>：Agnes Image 2.1 Flash — 支持参考图编辑</li>
-            <li><b>视频生成</b>：Agnes Video V2.0（agnes-video-v2.0）— 生成视频片段</li>
-          </ul>
+          <ul><li v-for="config in AGNES_CONFIGS" :key="config.service_type + config.provider"><b>{{ config.name }}</b>：{{ config.model.join('、') }}</li></ul><p v-if="!AGNES_CONFIGS.length">目录中暂无此厂商模型，请先添加连接和模型。</p>
         </div>
         <div class="one-key-section">
           <div class="one-key-section-title">🔑 如何申请 API Key</div>
@@ -1210,6 +1201,9 @@ input_reference = (图片文件，可选)</pre>
 </template>
 
 <script setup>
+import request from '@/utils/request'
+import ModelCatalog from './ModelCatalog.vue'
+import ProviderConnections from './ProviderConnections.vue'
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, MagicStick, QuestionFilled, Download, Upload, Delete, ChatDotRound, Picture, Film, VideoCamera, Key, Microphone, Folder } from '@element-plus/icons-vue'
@@ -1226,7 +1220,14 @@ const props = defineProps({
 const tenantId = computed(() => Number(props.tenantId) || null)
 const tenantBody = () => tenantId.value ? { tenant_id: tenantId.value } : {}
 
-const activeTab = ref('configs')
+const canManageCatalog = JSON.parse(localStorage.getItem('lmd_auth_user') || 'null')?.console_access === true
+const activeTab = ref(!tenantId.value && canManageCatalog ? 'catalog' : 'configs')
+const catalogPanel = ref(null)
+const connectionsPanel = ref(null)
+const catalogRows = ref([])
+async function onConfigTabChange(name) { if (name === 'connections') await connectionsPanel.value?.load(); if (name === 'catalog') { await catalogPanel.value?.load(); await loadList() } }
+async function openConnection(id) { if (!id && !tenantId.value && canManageCatalog) { activeTab.value = 'connections'; return }; if (id) { const row = list.value.find(item => item.id === id) || await aiAPI.get(id); activeTab.value = row?.provider_connection_id && !tenantId.value && canManageCatalog ? 'connections' : 'configs'; if (row) openEdit(row) } }
+function catalogModels(type, provider) { return catalogRows.value.filter(row => row.service_type === type && row.status !== 'retired' && row.connections.some(c => c.provider === provider)).map(row => row.model) }
 const importFileRef = ref(null)
 
 // ---- 生成设置 ----
@@ -1278,6 +1279,7 @@ async function saveGenerationSettings() {
 }
 const loading = ref(false)
 const list = ref([])
+const legacyList = computed(() => !tenantId.value && canManageCatalog ? list.value.filter(row => !row.provider_connection_id) : list.value)
 const selectedRows = ref([])
 const batchDeleting = ref(false)
 const vendorLock = ref({ enabled: false, config_file: '' })
@@ -1363,7 +1365,7 @@ function onServiceTypeChange() {
       form.value.provider = 'richbest_asset_v3'
     }
     const p = form.value.provider
-    const pcfg = (providerConfigs.jimeng2_character_auth || []).find((x) => x.id === p)
+    const pcfg = (providerConfigs.value.jimeng2_character_auth || []).find((x) => x.id === p)
     if (pcfg) {
       if (!form.value.base_url?.trim()) form.value.base_url = getBaseUrlForProvider(p)
       form.value.modelText = '-'
@@ -1377,7 +1379,7 @@ function onServiceTypeChange() {
     }
     return
   }
-  const listByType = providerConfigs[st] || []
+  const listByType = providerConfigs.value[st] || []
   const current = form.value.provider
   if (!current || !listByType.some((p) => p.id === current)) {
     form.value.provider = ''
@@ -1445,103 +1447,71 @@ const oneKeyAgnesVisible = ref(false)
 const oneKeyAgnesKey = ref('')
 const oneKeyAgnesSaving = ref(false)
 
-// 火山方舟官方模型预设（2026-08 核对）。这是配置选择清单，不代表
-// 当前账号已开通；实际调用仍会由方舟账户权限和本项目价目表校验。
-const VOLC_TEXT_MODELS = [
-  'doubao-seed-2-1-pro-250528',
-  'doubao-seed-2-1-turbo-250528',
-  'doubao-seed-2-0-lite-260428',
-  'deepseek-v3-2-251201',
-  'doubao-1-5-pro-32k-250115',
-  'kimi-k2-thinking-251104',
-]
-const VOLC_IMAGE_MODELS = [
-  'doubao-seedream-5-0-260128',
-  'doubao-seedream-4-5-251128',
-  'doubao-seedream-4-0-250828',
-]
-const VOLC_VIDEO_MODELS = [
-  'doubao-seedance-2-0-260128',
-  'doubao-seedance-2-0-fast-260128',
-  'doubao-seedance-2-0-mini-260615',
-  'doubao-seedance-1-5-pro-251215',
-  'doubao-seedance-1-0-lite-i2v-250428',
-  'doubao-seedance-1-0-lite-t2v-250428',
-  'doubao-seedance-1-0-pro-250528',
-  'doubao-seedance-1-0-pro-fast-251015',
-]
-const VOLC_TTS_MODELS = ['doubao-tts-2-0']
-
 /** 预设厂商与模型（与参考前端一致） */
-const providerConfigs = {
+const providerConfigs = computed(() => {
+  const providers = {
   text: [
-    { id: 'openai', name: 'OpenAI', models: ['gpt-4o', 'gpt-4', 'gpt-3.5-turbo'] },
-    { id: 'volcengine', name: '火山引擎（方舟）', models: VOLC_TEXT_MODELS },
-    // { id: 'chatfire', name: 'Chatfire', models: ['gemini-3-flash-preview', 'claude-sonnet-4-5-20250929', 'doubao-seed-1-8-251228'] },
-    { id: 'gemini', name: 'Google Gemini', models: ['gemini-2.5-pro', 'gemini-3-flash-preview'] },
-    { id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
-    { id: 'qwen', name: '通义千问', models: ['qwen3-max', 'qwen-plus', 'qwen-flash'] },
-    { id: 'agnes', name: 'Agnes AI', models: ['agnes-2.0-flash'] }
+    { id: 'openai', name: 'OpenAI' },
+    { id: 'volcengine', name: '火山引擎（方舟）' },
+
+    { id: 'gemini', name: 'Google Gemini' },
+    { id: 'deepseek', name: 'DeepSeek' },
+    { id: 'qwen', name: '通义千问' },
+    { id: 'agnes', name: 'Agnes AI' }
   ],
   image: [
-    { id: 'volcengine', name: '火山引擎（方舟）', models: VOLC_IMAGE_MODELS },
-    { id: 'kling', name: '可灵 Kling', models: ['kling-image', 'kling-omni-image'] },
-    { id: 'nano_banana', name: 'NanoBanana', models: ['nano-banana-2', 'nano-banana-pro', 'nano-banana'] },
-    // { id: 'chatfire', name: 'Chatfire', models: ['nano-banana-pro', 'doubao-seedream-4-5-251128', 'qwen-image'] },
-    { id: 'gemini', name: 'Google Gemini', models: ['gemini-2.5-flash-image', 'gemini-2.5-flash-image-preview', 'gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview'] },
-    { id: 'openai', name: 'OpenAI', models: ['dall-e-3', 'dall-e-2'] },
-    { id: 'dashscope', name: '通义万象', models: ['wan2.6-image', 'qwen-image-edit-plus-2026-01-09', 'qwen-image-edit-plus', 'qwen-image-edit-max'] },
-    { id: 'qwen_image', name: '通义千问', models: ['qwen-image-max', 'qwen-image-plus', 'qwen-image'] },
-    { id: 'agnes', name: 'Agnes AI', models: ['agnes-image-2.1-flash', 'agnes-image-2.0-flash'] }
+    { id: 'volcengine', name: '火山引擎（方舟）' },
+    { id: 'kling', name: '可灵 Kling' },
+    { id: 'nano_banana', name: 'NanoBanana' },
+
+    { id: 'gemini', name: 'Google Gemini' },
+    { id: 'openai', name: 'OpenAI' },
+    { id: 'dashscope', name: '通义万象' },
+    { id: 'qwen_image', name: '通义千问' },
+    { id: 'agnes', name: 'Agnes AI' }
   ],
   storyboard_image: [
-    { id: 'dashscope', name: '通义万象', models: ['wan2.6-image', 'qwen-image-edit-plus-2026-01-09', 'qwen-image-edit-plus', 'qwen-image-edit-max'] },
-    { id: 'volcengine', name: '火山引擎（方舟）', models: VOLC_IMAGE_MODELS },
-    { id: 'kling', name: '可灵 Kling', models: ['kling-image', 'kling-omni-image'] },
-    { id: 'nano_banana', name: 'NanoBanana', models: ['nano-banana-2', 'nano-banana-pro', 'nano-banana'] },
-    // { id: 'chatfire', name: 'Chatfire', models: ['nano-banana-pro', 'doubao-seedream-4-5-251128', 'qwen-image'] },
-    { id: 'gemini', name: 'Google Gemini', models: ['gemini-2.5-flash-image', 'gemini-2.5-flash-image-preview', 'gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview'] },
-    { id: 'openai', name: 'OpenAI', models: ['dall-e-3', 'dall-e-2'] },
-    { id: 'agnes', name: 'Agnes AI', models: ['agnes-image-2.1-flash', 'agnes-image-2.0-flash'] }
+    { id: 'dashscope', name: '通义万象' },
+    { id: 'volcengine', name: '火山引擎（方舟）' },
+    { id: 'kling', name: '可灵 Kling' },
+    { id: 'nano_banana', name: 'NanoBanana' },
+
+    { id: 'gemini', name: 'Google Gemini' },
+    { id: 'openai', name: 'OpenAI' },
+    { id: 'agnes', name: 'Agnes AI' }
   ],
   video: [
-    { id: 'klingai', name: '可灵官方 Omni (api-beijing.klingai.com)', models: ['kling-video-o1', 'kling-v3-omni'] },
-    { id: 'ffir', name: '飞儿API / 可灵 Omni-Video (ffir.cn)', models: ['kling-video-o1', 'kling-v3-omni'] },
-    { id: 'kling', name: '可灵 Kling', models: ['kling-omni-video', 'kling-video', 'kling-motion-control'] },
-    { id: 'vidu', name: 'Vidu', models: ['viduq2', 'viduq2-pro', 'viduq2-turbo', 'viduq3-pro'] },
-    { id: 'volces', name: '火山引擎（方舟）', models: VOLC_VIDEO_MODELS },
-    // { id: 'chatfire', name: 'Chatfire', models: ['doubao-seedance-1-5-pro-251215', 'doubao-seedance-1-0-lite-i2v-250428', 'doubao-seedance-1-0-lite-t2v-250428', 'doubao-seedance-1-0-pro-250528', 'doubao-seedance-1-0-pro-fast-251015', 'sora-2', 'sora-2-pro'] },
-    { id: 'minimax', name: 'MiniMax 海螺', models: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02'] },
-    { id: 'gemini', name: 'Google Gemini (Veo)', models: ['veo-3.1-generate-preview', 'veo-3.0-generate-preview', 'veo-3.0-fast-generate-preview'] },
-    { id: 'dashscope', name: '通义万相', models: ['wan2.6-r2v-flash', 'wan2.6-t2v', 'wan2.2-kf2v-flash', 'wan2.6-i2v-flash', 'wanx2.1-vace-plus'] },
+    { id: 'klingai', name: '可灵官方 Omni (api-beijing.klingai.com)' },
+    { id: 'ffir', name: '飞儿API / 可灵 Omni-Video (ffir.cn)' },
+    { id: 'kling', name: '可灵 Kling' },
+    { id: 'vidu', name: 'Vidu' },
+    { id: 'volces', name: '火山引擎（方舟）' },
+
+    { id: 'minimax', name: 'MiniMax 海螺' },
+    { id: 'gemini', name: 'Google Gemini (Veo)' },
+    { id: 'dashscope', name: '通义万相' },
     {
       id: 'jimeng_ai_api',
       name: 'Jimeng AI API（自建即梦免费 API）',
-      models: [
-        'jimeng-video-seedance-2.0',
-        'seedance-2.0',
-        'jimeng-video-seedance-2.0-fast',
-        'jimeng-video-3.0',
-        'jimeng-video-3.0-pro',
-        'jimeng-video-3.5-pro',
-      ],
     },
-    { id: 'openai', name: 'OpenAI', models: ['sora-2', 'sora-2-pro'] },
-    { id: 'xai', name: 'xAI Grok Imagine', models: ['grok-imagine-video'] },
-    { id: 'agnes', name: 'Agnes AI', models: ['agnes-video-v2.0'] },
+    { id: 'openai', name: 'OpenAI' },
+    { id: 'xai', name: 'xAI Grok Imagine' },
+    { id: 'agnes', name: 'Agnes AI' },
   ],
   video_postprocess: [
-    { id: 'volcengine_mediakit', name: '火山引擎 AI MediaKit', models: ['volcengine-video-generative-enhancement', 'volcengine-video-frame-interpolation'] },
+    { id: 'volcengine_mediakit', name: '火山引擎 AI MediaKit' },
   ],
   tts: [
-    { id: 'doubao', name: '火山引擎 豆包语音', models: VOLC_TTS_MODELS },
-    { id: 'minimax', name: 'MiniMax T2A', models: ['speech-02-hd', 'speech-02-turbo'] },
+    { id: 'doubao', name: '火山引擎 豆包语音' },
+    { id: 'minimax', name: 'MiniMax T2A' },
   ],
   jimeng2_character_auth: [
-    { id: 'richbest_asset_v3', name: 'Richbest 多类型素材 API v3（推荐）', models: ['-'] },
-    { id: 'jimeng_material_api', name: '即梦业务素材 API（/api/business/v1）', models: ['-'] },
+    { id: 'richbest_asset_v3', name: 'Richbest 多类型素材 API v3（推荐）' },
+    { id: 'jimeng_material_api', name: '即梦业务素材 API（/api/business/v1）' },
   ],
 }
+  return Object.fromEntries(Object.entries(providers).map(([type, providers]) => [type, providers.map(provider => ({ ...provider, models: type === 'jimeng2_character_auth' ? ['-'] : catalogModels(type, provider.id) }))]))
+})
 
 /** 厂商 id → 默认接口规范（api_protocol） */
 const providerProtocolMap = {
@@ -1640,22 +1610,22 @@ const isDeepSeekOfficialForm = computed(() => (
 /** 当前服务类型下的预设厂商列表（编辑时若当前 provider 不在列表则补一项；末尾始终附一项自定义入口） */
 const availableProviderOptions = computed(() => {
   const st = form.value.service_type || 'text'
-  const listByType = providerConfigs[st] || []
+  const listByType = providerConfigs.value[st] || []
   const current = form.value.provider
   let result = [...listByType]
   if (editingId.value && current && current !== CUSTOM_PROVIDER_SENTINEL && !listByType.some((p) => p.id === current)) {
-    result = [{ id: current, name: current + ' (当前)', models: [] }, ...result]
+    result = [{ id: current, name: current + ' (当前)' }, ...result]
   }
-  result.push({ id: CUSTOM_PROVIDER_SENTINEL, name: '✏️ 自定义（直接输入厂商名）', models: [] })
+  result.push({ id: CUSTOM_PROVIDER_SENTINEL, name: '✏️ 自定义（直接输入厂商名）' })
   return result
 })
 
-/** 当前厂商的预设模型列表（用于追加预设模型） */
+/** 当前厂商的预设模型列表（用于追加目录模型） */
 const availableModels = computed(() => {
   const st = form.value.service_type
   const provider = form.value.provider
   if (!st || !provider) return []
-  const p = (providerConfigs[st] || []).find((x) => x.id === provider)
+  const p = (providerConfigs.value[st] || []).find((x) => x.id === provider)
   return p?.models || []
 })
 
@@ -1819,7 +1789,7 @@ function onProviderChange(providerId) {
     return
   }
   const st = form.value.service_type || 'text'
-  const p = (providerConfigs[st] || []).find((x) => x.id === providerId)
+  const p = (providerConfigs.value[st] || []).find((x) => x.id === providerId)
   if (!p) {
     form.value.base_url = ''
     form.value.modelText = ''
@@ -1861,29 +1831,29 @@ function onProviderChange(providerId) {
 }
 
 /** 通义一键配置用 */
-const TONGYI_CONFIGS = [
-  { service_type: 'text', name: '通义千问', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', provider: 'qwen', model: ['qwen-plus'] },
-  { service_type: 'image', name: '通义万象 文本生图', base_url: 'https://dashscope.aliyuncs.com', provider: 'dashscope', model: ['wan2.6-image'] },
-  { service_type: 'image', name: '通义千问 文本生图', base_url: 'https://dashscope.aliyuncs.com', provider: 'qwen_image', model: ['qwen-image-max', 'qwen-image-plus', 'qwen-image'] },
-  { service_type: 'storyboard_image', name: '通义万象 分镜图', base_url: 'https://dashscope.aliyuncs.com', provider: 'dashscope', model: ['wan2.6-image'] },
-  { service_type: 'video', name: '通义万相', base_url: 'https://dashscope.aliyuncs.com', provider: 'dashscope', model: ['wan2.2-kf2v-flash'] }
-]
+const TONGYI_CONFIGS = computed(() => [
+  { service_type: 'text', name: '通义千问', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', provider: 'qwen', model: [] },
+  { service_type: 'image', name: '通义万象 文本生图', base_url: 'https://dashscope.aliyuncs.com', provider: 'dashscope', model: [] },
+  { service_type: 'image', name: '通义千问 文本生图', base_url: 'https://dashscope.aliyuncs.com', provider: 'qwen_image', model: [] },
+  { service_type: 'storyboard_image', name: '通义万象 分镜图', base_url: 'https://dashscope.aliyuncs.com', provider: 'dashscope', model: [] },
+  { service_type: 'video', name: '通义万相', base_url: 'https://dashscope.aliyuncs.com', provider: 'dashscope', model: [] }
+].map(config => ({ ...config, model: catalogModels(config.service_type, config.provider) })).filter(config => config.model.length))
 
 /** 火山引擎一键配置用 */
-const VOLCENGINE_CONFIGS = [
-  { service_type: 'text', name: '火山引擎 文本', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: VOLC_TEXT_MODELS },
-  { service_type: 'image', name: '火山引擎 即梦 文本生图', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: VOLC_IMAGE_MODELS },
-  { service_type: 'storyboard_image', name: '火山引擎 即梦 分镜图', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: VOLC_IMAGE_MODELS },
-  { service_type: 'video', name: '火山引擎 即梦 视频', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volces', model: VOLC_VIDEO_MODELS }
-]
+const VOLCENGINE_CONFIGS = computed(() => [
+  { service_type: 'text', name: '火山引擎 文本', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: [] },
+  { service_type: 'image', name: '火山引擎 即梦 文本生图', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: [] },
+  { service_type: 'storyboard_image', name: '火山引擎 即梦 分镜图', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: [] },
+  { service_type: 'video', name: '火山引擎 即梦 视频', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volces', model: [] }
+].map(config => ({ ...config, model: catalogModels(config.service_type, config.provider) })).filter(config => config.model.length))
 
 /** Agnes 一键配置用 */
-const AGNES_CONFIGS = [
-  { service_type: 'text', name: 'Agnes 文本', base_url: 'https://apihub.agnes-ai.com/v1', provider: 'agnes', api_protocol: 'openai', model: ['agnes-2.0-flash'] },
-  { service_type: 'image', name: 'Agnes 文本生图', base_url: 'https://apihub.agnes-ai.com/v1', provider: 'agnes', api_protocol: 'openai', model: ['agnes-image-2.1-flash'] },
-  { service_type: 'storyboard_image', name: 'Agnes 分镜图', base_url: 'https://apihub.agnes-ai.com/v1', provider: 'agnes', api_protocol: 'openai', model: ['agnes-image-2.1-flash'] },
-  { service_type: 'video', name: 'Agnes 视频', base_url: 'https://apihub.agnes-ai.com/v1', provider: 'agnes', api_protocol: 'agnes', endpoint: '/videos', query_endpoint: '/videos/{taskId}', model: ['agnes-video-v2.0'] },
-]
+const AGNES_CONFIGS = computed(() => [
+  { service_type: 'text', name: 'Agnes 文本', base_url: 'https://apihub.agnes-ai.com/v1', provider: 'agnes', api_protocol: 'openai', model: [] },
+  { service_type: 'image', name: 'Agnes 文本生图', base_url: 'https://apihub.agnes-ai.com/v1', provider: 'agnes', api_protocol: 'openai', model: [] },
+  { service_type: 'storyboard_image', name: 'Agnes 分镜图', base_url: 'https://apihub.agnes-ai.com/v1', provider: 'agnes', api_protocol: 'openai', model: [] },
+  { service_type: 'video', name: 'Agnes 视频', base_url: 'https://apihub.agnes-ai.com/v1', provider: 'agnes', api_protocol: 'agnes', endpoint: '/videos', query_endpoint: '/videos/{taskId}', model: [] },
+].map(config => ({ ...config, model: catalogModels(config.service_type, config.provider) })).filter(config => config.model.length))
 
 function serviceTypeLabel(t) {
   const map = {
@@ -1917,6 +1887,10 @@ async function loadList() {
   loading.value = true
   try {
     list.value = await aiAPI.list(null, { tenantId: tenantId.value })
+    selectedRows.value = []
+    if (canManageCatalog) {
+      try { catalogRows.value = await request.get('/admin/model-catalog') } catch (_) { catalogRows.value = [] }
+    }
   } catch (_) {
     list.value = []
   } finally {
@@ -2014,6 +1988,8 @@ function openEdit(row) {
   }
   form.value = {
     service_type: row.service_type,
+    provider_connection_id: row.provider_connection_id,
+    provider_connection_name: row.provider_connection_name,
     name: row.name,
     provider: row.provider,
     api_protocol: row.api_protocol || '',
@@ -2144,14 +2120,15 @@ async function submit() {
       ...(settings !== undefined ? { settings } : {}),
     }
     if (editingId.value) {
-      await aiAPI.update(editingId.value, { ...payload, ...tenantBody() })
+      await aiAPI.update(editingId.value, { ...payload, ...tenantBody(), catalog_managed: true })
       ElMessage.success('保存成功')
     } else {
-      await aiAPI.create({ ...payload, ...tenantBody() })
+      await aiAPI.create({ ...payload, ...tenantBody(), catalog_managed: true })
       ElMessage.success('添加成功')
     }
     dialogVisible.value = false
     await loadList()
+    await connectionsPanel.value?.load()
   } catch (e) {
     // request 已统一报错
   } finally {
@@ -2299,11 +2276,12 @@ function openOneKeyTongyi() {
 }
 
 async function submitOneKeyTongyi() {
+  if (!TONGYI_CONFIGS.value.length) return ElMessage.warning('目录中暂无此厂商模型，请先添加连接和模型')
   const apiKey = oneKeyTongyiKey.value.trim()
   if (!apiKey) return
   oneKeyTongyiSaving.value = true
   try {
-    for (const cfg of TONGYI_CONFIGS) {
+    for (const cfg of TONGYI_CONFIGS.value) {
       const models = cfg.model || []
       await aiAPI.create({ ...tenantBody(),
         service_type: cfg.service_type,
@@ -2333,11 +2311,12 @@ function openOneKeyVolc() {
 }
 
 async function submitOneKeyVolc() {
+  if (!VOLCENGINE_CONFIGS.value.length) return ElMessage.warning('目录中暂无此厂商模型，请先添加连接和模型')
   const apiKey = oneKeyVolcKey.value.trim()
   if (!apiKey) return
   oneKeyVolcSaving.value = true
   try {
-    for (const cfg of VOLCENGINE_CONFIGS) {
+    for (const cfg of VOLCENGINE_CONFIGS.value) {
       const models = cfg.model || []
       await aiAPI.create({ ...tenantBody(),
         service_type: cfg.service_type,
@@ -2367,11 +2346,12 @@ function openOneKeyAgnes() {
 }
 
 async function submitOneKeyAgnes() {
+  if (!AGNES_CONFIGS.value.length) return ElMessage.warning('目录中暂无此厂商模型，请先添加连接和模型')
   const apiKey = oneKeyAgnesKey.value.trim()
   if (!apiKey) return
   oneKeyAgnesSaving.value = true
   try {
-    for (const cfg of AGNES_CONFIGS) {
+    for (const cfg of AGNES_CONFIGS.value) {
       const models = cfg.model || []
       await aiAPI.create({ ...tenantBody(),
         service_type: cfg.service_type,
@@ -2401,7 +2381,7 @@ async function submitOneKeyAgnes() {
 async function exportConfigs() {
   try {
     const configs = await aiAPI.list(null, { tenantId: tenantId.value })
-    const exportData = configs.map(({ id, created_at, updated_at, ...rest }) => rest)
+    const exportData = configs.filter(row => tenantId.value || !canManageCatalog || !row.provider_connection_id).map(({ id, created_at, updated_at, ...rest }) => rest)
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -2514,9 +2494,18 @@ onMounted(() => {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+@media (max-width: 600px) {
+  .config-editor-dialog .el-form-item { display: block; }
+  .config-editor-dialog .el-form-item__label { width: auto !important; justify-content: flex-start; }
+  .config-editor-dialog .el-form-item__content { margin-left: 0 !important; min-width: 0; }
+  .config-editor-dialog .el-select { max-width: 100%; }
+}
 </style>
 
 <style scoped>
+.config-tabs { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.config-tabs :deep(.el-tabs__header), .config-tabs :deep(.el-tabs__content) { min-width: 0; max-width: 100%; }
+
 .ai-config-content {
   padding: 0;
 }

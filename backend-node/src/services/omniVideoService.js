@@ -92,7 +92,7 @@ function quote(db, body, payer) {
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
   return billing.quote(db, payer, {
     service_type: 'video',
-    model: billingTarget.billing_key,
+    model: billingTarget.billing_key, provider_model: billingTarget.provider_model,
     usage,
     pricing_context: {
       has_video_input: !!body.has_video_input,
@@ -180,7 +180,7 @@ function create(db, log, body, billingUser) {
   if (!waitingForSd2 && !idempotencyKey) throw new Error('视频生成请求缺少幂等键，请刷新后重试');
   const authorization = waitingForSd2 ? null : billing.createAuthorization(db, payer, {
     idempotency_key: idempotencyKey,
-    service_type: 'video', model: billingTarget.billing_key, usage,
+    service_type: 'video', model: billingTarget.billing_key, provider_model: billingTarget.provider_model, usage,
     pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: !!inputValidation?.automatic_voice_url || routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || null, drama_id: body.drama_id || null, source_kind: body.source_context === 'single_video_tool' ? 'single_video_tool' : body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.storyboard_id || body.shot_id || null,
   });
   let task = null;
@@ -1069,7 +1069,7 @@ async function cancelJob(db, log, jobId, user) {
   if (['completed', 'failed', 'invalid'].includes(generation.status)) throw new Error('任务已结束，无需取消');
   if (generation.provider_task_id && String(generation.provider_task_id).trim()) {
     const videoClient = require('./videoClient');
-    const config = videoClient.getDefaultVideoConfig(db, generation.model, generation.tenant_id ? { tenant_id: generation.tenant_id } : {});
+    const config = videoClient.getDefaultVideoConfig(db, generation.model, { tenant_id: generation.tenant_id, scene_defaults: false });
     if (!config) throw new Error('找不到该任务的视频模型配置，不能安全取消');
     const upstream = await videoClient.cancelVideoTask(config, log, String(generation.provider_task_id).trim());
     if (!upstream.cancelled) {

@@ -1426,7 +1426,7 @@ async function callImageApi(db, log, opts) {
     user_negative_prompt,
   } = opts;
   const preferredProvider = preferred_provider ?? opts.preferredProvider;
-  const config = getDefaultImageConfig(db, preferredModel, preferredProvider, imageServiceType, { tenant_id: opts.tenant_id });
+  const config = getDefaultImageConfig(db, preferredModel, preferredProvider, imageServiceType, { tenant_id: opts.tenant_id, scene_defaults: false });
   if (!config) {
     throw new Error('未配置图片模型，请在「AI 配置」中添加 image 类型且已启用的配置');
   }
@@ -1434,6 +1434,13 @@ async function callImageApi(db, log, opts) {
   const provider = (config.provider || '').toLowerCase();
   // api_protocol 显式指定接口规范，优先级高于 provider 推断；未设置时按 provider 自动判断
   const protocol = (config.api_protocol || '').toLowerCase() || inferProtocol(provider, model);
+  const imageBillingService = require('./billingService');
+  const authorizationId = opts.billing_authorization_id;
+  const authorization = authorizationId ? imageBillingService.imageAuthorization(db, authorizationId) : null;
+  const proPricing = authorization?.snapshot.rates?.some(rate => require('./seedreamProPricing').enabled(rate.conditions));
+  if (proPricing && (!['volcengine', 'openai'].includes(protocol) || opts.layer_decomposition === true || model !== authorization.snapshot.provider_model)) {
+    throw new Error('此价格规则仅支持 Seedream 单图生成');
+  }
 
   // ── 参考图标签注入：为所有非 Gemini 模型将标签注入 prompt 文本 ─────────────────────────────
   // Gemini 通过 parts 结构处理（interleaved text+image），不需要文字注入。
@@ -1530,8 +1537,8 @@ async function callImageApi(db, log, opts) {
   }
 
   // doubao-seedream-4-5+ 要求最低 3686400 像素，不足时等比放大；Agnes 需映射到官方支持尺寸
-  let effectiveSize = size;
-  if (isSeedream && size) effectiveSize = fixSeedreamSize(size);
+  let effectiveSize = proPricing ? (size || '2K') : size;
+  if (isSeedream && size && !proPricing) effectiveSize = fixSeedreamSize(size);
   else if (isAgnes && size) effectiveSize = fixAgnesImageSize(size);
 
   // 火山 Seedream 不接受 negative_prompt。按供应商要求将负向内容拼入主提示词。
@@ -1568,19 +1575,32 @@ async function callImageApi(db, log, opts) {
     'Content-Type': 'application/json',
     Authorization: 'Bearer ' + (config.api_key || ''),
   };
+  let finalized = null;
+  let providerRequestId = null;
+  if (proPricing) {
+    if (!isSeedream) throw new Error('此价格规则仅支持 Seedream 单图生成');
+    finalized = imageBillingService.authorizeImageRequest(db, authorizationId,
+      require('./seedreamProPricing').context({ size: effectiveSize, reference_image_urls: resolvedRefs }), image_gen_id);
+  }
+  const pending = (reason, providerRequestId) => {
+    if (finalized) imageBillingService.markPendingReconciliation(db, { id: authorization.user_id }, finalized.authorization_id, { reason, provider_request_id: providerRequestId });
+  };
   let raw;
   let httpStatus;
   try {
     const out = await postJSONWithTimeout(url, openaiCompatHeaders, body, IMAGE_HTTP_TIMEOUT_MS);
     httpStatus = out.statusCode;
     raw = out.raw;
+    providerRequestId = out.headers?.['x-request-id'] || out.headers?.['x-tt-logid'] || null;
   } catch (e) {
+    pending('图片请求已发送但响应未知：' + e.message);
     log.error('Image API network error', { image_gen_id, error: e.message, url: url.slice(0, 80) });
     return { error: e.message && e.message.includes('timeout')
       ? e.message
       : ('图片生成网络请求失败: ' + e.message) };
   }
   if (httpStatus < 200 || httpStatus >= 300) {
+    if (httpStatus >= 500) pending('图片供应商响应异常：' + httpStatus, providerRequestId);
     log.error('Image API failed', { status: httpStatus, body: raw.slice(0, 300) });
     let errMsg = '图片生成请求失败: ' + httpStatus;
     try {
@@ -1592,10 +1612,12 @@ async function callImageApi(db, log, opts) {
     }
     return { error: errMsg };
   }
+  pending('图片供应商已响应，等待结果校验', providerRequestId);
   let data;
   try {
     data = JSON.parse(raw);
   } catch (e) {
+    pending('图片供应商响应无法解析');
     log.warn('Image API response parse error', { image_gen_id, raw_preview: raw.slice(0, 200) });
     return { error: '图片生成返回格式异常' };
   }
@@ -1623,6 +1645,22 @@ async function callImageApi(db, log, opts) {
     });
     return { error: '未返回图片地址' };
   }
+  if (finalized) {
+    pending('图片已返回，等待本地保存和结算', providerRequestId);
+    if (data.data?.length !== 1) return { error: '图片数量与单图请求不一致，等待对账' };
+    try {
+      const cfg = loadConfig();
+      const storagePath = path.resolve(cfg.storage?.local_path || './data/storage');
+      const localPath = await uploadService.downloadImageToLocal(storagePath, imageUrl, 'images', log, 'ig', storageLayout.getProjectStorageSubdir(db, opts.drama_id));
+      if (!localPath) throw new Error('图片未保存到本地');
+      const metadata = await require('sharp')(fs.readFileSync(path.join(storagePath, localPath))).metadata();
+      const imageSize = `${metadata.width}x${metadata.height}`;
+      require('./seedreamProPricing').pixelBand(imageSize);
+      const usage = { image: 1, image_size: imageSize };
+      db.prepare('UPDATE billing_reconciliation_cases SET observed_usage_json=?,provider_request_id=? WHERE authorization_id=?').run(JSON.stringify(usage), providerRequestId, finalized.authorization_id);
+      return { image_url: '/static/' + localPath.replace(/\\/g, '/'), local_path: localPath, billing_usage: usage, provider_request_id: providerRequestId };
+    } catch (error) { return { error: '图片本地保存或校验失败，等待对账：' + error.message }; }
+  }
   return { image_url: imageUrl };
 }
 
@@ -1631,6 +1669,10 @@ async function callImageApi(db, log, opts) {
  * 与场景图一致：创建 task 并写入 task_id，便于前端轮询 /tasks/:task_id 获知完成或报错。
  */
 function createAndGenerateImage(db, log, opts) {
+  if (!opts.model) {
+    const selected = getDefaultImageConfig(db, null, null, 'image', { tenant_id: opts.tenant_id });
+    if (selected?.scene_default) opts = { ...opts, model: getModelFromConfig(selected) };
+  }
   const {
     drama_id,
     character_id,
@@ -1680,6 +1722,7 @@ function createAndGenerateImage(db, log, opts) {
       model: model || undefined,
       dramaId: dramaIdNum || null,
       sourceId: resourceId,
+      size,
       reference_image_urls,
     });
   } catch (billingErr) {
@@ -1735,6 +1778,7 @@ function createAndGenerateImage(db, log, opts) {
         character_id: character_id,
         image_type,
         image_gen_id: imageGenId,
+        billing_authorization_id: imageBilling?.authorizationId,
         user_negative_prompt: user_negative_prompt || undefined,
         reference_image_urls,
         files_base_url,
@@ -1770,7 +1814,7 @@ function createAndGenerateImage(db, log, opts) {
           : path.join(process.cwd(), cfg.storage?.local_path || './data/storage');
         const category = sceneIdNum != null ? 'scenes' : (charIdNum != null ? 'characters' : 'images');
         const projectSubdir = storageLayout.getProjectStorageSubdir(db, dramaIdNum);
-        localPath = await uploadService.downloadImageToLocal(
+        localPath = result.local_path || await uploadService.downloadImageToLocal(
           storagePath,
           result.image_url,
           category,
@@ -1794,7 +1838,7 @@ function createAndGenerateImage(db, log, opts) {
         }
       }
       taskService.updateTaskResult(db, taskId, { image_generation_id: imageGenId, image_url: result.image_url, local_path: localPath, status: 'completed' });
-      imageBilling?.settle(log, `image-generation:${imageGenId}`);
+      imageBilling?.settle(log, `image-generation:${imageGenId}`, result);
       if (charIdNum != null) {
         try {
           // 旧图追加到 extra_images，与上传逻辑保持一致
