@@ -3,7 +3,7 @@
     <el-tabs v-model="activeTab" class="config-tabs" @tab-change="onConfigTabChange">
       <el-tab-pane v-if="!tenantId && canManageCatalog" label="模型目录" name="catalog"><ModelCatalog class="tab-content" ref="catalogPanel" @connection="openConnection" @changed="loadList" /></el-tab-pane>
       <el-tab-pane v-if="!tenantId && canManageCatalog" label="供应商连接" name="connections"><ProviderConnections class="tab-content" ref="connectionsPanel" :locked="vendorLock.enabled" @changed="loadList" @binding="openConnection" @catalog="activeTab = 'catalog'" /></el-tab-pane>
-      <el-tab-pane :label="!tenantId && canManageCatalog ? '旧配置与专用服务' : '供应商连接'" name="configs">
+      <el-tab-pane :label="!tenantId && canManageCatalog ? '待迁移配置与专用服务' : '供应商连接'" name="configs">
         <div class="tab-content">
           <!-- 普通模式操作栏 -->
           <div v-if="!vendorLock.enabled" class="content-actions">
@@ -67,7 +67,7 @@
           </div>
           <el-table
             v-loading="loading"
-            :data="list"
+            :data="legacyList"
             stripe
             style="width: 100%"
             @selection-change="onSelectionChange"
@@ -207,7 +207,7 @@
     <el-dialog
       v-model="dialogVisible"
       class="config-editor-dialog"
-      :title="vendorLock.enabled ? '修改 API Key / 默认模型' : (editingId ? '编辑配置' : '添加配置')"
+      :title="form.provider_connection_id ? `${form.provider_connection_name || '供应商连接'} · ${serviceTypeLabel(form.service_type)}调用设置` : vendorLock.enabled ? '修改 API Key / 默认模型' : (editingId ? '编辑配置' : '添加配置')"
       width="min(640px, calc(100vw - 32px))"
       append-to-body
       :close-on-click-modal="false"
@@ -221,7 +221,7 @@
           <el-descriptions-item label="厂商">{{ form.provider }}</el-descriptions-item>
         </el-descriptions>
         <el-form ref="formRef" :model="form" label-width="100px">
-          <el-form-item prop="api_key" :rules="[{ required: true, message: '请输入 API Key', trigger: 'blur' }]">
+          <el-form-item v-if="!form.provider_connection_id" prop="api_key" :rules="[{ required: true, message: '请输入 API Key', trigger: 'blur' }]">
             <template #label><span class="form-label-tip">API Key</span></template>
             <el-input
               v-model="form.api_key"
@@ -260,7 +260,7 @@
       <!-- 普通模式：完整表单 -->
       <el-form v-else ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-alert v-if="form.provider_connection_id" title="地址与凭据由供应商连接统一管理。此处只修改模型调用设置。" type="info" :closable="false" show-icon />
-        <el-form-item prop="service_type">
+        <el-form-item v-if="!form.provider_connection_id" prop="service_type">
           <template #label>
             <span class="form-label-tip">服务类型
               <el-tooltip placement="top" :show-arrow="true" popper-class="cfg-tip-popper">
@@ -288,7 +288,7 @@
             <el-option label="素材库上传" value="jimeng2_character_auth" />
           </el-select>
         </el-form-item>
-        <el-form-item prop="provider">
+        <el-form-item v-if="!form.provider_connection_id" prop="provider">
           <template #label>
             <span class="form-label-tip">厂商
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
@@ -511,7 +511,7 @@ input_reference = (图片文件，可选)</pre>
             <el-button @click="showProtocolHelp = false">关闭</el-button>
           </template>
         </el-dialog>
-        <el-form-item prop="name">
+        <el-form-item v-if="!form.provider_connection_id" prop="name">
           <template #label>
             <span class="form-label-tip">名称
               <el-tooltip content="用于区分不同配置；选择厂商后自动生成。" placement="top" popper-class="cfg-tip-popper">
@@ -521,7 +521,7 @@ input_reference = (图片文件，可选)</pre>
           </template>
           <el-input v-model="form.name" placeholder="如：OpenAI 图文" />
         </el-form-item>
-        <el-form-item prop="base_url">
+        <el-form-item v-if="!form.provider_connection_id" prop="base_url">
           <template #label>
             <span class="form-label-tip">{{ form.service_type === 'jimeng2_character_auth' && form.provider !== 'richbest_asset_v3' ? '网关 URL' : 'Base URL' }}
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
@@ -549,7 +549,7 @@ input_reference = (图片文件，可选)</pre>
             :placeholder="form.provider === 'richbest_asset_v3' ? 'https://api.richbest.cn' : (form.service_type === 'jimeng2_character_auth' ? '如 https://your-gateway.com' : '选择预设厂商后自动填充，可修改')"
           />
         </el-form-item>
-        <el-form-item prop="api_key">
+        <el-form-item v-if="!form.provider_connection_id" prop="api_key">
           <template #label>
             <span class="form-label-tip">{{ form.service_type === 'jimeng2_character_auth' && form.provider !== 'richbest_asset_v3' ? 'Token' : 'API Key' }}
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
@@ -1226,7 +1226,7 @@ const catalogPanel = ref(null)
 const connectionsPanel = ref(null)
 const catalogRows = ref([])
 async function onConfigTabChange(name) { if (name === 'connections') await connectionsPanel.value?.load(); if (name === 'catalog') { await catalogPanel.value?.load(); await loadList() } }
-async function openConnection(id) { if (!id && !tenantId.value && canManageCatalog) { activeTab.value = 'connections'; return }; activeTab.value = 'configs'; if (id) { const row = list.value.find(item => item.id === id) || await aiAPI.get(id); if (row) openEdit(row) } }
+async function openConnection(id) { if (!id && !tenantId.value && canManageCatalog) { activeTab.value = 'connections'; return }; if (id) { const row = list.value.find(item => item.id === id) || await aiAPI.get(id); activeTab.value = row?.provider_connection_id && !tenantId.value && canManageCatalog ? 'connections' : 'configs'; if (row) openEdit(row) } }
 function catalogModels(type, provider) { return catalogRows.value.filter(row => row.service_type === type && row.status !== 'retired' && row.connections.some(c => c.provider === provider)).map(row => row.model) }
 const importFileRef = ref(null)
 
@@ -1279,6 +1279,7 @@ async function saveGenerationSettings() {
 }
 const loading = ref(false)
 const list = ref([])
+const legacyList = computed(() => !tenantId.value && canManageCatalog ? list.value.filter(row => !row.provider_connection_id) : list.value)
 const selectedRows = ref([])
 const batchDeleting = ref(false)
 const vendorLock = ref({ enabled: false, config_file: '' })
@@ -1886,6 +1887,7 @@ async function loadList() {
   loading.value = true
   try {
     list.value = await aiAPI.list(null, { tenantId: tenantId.value })
+    selectedRows.value = []
     if (canManageCatalog) {
       try { catalogRows.value = await request.get('/admin/model-catalog') } catch (_) { catalogRows.value = [] }
     }
@@ -1987,6 +1989,7 @@ function openEdit(row) {
   form.value = {
     service_type: row.service_type,
     provider_connection_id: row.provider_connection_id,
+    provider_connection_name: row.provider_connection_name,
     name: row.name,
     provider: row.provider,
     api_protocol: row.api_protocol || '',
@@ -2125,6 +2128,7 @@ async function submit() {
     }
     dialogVisible.value = false
     await loadList()
+    await connectionsPanel.value?.load()
   } catch (e) {
     // request 已统一报错
   } finally {
@@ -2377,7 +2381,7 @@ async function submitOneKeyAgnes() {
 async function exportConfigs() {
   try {
     const configs = await aiAPI.list(null, { tenantId: tenantId.value })
-    const exportData = configs.map(({ id, created_at, updated_at, ...rest }) => rest)
+    const exportData = configs.filter(row => tenantId.value || !canManageCatalog || !row.provider_connection_id).map(({ id, created_at, updated_at, ...rest }) => rest)
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -2489,6 +2493,12 @@ onMounted(() => {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+@media (max-width: 600px) {
+  .config-editor-dialog .el-form-item { display: block; }
+  .config-editor-dialog .el-form-item__label { width: auto !important; justify-content: flex-start; }
+  .config-editor-dialog .el-form-item__content { margin-left: 0 !important; min-width: 0; }
+  .config-editor-dialog .el-select { max-width: 100%; }
 }
 </style>
 

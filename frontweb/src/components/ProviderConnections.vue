@@ -11,15 +11,17 @@
       <header><div><h3>{{ row.name }}</h3><p>{{ row.provider }} · {{ row.base_url }}</p></div><el-tag :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? '已启用' : '已停用' }}</el-tag></header>
       <p class="connection-key">{{ row.has_api_key ? '凭据已保存' : '尚未填写凭据' }}</p>
       <div class="connection-models" v-if="row.bindings.length">
-        <div v-for="binding in row.bindings" :key="binding.id"><strong>{{ types[binding.service_type] || binding.service_type }}</strong><span><small class="binding-name">{{ binding.name }}</small>{{ binding.model.join('、') || '暂无模型' }}</span><el-button link @click="$emit('binding', binding.id)">模型调用设置</el-button></div>
+        <div v-for="group in capabilityGroups(row.bindings)" :key="group.type"><strong>{{ types[group.type] }}</strong><span>{{ group.models.join('、') || '暂无模型' }}</span>
+          <details class="binding-settings"><summary>调用设置</summary><el-button v-for="(binding, index) in group.bindings" :key="binding.id" link @click="$emit('binding', binding.id)">{{ types[binding.service_type] }}设置{{ group.bindings.filter(item => item.service_type === binding.service_type).length > 1 ? ` ${index + 1}` : '' }}</el-button></details>
+        </div>
       </div>
       <p v-else class="connection-key">导入模型后，它们会出现在模型目录中。</p>
       <footer><el-button :disabled="locked" @click="edit(row)">编辑连接</el-button><el-button :disabled="locked" @click="openAttachment(row)">关联现有配置</el-button><el-button :disabled="locked" @click="manual(row)">添加模型</el-button><el-button type="primary" :disabled="locked" @click="discover(row)">获取模型</el-button><el-button link @click="$emit('catalog')">模型目录与价格</el-button></footer>
     </article>
     <details class="legacy-connections" :open="!rows.length">
-      <summary>现有配置（{{ legacy.length }}）</summary>
+      <summary>待迁移配置（{{ legacy.length }}）</summary>
       <p>转换会共享凭据并保留原配置 ID、历史记录和默认值。能力不符的旧型号不再用于新请求，可重新导入到正确能力。不同凭据不会自动合并。</p>
-      <p>多条配置共用同一 Key 和地址时，先转换其中一条，再在该连接中点击“关联现有配置”。两条图片配置可同时保留。</p>
+      <p>多条配置共用同一 Key 和地址时，先转换其中一条，再关联其他配置。完成后统一在供应商连接中管理。</p>
       <div v-for="row in legacy" :key="row.id" class="legacy-row"><div><strong>{{ row.name }}</strong><small>{{ row.provider }} · {{ types[row.service_type] || row.service_type }}</small></div><el-button :disabled="locked || converting !== null" :loading="converting === row.id" @click="convert(row)">转换为共享连接</el-button></div>
       <p v-if="!legacy.length">没有可转换的旧配置。</p>
     </details>
@@ -67,7 +69,18 @@ import { modelDiscoveryAPI } from '@/api/modelDiscovery'
 import ModelDiscoveryDialog from './ModelDiscoveryDialog.vue'
 defineProps({ locked: Boolean })
 const emit = defineEmits(['changed', 'binding', 'catalog'])
-const types = { text: '文本', image: '图片', storyboard_image: '图片（旧分镜配置）', video: '视频', tts: '语音' }
+const types = { text: '文本', image: '图片', storyboard_image: '分镜图片', video: '视频', tts: '语音' }
+function capabilityGroups(bindings) {
+  const groups = new Map()
+  for (const binding of bindings) {
+    const type = binding.service_type === 'storyboard_image' ? 'image' : binding.service_type
+    if (!groups.has(type)) groups.set(type, { type, models: [], bindings: [] })
+    const group = groups.get(type)
+    group.models = [...new Set([...group.models, ...binding.model])]
+    group.bindings.push(binding)
+  }
+  return [...groups.values()]
+}
 const presets = [{ value: 'volcengine', label: '火山方舟', url: 'https://ark.cn-beijing.volces.com/api/v3' }, { value: 'openai', label: 'OpenAI / OpenAI 兼容', url: 'https://api.openai.com/v1' }, { value: 'agnes', label: 'Agnes', url: 'https://apihub.agnes-ai.com/v1' }, { value: 'qwen', label: '通义千问', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' }, { value: 'gemini', label: 'Google Gemini', url: 'https://generativelanguage.googleapis.com' }]
 const rows = ref([]); const legacy = ref([]); const loading = ref(false); const error = ref(''); const formError = ref('')
 const editing = ref(false); const adding = ref(false); const saving = ref(false); const converting = ref(null)
@@ -114,7 +127,7 @@ defineExpose({ load })
 </script>
 
 <style scoped>
-.binding-name{display:block;color:var(--text-muted);margin-bottom:.2rem}
+.binding-settings summary{cursor:pointer;color:var(--el-color-primary);padding:.2rem 0}.binding-settings .el-button{display:block;margin:.4rem 0;max-width:100%;white-space:normal;height:auto}
 .attachment-intro{line-height:1.7;color:var(--text-muted)}.attachment-target{overflow-wrap:anywhere}.attachment-actions{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:1rem 0}.attachment-actions .el-button{margin-left:0}.attachment-actions span{color:var(--text-muted);font-size:13px}.attachment-list{min-height:70px}.attachment-row{display:flex;gap:.8rem;align-items:flex-start;padding:1rem 0;border-top:1px solid var(--el-border-color);cursor:pointer}.attachment-row>div{min-width:0;overflow-wrap:anywhere;flex:1}.attachment-row small{display:block;margin-top:.3rem;color:var(--text-muted);line-height:1.5}.attachment-row .el-checkbox{margin:0;flex-shrink:0}.attachment-unavailable{cursor:default}.attachment-row .attachment-reason{color:var(--el-color-warning)}
 .provider-connections{max-width:1200px;margin:0 auto;width:100%;box-sizing:border-box;padding:1.25rem}.connections-heading,.connection-card>header{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}.connections-heading h2,.connection-card h3{margin:0 0 .5rem}.connections-heading p,.connection-card p,.legacy-connections p{margin:.3rem 0 .8rem;color:var(--text-muted);line-height:1.6;overflow-wrap:anywhere}.connection-actions,.connection-card footer{display:flex;gap:.6rem;flex-wrap:wrap}.connection-actions{flex-shrink:0}.connection-actions .el-button,.connection-card footer .el-button{margin-left:0}.connection-guide{display:flex;gap:1.5rem;flex-wrap:wrap;padding:1rem 0;color:var(--text-secondary)}.connection-card{border:1px solid var(--el-border-color);border-radius:12px;padding:1.2rem;margin:1rem 0;background:var(--bg-secondary)}.connection-card header>div{min-width:0}.connection-card h3{overflow-wrap:anywhere}.connection-models>div{display:flex;gap:.8rem;padding:.6rem 0;border-top:1px solid var(--el-border-color);align-items:flex-start;flex-wrap:wrap}.connection-models strong{min-width:4rem}.connection-models span{flex:1;min-width:10rem;overflow-wrap:anywhere;line-height:1.6}.connection-card footer{margin-top:1rem}.connection-key{font-size:13px}.connection-error{padding:.8rem;border:1px solid var(--el-color-danger);color:var(--el-color-danger);border-radius:8px;overflow-wrap:anywhere}.legacy-connections{margin:1.5rem 0;border-top:1px solid var(--el-border-color);padding-top:1rem}.legacy-connections summary{cursor:pointer;font-weight:600;padding:.6rem 0}.legacy-row{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:.8rem 0;border-bottom:1px solid var(--el-border-color)}.legacy-row>div{min-width:0;overflow-wrap:anywhere}.legacy-row small{display:block;color:var(--text-muted);margin-top:.3rem}.connection-empty{padding:2rem 0;color:var(--text-muted)}@media(max-width:600px){.provider-connections{padding:.75rem}.connections-heading{flex-direction:column}.legacy-row{flex-wrap:wrap}.connection-guide{gap:.5rem}.connection-guide span{width:100%}}
 </style>

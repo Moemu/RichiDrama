@@ -388,6 +388,7 @@ function rowToConfig(r, db) {
   const cfg = {
     id: r.id,
     provider_connection_id: r.provider_connection_id || null,
+    provider_connection_name: connection?.name || null,
     service_type: r.service_type,
     provider: r.provider,
     api_protocol: r.api_protocol || '',

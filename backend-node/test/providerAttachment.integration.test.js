@@ -66,7 +66,16 @@ test('four legacy Ark configurations attach over HTTP without replacing defaults
     const repeat = await f.request('POST', route + '/attach', { config_ids: configs.map(config => config.id) }, cookie);
     assert.equal(repeat.body.data.attached.length, 0);
     assert.equal(repeat.body.data.skipped, 4);
+    assert.equal((await f.request('PATCH', route, { name: '统一方舟连接' }, cookie)).status, 200);
     await f.restart();
+    const visible = await f.request('GET', '/ai-configs', undefined, cookie);
+    assert.equal(visible.status, 200);
+    for (const original of configs) {
+      const config = visible.body.data.find(row => row.id === original.id);
+      assert.equal(config.provider_connection_name, '统一方舟连接');
+      assert.equal(config.name, original.name);
+      assert.equal(config.default_model, original.default_model);
+    }
     assert.deepEqual(historic(), before);
     assert.equal((await f.request('GET', `/tasks/${task.id}`, undefined, cookie)).status, 200);
     const after = await f.request('GET', '/admin/provider-connections', undefined, cookie);

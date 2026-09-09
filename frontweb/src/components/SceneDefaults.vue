@@ -7,7 +7,9 @@
       <article v-for="scene in scenes" :key="scene.type">
         <h3>{{ scene.label }}</h3><p>{{ scene.note }}</p>
         <el-select v-model="selection[scene.type]" :aria-label="`${scene.label}默认模型`" filterable clearable placeholder="沿用现有默认模型" :disabled="saving === scene.type">
-          <el-option v-for="option in options(scene.type)" :key="option.value" :value="option.value" :label="option.label" />
+          <el-option-group v-for="group in options(scene.type)" :key="group.id" :label="group.name">
+            <el-option v-for="option in group.options" :key="option.value" :value="option.value" :label="`${option.label} · ${group.name}`" />
+          </el-option-group>
         </el-select>
         <footer><span>{{ current[scene.key]?.routing_version === version ? '已配置场景默认' : '沿用现有配置' }}</span><el-button :loading="saving === scene.type" :disabled="saving !== null" @click="save(scene)">保存</el-button></footer>
       </article>
@@ -20,6 +22,7 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { aiAPI } from '@/api/ai'
 import { sceneModelMapAPI as api } from '@/api/sceneModelMap'
+import { providerGroups, resolveProviderConfig } from '@/utils/providerModelSelection'
 const version = 'capability-default-v1'
 const scenes = [
   { type: 'text', key: 'default_text_generation', label: '文本任务', note: '具体文本场景可在下方单独覆盖。' },
@@ -29,8 +32,8 @@ const scenes = [
 ]
 const configs = ref([]); const current = ref({}); const selection = ref({}); const loading = ref(false); const saving = ref(null); const error = ref('')
 function options(type) {
-  return configs.value.filter(config => config.is_active && (config.service_type === type || (type === 'storyboard_image' && config.service_type === 'image' && config.provider_connection_id)))
-    .flatMap(config => config.model.map(model => ({ value: JSON.stringify([config.id, model]), label: `${model} · ${config.name}` })))
+  const currentId = selection.value[type] ? JSON.parse(selection.value[type])[0] : null
+  return providerGroups(configs.value, type, true).map(group => ({ ...group, options: group.models.map(model => ({ value: JSON.stringify([resolveProviderConfig(group, model, type, currentId).id, model]), label: model })) }))
 }
 async function load() {
   loading.value = true; error.value = ''

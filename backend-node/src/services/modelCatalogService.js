@@ -45,7 +45,7 @@ function list(db) {
     const keys = [...new Set(linked.map((config) => config.billing_key || row.model))];
     const prices = priceGroups(db, row.service_type, keys.length ? keys : [row.model], books);
     const ready = keys.length > 0 && keys.every(key => prices.some(book => effective(book) && priceReady(row.service_type, book.items.filter(item => item.model === key))));
-    return { ...row, connections: linked.map((config) => ({ id: config.id, name: config.name, provider: config.provider, is_active: config.is_active, default_model: config.default_model || config.model[0], billing_key: config.billing_key || row.model })), prices, price_ready: ready, connection_ready: linked.some((config) => config.is_active), managed: row.status !== 'legacy' };
+    return { ...row, connections: linked.map((config) => ({ id: config.id, name: config.name, provider_connection_id: config.provider_connection_id, provider_connection_name: config.provider_connection_name, provider: config.provider, is_active: config.is_active, default_model: config.default_model || config.model[0], billing_key: config.billing_key || row.model })), prices, price_ready: ready, connection_ready: linked.some((config) => config.is_active), managed: row.status !== 'legacy' };
   }).sort((a, b) => `${a.service_type}/${a.model}`.localeCompare(`${b.service_type}/${b.model}`));
 }
 function save(db, actorId, input, log) {

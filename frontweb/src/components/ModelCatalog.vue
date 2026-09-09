@@ -15,7 +15,7 @@
       <el-table :data="filtered" row-key="catalog_key">
         <el-table-column label="模型" min-width="220"><template #default="{ row }"><strong>{{ row.display_name }}</strong><small>{{ row.model }}</small></template></el-table-column>
         <el-table-column label="类型" width="100"><template #default="{ row }">{{ types[row.service_type] }}</template></el-table-column>
-        <el-table-column label="连接" min-width="170"><template #default="{ row }"><span v-for="connection in row.connections" :key="connection.id" class="connection-name">{{ connection.name }}{{ connection.is_active ? '' : '（停用）' }}</span></template></el-table-column>
+        <el-table-column label="连接" min-width="170"><template #default="{ row }"><span v-for="connection in displayConnections(row.connections)" :key="connection.id" class="connection-name">{{ connection.provider_connection_name || connection.name }}{{ connection.is_active ? '' : '（停用）' }}</span></template></el-table-column>
         <el-table-column label="状态" width="115"><template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ statuses[row.status] }}</el-tag></template></el-table-column>
         <el-table-column label="定价" width="110"><template #default="{ row }"><el-tag :type="row.price_ready ? 'success' : 'warning'">{{ row.price_ready ? '已有价格' : '待定价' }}</el-tag></template></el-table-column>
         <el-table-column label="操作" width="140"><template #default="{ row }"><el-button link type="primary" @click="openDetail(row)">管理 / 定价</el-button></template></el-table-column>
@@ -25,7 +25,7 @@
 
     <el-dialog class="catalog-dialog" top="5vh" v-model="showAdd" title="添加模型" width="min(620px, 94vw)" append-to-body>
       <el-form label-position="top">
-        <el-form-item label="供应商连接"><el-select v-model="add.config_id" filterable placeholder="选择已有连接" class="full"><el-option v-for="config in configs" :key="config.id" :value="config.id" :label="`${config.name} · ${types[config.service_type]}`" /></el-select></el-form-item>
+        <el-form-item label="供应商连接"><el-select v-model="add.config_id" filterable placeholder="选择已有连接" class="full"><el-option v-for="config in configs" :key="config.id" :value="config.id" :label="`${config.provider_connection_name || config.name} · ${types[config.service_type]}`" /></el-select></el-form-item>
         <el-button link type="primary" @click="showAdd = false; $emit('connection')">添加或编辑供应商连接</el-button>
         <el-form-item label="模型 ID"><el-input v-model="add.model" placeholder="填写供应商使用的模型 ID" /></el-form-item>
         <el-form-item label="显示名称"><el-input v-model="add.display_name" placeholder="可选，留空使用模型 ID" /></el-form-item>
@@ -60,7 +60,7 @@
         <el-tab-pane label="模型管理" name="management">
         <p class="pricing-help">上下架仅影响新请求。历史记录和已预授权任务保持原价格。</p>
         <p v-if="selected.status === 'legacy'">此模型沿用现有配置。主动上下架后纳入目录管理。</p>
-        <div class="detail-actions"><el-button v-if="selected.status !== 'active'" type="primary" :loading="saving" @click="setStatus('active')">上架模型</el-button><el-button v-if="selected.status !== 'retired'" type="danger" plain :loading="saving" @click="setStatus('retired')">下架模型</el-button><el-button @click="$emit('connection', selected.connections[0]?.id); showDetail = false">编辑连接 / 默认模型</el-button></div>
+        <div class="detail-actions"><el-button v-if="selected.status !== 'active'" type="primary" :loading="saving" @click="setStatus('active')">上架模型</el-button><el-button v-if="selected.status !== 'retired'" type="danger" plain :loading="saving" @click="setStatus('retired')">下架模型</el-button><el-button @click="$emit('connection', selected.connections[0]?.id); showDetail = false">模型调用设置</el-button></div>
         </el-tab-pane>
         </el-tabs>
       </template>
@@ -113,11 +113,12 @@ async function load() {
   try {
     const [catalog, priceBooks] = await Promise.all([request.get('/admin/model-catalog'), adminAPI.priceBooks()])
     rows.value = catalog.map(row => ({ ...row, catalog_key: `${row.service_type}:${row.model}` }))
-    configs.value = [...new Map(catalog.flatMap(row => row.connections.map(connection => [connection.id, { ...connection, service_type: row.service_type }]))).values()]
+    configs.value = [...new Map(catalog.flatMap(row => row.connections.map(connection => [`${connection.provider_connection_id || `config-${connection.id}`}:${row.service_type}`, { ...connection, service_type: row.service_type }]))).values()]
     books.value = priceBooks
     if (selected.value) selected.value = rows.value.find(row => row.model === selected.value.model && row.service_type === selected.value.service_type) || selected.value
   } catch (e) { error.value = e.message || '读取模型目录失败' } finally { loading.value = false }
 }
+function displayConnections(connections) { return [...new Map(connections.map(connection => [`${connection.provider_connection_id || `config-${connection.id}`}:${connection.is_active}`, connection])).values()] }
 function openAdd() { Object.assign(add, { config_id: null, model: '', display_name: '' }); showAdd.value = true }
 async function saveAdd() {
   const config = configs.value.find(c => c.id === add.config_id)
