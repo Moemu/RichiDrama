@@ -6,10 +6,13 @@ const ledger = require('../services/costLedgerService');
 const query = require('../services/costQueryService');
 const backfill = require('../services/costBackfillService');
 const reprice = require('../services/costRepriceService');
+const activity = require('../services/costActivityService');
 
 module.exports = function costRoutes(db) {
   const router = express.Router();
   const handle = fn => (req, res) => { try { const result = fn(req, res); if (!res.headersSent) response.success(res, result); } catch (error) { response.badRequest(res, error.message); } };
+  router.get('/activity', handle(req => activity.activity(db, req.query)));
+  router.get('/activity/:id', handle(req => activity.detail(db, req.params.id)));
   router.get('/summary', handle(req => query.summary(db, req.query)));
   router.post('/reprices/preview', handle(req => reprice.preview(db, req.auth.id, req.body)));
   router.get('/reprices/:id', handle(req => reprice.get(db, req.params.id)));
@@ -50,7 +53,8 @@ module.exports = function costRoutes(db) {
     return prices.publish(db, req.auth.id, req.params.id);
   }));
   router.get('/reports', handle(req => db.prepare('SELECT id,organization_id,month,version,generated_at FROM cost_reports WHERE (? IS NULL OR organization_id=?) ORDER BY generated_at DESC LIMIT 100').all(req.query.organization_id || null, req.query.organization_id || null)));
-  router.post('/reports', handle(req => query.createReport(db, req.auth.id, req.body)));
+  router.post('/reports', handle(req => req.body.basis === 'billing_activity_v1'
+    ? activity.createReport(db, req.auth.id, req.body) : query.createReport(db, req.auth.id, req.body)));
   router.get('/reports/:id', handle(req => query.report(db, req.params.id)));
   router.get('/reports/:id/export', handle((req, res) => {
     if (!query.report(db, req.params.id)) throw new Error('月报不存在');

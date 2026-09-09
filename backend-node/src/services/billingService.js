@@ -305,11 +305,12 @@ function authorizeImageRequest(db, authorizationId, context, imageGenerationId) 
   })();
 }
 
-function calculateFromSnapshot(snapshot, actualUsage) {
+function snapshotCalculation(snapshot, actualUsage) {
   if (snapshot.image_request_finalized && (actualUsage?.image !== 1 || !actualUsage?.image_size)) {
     throw new Error('图片结算需要本地校验后的单张图片尺寸');
   }
   const usage = normalizeUsage(actualUsage || snapshot.usage); let amount = 0;
+  const details = [];
   if ((snapshot.rates || []).some(rate => rate.meter === 'input_image' && seedreamPricing.enabled(rate.conditions))) {
     usage.input_image = snapshot.usage.input_image || 0;
   }
@@ -322,10 +323,19 @@ function calculateFromSnapshot(snapshot, actualUsage) {
         { ...snapshot.pricing_context, pixel_band: seedreamPricing.pixelBand(actualUsage.image_size) }, usage) : null;
     const unitPrice = imageRate ? imageRate.unit_price_micro : tier ? creditsToMicro(tier.unit_price_points) : rate.unit_price_micro;
     const unitSize = Number(tier?.unit_size ?? rate.unit_size ?? 1);
-    amount += rate.is_free ? 0 : proratedPoints(seedreamPricing.billableQuantity(rate.conditions, qty), unitPrice, unitSize);
+    const billable = seedreamPricing.billableQuantity(rate.conditions, qty);
+    const subtotal = rate.is_free ? 0 : proratedPoints(billable, unitPrice, unitSize);
+    amount = safeMicroAdd(amount, subtotal);
+    details.push({ ...rate, quantity: qty, billable_quantity: billable, unit_price_micro: unitPrice, unit_size: unitSize,
+      rate_id: imageRate?.rate_id || tier?.id || rate.rate_id || null, subtotal_micro: subtotal });
   }
   if (actualUsage?.image_size && snapshot.image_request_finalized) usage.image_size = actualUsage.image_size;
-  return { usage, amount_micro: amount };
+  return { usage, amount_micro: amount, rates: details };
+}
+
+function calculateFromSnapshot(snapshot, actualUsage) {
+  const { usage, amount_micro } = snapshotCalculation(snapshot, actualUsage);
+  return { usage, amount_micro };
 }
 
 function settleAuthorization(db, user, authorizationId, input = {}) {
@@ -1351,4 +1361,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { account, payerAccount, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, imageAuthorization, voidImageAuthorization, authorizeImageRequest, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverInterruptedImageReconciliations, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, recoverResolvedVideoReconciliations, recordVideoReconciliationRecovery, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, adjustOrganizationBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };
+module.exports = { snapshotCalculation, account, payerAccount, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, imageAuthorization, voidImageAuthorization, authorizeImageRequest, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverInterruptedImageReconciliations, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, recoverResolvedVideoReconciliations, recordVideoReconciliationRecovery, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, adjustOrganizationBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };

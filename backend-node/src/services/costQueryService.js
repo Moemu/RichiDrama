@@ -115,6 +115,26 @@ function csvCell(value) { let s = String(value ?? ''); if (/^[=+@\-\t\r]/.test(s
 function* reportCsvChunks(db, id, detail = false) {
   const r = report(db, id); if (!r) throw new Error('月报不存在');
   const line = values => values.map(csvCell).join(',') + '\r\n';
+  if (r.summary.basis === 'billing_activity_v1') {
+    yield '\uFEFF' + line(['客户', '月份', '版本', '保存时间（北京时间）', '口径']);
+    yield line([r.summary.organization_name, r.month, r.version, chinaTime(r.generated_at), '原调用价格快照；已结算按结算日期，未结算按预授权日期；非实付账单']);
+    yield line(['业务记录', '可复算记录', '模型计价折合（元）', '供应商费率估算（元）', '供应商费率覆盖记录', '原扣费含关联补扣（积分）']);
+    yield line([r.summary.calls, r.summary.calculated_calls, r.summary.calculated_calls ? r.summary.model_amount_micro / 1e6 : '未确定', r.summary.supplier_priced_calls ? r.summary.supplier_amount_micro / 1e6 : '未确定', r.summary.supplier_priced_calls, r.summary.charged_micro / 10000]);
+    if (detail) {
+      yield line(['记录ID','项目','模型','时间（北京时间）','时间依据','状态','用量','模型计价折合（元）','供应商费率估算（元）','原扣费含补扣（积分）','差额（积分）','说明','价格快照']);
+      let after = '';
+      for (;;) {
+        const items = db.prepare('SELECT call_id,detail_json FROM cost_report_items WHERE report_id=? AND call_id>? ORDER BY call_id LIMIT 500').all(id, after);
+        if (!items.length) break;
+        for (const item of items) {
+          const c = parse(item.detail_json);
+          yield line([c.id,c.project_title,c.model,chinaTime(c.occurred_at),c.time_basis,c.status,JSON.stringify(c.usage),c.model_amount_micro == null ? '未确定' : c.model_amount_micro / 1e6,c.supplier_amount_micro == null ? '未确定' : c.supplier_amount_micro / 1e6,c.charged_micro == null ? '未结算' : c.charged_micro / 10000,c.difference_micro == null ? '未确定' : c.difference_micro / 10000,c.reason,JSON.stringify(c.rates)]);
+        }
+        after = items.at(-1).call_id;
+      }
+    }
+    return;
+  }
   yield '\uFEFF' + line(['客户', '月份', '版本', '统计截止时间（北京时间）', '口径']);
   yield line([r.summary.organization_name, r.month, r.version, chinaTime(r.generated_at), '成本估算；非供应商实付账单']);
   if (!detail) {
