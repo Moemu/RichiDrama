@@ -5,11 +5,18 @@ const prices = require('../services/costPriceService');
 const ledger = require('../services/costLedgerService');
 const query = require('../services/costQueryService');
 const backfill = require('../services/costBackfillService');
+const reprice = require('../services/costRepriceService');
 
 module.exports = function costRoutes(db) {
   const router = express.Router();
   const handle = fn => (req, res) => { try { const result = fn(req, res); if (!res.headersSent) response.success(res, result); } catch (error) { response.badRequest(res, error.message); } };
   router.get('/summary', handle(req => query.summary(db, req.query)));
+  router.post('/reprices/preview', handle(req => reprice.preview(db, req.auth.id, req.body)));
+  router.get('/reprices/:id', handle(req => reprice.get(db, req.params.id)));
+  router.post('/reprices/:id/execute', handle(req => {
+    if (req.body.confirm !== true) throw new Error('请先检查批量估算预览并确认');
+    return reprice.execute(db, req.auth.id, req.params.id, req.body.reason);
+  }));
   router.get('/breakdown', handle(req => query.breakdown(db, req.query)));
   router.get('/calls', handle(req => query.calls(db, req.query)));
   router.get('/calls/:id', handle(req => ledger.get(db, req.params.id)));

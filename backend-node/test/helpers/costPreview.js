@@ -26,6 +26,13 @@ const sample = require('../fixtures/project73CostUsage.json');
     db.prepare('INSERT INTO billing_usage_logs(id,user_id,organization_id,drama_id,service_type,model,usage_json,charged_micro,snapshot_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run(`sample-${index}`, admin.id, customer.id, 73, row.service_type, model, JSON.stringify(row.usage), row.charged_micro, '{}', '2026-09-08T03:00:00.000Z');
   }
   require('./historicalCostFixture').seedHistoricalCosts(db, admin.id, 74);
+  const backfill = require('../../src/services/costBackfillService');
+  const history = backfill.preview(db, admin.id, { date_from: '2026-09-01', date_to: '2026-09-30', drama_id: 74 });
+  backfill.execute(db, admin.id, history.id);
+  const laterPrice = prices.saveDraft(db, admin.id, { account_id: account, scope: 'project', drama_id: 74,
+    model: 'doubao-seedance-2-0-fast-260128', service_type: 'video', effective_from: '2026-09-01T00:00:00+08:00',
+    source: '隔离验收：先补录缺价记录，再发布价格', rules: [{ meter: 'output_token', price: '0.01702', unit_size: '1000' }] });
+  prices.publish(db, admin.id, laterPrice.id);
   // A second project makes incomplete coverage and failure feedback reviewable.
   const id = ledger.begin(db, { config: {}, model: '未绑定账号的调用', service_type: 'text', user_id: admin.id, operation_id: 'unknown-sample' });
   ledger.observe(db, id, { status: 'unknown' });

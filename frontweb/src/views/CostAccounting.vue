@@ -26,7 +26,7 @@
       </form>
       <template v-if="summary">
         <section class="metrics" aria-label="成本汇总">
-          <article><span>已计算成本估算</span><strong>{{ costMoney(summary.cny_micro) }}</strong><small>{{ summary.calculated_calls || 0 }} / {{ summary.calls }} 次已计算</small></article>
+          <article><span>已计算成本估算</span><strong>{{ costMoney(summary.calls && !summary.calculated_calls ? null : summary.cny_micro) }}</strong><small>{{ summary.calculated_calls || 0 }} / {{ summary.calls }} 次已计算</small></article>
           <article><span>已记录 Token</span><strong>{{ number(summary.total_tokens) }}</strong><small>输入、缓存和输出不重复累加</small></article>
           <article><span>未完成调用</span><strong>{{ summary.processing_calls || 0 }}</strong><small>按原提交月份归属</small></article>
           <article><span>缺用量 / 缺价格</span><strong>{{ summary.missing_usage_calls || 0 }} / {{ summary.missing_price_calls || 0 }}</strong><small>待核实 {{ summary.unverified_calls || 0 }} 次</small></article>
@@ -41,6 +41,18 @@
           <p>平台扣费 {{ summary.platform_points == null ? '归属未确定' : number(summary.platform_points) }} 积分，按结算时间统计。{{ summary.platform_points_scope }}。跨月差额不代表毛利。</p>
         </section>
       </template>
+      <section v-if="summary?.missing_price_calls || repriceBatch" class="panel">
+        <h2>补齐缺价记录的成本</h2>
+        <p>价格发布后，已补录记录需要重新估算。按当前已查询范围处理，保留原用量、旧修订和月报；每批最多 1000 条。</p>
+        <button :disabled="busy" @click="previewReprice">预览当前范围的缺价记录</button>
+        <template v-if="repriceBatch">
+          <p>{{ repriceBatch.preview.eligible }} 条可估算 · {{ repriceBatch.preview.skipped }} 条仍缺价格或规格。</p>
+          <p v-for="c in repriceBatch.preview.currencies" :key="c.currency">本批预计新增成本：{{ costMoney(c.amount_micro, c.currency) }}</p>
+          <details><summary>查看本批记录和适用价格</summary><div class="table-scroll" tabindex="0"><table><thead><tr><th>项目 / 模型</th><th>提交时间</th><th>用量</th><th>价格版本</th><th>估算金额</th></tr></thead><tbody><tr v-for="item in repriceBatch.preview.items" :key="item.call_id"><td>#{{ item.drama_id || '未知' }} · {{ item.model }}</td><td>{{ chinaTime(item.submitted_at) }}</td><td>{{ usageText(item.usage) }}</td><td>{{ item.price_id || '未匹配' }}</td><td>{{ costMoney(item.calculation.amount_micro, item.calculation.currency || 'CNY') }}</td></tr></tbody></table></div></details>
+          <p v-if="repriceBatch.result">已新增 {{ repriceBatch.result.updated }} 条估算修订；跳过 {{ repriceBatch.result.skipped }} 条。证据或价格变化的记录请重新预览。</p>
+          <form v-else class="inline-form" @submit.prevent="executeReprice"><label>批量估算原因<input v-model="repriceReason" required></label><button :disabled="busy || !repriceBatch.preview.eligible">确认本批并新增估算修订</button></form>
+        </template>
+      </section>
       <section class="panel">
         <div class="section-heading"><h2>消耗构成</h2><label>分组<select v-model="groupBy" :disabled="busy" @change="groupPage = 1; loadGroups()"><option v-for="g in groups" :key="g.key" :value="g.key">{{ g.label }}</option></select></label></div>
         <div class="table-scroll" tabindex="0" aria-label="消耗构成表，可横向滚动"><table>
@@ -122,6 +134,7 @@ const tab = ref('query'), busy = ref(false), error = ref(''), notice = ref(''), 
 const accounts = ref({ items: [], bindings: [], configs: [] }), customers = ref([]), prices = ref([]), reports = ref([]), sources = ref([]), batches = ref([])
 const page = ref(1), groupPage = ref(1), groupBy = ref('customer'), calls = ref({ items: [], total: 0 }), breakdown = ref({ items: [], total: 0 })
 const detail = ref(null), detailPanel = ref(null), revisionReason = ref(''), report = ref(null), source = ref(null), batch = ref(null), backfillConfirmed = ref(false), reviewed = reactive({})
+const repriceBatch = ref(null), repriceReason = ref('补齐已审核价格')
 const accountForm = reactive({ name: '', provider: '' }), binding = reactive({ account_id: '', config_id: '' })
 const reportForm = reactive({ organization_id: '', month: today.slice(0, 7) })
 const backfillForm = reactive({ date_from: today.slice(0, 7) + '-01', date_to: today, organization_id: '', drama_id: '' })
@@ -131,13 +144,15 @@ const customerLabel = key => ({ personal: '个人账户', unknown: '未知客户
 const params = () => Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== ''))
 async function perform(fn, message = '') { if (busy.value) return; busy.value = true; error.value = ''; notice.value = ''; try { await fn(); notice.value = message } catch (e) { error.value = e.message || '操作失败，请重试' } finally { busy.value = false; if (error.value) { await nextTick(); errorPanel.value?.focus(); errorPanel.value?.scrollIntoView({ block: 'center' }) } } }
 async function queryAll() { const [s, c, g] = await Promise.all([api.summary(appliedFilters.value), api.calls({ ...appliedFilters.value, page: page.value }), api.breakdown({ ...appliedFilters.value, group_by: groupBy.value, page: groupPage.value })]); summary.value = s; calls.value = c; breakdown.value = g }
-function refresh(resetPage = false) { return perform(async () => { if (resetPage) { page.value = 1; groupPage.value = 1; detail.value = null } appliedFilters.value = params(); await queryAll(); await router.replace({ query: appliedFilters.value }) }) }
+function refresh(resetPage = false) { return perform(async () => { if (resetPage) { page.value = 1; groupPage.value = 1; detail.value = null; repriceBatch.value = null } appliedFilters.value = params(); await queryAll(); await router.replace({ query: appliedFilters.value }) }) }
 function loadCalls() { return perform(async () => { calls.value = await api.calls({ ...appliedFilters.value, page: page.value }) }) }
 function loadGroups() { return perform(async () => { breakdown.value = await api.breakdown({ ...appliedFilters.value, group_by: groupBy.value, page: groupPage.value }) }) }
 function reset() { Object.assign(filters, defaults()); groupBy.value = 'customer'; refresh(true) }
 function drill(row) { if (busy.value) return; Object.assign(filters, defaults(), appliedFilters.value); if (groupBy.value === 'customer') { filters.organization_id = ['personal', 'unknown'].includes(row.key) ? '0' : row.key; filters.customer_kind = ['personal', 'unknown'].includes(row.key) ? row.key : ''; reportForm.organization_id = filters.organization_id === '0' ? '' : filters.organization_id; groupBy.value = 'project' } else { const fields = { project: 'drama_id', user: 'user_id', model: 'model', operation: 'source_kind' }; filters[fields[groupBy.value]] = row.key === 'unknown' ? '0' : row.key; if (groupBy.value === 'project') groupBy.value = 'user' } refresh(true) }
 function openCall(id) { return perform(async () => { detail.value = await api.call(id); await nextTick(); detailPanel.value?.focus(); detailPanel.value?.scrollIntoView({ block: 'start' }) }) }
 function revise() { return perform(async () => { await api.reprice(detail.value.id, revisionReason.value); detail.value = await api.call(detail.value.id); revisionReason.value = ''; await queryAll() }, '已保留旧记录并新增成本修订。') }
+function previewReprice() { return perform(async () => { repriceBatch.value = await api.previewReprice(appliedFilters.value) }) }
+function executeReprice() { return perform(async () => { repriceBatch.value = await api.executeReprice(repriceBatch.value.id, repriceReason.value); await queryAll() }, '批量估算已完成，原用量、积分和月报保持不变。') }
 function saveReport() { return perform(async () => { report.value = await api.saveReport(reportForm); reports.value = await api.reports() }, '月报新版本已保存。') }
 function showReport(id) { return perform(async () => { report.value = await api.report(id) }) }
 function reportExportUrl(detailRows) { return `/api/v1/admin/costs/reports/${encodeURIComponent(report.value.id)}/export?detail=${detailRows}` }
