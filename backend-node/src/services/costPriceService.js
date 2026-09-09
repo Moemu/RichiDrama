@@ -44,23 +44,36 @@ function saveDraft(db, actor, input) {
   if (!/^[A-Z]{3}$/.test(input.currency || 'CNY')) throw new Error('币种必须为三位大写代码');
   const from = date(input.effective_from), to = input.effective_to ? date(input.effective_to) : null;
   if (to && to <= from) throw new Error('结束时间必须晚于开始时间');
-  const info = db.prepare(`INSERT INTO cost_prices(account_id,model,service_type,currency,effective_from,effective_to,rules_json,source,created_at,created_by)
-    VALUES(?,?,?,?,?,?,?,?,?,?)`).run(Number(input.account_id), input.model.trim(), input.service_type.trim(), input.currency || 'CNY', from, to, JSON.stringify(validateRules(input.rules)), input.source.trim(), now(), actor);
-  return get(db, info.lastInsertRowid);
+  const scope = input.scope ?? 'account';
+  if (!['account', 'platform', 'project'].includes(scope)) throw new Error('价格适用范围无效');
+  const dramaId = scope === 'project' ? Number(input.drama_id) : null;
+  if (scope === 'project' && (!Number.isSafeInteger(dramaId) || dramaId <= 0 || !db.prepare('SELECT 1 FROM dramas WHERE id=?').get(dramaId))) throw new Error('请选择存在的适用项目');
+  return db.transaction(() => {
+    const info = db.prepare(`INSERT INTO cost_prices(account_id,model,service_type,currency,effective_from,effective_to,rules_json,source,created_at,created_by)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(Number(input.account_id), input.model.trim(), input.service_type.trim(), input.currency || 'CNY', from, to, JSON.stringify(validateRules(input.rules)), input.source.trim(), now(), actor);
+    if (scope !== 'account') db.prepare('INSERT INTO cost_price_scopes(price_id,scope,drama_id) VALUES(?,?,?)').run(info.lastInsertRowid, scope, dramaId);
+    return get(db, info.lastInsertRowid);
+  })();
 }
-function get(db, id) { const row = db.prepare('SELECT * FROM cost_prices WHERE id=?').get(Number(id)); return row ? { ...row, rules: parse(row.rules_json) } : null; }
+function get(db, id) {
+  const row = db.prepare("SELECT p.*,COALESCE(s.scope,'account') scope,s.drama_id FROM cost_prices p LEFT JOIN cost_price_scopes s ON s.price_id=p.id WHERE p.id=?").get(Number(id));
+  return row ? { ...row, rules: parse(row.rules_json) } : null;
+}
 function publish(db, actor, id) {
   const price = get(db, id); if (!price) throw new Error('价格不存在');
   if (price.status === 'published') return price;
   db.prepare("UPDATE cost_prices SET status='published',reviewed_at=?,reviewed_by=? WHERE id=? AND status='draft'").run(now(), actor, price.id);
-  require('./billingService').audit(db, actor, 'cost.price.publish', 'cost_price', price.id, { account_id: price.account_id });
+  require('./billingService').audit(db, actor, 'cost.price.publish', 'cost_price', price.id, { account_id: price.account_id, scope: price.scope, drama_id: price.drama_id });
   return get(db, id);
 }
 function select(db, call) {
-  if (!call.account_id) return null;
-  return db.prepare(`SELECT * FROM cost_prices WHERE account_id=? AND model=? AND service_type=? AND status='published'
-    AND effective_from<=? AND (effective_to IS NULL OR effective_to>?) ORDER BY effective_from DESC,reviewed_at DESC,id DESC LIMIT 1`)
-    .get(call.account_id, call.model, call.service_type, call.submitted_at, call.submitted_at) || null;
+  return db.prepare(`SELECT p.*,COALESCE(s.scope,'account') scope,s.drama_id FROM cost_prices p LEFT JOIN cost_price_scopes s ON s.price_id=p.id
+    WHERE ((s.price_id IS NULL AND p.account_id=?) OR (s.scope='project' AND s.drama_id=?) OR s.scope='platform')
+    AND p.model=? AND p.service_type=? AND p.status='published'
+    AND p.effective_from<=? AND (p.effective_to IS NULL OR p.effective_to>?)
+    ORDER BY CASE WHEN s.scope='project' THEN 0 WHEN s.price_id IS NULL THEN 1 ELSE 2 END,
+    p.effective_from DESC,p.reviewed_at DESC,p.id DESC LIMIT 1`)
+    .get(call.account_id ?? null, call.drama_id ?? null, call.model, call.service_type, call.submitted_at, call.submitted_at) || null;
 }
 function calculate(price, usage, context) {
   if (!usage || !Object.keys(usage).length) return { cost_status: 'missing_usage', amount_micro: null };

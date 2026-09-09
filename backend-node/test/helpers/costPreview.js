@@ -25,6 +25,7 @@ const sample = require('../fixtures/project73CostUsage.json');
     ledger.observe(db, id, { status: 'completed', usage: row.usage, evidence_kind: 'isolated_project73_sample' });
     db.prepare('INSERT INTO billing_usage_logs(id,user_id,organization_id,drama_id,service_type,model,usage_json,charged_micro,snapshot_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run(`sample-${index}`, admin.id, customer.id, 73, row.service_type, model, JSON.stringify(row.usage), row.charged_micro, '{}', '2026-09-08T03:00:00.000Z');
   }
+  require('./historicalCostFixture').seedHistoricalCosts(db, admin.id, 74);
   // A second project makes incomplete coverage and failure feedback reviewable.
   const id = ledger.begin(db, { config: {}, model: '未绑定账号的调用', service_type: 'text', user_id: admin.id, operation_id: 'unknown-sample' });
   ledger.observe(db, id, { status: 'unknown' });
