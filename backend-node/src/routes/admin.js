@@ -45,6 +45,7 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
     modelPriceDraft: guarded((req, res) => response.created(res, require('../services/modelCatalogService').createPriceDraft(db, req.auth.id, req.body || {}))),
     users: (_req, res) => response.success(res, billing.listUsers(db)),
     createUser: guarded((req, res) => {
+      auth.validateNewPassword(req.body?.password);
       const user = auth.createUser(db, req.body || {}, req.auth.id);
       const tenantId = Number(req.body?.tenant_id);
       // 未显式指定分组时，createUser 已自动加入新用户默认分组。
@@ -53,8 +54,20 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
       response.created(res, auth.publicUser(user));
     }),
     updateUser: guarded((req, res) => {
-      const user = auth.updateUser(db, Number(req.params.id), req.body || {}); if (!user) return response.notFound(res, '用户不存在');
-      billing.audit(db, req.auth.id, 'user.update', 'user', user.id, { role: user.role, account_kind: user.account_kind || 'creator', is_active: user.is_active }); response.success(res, auth.publicUser(user));
+      if (req.body?.password) {
+        const target = db.prepare('SELECT role, console_access, account_kind FROM users WHERE id = ?').get(Number(req.params.id));
+        if (!target || target.role !== 'user' || target.console_access || target.account_kind !== 'creator') return response.forbidden(res, '只能重置创作账号的密码');
+      }
+      const user = db.transaction(() => {
+        const updated = auth.updateUser(db, Number(req.params.id), req.body || {});
+        if (updated) billing.audit(db, req.auth.id, req.body?.password ? 'user.password.admin_reset' : 'user.update', 'user', updated.id, {
+          role: updated.role, account_kind: updated.account_kind || 'creator', is_active: updated.is_active,
+          ...(req.body?.password ? { result: 'success', method: 'legacy_password_patch' } : {}),
+        });
+        return updated;
+      })();
+      if (!user) return response.notFound(res, '用户不存在');
+      response.success(res, auth.publicUser(user));
     }),
     tenants: (_req, res) => response.success(res, tenants.listTenants(db)),
     tenant: (req, res) => {

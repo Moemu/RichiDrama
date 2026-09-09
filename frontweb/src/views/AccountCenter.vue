@@ -1,5 +1,5 @@
 <template>
-  <main class="page">
+  <main class="page" :class="{ 'security-page': accountTab === 'security' }">
     <header class="account-header">
       <div><p class="eyebrow">账户与用量</p><h1>我的账户</h1></div>
       <div class="header-actions">
@@ -46,12 +46,13 @@
       <template #footer><el-button v-if="activePayment?.status === 'pending'" @click="closePayment">关闭订单</el-button><el-button type="primary" @click="paymentDialog = false">完成</el-button></template>
     </el-dialog>
     <div v-show="accountTab === 'security'" class="account-view security-view">
+      <section class="panel security-card security-card--password security-card--email"><div class="security-card-heading"><h2>找回密码邮箱</h2></div><EmailRecoveryForm binding /></section>
       <section class="panel security-card security-card--password">
         <div class="security-card-heading"><h2>修改密码</h2></div>
         <el-form label-position="top" class="security-form">
           <div class="security-form-fields security-form-fields--password">
             <el-form-item label="当前密码"><el-input v-model="password.old_password" type="password" show-password autocomplete="current-password" /></el-form-item>
-            <el-form-item label="新密码"><el-input v-model="password.new_password" type="password" show-password autocomplete="new-password" /></el-form-item>
+            <el-form-item label="新密码"><el-input v-model="password.new_password" placeholder="8–128 个字符" type="password" show-password autocomplete="new-password" /></el-form-item>
           </div>
           <el-button type="primary" @click="changePassword">更新密码</el-button>
         </el-form>
@@ -116,6 +117,8 @@ import { ElMessage } from 'element-plus'
 import QRCode from 'qrcode'
 import { accountAPI } from '@/api/account'
 import BillingTransactionTable from '@/components/BillingTransactionTable.vue'
+import EmailRecoveryForm from '@/components/EmailRecoveryForm.vue'
+import { clearPasswordSession } from '@/utils/passwordRecovery'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import { formatCredits, serviceLabel } from '@/utils/billingPresentation'
 import { formatChinaDateTime } from '@/utils/time'
@@ -221,7 +224,7 @@ function memberLabel(member) {
 }
 
 async function changePassword() {
-  try { await accountAPI.changePassword(password); password.old_password = ''; password.new_password = ''; ElMessage.success('密码已更新') }
+  try { await accountAPI.changePassword(password); password.old_password = ''; password.new_password = ''; clearPasswordSession(); ElMessage.success('密码已更新，请重新登录'); await router.replace('/login') }
   catch (error) { ElMessage.error(error?.message || '密码更新失败') }
 }
 
@@ -325,4 +328,6 @@ onBeforeUnmount(stopPaymentTracking)
 @media(max-width:45rem){.billing-heading{display:grid}.billing-view-switch{justify-self:start}.usage-filters{align-items:stretch;flex-direction:column}.usage-filters :deep(.el-date-editor),.usage-filters :deep(.el-select){width:100%}}
 @media(max-width:60rem){.security-card--password{grid-template-columns:1fr}.security-form-fields--password{grid-template-columns:1fr 1fr}}
 @media(max-width:45rem){.security-view{grid-template-columns:1fr}.security-card--password{grid-column:auto}.security-form-fields--password{grid-template-columns:1fr}.security-card{padding:1.1rem!important}}
+.page.security-page{height:auto;min-height:100dvh;overflow:visible;grid-template-rows:auto auto auto}.security-page .security-view{overflow:visible}.security-card--email{align-items:start}
+@media(max-width:45rem){.security-page .account-tabs{flex-wrap:wrap;overflow:visible;row-gap:.3rem}}
 </style>

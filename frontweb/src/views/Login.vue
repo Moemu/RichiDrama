@@ -140,7 +140,7 @@
                 :type="showPassword ? 'text' : 'password'"
                 name="password"
                 :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
-                placeholder="输入你的密码"
+                :placeholder="mode === 'register' ? '设置 8–128 个字符的密码' : '输入你的密码'"
                 required
                 :aria-invalid="submitted && !form.password"
                 :aria-describedby="submitted && !form.password ? 'password-error' : undefined"
@@ -166,6 +166,8 @@
 
           <p class="form-status" aria-live="polite">{{ statusMessage }}</p>
         </form>
+
+        <router-link class="forgot-password" to="/forgot-password">忘记密码？</router-link>
 
         <div class="trust-row" aria-label="产品能力">
           <span><Sparkles aria-hidden="true" /> 全流程 AI 协作</span>
@@ -271,6 +273,8 @@ async function submit() {
 </script>
 
 <style scoped>
+.forgot-password{display:block;margin-top:12px;text-align:center;color:var(--accent-red);font-size:14px}
+
 .login-page {
   --ink: #f7f2eb;
   --muted: rgba(235, 231, 226, .64);
@@ -539,6 +543,12 @@ async function submit() {
 @keyframes record-pulse { 0%, 100% { opacity: .55; transform: scale(.86); } 50% { opacity: 1; transform: scale(1); } }
 @keyframes grain-shift { 0% { transform: translate(0); } 25% { transform: translate(-1.5%, 1%); } 50% { transform: translate(1%, -1.2%); } 75% { transform: translate(.5%, 1.5%); } 100% { transform: translate(-1%, -.5%); } }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+@media (min-width: 981px) {
+  .login-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(460px, min(42vw, 600px)); }
+  .product-header { grid-area: 1 / 1 / 2 / 3; align-self: start; }
+  .access-panel { grid-area: 1 / 2 / 2 / 3; position: relative; inset: auto; width: 100%; min-width: 0; min-height: 100dvh; }
+}
 
 @media (max-width: 980px) {
   .login-page { min-height: 100dvh; overflow-x: hidden; overflow-y: auto; }

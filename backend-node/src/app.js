@@ -114,6 +114,8 @@ function createApp() {
   taskService.failOrphanedAsyncTasksOnStartup(db, log);
 
   const app = express();
+  // Only explicitly trusted proxy addresses may supply the recovery rate-limit IP.
+  if (process.env.AUTH_TRUST_PROXY) app.set('trust proxy', process.env.AUTH_TRUST_PROXY.split(',').map((value) => value.trim()).filter(Boolean));
   const webDist = process.env.WEB_DIST_PATH || path.join(process.cwd(), '..', 'frontweb', 'dist');
   // WeChat Pay signs the exact JSON bytes. Preserve them before parsing.
   app.use(express.json({
