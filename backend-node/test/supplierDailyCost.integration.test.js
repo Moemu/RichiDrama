@@ -39,8 +39,10 @@ test('daily supplier costs use raw prices independently of platform review, reta
     f.db.prepare("INSERT INTO cost_accounts(name,provider,created_at,created_by) VALUES('arbitrary','volcengine','2026-09-01',1)").run();
     f.db.prepare("INSERT INTO cost_prices(account_id,model,service_type,currency,effective_from,rules_json,source,status,created_at,created_by) VALUES(1,'doubao-seedance-2-0-fast-260128','video','CNY','2026-01-01','[]','manual','published','2026-09-01',1)").run();
     assert.deepEqual((await get(filter)).summary, result.summary, 'editable price books and cost rules cannot affect supplier costs');
+    const futureAt = new Date(Math.max(Date.now() + 86400000, Date.parse('2026-09-10T00:00:00.000Z'))).toISOString();
+    const futureDay = new Date(Date.parse(futureAt) + 28800000).toISOString().slice(0, 10);
     f.db.prepare(`INSERT INTO supplier_cost_snapshots(id,snapshot_day,status,created_at,fetched_at,raw_json)
-      VALUES('future','2026-09-10','completed','2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z',?)`).run(JSON.stringify(activations.map(i => ({ ...i, MultiChargeItems: [] }))));
+      VALUES('future',?,'completed',?,?,?)`).run(futureDay, futureAt, futureAt, JSON.stringify(activations.map(i => ({ ...i, MultiChargeItems: [] }))));
     assert.deepEqual((await get(filter)).summary, result.summary, 'future prices cannot overwrite prior estimates');
     const tenant = f.db.prepare('SELECT id FROM tenants LIMIT 1').get();
     const org = require('../src/services/customerOrganizationService').saveOrganization(f.db,f.admin.id,{ name:'Daily report fixture',config_tenant_id:tenant.id });
