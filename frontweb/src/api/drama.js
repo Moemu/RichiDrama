@@ -3,6 +3,9 @@ import { projectSession, hasPendingProjectText } from '@/composables/useProjectC
 import { projectSnapshot } from '@/utils/projectRequestSync'
 
 export const dramaAPI = {
+  importResource(id, data) {
+    return request.post(`/dramas/${id}/resources/import`, data)
+  },
   list(params) {
     return request.get('/dramas', { params: params || {} })
   },
@@ -11,6 +14,9 @@ export const dramaAPI = {
   },
   get(id) {
     return request.get(`/dramas/${id}`)
+  },
+  getCharacters(id) {
+    return request.get(`/dramas/${id}/characters`)
   },
   update(id, data) {
     return request.put(`/dramas/${id}`, data)

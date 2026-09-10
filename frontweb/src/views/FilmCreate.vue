@@ -354,6 +354,9 @@
               <button v-for="filter in resourceCatalogFilters" :key="filter.key" type="button" :class="{ active: resourceCatalogFilter === filter.key }" :aria-pressed="resourceCatalogFilter === filter.key" @click="resourceCatalogFilter = filter.key">{{ filter.label }}</button>
             </div>
             <div class="resource-browser-actions">
+              <el-button v-if="resourceCatalogType === 'character'" size="small" :disabled="(projectSession.enabled && !projectSession.canEdit) || !currentEpisodeId" @click="showCharLibrary = true">从项目选择</el-button>
+              <el-button v-else-if="resourceCatalogType === 'scene'" size="small" :disabled="(projectSession.enabled && !projectSession.canEdit) || !currentEpisodeId" @click="showSceneLibrary = true">从项目选择</el-button>
+              <el-button v-else-if="resourceCatalogType === 'prop'" size="small" :disabled="(projectSession.enabled && !projectSession.canEdit) || !currentEpisodeId" @click="showPropLibrary = true">从项目选择</el-button>
               <el-button :disabled="projectSession.enabled && !projectSession.canEdit" v-if="resourceCatalogType !== 'media' && resourceCatalogItems.length" size="small" :loading="resourceBatchUploading === resourceCatalogType" @click="batchUploadResourcesToMaterialLibrary(resourceCatalogType)">批量上传至素材库</el-button>
               <el-button v-if="resourceCatalogType === 'character'" size="small" :loading="charactersGenerating" :disabled="(projectSession.enabled && !projectSession.canEdit) || (!dramaId)" @click="onGenerateCharacters">从剧本提取</el-button>
               <el-button v-if="resourceCatalogType === 'scene'" size="small" :loading="scenesExtracting" :disabled="(projectSession.enabled && !projectSession.canEdit) || (!currentEpisodeId)" @click="onExtractScenes">从剧本提取</el-button>
@@ -902,9 +905,9 @@
     </el-dialog>
 
     <!-- 角色资源库（本剧库 / 本剧全部角色 / 团队库） -->
-    <el-dialog v-model="showCharLibrary" title="角色资源库" width="720px" destroy-on-close class="library-dialog" @open="onCharLibraryDialogOpen">
+    <el-dialog v-model="showCharLibrary" title="角色资源库" width="min(720px, calc(100vw - 24px))" destroy-on-close class="library-dialog" @open="onCharLibraryDialogOpen">
       <el-tabs v-model="charLibraryTab" class="char-library-tabs" @tab-change="onCharLibraryTabChange">
-        <el-tab-pane label="本剧角色库" name="library">
+        <el-tab-pane v-if="charLibraryTotal > 0 || charLibraryTab === 'library'" label="历史项目库" name="library">
           <div class="library-toolbar">
             <el-input v-model="charLibraryKeyword" placeholder="搜索名称或描述" clearable style="width: 200px" @input="debouncedLoadCharLibrary()" />
           </div>
@@ -924,7 +927,7 @@
                 </div>
               </div>
             </div>
-            <div v-if="!charLibraryLoading && charLibraryList.length === 0" class="library-empty">暂无本剧角色，可在项目中将角色「加入本剧库」。</div>
+            <div v-if="!charLibraryLoading && charLibraryList.length === 0" class="library-empty">未找到历史角色素材。新增素材请在项目详情页导入制作资源。</div>
           </div>
           <div class="library-pagination">
             <el-pagination
@@ -1003,9 +1006,9 @@
     </el-dialog>
 
     <!-- 道具资源库 -->
-    <el-dialog v-model="showPropLibrary" title="道具资源库" width="720px" destroy-on-close class="library-dialog" @open="onPropLibraryDialogOpen">
+    <el-dialog v-model="showPropLibrary" title="道具资源库" width="min(720px, calc(100vw - 24px))" destroy-on-close class="library-dialog" @open="onPropLibraryDialogOpen">
       <el-tabs v-model="propLibraryTab" class="char-library-tabs" @tab-change="onPropLibraryTabChange">
-        <el-tab-pane label="本剧道具库" name="library">
+        <el-tab-pane v-if="propLibraryTotal > 0 || propLibraryTab === 'library'" label="历史项目库" name="library">
           <div class="library-toolbar">
             <el-input v-model="propLibraryKeyword" placeholder="搜索名称或描述" clearable style="width: 200px" @input="debouncedLoadPropLibrary()" />
           </div>
@@ -1025,7 +1028,7 @@
                 </div>
               </div>
             </div>
-            <div v-if="!propLibraryLoading && propLibraryList.length === 0" class="library-empty">暂无本剧道具，可在项目中将道具「加入本剧库」。</div>
+            <div v-if="!propLibraryLoading && propLibraryList.length === 0" class="library-empty">未找到历史道具素材。新增素材请在项目详情页导入制作资源。</div>
           </div>
           <div class="library-pagination">
             <el-pagination v-model:current-page="propLibraryPage" v-model:page-size="propLibraryPageSize" :total="propLibraryTotal" :page-sizes="[10, 20, 50]" layout="total, sizes, prev, pager, next" @current-change="loadPropLibraryList" @size-change="loadPropLibraryList" />
@@ -1083,9 +1086,9 @@
     </el-dialog>
 
     <!-- 场景资源库 -->
-    <el-dialog v-model="showSceneLibrary" title="场景资源库" width="720px" destroy-on-close class="library-dialog" @open="onSceneLibraryDialogOpen">
+    <el-dialog v-model="showSceneLibrary" title="场景资源库" width="min(720px, calc(100vw - 24px))" destroy-on-close class="library-dialog" @open="onSceneLibraryDialogOpen">
       <el-tabs v-model="sceneLibraryTab" class="char-library-tabs" @tab-change="onSceneLibraryTabChange">
-        <el-tab-pane label="本剧场景库" name="library">
+        <el-tab-pane v-if="sceneLibraryTotal > 0 || sceneLibraryTab === 'library'" label="历史项目库" name="library">
           <div class="library-toolbar">
             <el-input v-model="sceneLibraryKeyword" placeholder="搜索地点或描述" clearable style="width: 200px" @input="debouncedLoadSceneLibrary()" />
           </div>
@@ -1105,7 +1108,7 @@
                 </div>
               </div>
             </div>
-            <div v-if="!sceneLibraryLoading && sceneLibraryList.length === 0" class="library-empty">暂无本剧场景，可在项目中将场景「加入本剧库」。</div>
+            <div v-if="!sceneLibraryLoading && sceneLibraryList.length === 0" class="library-empty">未找到历史场景素材。新增素材请在项目详情页导入制作资源。</div>
           </div>
           <div class="library-pagination">
             <el-pagination v-model:current-page="sceneLibraryPage" v-model:page-size="sceneLibraryPageSize" :total="sceneLibraryTotal" :page-sizes="[10, 20, 50]" layout="total, sizes, prev, pager, next" @current-change="loadSceneLibraryList" @size-change="loadSceneLibraryList" />
@@ -6644,7 +6647,9 @@ html.light .sb-panel {
 .library-item-info { flex: 1; min-width: 0; }
 .library-item-name { font-weight: 500; margin-bottom: 4px; }
 .library-item-desc { font-size: 0.85rem; color: #7a7a88; margin-bottom: 8px; }
-.library-item-actions { display: flex; gap: 8px; }
+.library-item-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.library-item-actions .el-button + .el-button { margin-left: 0; }
+.library-pagination :deep(.el-pagination) { flex-wrap: wrap; justify-content: center; gap: 4px; }
 .library-empty {
   text-align: center;
   color: #5a5a66;

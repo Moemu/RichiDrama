@@ -278,6 +278,14 @@ function setupRouter(cfg, db, log) {
   r.put('/dramas/:id/outline', drama.saveOutline);
   r.get('/dramas/:id/characters', drama.getCharacters);
   r.put('/dramas/:id/characters', drama.saveCharacters);
+  r.post('/dramas/:id/resources/import', async (req, res) => {
+    try {
+      const result = await require('../services/projectResourceImportService').importResource(db, cfg, log, req.params.id, req.auth, req.body || {});
+      response.created(res, result);
+    } catch (error) {
+      response.error(res, error.status || 500, 'RESOURCE_IMPORT_FAILED', error.status ? error.message : '素材导入失败，请重试');
+    }
+  });
   r.put('/dramas/:id/episodes', drama.saveEpisodes);
   r.put('/dramas/:id/progress', drama.saveProgress);
   r.put('/dramas/:id/canvas-layout', drama.saveCanvasLayout);

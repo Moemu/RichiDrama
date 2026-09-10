@@ -52,13 +52,17 @@ function ensureAsset(db, log, entityType, entity) {
   let owner = null;
   try { owner = db.prepare('SELECT owner_user_id FROM dramas WHERE id = ? AND deleted_at IS NULL').get(Number(entity.drama_id)); } catch (_) {}
   const payload = { drama_id: Number(entity.drama_id), owner_user_id: owner?.owner_user_id || null, name: config.name(entity), type: 'image', url: url || '', local_path: localPath, source_type: 'project_resource', processing_status: 'ready', metadata: { resource_type: entityType, resource_id: Number(entity.id) } };
-  const mapped = existing ? assetService.update(db, log, existing.id, payload) : assetService.create(db, log, payload);
+  const unchanged = existing && Object.entries(payload).every(([field, value]) => field === 'metadata'
+    ? existing.metadata_json === JSON.stringify(value)
+    : (existing[field] ?? null) === (value ?? null));
+  const mapped = existing ? (unchanged ? existing : assetService.update(db, log, existing.id, payload)) : assetService.create(db, log, payload);
   try {
     if (owner?.owner_user_id) db.prepare(`INSERT INTO asset_resource_links
       (owner_user_id, drama_id, resource_type, resource_id, role, asset_id, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'primary_image', ?, 'active', ?, ?)
       ON CONFLICT(drama_id, resource_type, resource_id, role) DO UPDATE SET
-        asset_id=excluded.asset_id, status='active', detached_at=NULL, updated_at=excluded.updated_at`)
+        asset_id=excluded.asset_id, status='active', detached_at=NULL, updated_at=excluded.updated_at
+      WHERE asset_resource_links.asset_id IS NOT excluded.asset_id OR asset_resource_links.status != 'active' OR asset_resource_links.detached_at IS NOT NULL`)
       .run(owner.owner_user_id, Number(entity.drama_id), entityType, Number(entity.id), Number(mapped.id), new Date().toISOString(), new Date().toISOString());
   } catch (_) {}
   // Never let an empty legacy project-resource state erase a valid material
@@ -67,7 +71,8 @@ function ensureAsset(db, log, entityType, entity) {
   try {
     const resourceCert = parseCertification(entity.seedance2_asset);
     if (resourceCert) {
-      db.prepare('UPDATE assets SET seedance2_asset = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(resourceCert), new Date().toISOString(), Number(mapped.id));
+      const serialized = JSON.stringify(resourceCert);
+      db.prepare('UPDATE assets SET seedance2_asset = ?, updated_at = ? WHERE id = ? AND seedance2_asset IS NOT ?').run(serialized, new Date().toISOString(), Number(mapped.id), serialized);
     }
   } catch (_) {
     // The mapped asset remains usable even on old SQLite schemas.

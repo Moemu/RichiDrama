@@ -93,7 +93,7 @@ export function useCharacters(deps) {
   let charLibraryKeywordTimer = null
 
   /** 角色库弹窗 Tab：library | drama | team */
-  const charLibraryTab = ref('library')
+  const charLibraryTab = ref('drama')
   const dramaAllCharList = ref([])
   const dramaAllCharLoading = ref(false)
   const dramaAllCharPage = ref(1)
@@ -454,8 +454,11 @@ export function useCharacters(deps) {
   }
 
   function onCharLibraryDialogOpen() {
-    if (charLibraryTab.value === 'library') loadCharLibraryList()
-    else if (charLibraryTab.value === 'drama') loadDramaAllCharList()
+    charLibraryTab.value = 'drama'
+    charLibraryKeyword.value = ''
+    charLibraryPage.value = 1
+    loadCharLibraryList()
+    loadDramaAllCharList()
   }
 
   function onCharLibraryTabChange() {

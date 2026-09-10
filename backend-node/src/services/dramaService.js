@@ -491,6 +491,7 @@ function rowToScene(r) {
     id: r.id,
     drama_id: r.drama_id,
     location: r.location,
+    description: r.description,
     time: r.time,
     prompt: r.prompt,
     polished_prompt: r.polished_prompt || null,

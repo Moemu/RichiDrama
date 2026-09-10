@@ -93,7 +93,7 @@ export function useProps(deps) {
   const addingPropFromLibraryId = ref(null)
   let propLibraryKeywordTimer = null
 
-  const propLibraryTab = ref('library')
+  const propLibraryTab = ref('drama')
   const dramaAllPropList = ref([])
   const dramaAllPropLoading = ref(false)
   const dramaAllPropPage = ref(1)
@@ -410,9 +410,11 @@ export function useProps(deps) {
   }
 
   function onPropLibraryDialogOpen() {
-    if (propLibraryTab.value === 'library') loadPropLibraryList()
-    else if (propLibraryTab.value === 'drama') loadDramaAllPropList()
-    
+    propLibraryTab.value = 'drama'
+    propLibraryKeyword.value = ''
+    propLibraryPage.value = 1
+    loadPropLibraryList()
+    loadDramaAllPropList()
   }
 
   function onPropLibraryTabChange() {

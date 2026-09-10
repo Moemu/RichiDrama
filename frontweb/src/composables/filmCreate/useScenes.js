@@ -86,7 +86,7 @@ export function useScenes(deps) {
   const addingSceneFromLibraryId = ref(null)
   let sceneLibraryKeywordTimer = null
 
-  const sceneLibraryTab = ref('library')
+  const sceneLibraryTab = ref('drama')
   const dramaAllSceneList = ref([])
   const dramaAllSceneLoading = ref(false)
   const dramaAllScenePage = ref(1)
@@ -399,7 +399,7 @@ export function useScenes(deps) {
     }
     dramaAllSceneLoading.value = true
     try {
-      const res = await sceneAPI.list(dramaId.value)
+      const res = await dramaAPI.get(dramaId.value)
       let list = Array.isArray(res) ? res : (res?.items ?? res?.scenes ?? [])
       const kw = (dramaAllSceneKeyword.value || '').trim().toLowerCase()
       if (kw) {
@@ -431,8 +431,11 @@ export function useScenes(deps) {
   }
 
   function onSceneLibraryDialogOpen() {
-    if (sceneLibraryTab.value === 'library') loadSceneLibraryList()
-    else if (sceneLibraryTab.value === 'drama') loadDramaAllSceneList()
+    sceneLibraryTab.value = 'drama'
+    sceneLibraryKeyword.value = ''
+    sceneLibraryPage.value = 1
+    loadSceneLibraryList()
+    loadDramaAllSceneList()
   }
 
   function onSceneLibraryTabChange() {
@@ -544,6 +547,7 @@ export function useScenes(deps) {
           location: item.location || existingScene.location,
           time: item.time || existingScene.time,
           prompt: existingScene.prompt || item.prompt || '',
+          description: item.description || existingScene.description || undefined,
           image_url: item.image_url || existingScene.image_url || undefined,
           local_path: item.local_path || existingScene.local_path || undefined,
         })
@@ -555,6 +559,7 @@ export function useScenes(deps) {
           location: item.location || '',
           time: item.time || '',
           prompt: item.prompt || '',
+          description: item.description || undefined,
           image_url: item.image_url || undefined,
           local_path: item.local_path || undefined,
         })
