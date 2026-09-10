@@ -1,4 +1,24 @@
 // 和 Go 端 pkg/response 保持一致，方便前端复用
+const INTERNAL_ERROR_MESSAGE = '服务器内部错误，请稍后重试';
+
+function clientMessage(errorOrMessage, fallback = '请求处理失败，请稍后重试') {
+  const message = String(errorOrMessage?.message || errorOrMessage || '').trim();
+  if (!message) return fallback;
+  if (/UNIQUE constraint failed/i.test(message)) return '该数据已存在，请检查后重试';
+  if (/NOT NULL constraint failed/i.test(message)) return '提交的数据不完整，请检查后重试';
+  if (/FOREIGN KEY constraint failed/i.test(message)) return '关联数据不存在或仍在使用';
+  if (/CHECK constraint failed/i.test(message)) return '提交的数据不符合要求';
+  const technical = [
+    /\bSQLITE_[A-Z_]+\b/i,
+    /\b(?:database is locked|no such (?:table|column)|has no column named|SQL logic error)\b/i,
+    /\bnear ["'][^"']+["']:\s*syntax error\b/i,
+    /\b(?:ENOENT|EACCES|EPERM|ECONNREFUSED)\b/,
+    /node_modules/i,
+    /\n\s*at\s+(?:async\s+)?[^\n]+/,
+    /(?:[A-Za-z]:\\|\/(?:home|usr|var|etc|opt)\/)/,
+  ];
+  return technical.some((pattern) => pattern.test(message)) ? fallback : message;
+}
 function send(res, statusCode, body) {
   const payload = {
     ...body,
@@ -27,9 +47,10 @@ function successWithPagination(res, items, total, page, pageSize) {
 }
 
 function error(res, statusCode, code, message, details) {
+  const safeMessage = clientMessage(message, statusCode >= 500 ? INTERNAL_ERROR_MESSAGE : undefined);
   send(res, statusCode, {
     success: false,
-    error: { code, message, ...(details && { details }) },
+    error: { code, message: safeMessage, ...(details && { details }) },
   });
 }
 
@@ -46,7 +67,7 @@ function forbidden(res, message) {
 }
 
 function internalError(res, message) {
-  error(res, 500, 'INTERNAL_ERROR', message || '服务器错误');
+  error(res, 500, 'INTERNAL_ERROR', clientMessage(message, INTERNAL_ERROR_MESSAGE));
 }
 
 module.exports = {
@@ -58,4 +79,6 @@ module.exports = {
   notFound,
   forbidden,
   internalError,
+  clientMessage,
+  INTERNAL_ERROR_MESSAGE,
 };

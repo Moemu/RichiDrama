@@ -21,7 +21,7 @@ module.exports = function paymentRoutes(service, log) {
         res.status(204).end();
       } catch (error) {
         log?.warn?.('wechat callback rejected', { request_id: req.requestId, code: error.code, error: error.message });
-        res.status(Number(error.status) || 400).json({ code: error.code || 'FAIL', message: error.message || '支付通知处理失败' });
+        res.status(Number(error.status) || 400).json({ code: error.code || 'FAIL', message: response.clientMessage(error, '支付通知处理失败') });
       }
     },
     options: (req, res) => response.success(res, service.options(req.auth.id)),
