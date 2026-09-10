@@ -35,7 +35,7 @@ test('activity reads original prices and usage without setup, imports or reprici
   try {
     let db = f.db;
     seedCostActivity(db, f.admin.id);
-    const owner = require('../src/services/authService').createUser(db, { username: 'project-owner', password: 'fixture-password' }, f.admin.id);
+    const owner = require('../src/services/authService').createUser(db, { username: 'project-owner', display_name: '项目负责人昵称', password: 'fixture-password' }, f.admin.id);
     db.prepare('UPDATE dramas SET owner_user_id=? WHERE id=73').run(owner.id);
     db.prepare("UPDATE billing_usage_logs SET project_title_snapshot=NULL,created_at='2026-09-08T04:00:00.000Z' WHERE id='legacy-0'").run();
     const cookie = (await f.request('POST', '/auth/login', { username: f.admin.username, password: 'fixture-password' })).cookie;
@@ -53,12 +53,12 @@ test('activity reads original prices and usage without setup, imports or reprici
     assert.equal(result.summary.charged_micro, 1651658800);
     assert.equal(result.summary.difference_calls, 0);
     assert.equal(result.breakdown.items[0].label, '历史项目名称', 'an unnamed latest record does not hide the known project snapshot');
-    assert.deepEqual(result.breakdown.items[0].owners, [{ id: owner.id, username: 'project-owner' }], 'project owner is distinct from the caller');
+    assert.deepEqual(result.breakdown.items[0].owners, [{ id: owner.id, username: 'project-owner', display_name: '项目负责人昵称' }], 'project owner is distinct from the caller');
     assert.equal(result.breakdown.items[0].has_unknown_owner, false);
     for (const basis of ['billing_activity_v1', 'supplier_daily_v1']) {
       for (const groupBy of ['project', 'customer', 'user', 'model', 'operation', 'hour', 'day', 'month']) {
         const grouped = await get(`?drama_id=73&basis=${basis}&group_by=${groupBy}`);
-        assert.ok(grouped.breakdown.items.every(g => g.owners.length === 1 && g.owners[0].username === 'project-owner'));
+        assert.ok(grouped.breakdown.items.every(g => g.owners.length === 1 && g.owners[0].username === 'project-owner' && g.owners[0].display_name === '项目负责人昵称'));
       }
     }
     db.prepare("INSERT INTO dramas(id,title,owner_user_id,created_at,updated_at) VALUES(74,'Other owner',?,'2026-09-01','2026-09-01')").run(f.admin.id);
@@ -107,6 +107,10 @@ test('activity reads original prices and usage without setup, imports or reprici
     assert.equal((await get('?organization_id=' + org.id)).summary.calls, 0);
     await f.restart(); db = f.db;
     assert.deepEqual((await get('?drama_id=73')).breakdown.items[0].owners, result.breakdown.items[0].owners);
+    db.prepare('UPDATE users SET display_name=? WHERE id=?').run('新的负责人昵称', owner.id);
+    assert.equal((await get('?drama_id=73')).breakdown.items[0].owners[0].display_name, '新的负责人昵称');
+    db.prepare("UPDATE users SET display_name='' WHERE id=?").run(owner.id);
+    assert.equal((await get('?drama_id=73')).breakdown.items[0].owners[0].display_name, null);
     assert.deepEqual((await get('?drama_id=73')).summary, result.summary);
     assert.equal(JSON.stringify(db.prepare('SELECT * FROM billing_usage_logs ORDER BY id').all()), original);
     assert.equal(JSON.stringify(db.prepare('SELECT * FROM billing_transactions ORDER BY id').all()), transactions);
