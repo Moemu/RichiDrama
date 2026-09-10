@@ -17,6 +17,7 @@ test('preview deployment is production-identical except dataset and title', () =
   assert.match(previewDockerfile, /FROM \$\{RUNTIME_BASE_IMAGE\} AS runtime/);
   const previewRuntime = previewDockerfile.split('FROM ${RUNTIME_BASE_IMAGE} AS runtime')[1];
   assert.doesNotMatch(previewRuntime, /apt-get|dnf|yum/);
+  assert.match(previewRuntime, /COPY --from=builder \/usr\/local\/bin\/node \/usr\/local\/bin\/node/);
   // The preview application joins the PRODUCTION docker network with a per-PR
   // alias — no parallel network, no isolated sandbox topology.
   assert.match(source, /--network "\$PROD_PROXY_NETWORK" --network-alias "pr-\$PR_NUMBER"/);
@@ -141,7 +142,7 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(dockerfile, /ARG DEBIAN_MIRROR=mirrors\.aliyun\.com/);
   assert.match(dockerfile, /--mount=type=cache,id=richidrama-builder-apt-lists/);
   assert.match(dockerfile, /--mount=type=cache,id=richidrama-runtime-apt-lists/);
-  const runtimeStage = dockerfile.split('FROM node:18-bookworm-slim AS runtime')[1];
+  const runtimeStage = dockerfile.split('FROM node:24-bookworm-slim AS runtime')[1];
   assert.ok(runtimeStage.indexOf('ARG APP_REVISION') > runtimeStage.indexOf('apt-get install'));
   assert.match(dockerfile, /npm ci --include=dev --no-audit --no-fund/);
   assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-60/);
@@ -155,8 +156,8 @@ test('GitHub workflows gate preview and production', () => {
   const cleanup = read('.github/workflows/preview-cleanup.yml');
   const production = read('.github/workflows/deploy.yml');
   assert.match(validation, /node --test test\/\*\.test\.js/);
-  assert.match(validation, /docker\/setup-buildx-action@v3/);
-  assert.match(validation, /docker\/build-push-action@v6/);
+  assert.match(validation, /docker\/setup-buildx-action@v4/);
+  assert.match(validation, /docker\/build-push-action@v7/);
   assert.match(validation, /cache-from: type=gha,scope=validation-container/);
   assert.match(validation, /cache-to: type=gha,mode=max,scope=validation-container/);
   assert.match(validation, /DEBIAN_MIRROR=deb\.debian\.org/);

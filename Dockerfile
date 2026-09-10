@@ -3,7 +3,7 @@
 #
 # 后端依赖 better-sqlite3 / sharp 两个原生模块，需要编译工具链。
 
-FROM node:18-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS builder
 
 # Use the regional mirror during application builds. This keeps a cold build
 # independent of the slow Debian route seen on the production host.
@@ -37,7 +37,7 @@ RUN cd backend-node && npm ci --omit=dev --no-audit --no-fund
 COPY backend-node ./backend-node
 
 # ============================================================
-FROM node:18-bookworm-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 
 ARG DEBIAN_MIRROR=mirrors.aliyun.com
 

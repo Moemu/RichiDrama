@@ -6,11 +6,37 @@ const ledger = require('../src/services/costLedgerService');
 const prices = require('../src/services/providerPriceService');
 const ai = require('../src/services/aiConfigService');
 
+test('cost filter options include current and historical projects and survive restart without changing usage', async () => {
+  const f = await modelCatalogFixture();
+  try {
+    seedCostActivity(f.db, f.admin.id);
+    const member = require('../src/services/authService').createUser(f.db, { username: 'filter-user', password: 'fixture-password' }, f.admin.id);
+    f.db.prepare("INSERT INTO dramas(id,title,owner_user_id,created_at,updated_at) VALUES(74,'另一用户的项目',?,'2026-09-01','2026-09-01')").run(member.id);
+    f.db.prepare("UPDATE dramas SET title='',deleted_at='2026-09-09' WHERE id=73").run();
+    const original = JSON.stringify(f.db.prepare('SELECT * FROM billing_usage_logs ORDER BY id').all());
+    const path = '/admin/costs/filter-options';
+    assert.equal((await f.request('GET', path)).status, 401);
+    const memberCookie = (await f.request('POST', '/auth/login', { username: member.username, password: 'fixture-password' })).cookie;
+    assert.equal((await f.request('GET', path, undefined, memberCookie)).status, 403);
+    const cookie = (await f.request('POST', '/auth/login', { username: f.admin.username, password: 'fixture-password' })).cookie;
+    const result = await f.request('GET', path, undefined, cookie);
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body.data.projects.find(p => p.id === 73), { id: 73, title: '历史项目名称' });
+    assert.deepEqual(result.body.data.projects.find(p => p.id === 74), { id: 74, title: '另一用户的项目' });
+    assert.deepEqual(result.body.data.users.find(u => u.id === member.id), { id: member.id, username: 'filter-user' });
+    await f.restart();
+    assert.deepEqual((await f.request('GET', path, undefined, cookie)).body.data, result.body.data);
+    assert.equal(JSON.stringify(f.db.prepare('SELECT * FROM billing_usage_logs ORDER BY id').all()), original);
+  } finally { await f.close(); }
+});
+
 test('activity reads original prices and usage without setup, imports or repricing; snapshots survive restart', async () => {
   const f = await modelCatalogFixture();
   try {
     let db = f.db;
     seedCostActivity(db, f.admin.id);
+    const owner = require('../src/services/authService').createUser(db, { username: 'project-owner', password: 'fixture-password' }, f.admin.id);
+    db.prepare('UPDATE dramas SET owner_user_id=? WHERE id=73').run(owner.id);
     db.prepare("UPDATE billing_usage_logs SET project_title_snapshot=NULL,created_at='2026-09-08T04:00:00.000Z' WHERE id='legacy-0'").run();
     const cookie = (await f.request('POST', '/auth/login', { username: f.admin.username, password: 'fixture-password' })).cookie;
     async function get(suffix) { const r = await f.request('GET', '/admin/costs/activity' + suffix, undefined, cookie); assert.equal(r.status, 200, JSON.stringify(r.body)); return r.body.data; }
@@ -27,6 +53,21 @@ test('activity reads original prices and usage without setup, imports or reprici
     assert.equal(result.summary.charged_micro, 1651658800);
     assert.equal(result.summary.difference_calls, 0);
     assert.equal(result.breakdown.items[0].label, '历史项目名称', 'an unnamed latest record does not hide the known project snapshot');
+    assert.deepEqual(result.breakdown.items[0].owners, [{ id: owner.id, username: 'project-owner' }], 'project owner is distinct from the caller');
+    assert.equal(result.breakdown.items[0].has_unknown_owner, false);
+    for (const basis of ['billing_activity_v1', 'supplier_daily_v1']) {
+      for (const groupBy of ['project', 'customer', 'user', 'model', 'operation', 'hour', 'day', 'month']) {
+        const grouped = await get(`?drama_id=73&basis=${basis}&group_by=${groupBy}`);
+        assert.ok(grouped.breakdown.items.every(g => g.owners.length === 1 && g.owners[0].username === 'project-owner'));
+      }
+    }
+    db.prepare("INSERT INTO dramas(id,title,owner_user_id,created_at,updated_at) VALUES(74,'Other owner',?,'2026-09-01','2026-09-01')").run(f.admin.id);
+    db.prepare("UPDATE billing_usage_logs SET drama_id=74 WHERE id='legacy-1'").run();
+    const mixed = await get('?group_by=user');
+    assert.deepEqual(new Set(mixed.breakdown.items[0].owners.map(o => o.username)), new Set(['project-owner', f.admin.username]));
+    db.prepare("UPDATE billing_usage_logs SET drama_id=NULL WHERE id='legacy-1'").run();
+    assert.equal((await get('?group_by=user')).breakdown.items[0].has_unknown_owner, true);
+    db.prepare("UPDATE billing_usage_logs SET drama_id=73 WHERE id='legacy-1'").run();
     assert.equal(result.calls.items.length, 20);
     assert.equal((await get('?drama_id=73&page=12')).calls.items.length, 2);
     const video = await get('?drama_id=73&service_type=video');
@@ -65,6 +106,7 @@ test('activity reads original prices and usage without setup, imports or reprici
     assert.equal((await get('?customer_kind=personal')).summary.calls, 222);
     assert.equal((await get('?organization_id=' + org.id)).summary.calls, 0);
     await f.restart(); db = f.db;
+    assert.deepEqual((await get('?drama_id=73')).breakdown.items[0].owners, result.breakdown.items[0].owners);
     assert.deepEqual((await get('?drama_id=73')).summary, result.summary);
     assert.equal(JSON.stringify(db.prepare('SELECT * FROM billing_usage_logs ORDER BY id').all()), original);
     assert.equal(JSON.stringify(db.prepare('SELECT * FROM billing_transactions ORDER BY id').all()), transactions);

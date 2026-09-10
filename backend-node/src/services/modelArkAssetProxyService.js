@@ -1,7 +1,6 @@
 'use strict';
 
-const querystring = require('querystring');
-const { Signer } = require('@volcengine/openapi');
+const { signOpenApiRequest } = require('./volcengineOpenApiSigning');
 
 const ALLOWED_ACTIONS = new Set([
   'CreateAssetGroup',
@@ -149,39 +148,23 @@ async function fetchSignedOpenApi({
   const parsed = parseSignedOpenApiUrl(base);
   const region = inferSignRegion(parsed.host, signRegion);
   const host = resolveControlPlaneHost(region);
-  const protocol = 'https:';
-  const pathname = '/';
-  const bodyStr = JSON.stringify(bodyObj && typeof bodyObj === 'object' ? bodyObj : {});
-
-  const params = { Action: action, Version: ver };
-  const pn = (projectName || '').toString().trim();
-  if (pn) params.ProjectName = pn;
-
-  const request = {
+  const signed = signOpenApiRequest({
+    host,
     region,
-    method: 'POST',
-    pathname,
-    params,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-    },
-    body: bodyStr,
-  };
-
-  const signer = new Signer(request, (signService || 'ark').toString().trim() || 'ark');
-  signer.addAuthorization({
+    service: (signService || 'ark').toString().trim() || 'ark',
+    action,
+    version: ver,
+    body: bodyObj && typeof bodyObj === 'object' ? bodyObj : {},
     accessKeyId: accessKeyId.trim(),
-    secretKey: secretKey.trim(),
+    secretAccessKey: secretKey.trim(),
     sessionToken: (sessionToken || '').trim(),
+    projectName: (projectName || '').toString().trim(),
   });
 
-  const qs = querystring.stringify(request.params);
-  const url = `${protocol}//${host}${pathname}?${qs}`;
-
-  const res = await fetch(url, {
+  const res = await fetch(signed.url, {
     method: 'POST',
-    headers: request.headers,
-    body: bodyStr,
+    headers: signed.headers,
+    body: signed.bodyText,
     redirect: 'manual',
   });
   return res;

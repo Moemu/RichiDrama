@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 18
+          node-version: 24
           cache: npm
           cache-dependency-path: backend-node/package-lock.json
       - name: Install bounded test tools
@@ -56,10 +56,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 18
+          node-version: 24
           cache: npm
           cache-dependency-path: frontweb/package-lock.json
       - name: Install frontend dependencies
@@ -77,10 +77,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
       - name: Build immutable candidate image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -92,6 +92,17 @@ jobs:
           cache-to: type=gha,mode=max,scope=validation-container
       - name: Verify image revision
         run: test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "local-minidrama:${GITHUB_SHA}")" = "${GITHUB_SHA}"
+      - name: Verify Node 24 and native modules
+        run: |
+          docker run --rm --network none --entrypoint node "local-minidrama:${GITHUB_SHA}" -e '
+            const assert = require("node:assert/strict");
+            assert.equal(process.versions.node.split(".")[0], "24");
+            const db = require("better-sqlite3")(":memory:");
+            assert.equal(db.prepare("SELECT 1 AS ok").get().ok, 1);
+            db.close();
+            require("sharp")({ create: { width: 1, height: 1, channels: 3, background: "white" } })
+              .png().toBuffer().catch(error => { console.error(error); process.exitCode = 1; });
+          '
       - name: Verify preview Nginx configuration
         run: |
           test_root="${RUNNER_TEMP}/preview-nginx"

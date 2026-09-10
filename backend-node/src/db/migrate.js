@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { getDb } = require('./index.js');
 const { loadConfig } = require('../config/index.js');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('node:crypto');
 
 function stripLeadingComments(sql) {
   return sql

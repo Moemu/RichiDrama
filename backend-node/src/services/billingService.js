@@ -1,4 +1,4 @@
-const { v4: uuid } = require('uuid');
+const { randomUUID: uuid } = require('node:crypto');
 const seedreamPricing = require('./seedreamProPricing');
 
 function now() { return new Date().toISOString(); }

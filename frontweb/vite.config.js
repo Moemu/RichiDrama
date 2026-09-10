@@ -9,6 +9,10 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
   },
+  build: {
+    // Preserve the browser targets used before the Vite 8 upgrade.
+    target: ['es2020', 'edge88', 'firefox78', 'chrome87', 'safari14']
+  },
   server: {
     host: '0.0.0.0',
     port: 3013,

@@ -1,4 +1,4 @@
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('node:crypto');
 const billingRequestContext = require('./billingRequestContext');
 
 function createTask(db, log, taskType, resourceId, ownerUserId = null, tenantId = null) {

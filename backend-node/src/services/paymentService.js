@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { v4: uuid } = require('uuid');
+const { randomUUID: uuid } = require('node:crypto');
 const { AlipayAdapter } = require('./paymentAdapters/alipayAdapter');
 const { WechatAdapter } = require('./paymentAdapters/wechatAdapter');
 
