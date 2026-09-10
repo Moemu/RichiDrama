@@ -69,7 +69,7 @@ request.interceptors.response.use(
     }
     const res = response.data
     if (res.success !== false) {
-      rememberProjectResponse(response.config?.url, res.data !== undefined ? res.data : res)
+      if (!response.config?.skipProjectSnapshot) rememberProjectResponse(response.config?.url, res.data !== undefined ? res.data : res)
       return res.data !== undefined ? res.data : res
     }
     return Promise.reject(new Error(res.error?.message || '请求失败'))

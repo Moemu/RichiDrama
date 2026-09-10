@@ -16,6 +16,16 @@ export function rememberProjectEntity(kind, entity, parentProjectId = null, pare
 }
 export function rememberProjectResponse(url, data) {
   const path = String(url || '').split('?')[0]
+  if (/^\/(episodes|storyboards)\/\d+\/generation-settings$/.test(path)) {
+    const fields = { text_model: 'text_model', video_model: 'video_model', duration: 'duration', resolution: 'video_resolution', aspect_ratio: 'video_aspect_ratio', upscale_resolution: 'video_upscale_resolution', target_fps: 'video_target_fps' }
+    for (const item of data?.storyboards || (data?.effective ? [data] : [])) {
+      const known = projectSnapshot('storyboards', item.id)
+      if (!known || !item.effective) continue
+      const values = Object.fromEntries(Object.entries(fields).filter(([key]) => Object.hasOwn(item.effective, key)).map(([key, field]) => [field, item.effective[key]]))
+      rememberProjectEntity('storyboards', { id: item.id, ...values })
+    }
+    return
+  }
   const direct = /^\/(dramas|episodes|storyboards|characters|scenes|props|assets|character-library|scene-library|prop-library)(?:\/\d+)?\/?$/.exec(path)
   const nested = /^\/(dramas|episodes)\/(\d+)\/(episodes|storyboards|characters|scenes|props)\/?$/.exec(path)
   const kind = data?.permissions && Array.isArray(data.episodes) ? 'dramas' : direct?.[1] || nested?.[3]
