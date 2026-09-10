@@ -16,7 +16,7 @@ test('自由创作只渲染一个提示词编辑器', async () => {
   const editorTags = source.match(/<OmniAssetPromptEditor\b/g) || []
 
   assert.equal(editorTags.length, 1)
-  assert.match(source, /<div class="shot-script"><OmniAssetPromptEditor\s+ref="promptEditorRef"\s+v-model="prompt"/)
+  assert.match(source, /<div class="shot-script"[^>]*><OmniAssetPromptEditor\s+:key="activeShotId"\s+ref="promptEditorRef"\s+v-model="prompt"/)
   assert.match(source, /class="insert-at-caret"/)
   assert.match(source, /promptEditorRef\?\.insertAtCaret\(promptAssetFor\(asset\)\)/)
   assert.match(source, /@keydown\.up\.prevent="selectRelative\(-1\)"/)

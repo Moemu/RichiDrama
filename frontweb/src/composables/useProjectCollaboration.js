@@ -1,4 +1,4 @@
-import { reactive, watch, onScopeDispose } from 'vue'
+import { reactive, ref, watch, onScopeDispose } from 'vue'
 import * as Y from 'yjs'
 import request from '@/utils/request'
 import { createClientRequestId } from '@/utils/requestId'
@@ -201,23 +201,30 @@ export function hasPendingProjectText(kind, id, field) {
 }
 
 export function useProjectTextModel(targetGetter, model) {
+  const ready = ref(false)
   let binding; let remote = false; let version = 0; let composing = false
   const stopTarget = watch(() => [projectSession.enabled, targetGetter()], async ([enabled, target]) => {
     const current = ++version
     binding?.dispose(); binding = null
+    composing = false
+    ready.value = !enabled
     if (!enabled || !target?.id) return
     try {
+      // Detach synchronously, then let the caller finish loading the selected shot.
+      await Promise.resolve()
+      if (current !== version) return
       const next = await bindProjectText(target, value => {
         if (current !== version) return
         remote = true; model.value = value; remote = false
       })
       if (current !== version) next?.dispose()
-      else binding = next
-    } catch (error) { projectSession.error = error.message }
-  }, { immediate: true, deep: true })
+      else { binding = next; ready.value = !!next }
+    } catch (error) { if (current === version) projectSession.error = error.message }
+  }, { immediate: true, deep: true, flush: 'sync' })
   const stopModel = watch(model, value => { if (!remote && !composing) binding?.change(value || '') }, { flush: 'sync' })
   onScopeDispose(() => { version++; binding?.dispose(); stopTarget(); stopModel() })
   return {
+    ready,
     compositionStart() { composing = true; binding?.compositionStart() },
     compositionEnd() { composing = false; binding?.compositionEnd(model.value || '') },
   }

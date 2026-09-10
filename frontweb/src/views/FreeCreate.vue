@@ -53,7 +53,7 @@
         <div class="shot-tabs"><span class="active">镜头提示词</span><span>镜头 {{ activeShotIndex + 1 }} / {{ shots.length }}</span></div>
         <!-- 提示词渲染只读取当前镜头工作集。项目库素材必须先“加入本镜”，
              才能成为 @ 引用候选，绝不能借用其他镜头的同名素材。 -->
-        <div class="shot-script"><OmniAssetPromptEditor ref="promptEditorRef" v-model="prompt" :readonly="projectSession.enabled && !projectSession.canEdit" @compositionstart="collaborativePrompt.compositionStart" @compositionend="collaborativePrompt.compositionEnd" :assets="promptAssets" :chosen-ids="selected" :reference-document="promptDocument" @pick="onPickFromEditor" @references="setPromptReferences" /></div>
+        <div class="shot-script" :aria-busy="!collaborativePrompt.ready.value"><OmniAssetPromptEditor :key="activeShotId" ref="promptEditorRef" v-model="prompt" :readonly="projectSession.enabled && (!projectSession.canEdit || !collaborativePrompt.ready.value)" @compositionstart="collaborativePrompt.compositionStart" @compositionend="collaborativePrompt.compositionEnd" :assets="promptAssets" :chosen-ids="selected" :reference-document="promptDocument" @pick="onPickFromEditor" @references="setPromptReferences" /></div>
       </section>
 
       <aside class="panel creation-panel" aria-label="创作输入与生成设置">
@@ -243,11 +243,11 @@ const projectEpisodeId = computed(() => Number(componentProps.projectEpisodeId |
 const projectDramaId = computed(() => Number(componentProps.projectDramaId || route.query.drama_id || 0))
 const isProjectMode = computed(() => Number.isInteger(projectEpisodeId.value) && projectEpisodeId.value > 0)
 const selected = ref(new Set()), selectedOrder = ref([]), selectedOrderSet = computed(() => new Set(selectedOrder.value)), assetScope = ref('project'), projectLibraryOpen = ref(false), projectLibraryKeyword = ref(''), prompt = ref(''), model = ref(''), aspectRatio = ref('16:9'), duration = ref(15), resolution = ref('720p'), upscaleResolution = ref('1080p'), targetFps = ref(null), audioStrategy = ref('reference_only'), creationMode = ref('multi_reference')
-const collaborativePrompt = useProjectTextModel(() => isProjectMode.value ? { kind: 'storyboards', id: activeShotId.value, field: 'universal_segment_text' } : null, prompt)
 const promptDocument = ref({ text: '', refs: [] })
 const keepOriginalAudio = ref(false), audioVolume = ref(1), audioFadeSeconds = ref(0), creating = ref(false), certifyingId = ref(null), extractingPosition = ref(''), savedResultJobId = ref(null), requestPreviewOpen = ref(false), polishingPrompt = ref(false), polishSuggestion = ref(''), stagePhase = ref(''), fileInput = ref(null), uploadLimits = ref(null)
 const retryingJobIds = reactive(new Set())
 const draggedShotId = ref(null), draggedAssetId = ref(null), loadingShot = ref(false)
+const collaborativePrompt = useProjectTextModel(() => isProjectMode.value && !loadingShot.value ? { kind: 'storyboards', id: activeShotId.value, field: 'universal_segment_text' } : null, prompt)
 const generationModes = ref({}), masterShotId = ref(null), projectGenerationDirty = ref(false)
 const playOnSelection = ref(false)
 const mediaLayers = ref([])
