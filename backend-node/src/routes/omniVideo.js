@@ -10,7 +10,7 @@ module.exports = function routes(db, log, cfg) { return {
     const standaloneTool = body.source_context === 'single_video_tool';
     const dramaId = Number(body.drama_id);
     if (standaloneTool && ((Number.isInteger(dramaId) && dramaId > 0) || body.sequence_id || body.shot_id || body.storyboard_id)) return response.badRequest(res, '单视频工具不能绑定项目、项目镜头或多镜头序列');
-    if (Number.isInteger(dramaId) && dramaId > 0 && !db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(dramaId, req.auth.id)) return response.notFound(res, '项目不存在');
+    if (Number.isInteger(dramaId) && dramaId > 0 && !require('../services/projectAccessService').access(db, dramaId, req.auth.id)) return response.notFound(res, '项目不存在');
     const sequence = body.sequence_id ? db.prepare('SELECT * FROM omni_video_sequences WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.sequence_id), req.auth.id) : null;
     if (body.sequence_id && !sequence) return response.notFound(res, '全能创作项目不存在');
     if (sequence?.drama_id && Number(sequence.drama_id) !== dramaId) return response.badRequest(res, '该全能创作序列已绑定其他计费项目，请新建序列后再生成');
@@ -45,7 +45,7 @@ module.exports = function routes(db, log, cfg) { return {
   generationHistoryDetail(req, res) { try { response.success(res, omniVideoService.generationHistoryDetail(db, req.params.id, req.auth)); } catch (err) { response.notFound(res, err.message); } },
   importRealPersonAsset(req, res) { try { response.created(res, omniVideoService.importRealPersonFailureAsset(db, log, req.params.id, req.auth, req.body || {})); } catch (err) { response.badRequest(res, err.message); } },
   importCopyrightAssets(req, res) { try { response.created(res, omniVideoService.importCopyrightFailureAssets(db, log, req.params.id, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
-  get(req, res) { try { const job = omniVideoService.get(db, req.params.id); if (!job || (Number(job.owner_user_id) !== Number(req.auth.id) && req.auth.role !== 'admin')) return response.notFound(res, '全能视频任务不存在'); response.success(res, job); } catch (err) { response.internalError(res, err.message); } },
+  get(req, res) { try { const job = omniVideoService.get(db, req.params.id); if (!job || (Number(job.owner_user_id) !== Number(req.auth.id) && !req.projectAccess)) return response.notFound(res, '全能视频任务不存在'); response.success(res, Number(job.owner_user_id) === Number(req.auth.id) ? job : omniVideoService.sharedProjectJob({ ...job, ...job.generation, id: job.id })); } catch (err) { response.internalError(res, err.message); } },
   capabilities(req, res) {
     const tenant = require('../services/tenantService').tenantForUser(db, req.auth.id);
     const scope = tenant ? { tenant_id: tenant.id } : {};

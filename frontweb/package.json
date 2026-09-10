@@ -20,7 +20,8 @@
     "pinia": "^2.1.0",
     "qrcode": "^1.5.4",
     "vue": "^3.4.0",
-    "vue-router": "^4.2.0"
+    "vue-router": "^4.2.0",
+    "yjs": "^13.6.32"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.0",

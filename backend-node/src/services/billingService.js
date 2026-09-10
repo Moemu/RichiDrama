@@ -214,8 +214,8 @@ function quote(db, user, input) {
 function projectSnapshot(db, userId, input = {}) {
   const dramaId = Number(input.drama_id);
   if (!Number.isInteger(dramaId) || dramaId <= 0) return { drama_id: null, project_title_snapshot: null };
-  const row = db.prepare('SELECT id, title FROM dramas WHERE id=? AND owner_user_id=? AND deleted_at IS NULL').get(dramaId, Number(userId));
-  if (!row) throw new Error('项目不存在或无权计费到该项目');
+  const row = db.prepare('SELECT id, title FROM dramas WHERE id=? AND deleted_at IS NULL').get(dramaId);
+  if (!row || !require('./projectAccessService').access(db, dramaId, userId)?.can_edit) throw new Error('项目不存在或无权计费到该项目');
   return { drama_id: row.id, project_title_snapshot: String(row.title || '').trim() || `项目 #${row.id}` };
 }
 

@@ -16,6 +16,8 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 import request from './utils/request'
+import projectText from './directives/projectText'
+import { installProjectRequestSync } from './utils/projectRequestSync'
 
 const app = createApp({
   name: 'RootProvider',
@@ -34,6 +36,8 @@ const app = createApp({
   },
 })
 const pinia = createPinia()
+app.directive('project-text', projectText)
+installProjectRequestSync(request)
 
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)

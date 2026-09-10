@@ -34,18 +34,18 @@
           <el-button size="small" type="warning" plain @click="focusScriptNode">
             剧本
           </el-button>
-          <el-button size="small" @click="openCreateDialog('storyboard')">
+          <el-button size="small" :disabled="drama?.permissions?.can_edit === false" @click="openCreateDialog('storyboard')">
             <el-icon><Plus /></el-icon>
             分镜
           </el-button>
-          <el-button size="small" @click="openCreateDialog('character')">角色</el-button>
-          <el-button size="small" @click="openCreateDialog('scene')">场景</el-button>
-          <el-button size="small" @click="openCreateDialog('prop')">道具</el-button>
-          <el-button size="small" @click="openCreateDialog('episode')">
+          <el-button size="small" :disabled="drama?.permissions?.can_edit === false" @click="openCreateDialog('character')">角色</el-button>
+          <el-button size="small" :disabled="drama?.permissions?.can_edit === false" @click="openCreateDialog('scene')">场景</el-button>
+          <el-button size="small" :disabled="drama?.permissions?.can_edit === false" @click="openCreateDialog('prop')">道具</el-button>
+          <el-button size="small" :disabled="drama?.permissions?.can_edit === false" @click="openCreateDialog('episode')">
             <el-icon><Plus /></el-icon>
             集
           </el-button>
-          <el-button size="small" :loading="aligningNodes" @click="onAlignNodes">
+          <el-button size="small" :disabled="drama?.permissions?.can_edit === false" :loading="aligningNodes" @click="onAlignNodes">
             <el-icon><Grid /></el-icon>
             对齐节点
           </el-button>
@@ -67,7 +67,7 @@
           <el-checkbox value="video">生视频</el-checkbox>
           <el-checkbox value="audio">配音</el-checkbox>
         </el-checkbox-group>
-        <el-button size="small" :disabled="selectedStoryboardIds.length === 0" @click="onCreateWorkflowGroup">
+        <el-button size="small" :disabled="drama?.permissions?.can_edit === false || selectedStoryboardIds.length === 0" @click="onCreateWorkflowGroup">
           创建工作流
         </el-button>
         <el-select
@@ -88,12 +88,12 @@
           size="small"
           type="primary"
           :loading="workflowRunning"
-          :disabled="!activeGroupId"
+          :disabled="drama?.permissions?.can_edit === false || !activeGroupId"
           @click="onRunActiveGroup"
         >
           整组重跑
         </el-button>
-        <el-button size="small" type="danger" plain :disabled="!activeGroupId" @click="onDeleteActiveGroup">
+        <el-button size="small" type="danger" plain :disabled="drama?.permissions?.can_edit === false || !activeGroupId" @click="onDeleteActiveGroup">
           删除工作流
         </el-button>
       </div>
@@ -106,7 +106,7 @@
           size="small"
           type="primary"
           :loading="episodeGenerating"
-          :disabled="!filterEpisodeId || workflowRunning"
+          :disabled="drama?.permissions?.can_edit === false || !filterEpisodeId || workflowRunning"
           @click="aiGenerateStoryboards"
         >
           AI 生成分镜
@@ -114,7 +114,7 @@
         <el-button
           size="small"
           :loading="episodeGenerating"
-          :disabled="!filterEpisodeId || workflowRunning"
+          :disabled="drama?.permissions?.can_edit === false || !filterEpisodeId || workflowRunning"
           @click="batchGenerateImages"
         >
           批量生图
@@ -122,7 +122,7 @@
         <el-button
           size="small"
           :loading="episodeGenerating"
-          :disabled="!filterEpisodeId || workflowRunning"
+          :disabled="drama?.permissions?.can_edit === false || !filterEpisodeId || workflowRunning"
           @click="batchGenerateVideos"
         >
           批量生视频
@@ -130,6 +130,7 @@
       </div>
       <div v-if="episodeGenProgress" class="workflow-progress episode-gen">{{ episodeGenProgress }}</div>
     </header>
+    <ProjectCollaborationBar v-if="dramaId" :drama-id="dramaId" @refresh="refreshCanvas(true)" />
 
     <div v-loading="loading" class="canvas-shell">
       <aside v-if="drama" class="canvas-sidebar">
@@ -215,6 +216,7 @@
           :min-zoom="0.08"
           :max-zoom="2"
           :nodes-connectable="false"
+          :nodes-draggable="drama?.permissions?.can_edit !== false"
           :elements-selectable="true"
           :selection-key-code="true"
           :pan-on-drag="[1, 2]"
@@ -227,7 +229,7 @@
           @pane-context-menu="onPaneContextMenu"
           @node-drag-stop="scheduleLayoutSave"
           @viewport-change="onViewportChange"
-          @move-end="scheduleLayoutSave"
+          @move-end="savePersonalViewport"
           @selection-change="onSelectionChange"
         >
           <CanvasFlowAligner />
@@ -236,7 +238,7 @@
           <MiniMap pannable zoomable />
         </VueFlow>
         <el-empty v-else-if="!loading" description="暂无画布数据" />
-        <CanvasFloatingToolbar v-if="drama && nodes.length" />
+        <CanvasFloatingToolbar v-if="drama && nodes.length && drama.permissions?.can_edit !== false" />
       </div>
     </div>
 
@@ -256,6 +258,7 @@
 </template>
 
 <script setup>
+import ProjectCollaborationBar from '@/components/ProjectCollaborationBar.vue'
 import { computed, markRaw, nextTick, onBeforeUnmount, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { VueFlow } from '@vue-flow/core'
@@ -367,7 +370,12 @@ const nodeTypes = {
 }
 
 const dramaId = computed(() => Number(route.params.id))
-const savedLayout = computed(() => layoutCache.value || parseCanvasLayout(drama.value?.metadata))
+const savedLayout = computed(() => {
+  const layout = layoutCache.value || parseCanvasLayout(drama.value?.metadata)
+  let viewport
+  try { viewport = JSON.parse(localStorage.getItem(`project-viewport:${JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').id}:${dramaId.value}`) || 'null') } catch {}
+  return viewport ? { ...layout, viewport } : layout
+})
 
 const initialViewport = computed(() => {
   const v = resolveViewport(savedLayout.value)
@@ -540,6 +548,14 @@ function onViewportChange(viewport) {
   currentViewport.value = { x: viewport.x, y: viewport.y, zoom: viewport.zoom }
 }
 
+function savePersonalViewport() {
+  if (!drama.value?.permissions?.collaboration_enabled) return scheduleLayoutSave()
+  try {
+    const userId = JSON.parse(localStorage.getItem('lmd_auth_user') || '{}').id
+    if (userId) localStorage.setItem(`project-viewport:${userId}:${dramaId.value}`, JSON.stringify(currentViewport.value))
+  } catch {}
+}
+
 function scheduleLayoutSave() {
   layoutDirty.value = true
   if (saveTimer) clearTimeout(saveTimer)
@@ -555,6 +571,10 @@ async function persistCanvasState({ layoutOnly = false, groupsOnly = false } = {
   let layoutPayload = null
   if (!groupsOnly) {
     layoutPayload = buildCanvasLayoutPayload(nodes.value, currentViewport.value, layoutCache.value)
+    if (drama.value?.permissions?.collaboration_enabled) {
+      savePersonalViewport()
+      delete layoutPayload.viewport
+    }
     if (layoutOnly && layoutPayload) layoutCache.value = layoutPayload
   }
   const groupsPayload = groupsOnly || !layoutOnly ? workflowGroups.value : undefined
@@ -1146,4 +1166,13 @@ onBeforeUnmount(() => {
 <style>
 html.light .drama-canvas-page { background: var(--bg-page); }
 html.light .vue-flow-canvas { background: #eef2ff; }
+.vue-flow-canvas .vue-flow__node:has(.canvas-node-panel) { z-index: 10 !important; }
+.vue-flow-canvas .vue-flow__controls { bottom: 80px; }
+@media (max-width: 768px) {
+  .drama-canvas-page.drama-canvas-page { height: 100dvh; overflow-y: auto; overflow-x: hidden; }
+  .drama-canvas-page .header-actions { flex-wrap: wrap; max-width: 100%; }
+  .drama-canvas-page .canvas-sidebar { display: none; }
+  .drama-canvas-page .canvas-shell { flex: none; height: 600px; }
+  .drama-canvas-page .vue-flow__minimap { display: none; }
+}
 </style>

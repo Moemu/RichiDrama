@@ -66,6 +66,7 @@ function createDrama(db, log, req) {
     now
   );
   const id = info.lastInsertRowid;
+  if (req.owner_user_id && require('./projectAccessService').installed(db)) require('./projectAccessService').enable(db, id, req.owner_user_id);
   log.info('Drama created', { drama_id: id });
   return getDramaById(db, id);
 }
@@ -180,8 +181,11 @@ function listDramas(db, query) {
   let sql = 'FROM dramas WHERE deleted_at IS NULL';
   const params = [];
   if (query.owner_user_id) {
-    sql += ' AND owner_user_id = ?';
-    params.push(Number(query.owner_user_id));
+    sql += ` AND id IN (${require('./projectAccessService').projectIdsSql(db, query.owner_user_id)})`;
+    if (query.membership === 'owned' || query.membership === 'joined') {
+      sql += query.membership === 'owned' ? ' AND owner_user_id = ?' : ' AND owner_user_id <> ?';
+      params.push(Number(query.owner_user_id));
+    }
   }
   if (query.status) {
     sql += ' AND status = ?';
@@ -528,7 +532,8 @@ function saveOutline(db, log, dramaId, req) {
   const drama = getDramaById(db, Number(dramaId));
   if (!drama) return false;
   const now = new Date().toISOString();
-  const tagsStr = Array.isArray(req.tags) ? JSON.stringify(req.tags) : null;
+  const collaborationEnabled = require('./projectAccessService').installed(db) && db.prepare('SELECT 1 FROM project_collaboration WHERE drama_id=?').get(Number(dramaId));
+  const tagsStr = req.tags === undefined && collaborationEnabled ? drama.tags : Array.isArray(req.tags) ? JSON.stringify(req.tags) : null;
   // Merge new metadata with existing metadata
   let existingMetadata = {};
   if (drama.metadata) {
@@ -791,7 +796,13 @@ function saveCanvasLayout(db, log, dramaId, req) {
     throw err;
   }
   const meta = storageLayout.parseMetadata(drama.metadata);
-  if (layout) meta.canvas_layout = layout;
+  if (layout) {
+    const collaborative = require('./projectAccessService').installed(db) && db.prepare('SELECT 1 FROM project_collaboration WHERE drama_id=?').get(Number(dramaId));
+    if (collaborative) {
+      const { viewport, ...sharedLayout } = layout;
+      meta.canvas_layout = { ...meta.canvas_layout, ...sharedLayout };
+    } else meta.canvas_layout = layout;
+  }
   if (workflowGroups !== undefined) meta.workflow_groups = workflowGroups;
   const now = new Date().toISOString();
   db.prepare('UPDATE dramas SET metadata = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(meta), now, dramaId);

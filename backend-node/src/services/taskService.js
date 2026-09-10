@@ -8,6 +8,10 @@ function createTask(db, log, taskType, resourceId, ownerUserId = null, tenantId 
     `INSERT INTO async_tasks (id, type, status, progress, message, resource_id, owner_user_id, tenant_id, created_at, updated_at)
      VALUES (?, ?, 'pending', 0, '', ?, ?, ?, ?, ?)`
   ).run(id, taskType, resourceId || '', ownerUserId, tenantId || null, now, now);
+  const projectId = billingRequestContext.current()?.drama_id;
+  if (projectId && require('./projectAccessService').installed(db)) {
+    db.prepare('INSERT OR IGNORE INTO project_task_links (task_id,drama_id) VALUES (?,?)').run(id, Number(projectId));
+  }
   log.info('Task created', { task_id: id, type: taskType, resource_id: resourceId });
   const task = getTask(db, id);
   return task || { id, type: taskType, status: 'pending', progress: 0, message: '', resource_id: resourceId || '', created_at: now, updated_at: now, completed_at: null };
@@ -32,6 +36,11 @@ function getTask(db, taskId) {
 }
 
 function getTasksByResource(db, resourceId, ownerUserId) {
+  if (ownerUserId && require('./projectAccessService').installed(db)) {
+    return db.prepare(`SELECT t.* FROM async_tasks t WHERE t.resource_id=? AND t.deleted_at IS NULL
+      AND ((t.owner_user_id=? AND NOT EXISTS (SELECT 1 FROM project_task_links p JOIN project_collaboration c ON c.drama_id=p.drama_id JOIN dramas d ON d.id=p.drama_id AND d.deleted_at IS NULL WHERE p.task_id=t.id)) OR t.id IN (SELECT task_id FROM project_task_links WHERE drama_id IN (${require('./projectAccessService').projectIdsSql(db, ownerUserId)}))) ORDER BY t.created_at DESC`)
+      .all(resourceId, ownerUserId).map(rowToTask);
+  }
   const ownerSql = ownerUserId ? ' AND owner_user_id = ?' : '';
   const rows = db.prepare(
     'SELECT * FROM async_tasks WHERE resource_id = ? AND deleted_at IS NULL' + ownerSql + ' ORDER BY created_at DESC'

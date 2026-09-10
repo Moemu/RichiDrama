@@ -785,6 +785,7 @@ function _doImport(db, storagePath, files, data, d, title, metaStr, now, log, ow
   }
 
   log.info('Drama imported', { drama_id: dramaId, title });
+  if (ownerUserId && require('./projectAccessService').installed(db)) require('./projectAccessService').enable(db, dramaId, ownerUserId);
   return { drama_id: dramaId, title };
 }
 

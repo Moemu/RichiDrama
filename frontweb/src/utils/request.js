@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { loginRouteForCurrentLocation } from './routeRecovery'
+import { rememberProjectResponse } from './projectSnapshots'
 
 const request = axios.create({
   baseURL: '/api/v1',
@@ -68,6 +69,7 @@ request.interceptors.response.use(
     }
     const res = response.data
     if (res.success !== false) {
+      rememberProjectResponse(response.config?.url, res.data !== undefined ? res.data : res)
       return res.data !== undefined ? res.data : res
     }
     return Promise.reject(new Error(res.error?.message || '请求失败'))

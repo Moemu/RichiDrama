@@ -860,6 +860,7 @@ function runMigrationsAndEnsure(database) {
   migrateBillingPrecision(database);
   ensureAllColumns(database);
   migrateStoryboardIdentityAndPosition(database);
+  require('../services/projectCollaborationService').ensureRevisionTriggers(database);
 }
 
 function main() {

@@ -209,7 +209,10 @@ function updateStoryboard(db, log, id, req, ownerUserId = null) {
       const val = req[key];
       if (key === 'omni_asset_ids') params.push(JSON.stringify(activeOmniAssetIds(db, id, val, ownerUserId, log)));
       else if (key === 'omni_asset_usage_json') params.push(JSON.stringify(parseJsonObject(val)));
-      else if (key === 'omni_prompt_document') params.push(JSON.stringify(val && typeof val === 'object' ? val : { text: '', refs: [] }));
+      else if (key === 'omni_prompt_document') {
+        const document = val && typeof val === 'object' ? val : { text: '', refs: [] };
+        params.push(JSON.stringify({ ...document, text: document.text ?? req.universal_segment_text ?? row.universal_segment_text ?? '' }));
+      }
       else if (key === 'keep_original_audio') params.push(val ? 1 : 0);
       else params.push(val);
     }

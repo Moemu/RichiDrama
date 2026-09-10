@@ -50,6 +50,7 @@
     <!-- 左侧固定侧边栏 -->
 
     <main class="main">
+      <ProjectCollaborationBar v-if="dramaId" :drama-id="dramaId" @refresh="loadDrama" />
       <section class="workflow-shell" aria-label="短剧制作工作流">
         <div class="workflow-head">
           <div>
@@ -91,20 +92,20 @@
                 <h2 class="section-title">故事生成</h2>
                 <p class="section-desc">输入故事梗概生成剧本，或导入小说章节</p>
                 <el-input
-                  v-model="storyInput"
+ :disabled="projectSession.enabled && !projectSession.canEdit"                  v-project-text="{ kind: 'dramas', id: dramaId, field: 'description' }" v-model="storyInput"
                   type="textarea"
                   :rows="4"
                   placeholder="例如：一个少女在森林里遇见会说话的狐狸，一起寻找失落的宝石..."
                   class="story-textarea"
                 />
                 <div class="row gap" style="margin-top: 10px; flex-wrap: wrap;">
-                  <el-select v-model="storyStyle" placeholder="故事风格" clearable style="width: 120px" @change="() => saveProjectSettings(false)">
+                  <el-select :disabled="projectSession.enabled && !projectSession.canEdit" v-model="storyStyle" placeholder="故事风格" clearable style="width: 120px" @change="() => saveProjectSettings(false)">
                     <el-option label="现代" value="modern" />
                     <el-option label="古风" value="ancient" />
                     <el-option label="奇幻" value="fantasy" />
                     <el-option label="日常" value="daily" />
                   </el-select>
-                  <el-select v-model="storyType" placeholder="剧本类型" clearable style="width: 120px" @change="() => saveProjectSettings(false)">
+                  <el-select :disabled="projectSession.enabled && !projectSession.canEdit" v-model="storyType" placeholder="剧本类型" clearable style="width: 120px" @change="() => saveProjectSettings(false)">
                     <el-option label="剧情" value="drama" />
                     <el-option label="喜剧" value="comedy" />
                     <el-option label="冒险" value="adventure" />
@@ -112,7 +113,7 @@
                   <div style="display:flex;align-items:center;gap:6px;font-size:13px">
                     <span>集数</span>
                     <el-input-number
-                      v-model="storyEpisodeCount"
+ :disabled="projectSession.enabled && !projectSession.canEdit"                      v-model="storyEpisodeCount"
                       :min="1"
                       :step="1"
                       :precision="0"
@@ -120,10 +121,10 @@
                       style="width: 100px"
                     />
                   </div>
-                  <el-button type="primary" :loading="isStoryGenRunning" @click="onGenerateStory">
+                  <el-button :disabled="projectSession.enabled && !projectSession.canEdit" type="primary" :loading="isStoryGenRunning" @click="onGenerateStory">
                     生成剧本
                   </el-button>
-                  <el-button plain @click="showNovelImport = true">
+                  <el-button plain :disabled="projectSession.enabled && !projectSession.canEdit" @click="showNovelImport = true">
                     <el-icon><DocumentAdd /></el-icon>
                     导入小说
                   </el-button>
@@ -148,13 +149,13 @@
                       :value="ep.id"
                     />
                   </el-select>
-                  <el-input v-model="scriptTitle" placeholder="集标题" style="width: 150px" />
-                  <el-button v-if="dramaId" style="margin-left: auto" @click="onAddEpisode">
+                  <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="scriptTitle" placeholder="集标题" style="width: 150px" />
+                  <el-button :disabled="projectSession.enabled && !projectSession.canEdit" v-if="dramaId" style="margin-left: auto" @click="onAddEpisode">
                     <el-icon><Plus /></el-icon>添加一集
                   </el-button>
                 </div>
                 <el-input
-                  v-model="scriptContent"
+ :disabled="projectSession.enabled && !projectSession.canEdit"                  v-project-text="{ kind: 'episodes', id: currentEpisodeId, field: 'script_content' }" v-model="scriptContent"
                   type="textarea"
                   :rows="8"
                   placeholder="剧本内容将显示在这里，可直接编辑..."
@@ -163,7 +164,7 @@
                 <div class="row gap" style="margin-top: 8px; flex-wrap: wrap;">
                   <el-button
                     :loading="scriptGenerating"
-                    :disabled="!!dramaId && (store.drama?.episodes?.length > 0) && !currentEpisodeId"
+                    :disabled="(projectSession.enabled && !projectSession.canEdit) || (!!dramaId && (store.drama?.episodes?.length > 0) && !currentEpisodeId)"
                     @click="onGenerateScript"
                   >
                     保存剧本
@@ -258,14 +259,14 @@
           <el-button
             type="primary"
             :loading="pipelineRunning && !pipelinePaused"
-            :disabled="!currentEpisodeId || pipelineRunning"
+            :disabled="(projectSession.enabled && !projectSession.canEdit) || !currentEpisodeId || pipelineRunning"
             @click="startOneClickPipeline"
           >
             一键成片带图片视频
           </el-button>
           <el-button
             :loading="pipelineRunning && !pipelinePaused"
-            :disabled="!currentEpisodeId || pipelineRunning"
+            :disabled="(projectSession.enabled && !projectSession.canEdit) || !currentEpisodeId || pipelineRunning"
             title="仅提取角色、场景、道具与生成分镜文本，不生成图片与视频"
             @click="startTextFrameworkPipeline"
           >
@@ -276,8 +277,8 @@
           </el-button>
           <template v-if="pipelinePanelExpanded">
             <GenerationSettings :model-value="projectGenerationSettings" :max-duration="15" include-generation-quote @update:model-value="setProjectGenerationSettings" />
-            <el-button size="small" plain @click="applyProjectGenerationSettingsToStoryboards">应用到全部分镜</el-button>
-            <el-select v-model="scriptLanguage" placeholder="分镜语言" clearable style="width: 105px">
+            <el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" plain @click="applyProjectGenerationSettingsToStoryboards">应用到全部分镜</el-button>
+            <el-select :disabled="projectSession.enabled && !projectSession.canEdit" v-model="scriptLanguage" placeholder="分镜语言" clearable style="width: 105px">
               <el-option label="中文" value="zh" />
               <el-option label="英文" value="en" />
             </el-select>
@@ -353,16 +354,16 @@
               <button v-for="filter in resourceCatalogFilters" :key="filter.key" type="button" :class="{ active: resourceCatalogFilter === filter.key }" :aria-pressed="resourceCatalogFilter === filter.key" @click="resourceCatalogFilter = filter.key">{{ filter.label }}</button>
             </div>
             <div class="resource-browser-actions">
-              <el-button v-if="resourceCatalogType !== 'media' && resourceCatalogItems.length" size="small" :loading="resourceBatchUploading === resourceCatalogType" @click="batchUploadResourcesToMaterialLibrary(resourceCatalogType)">批量上传至素材库</el-button>
-              <el-button v-if="resourceCatalogType === 'character'" size="small" :loading="charactersGenerating" :disabled="!dramaId" @click="onGenerateCharacters">从剧本提取</el-button>
-              <el-button v-if="resourceCatalogType === 'scene'" size="small" :loading="scenesExtracting" :disabled="!currentEpisodeId" @click="onExtractScenes">从剧本提取</el-button>
-              <el-button v-if="resourceCatalogType === 'prop'" size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取</el-button>
+              <el-button :disabled="projectSession.enabled && !projectSession.canEdit" v-if="resourceCatalogType !== 'media' && resourceCatalogItems.length" size="small" :loading="resourceBatchUploading === resourceCatalogType" @click="batchUploadResourcesToMaterialLibrary(resourceCatalogType)">批量上传至素材库</el-button>
+              <el-button v-if="resourceCatalogType === 'character'" size="small" :loading="charactersGenerating" :disabled="(projectSession.enabled && !projectSession.canEdit) || (!dramaId)" @click="onGenerateCharacters">从剧本提取</el-button>
+              <el-button v-if="resourceCatalogType === 'scene'" size="small" :loading="scenesExtracting" :disabled="(projectSession.enabled && !projectSession.canEdit) || (!currentEpisodeId)" @click="onExtractScenes">从剧本提取</el-button>
+              <el-button v-if="resourceCatalogType === 'prop'" size="small" :loading="propsExtracting" :disabled="(projectSession.enabled && !projectSession.canEdit) || (!currentEpisodeId)" @click="onExtractProps">从剧本提取</el-button>
               <el-button v-if="resourceCatalogType === 'character'" size="small" @click="openAddCharacter">添加角色</el-button>
               <el-button v-else-if="resourceCatalogType === 'scene'" size="small" @click="openAddScene">添加场景</el-button>
               <el-button v-else-if="resourceCatalogType === 'prop'" size="small" @click="showAddProp = true">添加道具</el-button>
-              <el-button v-if="resourceCatalogType !== 'media' && resourceCatalogItems.length" size="small" type="primary" plain :loading="resourceBatchGenerating === resourceCatalogType" @click="onGenerateMissingResourceImages(resourceCatalogType)">生成缺图</el-button>
+              <el-button :disabled="projectSession.enabled && !projectSession.canEdit" v-if="resourceCatalogType !== 'media' && resourceCatalogItems.length" size="small" type="primary" plain :loading="resourceBatchGenerating === resourceCatalogType" @click="onGenerateMissingResourceImages(resourceCatalogType)">生成缺图</el-button>
               <el-button v-if="resourceCatalogType === 'media'" size="small" @click="projectLibraryDialogOpen = true">管理项目素材</el-button>
-              <el-button v-if="resourceCatalogSelectedCount" size="small" type="danger" plain @click="batchDeleteUnifiedResources(resourceCatalogType)">批量删除（{{ resourceCatalogSelectedCount }}）</el-button>
+              <el-button :disabled="projectSession.enabled && !projectSession.canEdit" v-if="resourceCatalogSelectedCount" size="small" type="danger" plain @click="batchDeleteUnifiedResources(resourceCatalogType)">批量删除（{{ resourceCatalogSelectedCount }}）</el-button>
             </div>
           </header>
           <p class="resource-browser-summary" role="status">显示 {{ filteredResourceCatalogItems.length }} / {{ resourceCatalogItems.length }} 个{{ resourceCatalogMeta.label }}{{ resourceCatalogSelectedCount ? `，已选择 ${resourceCatalogSelectedCount} 个` : '' }}</p>
@@ -374,14 +375,14 @@
               <span v-else class="resource-browser-placeholder" aria-hidden="true">{{ resourceCatalogMeta.label }}</span>
               <div class="resource-browser-card-copy"><b>{{ resourceCatalogItemName(item) }}</b><small>{{ resourceCatalogItemDescription(item) }}</small></div>
               <div class="resource-browser-card-actions" :class="{ 'character-card-actions': resourceCatalogType === 'character' }">
-                <template v-if="resourceCatalogType === 'media'"><el-button size="small" text @click="renameResourceMedia(item)">重命名</el-button><el-button size="small" type="warning" text @click="deleteResourceMedia(item)">归档</el-button></template>
-                <template v-else-if="resourceCatalogType === 'character'"><el-button class="character-card-edit" size="small" @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button size="small" text :loading="uploadingResourceId === `character-${item.id}`" @click="onUploadResourceClick('character', item.id)">上传图</el-button><el-button size="small" type="primary" text :loading="sd2CertifyingId === item.id" @click="onSd2PrimaryAction(item)">{{ sd2ActionLabel(item) }}</el-button><el-button size="small" type="primary" text :loading="resourceCatalogGenerating(item)" @click="generateResourceCatalogItem(item)">生成图</el-button><el-button class="character-card-delete" size="small" type="danger" plain @click="deleteResourceCatalogItem(item)">删除</el-button></template>
-                <template v-else><el-button size="small" text @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker(resourceCatalogType, item)">素材库</el-button><el-button size="small" text :loading="uploadingResourceId === `${resourceCatalogType}-${item.id}`" @click="onUploadResourceClick(resourceCatalogType, item.id)">上传图</el-button><el-button size="small" type="primary" text :loading="resourceCatalogGenerating(item)" @click="generateResourceCatalogItem(item)">生成图</el-button><el-button size="small" type="danger" text @click="deleteResourceCatalogItem(item)">删除</el-button></template>
+                <template v-if="resourceCatalogType === 'media'"><el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" text @click="renameResourceMedia(item)">重命名</el-button><el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" type="warning" text @click="deleteResourceMedia(item)">归档</el-button></template>
+                <template v-else-if="resourceCatalogType === 'character'"><el-button class="character-card-edit" size="small" @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" text :loading="uploadingResourceId === `character-${item.id}`" @click="onUploadResourceClick('character', item.id)">上传图</el-button><el-button size="small" type="primary" text :loading="sd2CertifyingId === item.id" @click="onSd2PrimaryAction(item)">{{ sd2ActionLabel(item) }}</el-button><el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" type="primary" text :loading="resourceCatalogGenerating(item)" @click="generateResourceCatalogItem(item)">生成图</el-button><el-button :disabled="projectSession.enabled && !projectSession.canEdit" class="character-card-delete" size="small" type="danger" plain @click="deleteResourceCatalogItem(item)">删除</el-button></template>
+                <template v-else><el-button size="small" text @click="openResourceEditor(resourceCatalogType, item)">编辑</el-button><el-button size="small" text @click="openResourceAssetPicker(resourceCatalogType, item)">素材库</el-button><el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" text :loading="uploadingResourceId === `${resourceCatalogType}-${item.id}`" @click="onUploadResourceClick(resourceCatalogType, item.id)">上传图</el-button><el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" type="primary" text :loading="resourceCatalogGenerating(item)" @click="generateResourceCatalogItem(item)">生成图</el-button><el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" type="danger" text @click="deleteResourceCatalogItem(item)">删除</el-button></template>
               </div>
             </article>
           </div>
           <div v-else class="resource-browser-empty"><b>暂无匹配的{{ resourceCatalogMeta.label }}</b><p>{{ resourceCatalogKeyword ? '请清空搜索词或调整筛选条件。' : resourceCatalogMeta.empty }}</p></div>
-          <div v-if="resourceCatalogType === 'media' && detachedResourceLinks.length" class="resource-media-grid"><article v-for="link in detachedResourceLinks" :key="`detached-${link.id}`" class="resource-media-card"><span>已解除</span><small>{{ link.asset_name || `${link.resource_type} #${link.resource_id}` }}</small><small>历史分镜引用仍保留</small><el-button size="small" type="primary" text @click="restoreResourceMedia(link)">恢复关联</el-button></article></div>
+          <div v-if="resourceCatalogType === 'media' && detachedResourceLinks.length" class="resource-media-grid"><article v-for="link in detachedResourceLinks" :key="`detached-${link.id}`" class="resource-media-card"><span>已解除</span><small>{{ link.asset_name || `${link.resource_type} #${link.resource_id}` }}</small><small>历史分镜引用仍保留</small><el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" type="primary" text @click="restoreResourceMedia(link)">恢复关联</el-button></article></div>
         </section>
       </section>
 
@@ -390,9 +391,9 @@
           <b>{{ resourceBatchImageMeta.label }}缺图</b>
           <span>将为 {{ resourceBatchMissingItems.length }} 个{{ resourceBatchImageMeta.label }}生成图片。</span>
         </div>
-        <el-form label-position="top">
+        <el-form :disabled="projectSession.enabled && !projectSession.canEdit" label-position="top">
           <el-form-item label="图像模型" required>
-            <el-select v-model="resourceBatchImageModel" filterable placeholder="选择图像模型" style="width:100%">
+            <el-select :disabled="projectSession.enabled && !projectSession.canEdit" v-model="resourceBatchImageModel" filterable placeholder="选择图像模型" style="width:100%">
               <el-option v-for="model in resourceImageModels" :key="model" :label="model" :value="model" />
             </el-select>
             <small v-if="!resourceImageModels.length" class="resource-batch-image-hint">请先在 AI 配置中启用图像模型。</small>
@@ -408,7 +409,7 @@
         </div>
         <template #footer>
           <el-button @click="showResourceBatchImageDialog = false">取消</el-button>
-          <el-button type="primary" :disabled="!resourceBatchImageModel || !resourceBatchImageQuote || Boolean(resourceBatchImageQuoteError)" @click="submitGenerateMissingResourceImages">确认生成</el-button>
+          <el-button type="primary" :disabled="(projectSession.enabled && !projectSession.canEdit) || (!resourceBatchImageModel || !resourceBatchImageQuote || Boolean(resourceBatchImageQuoteError))" @click="submitGenerateMissingResourceImages">确认生成</el-button>
         </template>
       </el-dialog>
 
@@ -433,17 +434,17 @@
         <span>{{ storyboards.length ? `已有 ${storyboards.length} 个分镜，生成完成后可合成。` : '请先生成至少一个分镜。' }}</span>
         <div class="sb-stage-gen-group">
           <span class="sb-stage-gen-label" title="留空由 AI 按剧本估算">分镜数量</span>
-          <el-input-number v-model="storyboardCount" :min="1" :max="200" :step="5" placeholder="自动" size="small" controls-position="right" style="width: 96px" />
+          <el-input-number :disabled="projectSession.enabled && !projectSession.canEdit" v-model="storyboardCount" :min="1" :max="200" :step="5" placeholder="自动" size="small" controls-position="right" style="width: 96px" />
           <span class="sb-stage-gen-label" title="每段视频的时长">每段(秒)</span>
-          <el-select v-model="videoClipDuration" size="small" style="width: 82px" @change="() => saveProjectSettings(false)">
+          <el-select :disabled="projectSession.enabled && !projectSession.canEdit" v-model="videoClipDuration" size="small" style="width: 82px" @change="() => saveProjectSettings(false)">
             <el-option v-for="sec in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]" :key="sec" :label="`${sec} 秒`" :value="sec" />
           </el-select>
           <span class="sb-stage-gen-label" title="总时长仅作参考">总时长(秒)</span>
-          <el-input-number v-model="videoDuration" :min="10" :max="600" :step="5" placeholder="自动" size="small" controls-position="right" style="width: 96px" />
+          <el-input-number :disabled="projectSession.enabled && !projectSession.canEdit" v-model="videoDuration" :min="10" :max="600" :step="5" placeholder="自动" size="small" controls-position="right" style="width: 96px" />
           <el-button
             type="success"
             :loading="storyboardGenerating || universalOmniPolishRunning"
-            :disabled="!currentEpisodeId || storyboardGenerating || universalOmniPolishRunning"
+            :disabled="(projectSession.enabled && !projectSession.canEdit) || (!currentEpisodeId || storyboardGenerating || universalOmniPolishRunning)"
             @click="onGenerateStoryboard"
           >
             {{ storyboards.length ? '重新生成分镜' : 'AI 生成分镜' }}
@@ -476,7 +477,7 @@
         <h2 class="section-title">视频配置</h2>
         <div class="config-grid">
           <el-form-item label="分辨率（新分镜默认）">
-            <el-select v-model="videoResolution" style="width: 160px">
+            <el-select :disabled="projectSession.enabled && !projectSession.canEdit" v-model="videoResolution" style="width: 160px">
               <el-option label="480p" value="480p" />
               <el-option label="720p" value="720p" />
               <el-option label="1080p" value="1080p" />
@@ -484,21 +485,21 @@
           </el-form-item>
           <el-form-item label="字幕">
             <div class="video-option-row">
-              <el-switch v-model="videoSubtitle" />
+              <el-switch :disabled="projectSession.enabled && !projectSession.canEdit" v-model="videoSubtitle" />
               <span v-if="videoSubtitle" class="video-option-hint">开启后按解说旁白自动生成字幕并烧录到成片。</span>
             </div>
           </el-form-item>
           <el-form-item label="对白烧录">
             <div class="video-option-row">
-              <el-switch v-model="videoBurnDialogue" />
+              <el-switch :disabled="projectSession.enabled && !projectSession.canEdit" v-model="videoBurnDialogue" />
               <span v-if="videoBurnDialogue" class="video-option-hint">开启后把各镜「配音」生成的对白混入成片；可与字幕同时开启，两条音轨会同时出现。</span>
             </div>
           </el-form-item>
           <el-form-item label="水印">
             <div class="video-option-row">
-              <el-switch v-model="videoWatermark" />
+              <el-switch :disabled="projectSession.enabled && !projectSession.canEdit" v-model="videoWatermark" />
               <el-input
-                v-if="videoWatermark"
+ :disabled="projectSession.enabled && !projectSession.canEdit"                v-if="videoWatermark"
                 v-model="videoWatermarkText"
                 placeholder="右下角水印文字"
                 maxlength="200"
@@ -532,7 +533,7 @@
           type="primary"
           size="large"
           :loading="videoStatus === 'generating'"
-          :disabled="!currentEpisodeId || mergeReadiness.total === 0 || mergeReadiness.missing > 0 || videoStatus === 'generating'"
+          :disabled="(projectSession.enabled && !projectSession.canEdit) || (!currentEpisodeId || mergeReadiness.total === 0 || mergeReadiness.missing > 0 || videoStatus === 'generating')"
           @click="onGenerateVideo"
         >
           合成视频
@@ -563,7 +564,7 @@
 
     <!-- 添加道具弹窗 -->
     <el-dialog v-model="showAddProp" title="添加道具" width="600px" @close="() => { addPropForm = { name: '', type: '', description: '', prompt: '' }; addPropAddRefImage = null }">
-      <el-form label-width="90px">
+      <el-form :disabled="projectSession.enabled && !projectSession.canEdit" label-width="90px">
         <el-form-item label="参考图">
           <div class="ref-image-zone">
             <div class="ref-image-box" @click="addPropAddRefFileInput?.click()" @drop.prevent="onRefImageDrop2('addProp', $event)" @dragover.prevent>
@@ -571,22 +572,22 @@
               <div v-else class="ref-upload-hint"><span class="ref-upload-icon">🖼</span><span>点击或拖入参考图</span></div>
             </div>
             <div v-if="addPropAddRefImage" class="ref-actions">
-              <el-button type="primary" size="small" :loading="extractingPropAddDesc" @click="doExtractFromRef2('addProp')">提取特征描述</el-button>
+              <el-button :disabled="projectSession.enabled && !projectSession.canEdit" type="primary" size="small" :loading="extractingPropAddDesc" @click="doExtractFromRef2('addProp')">提取特征描述</el-button>
               <el-button size="small" @click="addPropAddRefImage = null">移除</el-button>
             </div>
           </div>
         </el-form-item>
         <el-form-item label="名称" required>
-          <el-input v-model="addPropForm.name" placeholder="道具名称" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="addPropForm.name" placeholder="道具名称" />
         </el-form-item>
         <el-form-item label="类型">
-          <el-input v-model="addPropForm.type" placeholder="如：物品、建筑" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="addPropForm.type" placeholder="如：物品、建筑" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="addPropForm.description" type="textarea" :rows="3" placeholder="描述" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="addPropForm.description" type="textarea" :rows="3" placeholder="描述" />
         </el-form-item>
         <el-form-item label="图生提示词">
-          <el-input v-model="addPropForm.prompt" type="textarea" :rows="2" placeholder="画面描述提示词" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="addPropForm.prompt" type="textarea" :rows="2" placeholder="画面描述提示词" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -603,7 +604,7 @@
 
     <!-- 添加/编辑角色弹窗 -->
     <el-dialog v-model="showEditCharacter" :title="editCharacterForm?.id ? '编辑角色' : '添加角色'" class="character-editor-dialog" width="min(920px, calc(100vw - 32px))" append-to-body @opened="resetCharacterEditorScroll" @close="onCloseCharDialog">
-      <el-form v-if="editCharacterForm" label-width="90px">
+      <el-form :disabled="projectSession.enabled && !projectSession.canEdit" v-if="editCharacterForm" label-width="90px">
         <!-- 参考图上传区（新增/编辑均显示） -->
         <el-form-item label="参考图">
           <div class="ref-image-zone">
@@ -628,10 +629,10 @@
           </div>
         </el-form-item>
         <el-form-item label="名称" required>
-          <el-input v-model="editCharacterForm.name" placeholder="角色名称" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editCharacterForm.name" placeholder="角色名称" />
         </el-form-item>
         <el-form-item label="身份/定位">
-          <el-select v-model="editCharacterForm.role" placeholder="请选择角色类型" style="width:200px">
+          <el-select :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editCharacterForm.role" placeholder="请选择角色类型" style="width:200px">
             <el-option value="main" label="主角" />
             <el-option value="supporting" label="配角" />
             <el-option value="minor" label="次要角色" />
@@ -639,14 +640,14 @@
         </el-form-item>
         <el-form-item label="外貌描述">
           <div class="character-field-stack">
-            <el-input v-model="editCharacterForm.appearance" type="textarea" :autosize="{ minRows: 4, maxRows: 10 }" placeholder="外貌描述（尽量详细）" />
+            <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-project-text="{ kind: 'characters', id: editCharacterForm.id, field: 'appearance' }" v-model="editCharacterForm.appearance" type="textarea" :autosize="{ minRows: 4, maxRows: 10 }" placeholder="外貌描述（尽量详细）" />
             <div class="character-field-actions">
               <el-button v-if="characterDescriptionSourceLabel" size="small" :loading="extractingCharAppearance" @click="extractEditCharacterDescription">{{ characterDescriptionSourceLabel }}</el-button>
             </div>
           </div>
         </el-form-item>
         <el-form-item label="简介">
-          <el-input v-model="editCharacterForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="角色背景简介" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-project-text="{ kind: 'characters', id: editCharacterForm.id, field: 'description' }" v-model="editCharacterForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="角色背景简介" />
         </el-form-item>
         <el-form-item v-if="editCharacterForm.id" label="音色参考">
           <div class="character-inline-control">
@@ -664,11 +665,11 @@
           <div style="width:100%">
             <div class="character-field-help">最终提示词，可修改</div>
             <el-input
-              v-model="editCharacterForm.polished_prompt"
+              v-project-text="{ kind: 'characters', id: editCharacterForm.id, field: 'polished_prompt' }" v-model="editCharacterForm.polished_prompt"
               type="textarea"
               :autosize="{ minRows: 5, maxRows: 16 }"
               :placeholder="editCharacterPromptGenerating ? 'AI 正在生成提示词，请稍候…' : '点击「重新生成提示词」由 AI 自动生成，或直接在此输入'"
-              :disabled="editCharacterPromptGenerating"
+              :disabled="(projectSession.enabled && !projectSession.canEdit) || (editCharacterPromptGenerating)"
               style="font-size:12px"
             />
             <div class="character-field-actions">
@@ -693,7 +694,7 @@
             />
             <div v-else style="font-size:12px;color:#c0c4cc;padding:4px 0">暂无锚点，点击「提炼视觉锚点」自动提炼</div>
             <div class="character-field-actions">
-              <el-button size="small" :loading="extractingAnchors" :disabled="!editCharacterForm.appearance" @click="extractIdentityAnchors">提炼视觉锚点</el-button>
+              <el-button size="small" :loading="extractingAnchors" :disabled="(projectSession.enabled && !projectSession.canEdit) || (!editCharacterForm.appearance)" @click="extractIdentityAnchors">提炼视觉锚点</el-button>
             </div>
           </div>
         </el-form-item>
@@ -701,7 +702,7 @@
         <el-form-item v-if="editCharacterForm.id" label="多阶段造型">
           <div style="width:100%">
             <el-input
-              v-model="editCharacterForm.stages"
+ :disabled="projectSession.enabled && !projectSession.canEdit"              v-model="editCharacterForm.stages"
               type="textarea"
               :rows="4"
               placeholder='例：[{"episode_range":[1,5],"appearance":"白衣少年"},{"episode_range":[6,10],"appearance":"黑衣武者"}]'
@@ -760,7 +761,7 @@
 
     <!-- 编辑道具弹窗 -->
     <el-dialog v-model="showEditProp" :title="editPropForm?.id ? '编辑道具' : '添加道具'" width="75%" @close="onClosePropDialog">
-      <el-form v-if="editPropForm" label-width="90px">
+      <el-form :disabled="projectSession.enabled && !projectSession.canEdit" v-if="editPropForm" label-width="90px">
         <!-- 参考图上传区（新增/编辑均显示） -->
         <el-form-item label="参考图">
           <div class="ref-image-zone">
@@ -774,7 +775,7 @@
               <div v-else class="ref-upload-hint"><span class="ref-upload-icon">🖼</span><span>点击或拖入参考图</span></div>
             </div>
             <div v-if="addPropRefImage" class="ref-actions">
-              <el-button type="primary" size="small" :loading="extractingPropDesc" @click="doExtractFromRef('prop')">提取特征描述</el-button>
+              <el-button :disabled="projectSession.enabled && !projectSession.canEdit" type="primary" size="small" :loading="extractingPropDesc" @click="doExtractFromRef('prop')">提取特征描述</el-button>
               <el-button size="small" @click="addPropRefImage = null">移除</el-button>
             </div>
             <div v-else-if="editPropForm.ref_image" class="ref-actions">
@@ -788,13 +789,13 @@
           </div>
         </el-form-item>
         <el-form-item label="名称" required>
-          <el-input v-model="editPropForm.name" placeholder="道具名称" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editPropForm.name" placeholder="道具名称" />
         </el-form-item>
         <el-form-item label="类型">
-          <el-input v-model="editPropForm.type" placeholder="如：物品、建筑" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editPropForm.type" placeholder="如：物品、建筑" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="editPropForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="道具描述" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-project-text="{ kind: 'props', id: editPropForm.id, field: 'description' }" v-model="editPropForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="道具描述" />
         </el-form-item>
         <el-form-item label="图生提示词">
           <div style="width:100%">
@@ -803,11 +804,11 @@
               <el-button size="small" :loading="editPropPromptGenerating" @click="doGeneratePropPrompt">重新生成提示词</el-button>
             </div>
             <el-input
-              v-model="editPropForm.prompt"
+              v-project-text="{ kind: 'props', id: editPropForm.id, field: 'prompt' }" v-model="editPropForm.prompt"
               type="textarea"
               :autosize="{ minRows: 5, maxRows: 16 }"
               :placeholder="editPropPromptGenerating ? 'AI 正在生成提示词，请稍候…' : '点击「重新生成提示词」由 AI 自动生成，或直接在此输入'"
-              :disabled="editPropPromptGenerating"
+              :disabled="(projectSession.enabled && !projectSession.canEdit) || (editPropPromptGenerating)"
             />
           </div>
         </el-form-item>
@@ -820,7 +821,7 @@
 
     <!-- 添加/编辑场景弹窗 -->
     <el-dialog v-model="showEditScene" :title="editSceneForm?.id ? '编辑场景' : '添加场景'" width="75%" @close="onCloseSceneDialog">
-      <el-form v-if="editSceneForm" label-width="90px">
+      <el-form :disabled="projectSession.enabled && !projectSession.canEdit" v-if="editSceneForm" label-width="90px">
         <!-- 参考图上传区（新增/编辑均显示） -->
         <el-form-item label="参考图">
           <div class="ref-image-zone">
@@ -834,7 +835,7 @@
               <div v-else class="ref-upload-hint"><span class="ref-upload-icon">🖼</span><span>点击或拖入参考图</span></div>
             </div>
             <div v-if="addSceneRefImage" class="ref-actions">
-              <el-button type="primary" size="small" :loading="extractingSceneDesc" @click="doExtractFromRef('scene')">提取特征描述</el-button>
+              <el-button :disabled="projectSession.enabled && !projectSession.canEdit" type="primary" size="small" :loading="extractingSceneDesc" @click="doExtractFromRef('scene')">提取特征描述</el-button>
               <el-button size="small" @click="addSceneRefImage = null">移除</el-button>
             </div>
             <div v-else-if="editSceneForm.ref_image" class="ref-actions">
@@ -848,13 +849,13 @@
           </div>
         </el-form-item>
         <el-form-item label="地点" required>
-          <el-input v-model="editSceneForm.location" placeholder="如：森林、教室" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editSceneForm.location" placeholder="如：森林、教室" />
         </el-form-item>
         <el-form-item label="时间">
-          <el-input v-model="editSceneForm.time" placeholder="如：白天、傍晚" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editSceneForm.time" placeholder="如：白天、傍晚" />
         </el-form-item>
         <el-form-item label="场景描述">
-          <el-input v-model="editSceneForm.prompt" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="场景的简要描述，供 AI 生成四视图时参考" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-project-text="{ kind: 'scenes', id: editSceneForm.id, field: 'prompt' }" v-model="editSceneForm.prompt" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="场景的简要描述，供 AI 生成四视图时参考" />
         </el-form-item>
         <el-form-item v-if="editSceneForm.id">
           <template #label>
@@ -866,7 +867,7 @@
               <el-button size="small" :loading="editScenePromptGenerating" @click="doGenerateSceneSinglePrompt">重新生成提示词</el-button>
             </div>
             <el-input
-              v-model="editSceneForm.polished_prompt_single"
+ :disabled="projectSession.enabled && !projectSession.canEdit"              v-project-text="{ kind: 'scenes', id: editSceneForm.id, field: 'polished_prompt_single' }" v-model="editSceneForm.polished_prompt_single"
               type="textarea"
               :autosize="{ minRows: 5, maxRows: 16 }"
               placeholder="单图场景提示词，点击场景列表的「AI 生成」按钮（不勾选四宫格）后会自动生成"
@@ -884,11 +885,11 @@
               <el-button size="small" :loading="editScenePromptGenerating" @click="doGenerateScenePrompt">重新生成提示词</el-button>
             </div>
             <el-input
-              v-model="editSceneForm.polished_prompt"
+              v-project-text="{ kind: 'scenes', id: editSceneForm.id, field: 'polished_prompt' }" v-model="editSceneForm.polished_prompt"
               type="textarea"
               :autosize="{ minRows: 5, maxRows: 16 }"
               :placeholder="editScenePromptGenerating ? 'AI 正在生成四视图提示词，请稍候…' : '点击「重新生成提示词」由 AI 自动生成，或直接在此输入'"
-              :disabled="editScenePromptGenerating"
+              :disabled="(projectSession.enabled && !projectSession.canEdit) || (editScenePromptGenerating)"
               style="font-size:12px"
             />
           </div>
@@ -919,7 +920,7 @@
                 <div class="library-item-actions">
                   <el-button size="small" type="primary" :loading="isCharAddToEpisodeLoading('library', item.id)" :disabled="!currentEpisodeId" @click="onAddCharFromLibrary(item)">加入本集</el-button>
                   <el-button size="small" @click="openEditCharLibrary(item)">编辑</el-button>
-                  <el-button size="small" type="danger" plain @click="onDeleteCharLibrary(item)">删除</el-button>
+                  <el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" type="danger" plain @click="onDeleteCharLibrary(item)">删除</el-button>
                 </div>
               </div>
             </div>
@@ -981,7 +982,7 @@
     </el-dialog>
     <!-- 编辑公共角色 -->
     <el-dialog v-model="showEditCharLibrary" title="编辑公共角色" width="440px" @close="editCharLibraryForm = null">
-      <el-form v-if="editCharLibraryForm" label-width="80px">
+      <el-form :disabled="projectSession.enabled && !projectSession.canEdit" v-if="editCharLibraryForm" label-width="80px">
         <el-form-item label="名称">
           <el-input v-model="editCharLibraryForm.name" placeholder="角色名称" />
         </el-form-item>
@@ -989,7 +990,7 @@
           <el-input v-model="editCharLibraryForm.category" placeholder="可选" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="editCharLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
+          <el-input v-project-text="{ kind: 'character_libraries', id: editCharLibraryForm.id, field: 'description' }" v-model="editCharLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
         </el-form-item>
         <el-form-item label="标签">
           <el-input v-model="editCharLibraryForm.tags" placeholder="可选，逗号分隔" />
@@ -1020,7 +1021,7 @@
                 <div class="library-item-actions">
                   <el-button size="small" type="primary" :loading="isPropAddToEpisodeLoading('library', item.id)" :disabled="!currentEpisodeId" @click="onAddPropFromLibrary(item)">加入本集</el-button>
                   <el-button size="small" @click="openEditPropLibrary(item)">编辑</el-button>
-                  <el-button size="small" type="danger" plain @click="onDeletePropLibrary(item)">删除</el-button>
+                  <el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" type="danger" plain @click="onDeletePropLibrary(item)">删除</el-button>
                 </div>
               </div>
             </div>
@@ -1061,7 +1062,7 @@
     </el-dialog>
     <!-- 编辑公共道具 -->
     <el-dialog v-model="showEditPropLibrary" title="编辑公共道具" width="440px" @close="editPropLibraryForm = null">
-      <el-form v-if="editPropLibraryForm" label-width="80px">
+      <el-form :disabled="projectSession.enabled && !projectSession.canEdit" v-if="editPropLibraryForm" label-width="80px">
         <el-form-item label="名称">
           <el-input v-model="editPropLibraryForm.name" placeholder="道具名称" />
         </el-form-item>
@@ -1069,7 +1070,7 @@
           <el-input v-model="editPropLibraryForm.category" placeholder="可选" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="editPropLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
+          <el-input v-project-text="{ kind: 'prop_libraries', id: editPropLibraryForm.id, field: 'description' }" v-model="editPropLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
         </el-form-item>
         <el-form-item label="标签">
           <el-input v-model="editPropLibraryForm.tags" placeholder="可选，逗号分隔" />
@@ -1100,7 +1101,7 @@
                 <div class="library-item-actions">
                   <el-button size="small" type="primary" :loading="isSceneAddToEpisodeLoading('library', item.id)" :disabled="!currentEpisodeId" @click="onAddSceneFromLibrary(item)">加入本集</el-button>
                   <el-button size="small" @click="openEditSceneLibrary(item)">编辑</el-button>
-                  <el-button size="small" type="danger" plain @click="onDeleteSceneLibrary(item)">删除</el-button>
+                  <el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" type="danger" plain @click="onDeleteSceneLibrary(item)">删除</el-button>
                 </div>
               </div>
             </div>
@@ -1141,7 +1142,7 @@
     </el-dialog>
     <!-- 编辑公共场景 -->
     <el-dialog v-model="showEditSceneLibrary" title="编辑公共场景" width="440px" @close="editSceneLibraryForm = null">
-      <el-form v-if="editSceneLibraryForm" label-width="80px">
+      <el-form :disabled="projectSession.enabled && !projectSession.canEdit" v-if="editSceneLibraryForm" label-width="80px">
         <el-form-item label="地点">
           <el-input v-model="editSceneLibraryForm.location" placeholder="场景地点" />
         </el-form-item>
@@ -1152,7 +1153,7 @@
           <el-input v-model="editSceneLibraryForm.category" placeholder="可选" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="editSceneLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
+          <el-input v-project-text="{ kind: 'scene_libraries', id: editSceneLibraryForm.id, field: 'description' }" v-model="editSceneLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
         </el-form-item>
         <el-form-item label="标签">
           <el-input v-model="editSceneLibraryForm.tags" placeholder="可选，逗号分隔" />
@@ -1181,7 +1182,7 @@
         <el-tabs v-model="novelImportMode">
           <el-tab-pane label="粘贴文本" name="text">
             <el-input
-              v-model="novelText"
+ :disabled="projectSession.enabled && !projectSession.canEdit"              v-model="novelText"
               type="textarea"
               :rows="10"
               placeholder="粘贴小说正文，AI 会自动识别章节..."
@@ -1204,7 +1205,7 @@
         <div class="novel-import-options" style="margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <div style="display:flex;align-items:center;gap:6px;font-size:13px">
             <span>最多导入集数：</span>
-            <el-input-number v-model="novelMaxChapters" :min="1" :max="20" size="small" style="width:100px" />
+            <el-input-number :disabled="projectSession.enabled && !projectSession.canEdit" v-model="novelMaxChapters" :min="1" :max="20" size="small" style="width:100px" />
           </div>
           <el-checkbox v-model="novelAiSummarize" size="small">AI 转换为剧本格式（会消耗 Token）</el-checkbox>
         </div>
@@ -1234,6 +1235,8 @@
 </template>
 
 <script setup>
+import { projectSession } from '@/composables/useProjectCollaboration'
+import ProjectCollaborationBar from '@/components/ProjectCollaborationBar.vue'
 import { ref, computed, onMounted, watch, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
@@ -2662,7 +2665,7 @@ async function loadDrama() {
   if (!store.dramaId) return
   try {
     let d = await dramaAPI.get(store.dramaId)
-    d = await backfillDramaStylePromptMetadataIfNeeded(dramaAPI, store.dramaId, d)
+    if (!d.permissions?.collaboration_enabled) d = await backfillDramaStylePromptMetadataIfNeeded(dramaAPI, store.dramaId, d)
     store.setDrama(d)
     // 恢复「故事生成」框的梗概（项目 description 存的是故事梗概）
     storyInput.value = (d.description || '').toString().trim()

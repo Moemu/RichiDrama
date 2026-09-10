@@ -85,8 +85,7 @@ function list(db, query) {
   let sql = 'FROM video_generations WHERE deleted_at IS NULL';
   const params = [];
   if (query.owner_user_id) {
-    sql += ' AND owner_user_id = ?';
-    params.push(Number(query.owner_user_id));
+    sql += ` AND ${require('./projectAccessService').generationPredicate(db, query.owner_user_id, 'video_generations')}`;
   }
   if (query.drama_id) {
     sql += ' AND drama_id = ?';

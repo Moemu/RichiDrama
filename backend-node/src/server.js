@@ -25,7 +25,7 @@ const { createApp } = require('./app.js');
 const { closeDb } = require('./db/index.js');
 const logger = require('./logger.js');
 
-const { app, config } = createApp();
+const { app, config, db } = createApp();
 const port = Number(process.env.PORT) || config.server?.port || 5679;
 const host = config.server?.host || '0.0.0.0';
 
@@ -37,7 +37,10 @@ const server = app.listen(port, host, () => {
   logger.info('Server is ready!');
 });
 
+const collaborationSockets = require('./services/projectCollaborationSocket').attach(server, db);
+
 function shutdown() {
+  for (const socket of collaborationSockets.clients) socket.close(1001, '服务重启');
   logger.info('Shutting down server...');
   server.close(() => {
     closeDb();

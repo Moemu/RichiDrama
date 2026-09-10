@@ -1,4 +1,6 @@
 import request from '@/utils/request'
+import { projectSession, hasPendingProjectText } from '@/composables/useProjectCollaboration'
+import { projectSnapshot } from '@/utils/projectRequestSync'
 
 export const dramaAPI = {
   list(params) {
@@ -17,6 +19,22 @@ export const dramaAPI = {
     return request.delete(`/dramas/${id}`)
   },
   saveEpisodes(id, episodes) {
+    const baseline = projectSnapshot('dramas', Number(id))
+    if (projectSession.enabled && projectSession.id === Number(id) && baseline) {
+      if (!projectSession.connected) return Promise.reject(new Error('连接已断开，请等待重连后保存'))
+      const updates = []; const creates = []; const retained = new Set()
+      for (const episode of episodes) {
+        const existing = (baseline.episodes || []).find(item => episode.id ? item.id === episode.id : item.episode_number === episode.episode_number)
+        if (!existing) { creates.push(episode); continue }
+        retained.add(existing.id)
+        const fields = {}
+        for (const field of ['title', 'script_content', 'description', 'duration']) {
+          if (episode[field] !== undefined && !hasPendingProjectText('episodes', existing.id, field) && JSON.stringify(episode[field] ?? null) !== JSON.stringify(existing[field] ?? null)) fields[field] = episode[field]
+        }
+        if (Object.keys(fields).length) updates.push({ id: existing.id, fields })
+      }
+      return request.patch(`/dramas/${id}/collaboration/episodes`, { updates, creates, remove_ids: (baseline.episodes || []).filter(item => !retained.has(item.id)).map(item => item.id) })
+    }
     return request.put(`/dramas/${id}/episodes`, { episodes })
   },
   saveCharacters(id, data) {

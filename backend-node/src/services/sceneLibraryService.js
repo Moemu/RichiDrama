@@ -32,8 +32,8 @@ function listLibraryItems(db, query, actor = null) {
   const params = [];
   const actorId = libraryOwnership.actorId(actor);
   if (actorId != null) {
-    sql += ' AND (l.drama_id IS NULL OR d.owner_user_id = ?)';
-    params.push(actorId);
+    sql += ' AND (l.drama_id IS NULL OR d.id IN (' + require('./projectAccessService').projectIdsSql(db, actorId) + '))';
+
   }
   if (query.global === '1' || query.global === 1) {
     sql += ' AND l.drama_id IS NULL';

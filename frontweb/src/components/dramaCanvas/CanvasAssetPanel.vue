@@ -27,7 +27,7 @@
       </div>
 
       <div class="form-col">
-        <el-form label-position="left" label-width="44px" size="small" class="panel-form compact-form">
+        <el-form :disabled="projectSession.enabled && !projectSession.canEdit" label-position="left" label-width="44px" size="small" class="panel-form compact-form">
           <template v-if="kind === 'character'">
             <div class="form-row-2">
               <el-form-item label="名称" class="flex-1">
@@ -49,7 +49,7 @@
             </div>
             <el-form-item label="外貌">
               <el-input
-                v-model="form.appearance"
+                v-project-text="{ kind: kind === 'character' ? 'characters' : kind === 'scene' ? 'scenes' : 'props', id: entity?.id, field: 'appearance' }" v-model="form.appearance"
                 type="textarea"
                 :rows="2"
                 resize="vertical"
@@ -58,7 +58,7 @@
             </el-form-item>
             <el-form-item label="简介">
               <el-input
-                v-model="form.description"
+                v-project-text="{ kind: kind === 'character' ? 'characters' : kind === 'scene' ? 'scenes' : 'props', id: entity?.id, field: 'description' }" v-model="form.description"
                 type="textarea"
                 :rows="2"
                 resize="vertical"
@@ -78,7 +78,7 @@
             </div>
             <el-form-item label="描述">
               <el-input
-                v-model="form.prompt"
+                v-project-text="{ kind: kind === 'character' ? 'characters' : kind === 'scene' ? 'scenes' : 'props', id: entity?.id, field: 'prompt' }" v-model="form.prompt"
                 type="textarea"
                 :rows="2"
                 resize="vertical"
@@ -93,7 +93,7 @@
             </el-form-item>
             <el-form-item label="描述">
               <el-input
-                v-model="form.description"
+                v-project-text="{ kind: kind === 'character' ? 'characters' : kind === 'scene' ? 'scenes' : 'props', id: entity?.id, field: 'description' }" v-model="form.description"
                 type="textarea"
                 :rows="2"
                 resize="vertical"
@@ -102,7 +102,7 @@
             </el-form-item>
             <el-form-item label="提示">
               <el-input
-                v-model="form.prompt"
+                v-project-text="{ kind: kind === 'character' ? 'characters' : kind === 'scene' ? 'scenes' : 'props', id: entity?.id, field: 'prompt' }" v-model="form.prompt"
                 type="textarea"
                 :rows="2"
                 resize="vertical"
@@ -132,6 +132,7 @@
 </template>
 
 <script setup>
+import { projectSession } from '@/composables/useProjectCollaboration'
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { characterAPI } from '@/api/characters'

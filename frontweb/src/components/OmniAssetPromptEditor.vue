@@ -6,12 +6,14 @@
     <div
       ref="editorRef"
       class="prompt-rich-editor"
-      contenteditable="true"
+      :contenteditable="!readonly"
       role="textbox"
       aria-multiline="true"
       aria-label="镜头提示词"
       :data-placeholder="placeholder"
       @input="onInput"
+      @compositionstart="startComposition"
+      @compositionend="endComposition"
       @keyup="onCursorChange"
       @click="onCursorChange"
       @focus="onCursorChange"
@@ -50,6 +52,7 @@ import { insertTokenAtOffset } from '@/utils/promptInsertion'
 import { ASSET_POINTER_CANCEL, ASSET_POINTER_DROP, ASSET_POINTER_MOVE } from '@/utils/assetPointerDrag'
 import { assetAliasValues, findAssetMentions, promptAliasForAsset } from '@/utils/assetMentions'
 const props = defineProps({
+  readonly: { type: Boolean, default: false },
   modelValue: { type: String, default: '' },
   /** 全部可选素材（不限于已选）；插入未选中的时会 emit pick 自动加入创作 */
   assets: { type: Array, default: () => [] },
@@ -59,7 +62,10 @@ const props = defineProps({
   referenceDocument: { type: Object, default: () => ({ refs: [] }) },
   placeholder: { type: String, default: '描述你要生成的视频；输入 @ 引用素材，或直接把左侧素材拖入此处' },
 })
-const emit = defineEmits(['update:modelValue', 'pick', 'references'])
+const emit = defineEmits(['update:modelValue', 'pick', 'references', 'compositionstart', 'compositionend'])
+let composing = false
+function startComposition() { composing = true; emit('compositionstart') }
+function endComposition() { composing = false; onInput(); emit('compositionend') }
 const editorRef = ref(null)
 const editorRoot = ref(null)
 const text = ref(props.modelValue)
@@ -101,6 +107,7 @@ const resolvedReferences = ref([])
 const unresolved = ref([])
 
 function onInput() {
+  if (composing || props.readonly) return
   clearLayoutCache()
   text.value = serializeEditor()
   emit('update:modelValue', text.value)
@@ -275,6 +282,7 @@ function serializeNode(node) {
 }
 function serializeEditor() { return [...(editorRef.value?.childNodes || [])].map(serializeNode).join('') }
 function renderEditor(value, force = false) {
+  if (composing) return
   const el = editorRef.value
   if (!el || (!force && document.activeElement === el)) return
   el.replaceChildren()

@@ -21,7 +21,7 @@ function ownedTask(db, taskId, user) {
 
 function getTaskStatus(db, log) {
   return (req, res) => {
-    const task = ownedTask(db, req.params.task_id, req.auth);
+    const task = req.projectAccess ? taskService.getTask(db, req.params.task_id) : ownedTask(db, req.params.task_id, req.auth);
     if (!task) return response.notFound(res, '任务不存在');
     if (task === false) return response.notFound(res, '任务不存在');
     response.success(res, taskService.getTask(db, req.params.task_id));

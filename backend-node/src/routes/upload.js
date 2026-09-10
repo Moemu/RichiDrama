@@ -74,6 +74,7 @@ function routes(cfg, log, db) {
               ? Number(raw)
               : NaN;
           if (Number.isFinite(did) && did > 0) {
+            require('../services/projectAccessService').requireAccess(db, did, req.auth.id, 'edit');
             projectSubdir = storageLayout.getProjectStorageSubdir(db, did);
           }
         }
@@ -96,6 +97,7 @@ function routes(cfg, log, db) {
         });
       } catch (err) {
         log.error('upload image', { error: err.message });
+        if (err.status) return response.error(res, err.status, 'PROJECT_ACCESS_DENIED', err.message);
         response.internalError(res, err.message || '上传失败');
       }
     },
@@ -108,9 +110,7 @@ function routes(cfg, log, db) {
         // A media upload must be owned immediately. Previously global uploads
         // were inserted with a NULL owner, so they were hidden by the library's
         // ownership filter and their subsequent rename/delete calls returned 404.
-        if (dramaId && !db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(dramaId, req.auth.id)) {
-          return response.notFound(res, '项目不存在');
-        }
+        if (dramaId) require('../services/projectAccessService').requireAccess(db, dramaId, req.auth.id, 'edit');
         const asset = await mediaAssetService.upload(db, cfg, log, req.file, {
           ...body,
           drama_id: dramaId,
@@ -119,6 +119,7 @@ function routes(cfg, log, db) {
         response.created(res, { asset });
       } catch (err) {
         log.error('upload media', { error: err.message });
+        if (err.status) return response.error(res, err.status, 'PROJECT_ACCESS_DENIED', err.message);
         response.badRequest(res, err.message || '上传失败');
       }
     },

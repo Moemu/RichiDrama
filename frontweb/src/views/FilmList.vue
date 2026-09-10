@@ -55,6 +55,7 @@
               <label class="record-search"><input v-model.trim="recordQuery" type="search" placeholder="搜索项目名称或描述" /></label>
               <button type="button" class="records-close" aria-label="关闭创作记录" @click="recordsOpen = false">×</button>
             </header>
+            <div class="record-filters" role="group" aria-label="项目关系筛选"><button v-for="scope in [{value:'all',label:'全部'},{value:'owned',label:'我创建的'},{value:'joined',label:'我参与的'}]" :key="scope.value" type="button" :class="{active: membershipFilter === scope.value}" @click="membershipFilter = scope.value">{{ scope.label }}</button></div>
             <div class="record-filters" role="group" aria-label="记录类型筛选">
               <button v-for="filter in recordFilters" :key="filter.value" type="button" :class="{ active: recordFilter === filter.value }" @click="recordFilter = filter.value">{{ filter.label }}</button>
             </div>
@@ -63,11 +64,11 @@
                 <button type="button" class="record-open" @click="openRecord(record)">
                   <span class="record-index">{{ String(index + 1).padStart(2, '0') }}</span>
                   <span class="record-thumb" :class="{ 'has-image': recordCover(record) || recordVideo(record) }"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" loading="lazy" decoding="async" /><video v-else-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><i v-else>{{ record.type === 'drama' ? '剧' : '片' }}</i></span>
-                  <span class="record-title"><small>{{ record.label }}</small><b :title="record.title">{{ record.title }}</b><em>{{ record.description }}</em></span>
+                  <span class="record-title"><small>{{ record.label }}{{ record.type === 'drama' ? ' · ' + ({owner:'负责人',editor:'编辑成员',viewer:'只读成员'}[record.source.permissions?.role] || '负责人') : '' }}</small><b :title="record.title">{{ record.title }}</b><em>{{ record.description }}</em></span>
                   <span class="record-meta">{{ record.meta }}</span><span class="record-arrow">→</span>
                 </button>
                 <div class="record-actions record-actions--panel">
-                  <el-button circle type="danger" plain :icon="Delete" :title="`删除${record.title}`" :aria-label="`删除${record.title}`" @click.stop="record.type === 'drama' ? onDelete(record.source) : deleteOmniProject(record.source)" />
+                  <el-button v-if="record.type !== 'drama' || record.source.permissions?.can_manage !== false" circle type="danger" plain :icon="Delete" :title="`删除${record.title}`" :aria-label="`删除${record.title}`" @click.stop="record.type === 'drama' ? onDelete(record.source) : deleteOmniProject(record.source)" />
                 </div>
               </article>
             </div>
@@ -421,6 +422,7 @@ const defaultHeroVideos = ref([])
 const total = ref(0)
 const recordQuery = ref('')
 const recordFilter = ref('all')
+const membershipFilter = ref('all')
 const recordsOpen = ref(false)
 const heroVideoFailed = ref(false)
 const heroVideoIndex = ref(0)
@@ -630,6 +632,8 @@ const recordFilters = computed(() => [
 const filteredRecords = computed(() => {
   const keyword = recordQuery.value.toLowerCase()
   return allRecords.value.filter(record => {
+    if (membershipFilter.value === 'owned' && record.type === 'drama' && record.source.permissions?.role !== 'owner') return false
+    if (membershipFilter.value === 'joined' && (record.type !== 'drama' || !['editor', 'viewer'].includes(record.source.permissions?.role))) return false
     if (recordFilter.value !== 'all' && record.type !== recordFilter.value) return false
     return !keyword || `${record.title} ${record.description} ${record.label}`.toLowerCase().includes(keyword)
   })

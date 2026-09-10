@@ -1152,6 +1152,16 @@ async function processStoryboardGeneration(db, log, cfg, taskId, episodeId, mode
     taskService.updateTaskStatus(db, taskId, 'processing', 70, '正在保存分镜头...');
 
     // 首次生成保留增量恢复。重新生成只在完整结果可保存后替换旧分镜。
+    if (isRegeneration && require('./projectAccessService').installed(db)
+      && db.prepare('SELECT 1 FROM project_collaboration WHERE drama_id=(SELECT drama_id FROM episodes WHERE id=?)').get(episodeIdNum)
+      && !storyboardSnapshotsMatch(originalStoryboardSnapshot, getActiveStoryboardSnapshot(db, episodeIdNum))) {
+      const project = db.prepare('SELECT drama_id FROM episodes WHERE id=?').get(episodeIdNum);
+      const suggestion = db.prepare(`INSERT INTO project_generated_suggestions (drama_id,entity_kind,entity_id,field,proposed_text,created_at)
+        VALUES (?,'episodes',?,'storyboard_generation',?,?)`).run(project.drama_id, episodeIdNum, JSON.stringify({ storyboards, style, derive_options: deriveOpts }), new Date().toISOString());
+      db.prepare('UPDATE project_collaboration SET revision=revision+1 WHERE drama_id=?').run(project.drama_id);
+      taskService.updateTaskResult(db, taskId, { storyboards: getStoryboardsForEpisode(db, episodeIdNum), suggestion_id: Number(suggestion.lastInsertRowid), requires_application: true }, '分镜已被编辑，生成内容已保留，请比较后应用');
+      return;
+    }
     const saved = isRegeneration
       ? replaceStoryboardsAtomically(
         db, log, episodeId, storyboards, cfg, style, originalStoryboardSnapshot, deriveOpts

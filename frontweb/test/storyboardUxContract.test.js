@@ -84,7 +84,7 @@ test('an empty episode shows one explicit empty state instead of a phantom first
   assert.match(freeCreate, /<section v-else class="empty-shot-workspace"/)
   assert.match(freeCreate, /当前剧集还没有分镜/)
   assert.match(freeCreate, /@click="addShot\(false\)">添加第一个镜头/)
-  assert.match(freeCreate, /:disabled="!currentShot \|\| reproductionMode" @click="addShot\(true\)">当前镜头后添加/)
+  assert.match(freeCreate, /:disabled="[^"]*!currentShot \|\| reproductionMode[^"]*" @click="addShot\(true\)">当前镜头后添加/)
   assert.match(freeCreate, /const workspaceReady = ref\(false\)/)
   assert.match(freeCreate, /finally \{ workspaceReady\.value = true \}/)
 })
@@ -216,7 +216,7 @@ test('asset mention menus are teleported translucent overlays with bounded inter
 
 test('asset drag shows an exact text-boundary caret and rejects whitespace-only lines', () => {
   assert.match(dragPreview, /setDragImage\(transparentPreview, 0, 0\)/)
-  assert.match(freeCreate, /@pointerdown="!reproductionMode && beginAssetPointerDrag\(\$event, promptAssetFor\(asset\)\)"/)
+  assert.match(freeCreate, /@pointerdown="!reproductionMode && \(!projectSession.enabled \|\| projectSession.canEdit\) && beginAssetPointerDrag\(\$event, promptAssetFor\(asset\)\)"/)
   assert.match(pointerDrag, /Math\.hypot\([\s\S]*< 6/)
   assert.match(pointerDrag, /ASSET_POINTER_MOVE/)
   assert.match(pointerDrag, /ASSET_POINTER_DROP/)

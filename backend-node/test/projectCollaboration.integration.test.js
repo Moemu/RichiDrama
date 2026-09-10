@@ -1,0 +1,218 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { once } = require('node:events');
+const Database = require('better-sqlite3');
+const express = require('express');
+const Y = require('yjs');
+const WebSocket = require('ws');
+const { runMigrationsAndEnsure } = require('../src/db/migrate');
+const auth = require('../src/services/authService');
+const { setupRouter } = require('../src/routes');
+const { attach } = require('../src/services/projectCollaborationSocket');
+
+test('project HTTP permissions, concurrent text, copies and restart persistence', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'project-collaboration-'));
+  const cfg = { storage: { type: 'local', local_path: path.join(root, 'storage') }, payments: { enabled: false }, image_proxy: { use_for_video: false }, vendor_lock: { enabled: false } };
+  fs.mkdirSync(cfg.storage.local_path);
+  const log = { info() {}, warn() {}, error() {}, debug() {}, infow() {}, warnw() {}, errorw() {} };
+  let db; let server; let sockets; let base;
+  async function start() {
+    db = new Database(path.join(root, 'test.db'));
+    runMigrationsAndEnsure(db);
+    const app = express(); app.use(express.json({ limit: '4mb' })); app.use('/api/v1', setupRouter(cfg, db, log));
+    app.use('/static', require('../src/middleware/auth').requireAuth(db), (req, res, next) => {
+      const permission = require('../src/services/mediaAuthorizationService').authorizeMediaPath(db, '/static' + req.path, req.auth, { storageRoot: cfg.storage.local_path });
+      return permission.allowed ? next() : res.sendStatus(permission.status);
+    }, express.static(cfg.storage.local_path));
+    server = app.listen(0, '127.0.0.1'); sockets = attach(server, db);
+    await once(server, 'listening');
+    base = `http://127.0.0.1:${server.address().port}/api/v1`;
+  }
+  async function stop() {
+    for (const socket of sockets.clients) socket.terminate();
+    await new Promise(resolve => server.close(resolve)); db.close();
+  }
+  await start();
+  t.after(async () => { await stop(); fs.rmSync(root, { recursive: true, force: true }); });
+  const password = crypto.randomBytes(18).toString('base64');
+  async function request(token, method, route, data, headers = {}) {
+    const res = await fetch(base + route, { method, headers: { 'content-type': 'application/json', 'x-lmd-session': token || '', ...headers }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+    return { status: res.status, body: await res.json() };
+  }
+  async function user(username) {
+    const created = auth.createUser(db, { username, password, display_name: username });
+    const login = await request('', 'POST', '/auth/login', { username, password });
+    assert.equal(login.status, 200);
+    return { id: created.id, token: login.body.data.token };
+  }
+  const owner = await user('project_owner'); const editor = await user('project_editor');
+  const viewer = await user('project_viewer'); const stranger = await user('project_stranger');
+  const legacyId = Number(db.prepare('INSERT INTO dramas (title,owner_user_id,metadata) VALUES (?,?,?)').run('历史私有项目', owner.id, JSON.stringify({ canvas_layout: { viewport: { x: 11, y: 22, zoom: 0.7 } } })).lastInsertRowid);
+  const legacyBefore = (await request(owner.token, 'GET', `/dramas/${legacyId}`)).body.data;
+  assert.equal(legacyBefore.permissions.collaboration_enabled, false);
+  const created = await request(owner.token, 'POST', '/dramas', { title: '共同编辑', description: '开场' });
+  assert.equal(created.status, 201);
+  const id = created.body.data.id;
+  const prefix = `/dramas/${id}`;
+  assert.equal((await request(owner.token, 'PUT', `${prefix}/collaboration/members`, { username: 'project_editor', role: 'editor' })).status, 200);
+  assert.equal((await request(owner.token, 'PUT', `${prefix}/collaboration/members`, { username: 'project_viewer', role: 'viewer' })).status, 200);
+  assert.equal((await request(stranger.token, 'GET', prefix)).status, 404);
+  assert.equal((await request(viewer.token, 'PUT', prefix, { title: '越权' })).status, 403);
+  assert.equal((await request(editor.token, 'DELETE', prefix)).status, 403);
+  assert.equal((await request(editor.token, 'PUT', prefix, { title: '协作项目' })).status, 200);
+  async function uploadImage(token, route, headers = {}) {
+    const form = new FormData();
+    form.set('drama_id', String(id));
+    form.set('file', new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=', 'base64')], { type: 'image/png' }), 'fixture.png');
+    return fetch(base + route, { method: 'POST', headers: { 'x-lmd-session': token, ...headers }, body: form });
+  }
+  assert.equal((await uploadImage(viewer.token, '/upload/image')).status, 403);
+  assert.equal((await uploadImage(viewer.token, '/media/upload')).status, 403);
+  assert.equal((await uploadImage(editor.token, '/upload/image')).status, 200);
+  const uploadOperation = { 'x-project-operation': crypto.randomUUID() };
+  const firstUpload = await (await uploadImage(editor.token, '/upload/image', uploadOperation)).json();
+  assert.deepEqual(await (await uploadImage(editor.token, '/upload/image', uploadOperation)).json(), firstUpload);
+  const listed = await request(editor.token, 'GET', '/dramas?membership=joined');
+  assert.equal(listed.body.data.items[0].permissions.role, 'editor');
+  const read = await request(editor.token, 'GET', `${prefix}/collaboration/text?kind=dramas&id=${id}&field=description`);
+  assert.equal(read.status, 200);
+  const initial = read.body.data;
+  const socketUrl = base.replace(/^http/, 'ws') + `${prefix}/collaboration/socket`;
+  const connect = async token => {
+    const socket = new WebSocket(socketUrl, { origin: new URL(base).origin, headers: { cookie: `lmd_session=${encodeURIComponent(token)}` } });
+    await once(socket, 'open');
+    return socket;
+  };
+  const ownerSocket = await connect(owner.token);
+  const editorSocket = await connect(editor.token);
+  const sendText = (socket, input) => new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+    const timer = setTimeout(() => { socket.off('message', receive); reject(new Error('socket acknowledgement timeout')); }, 3000);
+    const receive = bytes => {
+      const value = JSON.parse(bytes.toString());
+      if (value.request_id !== requestId) return;
+      clearTimeout(timer); socket.off('message', receive); resolve(value);
+    };
+    socket.on('message', receive);
+    socket.send(JSON.stringify({ type: 'text_update', request_id: requestId, ...input }));
+  });
+  const a = new Y.Doc(); const b = new Y.Doc();
+  Y.applyUpdate(a, Buffer.from(initial.state, 'base64')); Y.applyUpdate(b, Buffer.from(initial.state, 'base64'));
+  const vector = Y.encodeStateVector(a);
+  a.getText('content').insert(0, '甲'); b.getText('content').insert(2, '乙');
+  const message = doc => ({ kind: 'dramas', id, field: 'description', epoch: initial.epoch, update: Buffer.from(Y.encodeStateAsUpdate(doc, vector)).toString('base64') });
+  assert.equal((await sendText(ownerSocket, message(a))).type, 'text');
+  assert.equal((await sendText(editorSocket, message(b))).type, 'text');
+  assert.equal((await request(editor.token, 'POST', `${prefix}/collaboration/text`, message(b))).status, 200);
+  assert.equal((await request(viewer.token, 'POST', `${prefix}/collaboration/text`, message(b))).status, 403);
+  assert.equal((await request(owner.token, 'GET', prefix)).body.data.description, '甲开场乙');
+  await request(owner.token, 'PUT', prefix, { description: '替换文本' });
+  const stale = await request(editor.token, 'POST', `${prefix}/collaboration/text`, message(a));
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.error.code, 'DOCUMENT_REPLACED');
+  const version = (await request(owner.token, 'GET', prefix)).body.data.revision;
+  const operation = { 'x-project-operation': crypto.randomUUID(), 'x-project-revision': String(version) };
+  const episodeChange = { creates: [{ episode_number: 1, title: '首集' }] };
+  const firstCreate = await request(editor.token, 'PATCH', `${prefix}/collaboration/episodes`, episodeChange, operation);
+  assert.equal(firstCreate.status, 200);
+  assert.deepEqual((await request(editor.token, 'PATCH', `${prefix}/collaboration/episodes`, episodeChange, operation)).body, firstCreate.body);
+  assert.equal((await request(editor.token, 'PATCH', `${prefix}/collaboration/episodes`, { creates: [{ episode_number: 2 }] }, { ...operation, 'x-project-operation': crypto.randomUUID() })).status, 409);
+  const baseline = require('../src/services/projectCollaborationService').captureTextBaseline(db, id);
+  await request(editor.token, 'PUT', prefix, { description: '人工的新内容' });
+  require('../src/services/billingRequestContext').run({ project_text_baseline: baseline }, () => {
+    db.prepare('UPDATE dramas SET description=? WHERE id=?').run('延迟生成结果', id);
+  });
+  assert.equal((await request(owner.token, 'GET', prefix)).body.data.description, '人工的新内容');
+  const suggestions = await request(editor.token, 'GET', `${prefix}/collaboration/suggestions`);
+  assert.equal(suggestions.body.data[0].proposed_text, '延迟生成结果');
+  const applyRoute = `${prefix}/collaboration/suggestions/${suggestions.body.data[0].id}/apply`;
+  assert.equal((await request(editor.token, 'POST', applyRoute, { expected_text: '过期内容' })).status, 409);
+  assert.equal((await request(editor.token, 'POST', applyRoute, { expected_text: '人工的新内容' })).status, 200);
+  await request(owner.token, 'PUT', prefix, { description: '替换文本' });
+  fs.writeFileSync(path.join(cfg.storage.local_path, 'sample.txt'), 'durable-media-fixture');
+  const source = await request(editor.token, 'POST', '/assets', { name: '独立素材', type: 'audio', local_path: 'sample.txt' });
+  assert.equal(source.status, 201);
+  const copy = await request(editor.token, 'POST', `${prefix}/collaboration/assets`, { asset_id: source.body.data.id });
+  assert.equal(copy.status, 200);
+  assert.notEqual(copy.body.data.local_path, 'sample.txt');
+  const again = await request(editor.token, 'POST', `${prefix}/collaboration/assets`, { asset_id: source.body.data.id });
+  assert.equal(again.body.data.id, copy.body.data.id);
+  const episodeId = (await request(editor.token, 'GET', prefix)).body.data.episodes[0].id;
+  const shot = await request(editor.token, 'POST', '/storyboards', { episode_id: episodeId, title: '素材引用' });
+  assert.equal(shot.status, 201);
+  const shotId = shot.body.data.id;
+  const bound = await request(editor.token, 'PUT', `/storyboards/${shotId}`, { audio_local_path: 'sample.txt' });
+  assert.equal(bound.status, 200);
+  assert.equal((await request(viewer.token, 'GET', `/storyboards/${shotId}`)).body.data.audio_local_path, copy.body.data.local_path);
+  assert.equal((await request(editor.token, 'DELETE', `/assets/${copy.body.data.id}`)).status, 409);
+  assert.equal((await request(viewer.token, 'GET', `/assets/${copy.body.data.id}`)).body.data.usages[0].storyboard_id, shotId);
+  db.prepare('UPDATE storyboards SET audio_local_path=? WHERE id=?').run('sample.txt', shotId);
+  const copyCount = db.prepare('SELECT count(*) count FROM project_asset_copies').get().count;
+  assert.equal((await request(editor.token, 'PUT', `/storyboards/${shotId}`, { title: '保留旧引用', audio_local_path: 'sample.txt' })).status, 200);
+  assert.equal((await request(editor.token, 'GET', `/storyboards/${shotId}`)).body.data.audio_local_path, 'sample.txt');
+  assert.equal(db.prepare('SELECT count(*) count FROM project_asset_copies').get().count, copyCount);
+  const aiClient = require('../src/services/aiClient');
+  const taskService = require('../src/services/taskService');
+  const originalGenerate = aiClient.generateText;
+  const originalStatus = taskService.updateTaskStatus;
+  const originalResult = taskService.updateTaskResult;
+  const originalError = taskService.updateTaskError;
+  let generatedResult;
+  let generatedError;
+  try {
+    aiClient.generateText = async () => {
+      await request(editor.token, 'PUT', `/storyboards/${shotId}`, { title: '生成期间人工修改' });
+      return JSON.stringify([{ shot_number: 1, title: '生成的新分镜', duration: 5, action: '打开信封', characters: [] }]);
+    };
+    taskService.updateTaskStatus = () => {};
+    taskService.updateTaskResult = (_db, _id, result) => { generatedResult = result; };
+    taskService.updateTaskError = (_db, _id, error) => { generatedError = error; };
+    await require('../src/services/episodeStoryboardService').processStoryboardGeneration(db, log, cfg, 'mock-structure', episodeId, 'mock', '', 'fixture', 'fixture', false, false);
+  } finally {
+    aiClient.generateText = originalGenerate;
+    taskService.updateTaskStatus = originalStatus;
+    taskService.updateTaskResult = originalResult;
+    taskService.updateTaskError = originalError;
+  }
+  assert.equal(generatedError, undefined);
+  assert.equal(generatedResult.requires_application, true);
+  assert.equal((await request(editor.token, 'GET', `/storyboards/${shotId}`)).body.data.title, '生成期间人工修改');
+  const proposalRoute = `${prefix}/collaboration/suggestions/${generatedResult.suggestion_id}`;
+  const proposed = (await request(editor.token, 'GET', proposalRoute)).body.data;
+  assert.equal((await request(editor.token, 'POST', `${proposalRoute}/apply`, { expected_text: 'stale' })).status, 409);
+  assert.equal((await request(editor.token, 'POST', `${proposalRoute}/apply`, { expected_text: proposed.current_text })).status, 200);
+  assert.equal((await request(editor.token, 'GET', `/storyboards/${shotId}`)).body.data.title, '生成的新分镜');
+  const removable = (await request(editor.token, 'POST', '/storyboards', { episode_id: episodeId, title: '待删除镜头' })).body.data;
+  const deletedDocument = (await request(editor.token, 'GET', `${prefix}/collaboration/text?kind=storyboards&id=${removable.id}&field=description`)).body.data;
+  const beforeDeleteRevision = (await request(editor.token, 'GET', prefix)).body.data.revision;
+  assert.equal((await request(owner.token, 'DELETE', `/storyboards/${removable.id}`)).status, 200);
+  assert.equal((await request(editor.token, 'POST', `${prefix}/collaboration/text`, { kind: 'storyboards', id: removable.id, field: 'description', epoch: deletedDocument.epoch, update: deletedDocument.state })).status, 404);
+  assert.equal((await request(editor.token, 'PUT', '/storyboards/reorder', { episode_id: episodeId, ids: [removable.id, shotId] }, { 'x-project-operation': crypto.randomUUID(), 'x-project-revision': String(beforeDeleteRevision) })).status, 409);
+  assert.equal((await request(viewer.token, 'GET', `/assets/${copy.body.data.id}`)).status, 200);
+  const mediaRequest = token => fetch(base.replace('/api/v1', '') + '/static/' + copy.body.data.local_path, { headers: { 'x-lmd-session': token } });
+  assert.equal(await (await mediaRequest(viewer.token)).text(), 'durable-media-fixture');
+  assert.equal((await request(viewer.token, 'GET', `/assets/${source.body.data.id}`)).status, 404);
+  await request(editor.token, 'DELETE', `/assets/${source.body.data.id}`);
+  fs.unlinkSync(path.join(cfg.storage.local_path, 'sample.txt'));
+  assert.equal(fs.readFileSync(path.join(cfg.storage.local_path, copy.body.data.local_path), 'utf8'), 'durable-media-fixture');
+  const revoked = once(editorSocket, 'close');
+  assert.equal((await request(owner.token, 'DELETE', `${prefix}/collaboration/members/${editor.id}`)).status, 200);
+  assert.equal((await revoked)[0], 4403);
+  assert.equal((await request(editor.token, 'GET', prefix)).status, 404);
+  assert.equal((await request(editor.token, 'GET', `/assets/${copy.body.data.id}`)).status, 404);
+  assert.equal((await mediaRequest(editor.token)).status, 404);
+  await stop(); await start();
+  const legacyAfter = (await request(owner.token, 'GET', `/dramas/${legacyId}`)).body.data;
+  assert.equal(legacyAfter.title, legacyBefore.title);
+  assert.deepEqual(legacyAfter.metadata, legacyBefore.metadata);
+  assert.equal(legacyAfter.permissions.collaboration_enabled, false);
+  assert.equal((await request(viewer.token, 'GET', `/dramas/${legacyId}`)).status, 404);
+  assert.equal((await request(owner.token, 'GET', prefix)).body.data.description, '替换文本');
+  assert.equal((await request(viewer.token, 'GET', `/assets/${copy.body.data.id}`)).status, 200);
+  assert.equal(await (await mediaRequest(viewer.token)).text(), 'durable-media-fixture');
+  a.destroy(); b.destroy();
+});

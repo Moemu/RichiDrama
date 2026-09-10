@@ -60,17 +60,32 @@ function setupRouter(cfg, db, log) {
   r.patch('/auth/username', auth.changeUsername);
   r.patch('/auth/display-name', auth.changeDisplayName);
   r.use(ownershipGuard(db));
+  r.use(require('../middleware/projectOperations')(db));
+  r.use((req, res, next) => {
+    if (!req.projectAccess?.collaboration_enabled || !['POST', 'PUT', 'PATCH'].includes(req.method) || req.path.includes('/collaboration/')) return next();
+    try {
+      const target = /^\/(storyboards|characters|scenes|props|assets)\/(\d+)\/?$/.exec(req.path);
+      const previous = target && ['PUT', 'PATCH'].includes(req.method)
+        ? db.prepare(`SELECT * FROM ${target[1]} WHERE id=?`).get(Number(target[2])) : null;
+      if (previous) {
+        for (const field of ['omni_asset_ids', 'omni_asset_usage_json']) {
+          try { previous[field] = JSON.parse(previous[field]); } catch (_) {}
+        }
+      }
+      req.body = require('../services/projectAssetService').prepareReferences(db, cfg, log, req.projectAccess.drama_id, req.auth.id, req.body, previous);
+      next();
+    } catch (error) { response.error(res, error.status || 400, 'PROJECT_ASSET_ERROR', error.message); }
+  });
   // A project id supplied to any authenticated business API establishes the
   // default scope for downstream text-model calls.  Direct image/video routes
   // also pass it explicitly, while this covers project subflows such as prompt
   // polishing and extraction without trusting an unverified client id.
   r.use((req, res, next) => {
-    const rawDramaId = req.body?.drama_id ?? req.query?.drama_id;
+    const rawDramaId = req.projectAccess?.drama_id ?? req.body?.drama_id ?? req.query?.drama_id;
     if (rawDramaId == null || rawDramaId === '') return next();
     const dramaId = Number(rawDramaId);
     if (!Number.isInteger(dramaId) || dramaId <= 0) return next();
-    const owned = db.prepare('SELECT 1 FROM dramas WHERE id=? AND owner_user_id=? AND deleted_at IS NULL')
-      .get(dramaId, req.auth.id);
+    const owned = require('../services/projectAccessService').access(db, dramaId, req.auth.id);
     if (!owned) return next();
     const billingRequestContext = require('../services/billingRequestContext');
     return billingRequestContext.run({
@@ -79,6 +94,11 @@ function setupRouter(cfg, db, log) {
       billing_source_kind: 'project_text_generation',
       billing_source_id: String(dramaId),
     }, next);
+  });
+  r.use((req, res, next) => {
+    if (!req.projectAccess?.collaboration_enabled || !/generate|generation|polish|extract|rebuild|infer/.test(req.path) || req.method === 'GET') return next();
+    const context = require('../services/billingRequestContext');
+    return context.run({ ...(context.current() || {}), project_text_baseline: require('../services/projectCollaborationService').captureTextBaseline(db, req.projectAccess.drama_id) }, next);
   });
   const drama = dramaRoutes(db, cfg, log);
   const task = taskRoutes(db, log);
@@ -224,6 +244,7 @@ function setupRouter(cfg, db, log) {
   r.use('/admin', adminRouter);
 
   // ---------- dramas ----------
+  r.use('/dramas/:id/collaboration', require('./projectCollaboration')(db, cfg, log));
   r.get('/dramas', drama.listDramas);
   r.post('/dramas', drama.createDrama);
   r.get('/dramas/stats', drama.getDramaStats);
@@ -303,9 +324,7 @@ function setupRouter(cfg, db, log) {
       const body = req.body || {};
       if (body.drama_id) {
         const dramaId = Number(body.drama_id);
-        const ownsDrama = Number.isInteger(dramaId) && dramaId > 0 && db.prepare(
-          'SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL'
-        ).get(dramaId, req.auth.id);
+        const ownsDrama = Number.isInteger(dramaId) && dramaId > 0 && require('../services/projectAccessService').access(db, dramaId, req.auth.id);
         if (!ownsDrama) return response.notFound(res, '项目不存在或无权限');
         const billingRequestContext = require('../services/billingRequestContext');
         const parentContext = billingRequestContext.current() || {};
@@ -401,8 +420,8 @@ function setupRouter(cfg, db, log) {
   });
 
   // ---------- upload ----------
-  r.post('/upload/image', uploadModule.multerSingle, uploadHandlers.uploadImage);
-  r.post('/media/upload', uploadHandlers.multerMediaSingle, uploadHandlers.uploadMedia);
+  r.post('/upload/image', uploadModule.multerSingle, ownershipGuard(db), require('../middleware/projectOperations')(db), uploadHandlers.uploadImage);
+  r.post('/media/upload', uploadHandlers.multerMediaSingle, ownershipGuard(db), require('../middleware/projectOperations')(db), uploadHandlers.uploadMedia);
   r.get('/upload-limits', (req, res) => response.success(res, require('../services/mediaAssetService').limits()));
   r.get('/video-model-capabilities', omniVideo.capabilities);
   r.get('/omni-video-sequences', omniVideo.listSequences);

@@ -465,7 +465,7 @@ test('剧本工具仍要求项目，自由全能生成允许可选的计费归�
   assert.match(freeCreate, /class="billing-project-field" aria-labelledby="billing-project-title"/)
   assert.match(freeCreate, /仅用于账单归类；不选择也可生成。/)
   assert.match(freeCreate, /\.\.\.\(optionalDramaId \? \{ drama_id: optionalDramaId \} : \{\}\)/)
-  assert.match(freeCreate, /:disabled="!!sequence\?\.drama_id"/)
+  assert.match(freeCreate, /:disabled="[^"]*!!sequence\?\.drama_id[^"]*"/)
   assert.match(freeCreate, /if \(Number\(seq\?\.drama_id\)\) freeProjectId\.value = Number\(seq\.drama_id\)/)
   assert.doesNotMatch(freeCreate, /请选择计费归属项目并补齐生成参数/)
 })
@@ -780,15 +780,14 @@ test('无作品账号使用固定的全局默认媒体资源', async () => {
   assert.doesNotMatch(source, /MediaRecorder|captureStream\(/)
 })
 
-test('单集项目页使用紧凑的制作概览而非展示型大标题', async () => {
+test('项目详情按分集、资源、成果和成员组织制作入口', async () => {
   const source = await readSource('../src/views/DramaDetail.vue')
 
-  assert.match(source, /class="episode-progress-heading"/)
-  assert.match(source, /制作概览/)
-  assert.match(source, /第 \{\{ episodes\[0\]\?\.episode_number/)
-  assert.match(source, /单集概览以“剧集信息 \+ 下一步”成对呈现/)
-  assert.match(source, /episode-next-step h3\{font-size:clamp\(1\.55rem,2\.15vw,2\.35rem\)/)
-  assert.match(source, /episodes-section\.is-single \.episode-grid\{height:auto;min-height:27rem/)
+  assert.match(source, /aria-label="项目工作区"/)
+  for (const label of ['分集', '制作资源', '成果', '成员与设置']) assert.ok(source.includes(`label:'${label}'`))
+  assert.match(source, /<ProjectResults/)
+  assert.match(source, /<ProjectMembers/)
+  assert.match(source, /<ProjectMediaResources/)
 })
 
 test('视频创作界面展示已持久化的任务进度和最近状态说明', async () => {

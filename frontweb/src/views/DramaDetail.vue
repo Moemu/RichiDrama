@@ -24,13 +24,17 @@
     </header>
 
     <main class="main" v-loading="loading">
+      <ProjectCollaborationBar :key="String(drama?.permissions?.collaboration_enabled)" :drama-id="dramaId" @refresh="loadDrama" />
+      <div class="project-summary"><h2>{{ drama?.title }}</h2><p>{{ drama?.description || '从分集开始组织制作内容' }}</p></div>
       <nav class="project-workspace-tabs" aria-label="项目工作区">
-        <button v-for="tab in [{v:'episodes',label:'分集'},{v:'resources',label:'制作资源'},{v:'info',label:'项目设置'}]" :key="tab.v" type="button" :class="{ active: workspaceTab === tab.v }" @click="workspaceTab = tab.v">{{ tab.label }}</button>
+        <button v-for="tab in [{v:'episodes',label:'分集'},{v:'resources',label:'制作资源'},{v:'results',label:'成果'},{v:'info',label:'成员与设置'}]" :key="tab.v" type="button" :class="{ active: workspaceTab === tab.v }" @click="workspaceTab = tab.v">{{ tab.label }}</button>
       </nav>
+      <ProjectResults v-if="workspaceTab === 'results'" :drama-id="dramaId" :episodes="episodes" />
+      <section v-if="workspaceTab === 'info'" class="section card"><ProjectMembers :drama-id="dramaId" :permissions="drama?.permissions || {}" :members="drama?.members || []" @updated="loadDrama" /></section>
       <!-- 基本信息 + 设置 -->
       <section v-show="workspaceTab === 'info'" class="section card info-section">
         <div class="section-title">剧集信息</div>
-        <el-form :model="infoForm" label-width="110px" label-position="left" class="info-form">
+        <el-form :disabled="drama?.permissions?.can_edit === false" :model="infoForm" label-width="110px" label-position="left" class="info-form">
           <el-row :gutter="24">
             <el-col :span="12">
               <el-form-item label="标题">
@@ -98,7 +102,7 @@
             </el-col>
             <el-col :span="24">
               <el-form-item label="故事梗概">
-                <el-input v-model="infoForm.description" type="textarea" :rows="3" placeholder="一句话描述故事梗概" @blur="saveInfo" />
+                <el-input v-project-text="{ kind: 'dramas', id: dramaId, field: 'description' }" v-model="infoForm.description" type="textarea" :rows="3" placeholder="一句话描述故事梗概" @blur="saveInfo" />
               </el-form-item>
             </el-col>
           </el-row>
@@ -110,8 +114,8 @@
         <div class="section-header">
           <div class="section-title">分集列表</div>
           <span class="section-count">共 {{ episodes.length }} 集</span>
-          <EpisodeBatchImportDialog ref="episodeBatchImportDialogRef" :start-episode-number="nextEpisodeNumber" style="margin-left: auto" @import="onBatchImportEpisodes" />
-          <el-button size="small" type="primary" :loading="addingEpisode" @click="onAddEpisode">
+          <EpisodeBatchImportDialog v-if="drama?.permissions?.can_edit !== false" ref="episodeBatchImportDialogRef" :start-episode-number="nextEpisodeNumber" style="margin-left: auto" @import="onBatchImportEpisodes" />
+          <el-button size="small" type="primary" :disabled="drama?.permissions?.can_edit === false" :loading="addingEpisode" @click="onAddEpisode">
             <el-icon><Plus /></el-icon>新增一集
           </el-button>
         </div>
@@ -132,11 +136,12 @@
                   plain
                   circle
                   :icon="Delete"
-                  :loading="deletingEpisodeId === ep.id"
+                  :disabled="drama?.permissions?.can_edit === false" :loading="deletingEpisodeId === ep.id"
                   @click.stop="onDeleteEpisode(ep)"
                 />
               </div>
               <div class="episode-title">{{ ep.title || '未命名' }}</div>
+              <div class="episode-assignee" @click.stop><el-select :model-value="ep.assignee_user_id" :disabled="!drama?.permissions?.can_edit" clearable placeholder="分配负责人" size="small" @change="value => assignEpisode(ep.id, value)"><el-option v-for="member in (drama?.members || []).filter(item => item.role !== 'viewer')" :key="member.id" :value="member.id" :label="member.display_name || member.username" /></el-select></div>
               <div class="episode-preview">{{ (ep.script_content || '').slice(0, 20) || '暂无剧本' }}</div>
               <div class="episode-stats">
                 <span class="ep-stat">
@@ -150,10 +155,6 @@
               </div>
             </div>
           </div>
-          <aside v-if="episodes.length <= 3" class="episode-next-step" aria-labelledby="episode-progress-title">
-            <header class="episode-progress-heading"><div><p>制作概览</p><h3 id="episode-progress-title">第 {{ episodes[0]?.episode_number ?? episodes[0]?.number ?? 1 }} 集进度</h3></div><span class="episode-progress-state">{{ episodes[0]?.status ? epStatusLabel(episodes[0].status) : '待制作' }}</span></header>
-            <div class="episode-next-actions"><button type="button" @click="workspaceTab = 'resources'">准备角色与场景</button><button type="button" class="primary" @click="goEpisode(episodes[0].id)">继续第 {{ episodes[0]?.episode_number ?? episodes[0]?.number ?? 1 }} 集 ↗</button></div>
-          </aside>
         </div>
       </section>
 
@@ -189,7 +190,7 @@
                   </div>
                   <div class="drama-res-desc">{{ (item.description || item.prompt || '').slice(0, 80) }}</div>
                   <div class="drama-res-actions">
-                    <el-button size="small" @click="openEditDramaChar(item)">编辑</el-button>
+                    <el-button :disabled="drama?.permissions?.can_edit === false" size="small" @click="openEditDramaChar(item)">编辑</el-button>
                   </div>
                 </div>
               </div>
@@ -214,7 +215,7 @@
                   </div>
                   <div class="drama-res-desc">{{ (item.description || item.prompt || '').slice(0, 80) }}</div>
                   <div class="drama-res-actions">
-                    <el-button size="small" @click="openEditDramaScene(item)">编辑</el-button>
+                    <el-button :disabled="drama?.permissions?.can_edit === false" size="small" @click="openEditDramaScene(item)">编辑</el-button>
                   </div>
                 </div>
               </div>
@@ -239,7 +240,7 @@
                   </div>
                   <div class="drama-res-desc">{{ (item.description || item.prompt || '').slice(0, 80) }}</div>
                   <div class="drama-res-actions">
-                    <el-button size="small" @click="openEditDramaProp(item)">编辑</el-button>
+                    <el-button :disabled="drama?.permissions?.can_edit === false" size="small" @click="openEditDramaProp(item)">编辑</el-button>
                   </div>
                 </div>
               </div>
@@ -360,9 +361,9 @@
             <el-option label="次要角色" value="minor" />
           </el-select>
         </el-form-item>
-        <el-form-item label="描述"><el-input v-model="editDramaCharForm.description" type="textarea" :rows="3" placeholder="角色背景描述" /></el-form-item>
-        <el-form-item label="性格"><el-input v-model="editDramaCharForm.personality" placeholder="性格特征" /></el-form-item>
-        <el-form-item label="外貌"><el-input v-model="editDramaCharForm.appearance" type="textarea" :rows="2" placeholder="外貌特征（影响图片生成）" /></el-form-item>
+        <el-form-item label="描述"><el-input v-project-text="{ kind: 'characters', id: editDramaCharForm.id, field: 'description' }" v-model="editDramaCharForm.description" type="textarea" :rows="3" placeholder="角色背景描述" /></el-form-item>
+        <el-form-item label="性格"><el-input v-project-text="{ kind: 'characters', id: editDramaCharForm.id, field: 'personality' }" v-model="editDramaCharForm.personality" placeholder="性格特征" /></el-form-item>
+        <el-form-item label="外貌"><el-input v-project-text="{ kind: 'characters', id: editDramaCharForm.id, field: 'appearance' }" v-model="editDramaCharForm.appearance" type="textarea" :rows="2" placeholder="外貌特征（影响图片生成）" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDramaCharVisible = false">取消</el-button>
@@ -388,8 +389,8 @@
         </el-form-item>
         <el-form-item label="地点"><el-input v-model="editDramaSceneForm.location" /></el-form-item>
         <el-form-item label="时间"><el-input v-model="editDramaSceneForm.time" placeholder="如：浅色/夜晚" /></el-form-item>
-        <el-form-item label="描述"><el-input v-model="editDramaSceneForm.description" type="textarea" :rows="3" placeholder="场景描述" /></el-form-item>
-        <el-form-item label="图片提示词"><el-input v-model="editDramaSceneForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
+        <el-form-item label="描述"><el-input v-project-text="{ kind: 'scenes', id: editDramaSceneForm.id, field: 'description' }" v-model="editDramaSceneForm.description" type="textarea" :rows="3" placeholder="场景描述" /></el-form-item>
+        <el-form-item label="图片提示词"><el-input v-project-text="{ kind: 'scenes', id: editDramaSceneForm.id, field: 'prompt' }" v-model="editDramaSceneForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDramaSceneVisible = false">取消</el-button>
@@ -415,8 +416,8 @@
         </el-form-item>
         <el-form-item label="名称"><el-input v-model="editDramaPropForm.name" /></el-form-item>
         <el-form-item label="类型"><el-input v-model="editDramaPropForm.type" placeholder="如：关键道具、背景物件" /></el-form-item>
-        <el-form-item label="描述"><el-input v-model="editDramaPropForm.description" type="textarea" :rows="3" placeholder="道具描述" /></el-form-item>
-        <el-form-item label="图片提示词"><el-input v-model="editDramaPropForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
+        <el-form-item label="描述"><el-input v-project-text="{ kind: 'props', id: editDramaPropForm.id, field: 'description' }" v-model="editDramaPropForm.description" type="textarea" :rows="3" placeholder="道具描述" /></el-form-item>
+        <el-form-item label="图片提示词"><el-input v-project-text="{ kind: 'props', id: editDramaPropForm.id, field: 'prompt' }" v-model="editDramaPropForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDramaPropVisible = false">取消</el-button>
@@ -442,7 +443,7 @@
         </el-form-item>
         <el-form-item label="名称"><el-input v-model="editCharForm.name" /></el-form-item>
         <el-form-item label="分类"><el-input v-model="editCharForm.category" placeholder="可选" /></el-form-item>
-        <el-form-item label="描述"><el-input v-model="editCharForm.description" type="textarea" :rows="3" placeholder="可选" /></el-form-item>
+        <el-form-item label="描述"><el-input v-project-text="{ kind: 'character_libraries', id: editCharForm.id, field: 'description' }" v-model="editCharForm.description" type="textarea" :rows="3" placeholder="可选" /></el-form-item>
         <el-form-item label="标签"><el-input v-model="editCharForm.tags" placeholder="逗号分隔" /></el-form-item>
       </el-form>
       <template #footer>
@@ -470,7 +471,7 @@
         <el-form-item label="地点"><el-input v-model="editSceneForm.location" /></el-form-item>
         <el-form-item label="时间"><el-input v-model="editSceneForm.time" placeholder="如：浅色/夜晚" /></el-form-item>
         <el-form-item label="分类"><el-input v-model="editSceneForm.category" placeholder="可选" /></el-form-item>
-        <el-form-item label="描述"><el-input v-model="editSceneForm.description" type="textarea" :rows="3" placeholder="可选" /></el-form-item>
+        <el-form-item label="描述"><el-input v-project-text="{ kind: 'scene_libraries', id: editSceneForm.id, field: 'description' }" v-model="editSceneForm.description" type="textarea" :rows="3" placeholder="可选" /></el-form-item>
         <el-form-item label="标签"><el-input v-model="editSceneForm.tags" placeholder="逗号分隔" /></el-form-item>
       </el-form>
       <template #footer>
@@ -497,7 +498,7 @@
         </el-form-item>
         <el-form-item label="名称"><el-input v-model="editPropForm.name" /></el-form-item>
         <el-form-item label="分类"><el-input v-model="editPropForm.category" placeholder="可选" /></el-form-item>
-        <el-form-item label="描述"><el-input v-model="editPropForm.description" type="textarea" :rows="3" placeholder="可选" /></el-form-item>
+        <el-form-item label="描述"><el-input v-project-text="{ kind: 'prop_libraries', id: editPropForm.id, field: 'description' }" v-model="editPropForm.description" type="textarea" :rows="3" placeholder="可选" /></el-form-item>
         <el-form-item label="标签"><el-input v-model="editPropForm.tags" placeholder="逗号分隔" /></el-form-item>
       </el-form>
       <template #footer>
@@ -561,6 +562,10 @@
 </template>
 
 <script setup>
+import request from '@/utils/request'
+import ProjectCollaborationBar from '@/components/ProjectCollaborationBar.vue'
+import ProjectMembers from '@/components/ProjectMembers.vue'
+import ProjectResults from '@/components/ProjectResults.vue'
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -888,6 +893,9 @@ function assetImageUrl(item) {
   return item.image_url || ''
 }
 
+async function assignEpisode(id, userId) {
+  try { await request.put(`/dramas/${dramaId}/collaboration/episodes/${id}/assignee`, { user_id: userId || null }); await loadDrama() } catch(error) { ElMessage.error(error.message) }
+}
 async function loadDrama() {
   loading.value = true
   try {
@@ -1553,62 +1561,43 @@ html.light .btn-theme {
   .res-section{padding-top:22px!important}.res-tabbar{margin-inline:-30px;padding-left:30px;background:color-mix(in srgb,var(--bg-page) 26%,transparent)}.res-tab{padding:13px 18px}.drama-res-list{gap:16px}.drama-res-item{padding:14px;border-radius:12px;transition:transform .18s ease,border-color .18s ease}.drama-res-item:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--accent) 48%,var(--border-color))}
 }
 
-/* Project cockpit: one bounded workspace instead of three stacked admin cards. */
-.drama-detail { display:flex; height:100vh; height:100dvh; min-height:0; flex-direction:column; overflow:hidden; }
+
+.drama-detail { display:flex; height:100dvh; min-height:0; flex-direction:column; overflow-y:auto; overflow-x:clip; }
 .drama-detail > .header { position:relative; flex:0 0 auto; }
-.drama-detail > .main { display:grid; grid-template-rows:auto minmax(0,1fr); flex:1; min-height:0; width:100%; max-width:min(1500px,calc(100vw - 3rem)); padding:1.2rem 0; overflow:hidden; }
-.project-workspace-tabs { display:flex; gap:.3rem; align-items:center; padding:.35rem; justify-self:start; border:1px solid var(--border-subtle); border-radius:999px; background:color-mix(in srgb,var(--bg-surface) 84%,transparent); }
-.project-workspace-tabs button { padding:.65rem 1rem; border:0; border-radius:999px; background:transparent; color:var(--text-muted); font-size:.75rem; cursor:pointer; transition:background-color var(--motion-fast,140ms) ease,color var(--motion-fast,140ms) ease; }.project-workspace-tabs button:hover,.project-workspace-tabs button.active { background:var(--text-primary); color:var(--bg-page); }
-.drama-detail .main > .section.card { min-height:0; margin-top:.8rem; padding:clamp(1.2rem,2.5vw,2.4rem); overflow:auto; border-radius:1.1rem; }
-.drama-detail .main > .episodes-section { background:linear-gradient(145deg,color-mix(in srgb,var(--bg-surface) 94%,transparent),color-mix(in srgb,var(--bg-page) 94%,transparent)); }
-.drama-detail .episodes-section .section-title::before { content:'分集'!important; }.drama-detail .info-section .section-title::before { content:'项目'!important; }
-.drama-detail .main > .episodes-section .episode-grid { display:flex; flex-direction:column; align-content:start; gap:0; border-top:1px solid var(--border-color); }.drama-detail .main > .episodes-section .episode-card { display:grid; grid-template-columns:6rem minmax(12rem,1fr) 10rem 7rem; grid-template-rows:auto auto; gap:.35rem 1.2rem; align-items:center; width:100%; min-height:6.7rem; padding:1rem .5rem; border-width:0 0 1px; border-radius:0; background:transparent; box-shadow:none; }.drama-detail .episodes-section .episode-card:hover { transform:none; background:color-mix(in srgb,var(--bg-hover) 42%,transparent); }.drama-detail .episodes-section .episode-card::after,.drama-detail .episodes-section .episode-card::before { display:none; }.drama-detail .episodes-section .episode-card-header { grid-column:1; grid-row:1 / 3; align-self:stretch; flex-direction:column; align-items:flex-start; justify-content:space-between; }.drama-detail .episodes-section .episode-title { grid-column:2; grid-row:1; align-self:end; }.drama-detail .episodes-section .episode-preview { grid-column:2; grid-row:2; align-self:start; }.drama-detail .episodes-section .episode-stats { grid-column:3; grid-row:1 / 3; }.drama-detail .episodes-section .episode-enter { grid-column:4; grid-row:1 / 3; margin:0; padding:0; border:0; }
-.drama-detail .episodes-section .episode-stage { min-height:0; }.drama-detail .episodes-section.is-sparse .episode-stage { display:grid; grid-template-columns:minmax(34rem,1.1fr) minmax(27rem,.9fr); gap:clamp(1.5rem,3vw,3.5rem); height:100%; min-height:0; padding-top:1.2rem; }.drama-detail .episodes-section.is-sparse .episode-grid { align-self:start; border-top:1px solid var(--border-color); }
-.drama-detail .episodes-section.is-single .episode-grid { align-self:stretch; height:100%; border-bottom:1px solid var(--border-color); }.drama-detail .episodes-section.is-single .episode-card { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto minmax(0,1fr) auto auto; height:100%; min-height:0; padding:clamp(1.4rem,3vw,3rem); }.drama-detail .episodes-section.is-single .episode-card-header { grid-column:1/-1; grid-row:1; flex-direction:row; align-items:center; }.drama-detail .episodes-section.is-single .episode-title { grid-column:1/-1; grid-row:2; align-self:end; max-width:13ch; font-size:clamp(2.4rem,4vw,5.2rem); line-height:.9; letter-spacing:-.07em; }.drama-detail .episodes-section.is-single .episode-preview { grid-column:1/-1; grid-row:3; align-self:start; margin-top:1rem; font-size:.9rem; }.drama-detail .episodes-section.is-single .episode-stats { grid-column:1; grid-row:4; align-self:end; margin-top:1.8rem; }.drama-detail .episodes-section.is-single .episode-enter { grid-column:2; grid-row:4; align-self:end; padding:.7rem .9rem; border:1px solid var(--border-strong); border-radius:.5rem; }
-.episode-next-step { display:flex; min-width:0; flex-direction:column; justify-content:space-between; padding:clamp(1.3rem,2.5vw,2.6rem) 0; border-top:1px solid var(--border-color); border-bottom:1px solid var(--border-color); }.episode-next-step p { margin:0 0 1rem; color:var(--accent-teal); font:800 .62rem/1 ui-monospace,monospace; letter-spacing:.15em; }.episode-next-step h3 { margin:0; font-size:clamp(2.7rem,4vw,4.8rem); line-height:.9; letter-spacing:-.07em; }.episode-next-step>div:first-child>span { display:block; max-width:38rem; margin-top:1.2rem; color:var(--text-muted); line-height:1.7; }.episode-pipeline { display:flex; align-items:center; gap:.55rem; color:var(--text-faint); font:700 .6rem/1 ui-monospace,monospace; }.episode-pipeline i { font-style:normal; white-space:nowrap; }.episode-pipeline i.done { color:var(--accent-teal); }.episode-pipeline b { flex:1; height:1px; background:var(--border-color); }.episode-next-step dl { display:grid; grid-template-columns:1.5fr .65fr .65fr; margin:0; border-top:1px solid var(--border-color); border-bottom:1px solid var(--border-color); }.episode-next-step dl div { min-width:0; padding:1rem; border-right:1px solid var(--border-color); }.episode-next-step dl div:last-child { border-right:0; }.episode-next-step dt { color:var(--text-faint); font-size:.6rem; }.episode-next-step dd { overflow:hidden; margin:.5rem 0 0; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }.episode-next-actions { display:flex; gap:.65rem; }.episode-next-actions button { padding:.78rem 1rem; border:1px solid var(--border-strong); border-radius:.5rem; background:transparent; color:var(--text-regular); cursor:pointer; }.episode-next-actions button.primary { border-color:var(--accent); background:var(--accent); color:#fff; }
-.drama-detail .main > .info-section { background:radial-gradient(circle at 90% 5%,color-mix(in srgb,var(--accent) 18%,transparent),transparent 26%),var(--bg-surface); }
-.drama-detail .main > .res-section { display:block; }
-@media(max-width:72rem){.drama-detail .episodes-section.is-sparse .episode-stage{grid-template-columns:1fr}.episode-next-step{display:none}}
-@media(max-width:48rem){.drama-detail>.main{max-width:100%;padding:.75rem}.project-workspace-tabs{width:100%;justify-content:space-between}.project-workspace-tabs button{flex:1;padding:.6rem .5rem}.drama-detail .main>.section.card{margin-top:.65rem;padding:1rem}.drama-detail .main>.episodes-section .episode-card{grid-template-columns:3.7rem minmax(0,1fr) 1rem;min-height:5.8rem;gap:.25rem .7rem}.drama-detail .episodes-section .episode-card-header{grid-column:1}.drama-detail .episodes-section .episode-title,.drama-detail .episodes-section .episode-preview{grid-column:2}.drama-detail .episodes-section .episode-stats{display:none}.drama-detail .episodes-section .episode-enter{grid-column:3;font-size:0}}
-@media(max-width:48rem){
-  .drama-detail .main>.episodes-section{display:flex;flex-direction:column;overflow:hidden}
-  .drama-detail .episodes-section.is-sparse .episode-stage{display:grid;grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr);gap:.8rem;flex:1;height:auto;min-height:0;padding-top:.7rem;overflow:hidden}
-  .drama-detail .episodes-section.is-single .episode-grid{align-self:start;height:auto}
-  .drama-detail .episodes-section.is-single .episode-card{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto auto auto;height:auto;min-height:14rem;padding:1.1rem}
-  .drama-detail .episodes-section.is-single .episode-card-header{grid-column:1/-1;grid-row:1;flex-direction:row;align-items:center}
-  .drama-detail .episodes-section.is-single .episode-title{grid-column:1/-1;grid-row:2;align-self:auto;margin-top:2rem;font-size:2.35rem;line-height:.92}
-  .drama-detail .episodes-section.is-single .episode-preview{grid-column:1/-1;grid-row:3;margin-top:.7rem}
-  .drama-detail .episodes-section.is-single .episode-enter{grid-column:1/-1;grid-row:4;justify-self:start;margin-top:1rem;padding:.55rem .75rem;font-size:.78rem}
-  .drama-detail .episodes-section .episode-next-step{display:grid;grid-template-rows:auto auto auto auto;gap:.7rem;min-height:0;padding:.8rem 0;overflow:hidden}
-  .drama-detail .episodes-section .episode-next-step h3{font-size:1.8rem}.drama-detail .episodes-section .episode-next-step p{margin-bottom:.35rem}
-  .drama-detail .episodes-section .episode-pipeline{gap:.25rem}.drama-detail .episodes-section .episode-next-step dl div{padding:.65rem .45rem}.drama-detail .episodes-section .episode-next-actions button{flex:1;padding:.65rem .5rem}
+.drama-detail > .main { display:block; flex:0 0 auto; min-height:0; width:100%; max-width:min(1500px,calc(100vw - 3rem)); padding:1.2rem 0 3rem; overflow:visible; }
+.project-summary { margin:24px 0; }
+.project-summary h2 { margin:0; font-size:24px; line-height:1.3; overflow-wrap:anywhere; }
+.project-summary p { margin:10px 0 0; max-width:80ch; color:var(--text-muted); line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
+.project-workspace-tabs { display:flex; flex-wrap:wrap; gap:4px; width:fit-content; padding:5px; border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-surface); }
+.project-workspace-tabs button { padding:10px 18px; border:0; border-radius:8px; background:transparent; color:var(--text-muted); font:inherit; font-size:13px; cursor:pointer; }
+.project-workspace-tabs button:hover,.project-workspace-tabs button.active { background:var(--text-primary); color:var(--bg-page); }
+.drama-detail .main > .section.card { margin-top:20px; padding:24px; overflow:visible; border-radius:16px; }
+.drama-detail .section-title::before { content:none!important; }
+.drama-detail .episodes-section .episode-grid { display:flex; flex-direction:column; gap:0; }
+.drama-detail .episodes-section .episode-stage { display:block; height:auto; }
+.drama-detail .episodes-section .episode-card { display:grid; grid-template-columns:65px minmax(160px,1fr) 170px 100px 100px; grid-template-rows:auto auto; align-items:center; gap:8px 20px; width:100%; min-height:110px; height:auto; padding:18px 8px; border:0; border-bottom:1px solid var(--border-subtle); border-radius:0; background:transparent; box-shadow:none; box-sizing:border-box; }
+.drama-detail .episodes-section .episode-card:hover { transform:none; background:var(--bg-raised); }
+.drama-detail .episode-card::before,.drama-detail .episode-card::after { display:none; }
+.drama-detail .episode-card-header { grid-column:1; grid-row:1/3; display:flex; flex-direction:column; align-items:flex-start; justify-content:space-between; gap:12px; }
+.drama-detail .episode-title { grid-column:2; grid-row:1; margin:0; font-size:16px; line-height:1.4; }
+.drama-detail .episode-preview { grid-column:2; grid-row:2; margin:0; line-height:1.5; }
+.drama-detail .episode-assignee { grid-column:3; grid-row:1/3; min-width:0; }
+.drama-detail .episode-stats { grid-column:4; grid-row:1/3; }
+.drama-detail .episode-enter { grid-column:5; grid-row:1/3; margin:0; padding:0; border:0; font-size:12px; }
+.episode-next-step { display:none; }
+.resources-workspace .drama-res-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr)); }
+.resources-workspace .drama-res-item { width:auto; min-width:0; box-sizing:border-box; }
+.resources-workspace .res-section .library-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr)); max-height:none; overflow:visible; }
+.resources-workspace .res-section .library-empty { grid-column:1/-1; }
+.resources-workspace .res-tabbar { margin-inline:0; padding-inline:0; }
+@media(max-width:900px) {
+  .drama-detail > .main { max-width:calc(100vw - 24px); }
+  .drama-detail .main > .section.card { padding:16px; }
+  .drama-detail .episodes-section .episode-card { grid-template-columns:54px minmax(0,1fr) 80px; gap:8px 12px; }
+  .drama-detail .episode-assignee { grid-column:2; grid-row:3; width:170px; max-width:100%; }
+  .drama-detail .episode-stats { grid-column:2; grid-row:4; }
+  .drama-detail .episode-enter { grid-column:3; grid-row:1/4; }
+  .project-workspace-tabs { width:100%; box-sizing:border-box; }
+  .project-workspace-tabs button { flex:1; padding:10px 6px; }
 }
-.drama-detail .episodes-section.is-single .episode-title{max-width:18ch;overflow-wrap:anywhere;font-size:clamp(2rem,3vw,3.8rem);line-height:1;letter-spacing:-.055em}
-/* 单集概览以“剧集信息 + 下一步”成对呈现，避免大字与大片空白割裂项目页。 */
-@media(min-width:72.1rem){
-  .drama-detail .episodes-section.is-single .episode-stage{grid-template-columns:minmax(24rem,.86fr) minmax(31rem,1.14fr);gap:clamp(1.25rem,2.4vw,2.4rem);align-items:stretch;min-height:27rem}
-  .drama-detail .episodes-section.is-single .episode-grid{height:auto;min-height:27rem;border:1px solid var(--border-subtle);border-radius:1rem;background:color-mix(in srgb,var(--bg-raised) 80%,transparent);overflow:hidden}
-  .drama-detail .episodes-section.is-single .episode-card{height:auto;min-height:27rem;padding:clamp(1.35rem,2.6vw,2.4rem);grid-template-rows:auto minmax(0,1fr) auto auto;background:transparent}
-  .drama-detail .episodes-section.is-single .episode-title{align-self:center;max-width:16ch;font-size:clamp(2rem,3vw,3.35rem);line-height:1.04;letter-spacing:-.052em}
-  .drama-detail .episodes-section.is-single .episode-preview{max-width:38ch;margin-top:.7rem;line-height:1.6}
-  .drama-detail .episodes-section.is-single .episode-stats{margin-top:1rem}
-  .episode-next-step{min-height:27rem;padding:clamp(1.35rem,2.6vw,2.4rem);border:1px solid var(--border-subtle);border-radius:1rem;background:color-mix(in srgb,var(--bg-surface) 88%,transparent);box-sizing:border-box}
-  .episode-progress-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
-  .episode-next-step p{margin-bottom:.55rem}
-  .episode-next-step h3{font-size:clamp(1.55rem,2.15vw,2.35rem);line-height:1.08;letter-spacing:-.045em}
-  .episode-progress-heading>div>span{display:block;max-width:34rem;margin-top:.7rem;color:var(--text-muted);font-size:.84rem;line-height:1.6}
-  .episode-progress-state{flex:0 0 auto;padding:.38rem .58rem;border:1px solid color-mix(in srgb,var(--accent-teal) 38%,var(--border-subtle));border-radius:999px;color:var(--accent-teal);font-size:.72rem;font-weight:700;white-space:nowrap}
-  .episode-pipeline{margin-top:1.35rem;padding:.75rem .85rem;border-radius:.65rem;background:color-mix(in srgb,var(--bg-page) 54%,transparent)}
-  .episode-next-step dl{margin-top:1.25rem}
-  .episode-next-actions{margin-top:1.25rem}
-  .episode-next-actions button{min-height:2.7rem}
-}
-.drama-detail.resources-workspace { overflow-y: auto; }
-.drama-detail.resources-workspace > .main { display: block; flex: 0 0 auto; min-height: auto; overflow: visible; }
-.drama-detail.resources-workspace .main > .res-section { overflow: visible; }
-.resources-workspace .drama-res-list { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,300px),1fr)); }
-.resources-workspace .drama-res-item { width: auto; min-width: 0; box-sizing: border-box; }
-.resources-workspace .res-section .library-list { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,300px),1fr)); max-height: none; overflow: visible; }
-.resources-workspace .res-section .library-empty { grid-column: 1 / -1; }
-.resources-workspace .res-tabbar { margin-inline: 0; padding-inline: 0; }
 </style>

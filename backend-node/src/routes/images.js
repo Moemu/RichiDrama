@@ -21,7 +21,7 @@ function routes(db, cfg, log) {
         if (body.layer_decomposition === true) return response.badRequest(res, '当前图片生成接口不支持图层拆分');
         if (!Number.isInteger(Number(body.drama_id)) || Number(body.drama_id) <= 0) return response.badRequest(res, '请选择计费归属项目后再生成');
         if (body.drama_id) {
-          const own = db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id);
+          const own = require('../services/projectAccessService').access(db, Number(body.drama_id), req.auth.id);
           if (!own) return response.notFound(res, '项目不存在');
         }
         if (body.storyboard_id && require('../services/generationSubmissionGuard').findActiveImageForStoryboard(db, {

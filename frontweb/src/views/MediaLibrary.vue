@@ -2,6 +2,7 @@
   <div class="media-library-page">
     <div class="page-header library-header">
       <div class="header-left">
+        <ProjectCollaborationBar v-if="projectDramaId" :drama-id="projectDramaId" />
         <el-button text @click="returnToSource">
           <el-icon><ArrowLeft /></el-icon>
           返回
@@ -10,10 +11,10 @@
       </div>
       <div class="header-actions">
         <AccountBalanceBadge />
-        <el-button type="warning" plain :disabled="!selectedIds.size" @click="batchDelete">批量归档{{ selectedIds.size ? `（${selectedIds.size}）` : '' }}</el-button>
-        <el-button type="danger" plain :disabled="!total" @click="clearLibrary">一键归档{{ projectDramaId ? '项目素材' : '素材库' }}</el-button>
+        <el-button type="warning" plain :disabled="(projectSession.enabled && !projectSession.canEdit) || !selectedIds.size" @click="batchDelete">批量归档{{ selectedIds.size ? `（${selectedIds.size}）` : '' }}</el-button>
+        <el-button type="danger" plain :disabled="(projectSession.enabled && !projectSession.canEdit) || !total" @click="clearLibrary">一键归档{{ projectDramaId ? '项目素材' : '素材库' }}</el-button>
         <el-button plain :disabled="!total || selectingAll" @click="selectAllFiltered">{{ selectingAll ? '正在全选…' : '全选筛选结果' }}</el-button>
-        <el-button type="primary" plain @click="triggerUpload">
+        <el-button type="primary" plain :disabled="projectSession.enabled && !projectSession.canEdit" @click="triggerUpload">
           <el-icon><Upload /></el-icon>
           上传素材
         </el-button>
@@ -99,7 +100,7 @@
       <div v-if="!loading && mediaItems.length === 0" class="empty-media">
         <el-icon class="empty-icon"><Files /></el-icon>
         <div><b>素材库还是空的</b><p>上传后可在创作与分镜中使用。</p></div>
-        <div class="empty-media-actions"><el-button type="primary" @click="triggerUpload"><el-icon><Upload /></el-icon>上传首个素材</el-button><el-button @click="$router.push('/free-create')">先去自由创作</el-button></div>
+        <div class="empty-media-actions"><el-button type="primary" :disabled="projectSession.enabled && !projectSession.canEdit" @click="triggerUpload"><el-icon><Upload /></el-icon>上传首个素材</el-button><el-button @click="$router.push('/free-create')">先去自由创作</el-button></div>
       </div>
     </div>
 
@@ -175,6 +176,8 @@
 </template>
 
 <script setup>
+import ProjectCollaborationBar from '@/components/ProjectCollaborationBar.vue'
+import { projectSession } from '@/composables/useProjectCollaboration'
 import { ref, onMounted, onBeforeUnmount, reactive, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {

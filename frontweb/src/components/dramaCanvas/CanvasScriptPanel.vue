@@ -15,13 +15,13 @@
       </div>
     </div>
 
-    <el-form label-position="left" label-width="44px" size="small" class="compact-form">
+    <el-form :disabled="projectSession.enabled && !projectSession.canEdit" label-position="left" label-width="44px" size="small" class="compact-form">
       <el-form-item label="集标题">
         <el-input v-model="form.title" placeholder="第 N 集" />
       </el-form-item>
       <el-form-item label="剧本">
         <el-input
-          v-model="form.scriptContent"
+          v-project-text="{ kind: 'episodes', id: episode?.id, field: 'script_content' }" v-model="form.scriptContent"
           type="textarea"
           :rows="6"
           resize="vertical"
@@ -37,16 +37,17 @@
     </div>
 
     <div class="panel-actions">
-      <el-button size="small" type="primary" :loading="saving" @click.stop="onSave">保存剧本</el-button>
-      <el-button size="small" :loading="extracting" @click.stop="onExtractChars">提取角色</el-button>
-      <el-button size="small" :loading="extracting" @click.stop="onExtractScenes">提取场景</el-button>
-      <el-button size="small" :loading="extracting" @click.stop="onExtractProps">提取道具</el-button>
-      <el-button size="small" type="warning" :loading="extracting" @click.stop="onExtractAll">一键提取</el-button>
+      <el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" type="primary" :loading="saving" @click.stop="onSave">保存剧本</el-button>
+      <el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" :loading="extracting" @click.stop="onExtractChars">提取角色</el-button>
+      <el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" :loading="extracting" @click.stop="onExtractScenes">提取场景</el-button>
+      <el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" :loading="extracting" @click.stop="onExtractProps">提取道具</el-button>
+      <el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" type="warning" :loading="extracting" @click.stop="onExtractAll">一键提取</el-button>
     </div>
   </div>
 </template>
 
 <script setup>
+import { projectSession } from '@/composables/useProjectCollaboration'
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useCanvasContext } from '@/composables/useCanvasContext'
