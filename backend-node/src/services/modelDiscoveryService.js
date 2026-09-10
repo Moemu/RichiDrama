@@ -2,7 +2,7 @@ const { randomUUID } = require('node:crypto');
 const ai = require('./aiConfigService');
 const catalog = require('./modelCatalogService');
 const billing = require('./billingService');
-const { signedHeaders } = require('./providerPriceService');
+const { signOpenApiRequest } = require('./volcengineOpenApiSigning');
 const capability = require('./modelCapabilityService');
 const providers = require('./providerConnectionService');
 
@@ -107,7 +107,7 @@ async function discover(db, actorId, configId, input = {}) {
       ? { PageNumber: page, PageSize: pageSize, WithPrice: false, WithFreeUsage: false, Filter: { States: ['Available'] } }
       : versionSource ? { FoundationModelName: foundationModel, PageNumber: page, PageSize: pageSize }
       : { PageNumber: page, PageSize: pageSize, ...(value.project_name ? { ProjectName: value.project_name } : {}) };
-    const signed = signedHeaders({ accessKeyId: value.access_key_id, secretAccessKey: value.secret_access_key, region, service: 'ark', action: activations ? 'ListModelActivations' : versionSource ? 'ListFoundationModelVersions' : 'ListEndpoints', version: '2024-01-01', body });
+    const signed = signOpenApiRequest({ accessKeyId: value.access_key_id, secretAccessKey: value.secret_access_key, region, service: 'ark', action: activations ? 'ListModelActivations' : versionSource ? 'ListFoundationModelVersions' : 'ListEndpoints', version: '2024-01-01', body });
     url = signed.url;
     init = { method: 'POST', headers: signed.headers, body: signed.bodyText };
   }

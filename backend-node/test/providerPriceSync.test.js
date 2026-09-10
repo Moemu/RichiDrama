@@ -233,15 +233,10 @@ test('provider models not used by the platform stay only in the sanitized raw re
   } finally { teardown(dbPath); }
 });
 
-test('native OpenAPI signature matches the installed Volcengine signer', () => {
-  const Signer = require('@volcengine/openapi/lib/base/sign').default;
-  const date = new Date('2026-08-31T02:00:00.000Z');
-  const body = { PageNumber: 1, PageSize: 100, WithPrice: true };
-  const native = prices.signedHeaders({ accessKeyId: 'AKLT_TEST_KEY', secretAccessKey: 'TEST_SECRET', region: 'cn-beijing', service: 'ark', action: 'ListModelActivations', version: '2024-01-01', body, date });
-  const request = { pathname: '/', params: { Action: 'ListModelActivations', Version: '2024-01-01' }, region: 'cn-beijing', method: 'POST', body: native.bodyText, headers: { 'Content-Type': 'application/json; charset=utf-8', 'X-Content-Sha256': native.headers['X-Content-Sha256'] } };
-  const signer = new Signer(request, 'ark');
-  signer.addAuthorization({ accessKeyId: 'AKLT_TEST_KEY', secretKey: 'TEST_SECRET' }, date);
-  assert.equal(native.headers.Authorization, request.headers.Authorization);
+test('price signing preserves the existing SDK signature contract', () => {
+  const fixture = require('./fixtures/volcengineOpenApiSignatures.json').cases[0];
+  const signed = prices.signedHeaders({ ...fixture.input, date: new Date(fixture.input.date) });
+  assert.deepEqual(signed, fixture.expected);
 });
 
 test('bill detail reconciliation reads every daily aggregate page', async () => {

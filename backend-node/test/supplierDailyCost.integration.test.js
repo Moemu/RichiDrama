@@ -6,7 +6,8 @@ const rates = require('../src/services/supplierCostRates');
 const activations = require('./helpers/volcengineAliasPrices');
 const ai = require('../src/services/aiConfigService');
 
-test('daily supplier costs use raw prices independently of platform review, retain history, and exclude fixed MediaKit models', async () => {
+test('daily supplier costs use raw prices independently of platform review, retain history, and exclude fixed MediaKit models', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-11T02:00:00.000Z') });
   const f = await modelCatalogFixture(); const originalFetch = global.fetch;
   try {
     seedCostActivity(f.db, f.admin.id);
