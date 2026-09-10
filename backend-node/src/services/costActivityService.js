@@ -38,10 +38,11 @@ SELECT x.*,(SELECT a.created_at FROM billing_transactions a WHERE a.id=x.authori
  (SELECT b.observed_usage_json FROM billing_reconciliation_cases b WHERE b.authorization_id=x.authorization_id AND b.observed_usage_json IS NOT NULL ORDER BY b.created_at DESC LIMIT 1) reconciliation_usage,
  COALESCE((SELECT SUM(-t.amount_micro) FROM billing_transactions t WHERE t.authorization_id=x.authorization_id AND t.type='adjustment'
  AND t.idempotency_key LIKE 'settlement-supplement:'||x.authorization_id||':%'),0) supplement_micro,
- cfg.name config_name
+ cfg.name config_name,d.owner_user_id project_owner_id,owner.username project_owner_username
  FROM activity x LEFT JOIN cost_calls c ON c.id=COALESCE(x.call_id,
  (SELECT cc.id FROM cost_calls cc WHERE cc.authorization_id=x.authorization_id AND cc.origin='live' ORDER BY cc.submitted_at DESC,cc.id DESC LIMIT 1))
- LEFT JOIN cost_revisions r ON r.id=c.latest_revision_id LEFT JOIN ai_service_configs cfg ON cfg.id=c.config_id`;
+ LEFT JOIN cost_revisions r ON r.id=c.latest_revision_id LEFT JOIN ai_service_configs cfg ON cfg.id=c.config_id
+ LEFT JOIN dramas d ON d.id=x.drama_id LEFT JOIN users owner ON owner.id=d.owner_user_id`;
 
 function selection(input) {
   const clauses = [], args = [];
@@ -79,7 +80,8 @@ function present(row) {
     user_name: identity.user_name || row.recorded_user_name || (row.user_id ? `用户 #${row.user_id}` : '未知用户'),
     organization_id: row.organization_id, organization_name: identity.organization_name || row.recorded_organization_name || null,
     customer_kind: row.organization_id ? 'customer' : (log.account_scope || auth.account_scope) === 'personal' ? 'personal' : 'unknown',
-    drama_id: row.drama_id, project_title: row.project_title, source_kind: row.source_kind, service_type: row.service_type,
+    drama_id: row.drama_id, project_title: row.project_title, project_owner_id: row.project_owner_id,
+    project_owner_username: row.project_owner_username, source_kind: row.source_kind, service_type: row.service_type,
     model: log.provider_model || auth.provider_model || row.model, billing_model: row.model, occurred_at: row.occurred_at,
     time_basis: row.status === 'settled' ? 'settlement' : row.call_id ? 'supplier_submission' : 'authorization',
     status: row.status, usage, pricing_context: { ...parse(row.context_json), ...snapshot.pricing_context },
@@ -173,8 +175,13 @@ function activity(db, input = {}) {
     if (summary.calls >= (page - 1) * size && items.length < size) items.push(row);
     add(summary, row);
     const g = group(row, key);
-    if (!groups.has(g.key)) groups.set(g.key, { ...g, ...totals() });
+    if (!groups.has(g.key)) groups.set(g.key, { ...g, ...totals(), owners: [], has_unknown_owner: false });
     if (!groups.get(g.key).label && g.label) groups.get(g.key).label = g.label;
+    const grouped = groups.get(g.key);
+    if (row.project_owner_id == null) grouped.has_unknown_owner = true;
+    else if (!grouped.owners.some(owner => owner.id === row.project_owner_id)) {
+      grouped.owners.push({ id: row.project_owner_id, username: row.project_owner_username || null });
+    }
     add(groups.get(g.key), row);
   }
   return { basis: input.basis === DAILY_BASIS ? DAILY_BASIS : 'billing_activity_v1', ...(input.basis === DAILY_BASIS ? { supplier_prices: supplierSnapshots.status(db) } : {}), generated_at: new Date().toISOString(), timezone: 'Asia/Shanghai', summary,
@@ -213,4 +220,21 @@ function createReport(db, actor, input) {
     return require('./costQueryService').report(db, id);
   })();
 }
-module.exports = { activity, detail, records, createReport };
+function filterOptions(db) {
+  const projects = db.prepare(`WITH candidates AS (
+    SELECT id, title, 1 current FROM dramas
+    UNION ALL SELECT drama_id, project_title_snapshot, 0 FROM billing_usage_logs
+    UNION ALL SELECT drama_id, project_title_snapshot, 0 FROM billing_transactions WHERE type='authorization'
+    UNION ALL SELECT drama_id, project_title, 0 FROM cost_calls WHERE origin='live'
+  ) SELECT id, COALESCE(MAX(CASE WHEN current=1 THEN NULLIF(title,'') END), MAX(NULLIF(title,''))) title
+    FROM candidates WHERE id IS NOT NULL AND id>0 GROUP BY id ORDER BY id DESC`).all();
+  const users = db.prepare(`WITH ids AS (
+    SELECT id FROM users UNION SELECT user_id FROM billing_usage_logs
+    UNION SELECT user_id FROM billing_transactions WHERE type='authorization'
+    UNION SELECT user_id FROM cost_calls WHERE origin='live'
+  ) SELECT ids.id,u.username FROM ids LEFT JOIN users u ON u.id=ids.id
+    WHERE ids.id IS NOT NULL AND ids.id>0 ORDER BY ids.id`).all();
+  return { projects, users };
+}
+
+module.exports = { activity, detail, records, createReport, filterOptions };

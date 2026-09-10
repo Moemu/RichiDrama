@@ -13,6 +13,7 @@ module.exports = function costRoutes(db) {
   const handle = fn => (req, res) => { try { const result = fn(req, res); if (!res.headersSent) response.success(res, result); } catch (error) { response.badRequest(res, error.message); } };
   router.get('/supplier-prices', handle(() => require('../services/supplierCostSnapshotService').status(db)));
   router.post('/supplier-prices/sync', handle(req => require('../services/supplierCostSnapshotService').queue(db, req.auth.id)));
+  router.get('/filter-options', handle(() => activity.filterOptions(db)));
   router.get('/activity', handle(req => activity.activity(db, req.query)));
   router.get('/activity/:id', handle(req => activity.detail(db, req.params.id, req.query)));
   router.get('/summary', handle(req => query.summary(db, req.query)));
