@@ -63,9 +63,13 @@ function updateDrama(db, log) {
 
 function deleteDrama(db, log) {
   return (req, res) => {
-    const ok = dramaService.deleteDrama(db, log, req.params.id);
-    if (!ok) return response.notFound(res, '剧本不存在');
-    response.success(res, { message: '删除成功' });
+    try {
+      const ok = dramaService.deleteDrama(db, log, req.params.id);
+      if (!ok) return response.notFound(res, '剧本不存在');
+      response.success(res, { message: '删除成功' });
+    } catch (error) {
+      response.error(res, error.status || 500, 'PROJECT_DELETE_FAILED', error.status ? error.message : '项目删除失败，请重试');
+    }
   };
 }
 

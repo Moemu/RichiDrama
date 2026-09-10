@@ -1,5 +1,6 @@
 import { hasPendingProjectText, projectSession } from '@/composables/useProjectCollaboration'
 import { projectKind, projectSnapshot, rememberProjectEntity } from './projectSnapshots'
+import { createClientRequestId } from './requestId'
 export { projectSnapshot } from './projectSnapshots'
 
 const equal = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
@@ -16,7 +17,7 @@ export function installProjectRequestSync(request) {
     if (!scoped) return config
     if (!projectSession.connected) throw new Error('协作连接已断开，请等待重连后再执行此操作')
     if (!projectSession.canEdit) throw new Error('当前为只读成员，无法修改项目')
-    config.headers['X-Project-Operation'] ||= crypto.randomUUID()
+    config.headers['X-Project-Operation'] ||= createClientRequestId()
     if (match?.[1] === 'dramas' && match[3] === '/outline' && hasPendingProjectText('dramas', Number(match[2]), 'description')) {
       config.data = { ...config.data }
       delete config.data.summary

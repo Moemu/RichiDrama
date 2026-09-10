@@ -19,6 +19,7 @@ module.exports = function projectRoutes(db, cfg, log) {
     access.requireAccess(db, req.params.id, req.auth.id);
     return access.members(db, req.params.id);
   }));
+  router.post('/transfer', handle(req => require('../services/projectOwnershipService').transferOwnership(db, req.params.id, req.auth.id, req.body.user_id)));
   router.put('/members', handle(req => {
     const permission = access.requireAccess(db, req.params.id, req.auth.id, 'manage');
     if (!permission.collaboration_enabled) throw Object.assign(new Error('请先启用项目协作'), { status: 409 });
@@ -123,7 +124,7 @@ module.exports = function projectRoutes(db, cfg, log) {
     const dramaId = Number(req.params.id);
     const results = [];
     for (const [table, type] of [['image_generations', 'image'], ['video_generations', 'video']]) {
-      results.push(...db.prepare(`SELECT g.id, g.storyboard_id, s.episode_id, g.status, g.local_path, g.created_at,
+      results.push(...db.prepare(`SELECT g.id, g.storyboard_id, s.episode_id, s.title AS storyboard_title, s.storyboard_number, g.status, g.local_path, g.created_at,
         u.display_name creator_name FROM ${table} g LEFT JOIN storyboards s ON s.id=g.storyboard_id
         LEFT JOIN users u ON u.id=g.owner_user_id WHERE g.drama_id=? AND g.deleted_at IS NULL
         ORDER BY g.created_at DESC LIMIT 200`).all(dramaId).map(row => ({ ...row, type })));

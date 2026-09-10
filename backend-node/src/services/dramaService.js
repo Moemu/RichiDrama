@@ -305,7 +305,7 @@ function deleteDrama(db, log, dramaId) {
         WHERE drama_id = ? AND deleted_at IS NULL
           AND status IN ('sd2_waiting','processing','persisting','upscale_pending','upscaling','interpolation_pending','interpolating')`
     ).get(id).c;
-    if (active > 0) throw new Error(`项目还有 ${active} 个生成中的任务，请先等待完成或在全能创作中取消后再删除`);
+    if (active > 0) throw Object.assign(new Error(`项目还有 ${active} 个生成中的任务，请先等待完成或在全能创作中取消后再删除`), { status: 409 });
   }
   const result = db.prepare('UPDATE dramas SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').run(
     new Date().toISOString(),

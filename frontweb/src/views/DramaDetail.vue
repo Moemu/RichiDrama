@@ -115,9 +115,10 @@
         </el-form>
       </section>
       <section v-if="workspaceTab === 'info'" class="section card members-section"><ProjectMembers :drama-id="dramaId" :permissions="drama?.permissions || {}" :members="drama?.members || []" @updated="loadDrama" /></section>
-      </div>
+        </div>
+        <ProjectDangerZone v-if="workspaceTab === 'info'" :drama-id="dramaId" :title="drama?.title || ''" :permissions="drama?.permissions || {}" :members="drama?.members || []" @updated="loadDrama" />
 
-      <!-- 分集列表 -->
+        <!-- 分集列表 -->
       <section v-show="workspaceTab === 'episodes'" class="section card episodes-section" :class="{ 'is-sparse': episodes.length > 0 && episodes.length <= 3, 'is-single': episodes.length === 1 }">
         <div class="section-header">
           <div class="section-title">分集列表</div>
@@ -138,16 +139,6 @@
             >
               <div class="episode-card-header">
                 <span class="episode-num">第 {{ ep.episode_number ?? ep.number ?? '?' }} 集</span>
-                <el-button
-                  size="small"
-                  type="danger"
-                  plain
-                  circle
-                  :icon="Delete"
-                  :aria-label="`删除第 ${ep.episode_number ?? ep.number ?? '?'} 集`"
-                  :disabled="drama?.permissions?.can_edit === false" :loading="deletingEpisodeId === ep.id"
-                  @click.stop="onDeleteEpisode(ep)"
-                />
               </div>
               <div class="episode-title">{{ ep.title || '未命名' }}</div>
               <div class="episode-assignee" @click.stop><el-select :model-value="ep.assignee_user_id" :disabled="!drama?.permissions?.can_edit" clearable placeholder="分配负责人" size="small" @change="value => assignEpisode(ep.id, value)"><el-option v-for="member in (drama?.members || []).filter(item => item.role !== 'viewer')" :key="member.id" :value="member.id" :label="member.display_name || member.username" /></el-select></div>
@@ -158,10 +149,10 @@
                 </span>
                 <span v-if="ep.status" class="ep-stat ep-stat--status" :class="'ep-status--' + ep.status">{{ epStatusLabel(ep.status) }}</span>
               </div>
-              <div class="episode-enter">
+              <div class="episode-actions"><div class="episode-enter">
                 <el-icon class="episode-enter-icon"><VideoPlay /></el-icon>
                 进入制作
-              </div>
+              </div><button type="button" class="episode-delete" :aria-label="`删除第 ${ep.episode_number ?? ep.number ?? '?'} 集`" :disabled="drama?.permissions?.can_edit === false || deletingEpisodeId === ep.id" @click.stop="onDeleteEpisode(ep)"><el-icon><Delete /></el-icon>{{ deletingEpisodeId === ep.id ? '删除中' : '删除' }}</button></div>
             </div>
           </div>
         </div>
@@ -192,8 +183,8 @@
         <template v-if="activeResTab === 'char'">
           <div class="drama-res-list">
             <template v-if="projectResources.length">
-              <div v-for="item in projectResources" :key="item.id" class="drama-res-item">
-                <div class="drama-res-cover" @click="openPreview(assetImageUrl(item))">
+              <div v-for="item in projectResources" :key="item.id" class="drama-res-item" role="button" :tabindex="drama?.permissions?.can_edit === false ? -1 : 0" :aria-label="`编辑${item.name || item.location || resourceLabel}`" :aria-disabled="drama?.permissions?.can_edit === false" @click="openResourceEditor(item)" @keydown.enter.prevent="openResourceEditor(item)" @keydown.space.prevent="openResourceEditor(item)">
+                <div class="drama-res-cover">
                   <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
                   <span v-else class="library-placeholder">暂无图</span>
                 </div>
@@ -203,9 +194,6 @@
                     <el-tag size="small" type="info">{{ item.role === 'main' ? '主角' : item.role === 'supporting' ? '配角' : item.role }}</el-tag>
                   </div>
                   <div class="drama-res-desc">{{ (item.description || item.prompt || '').slice(0, 80) }}</div>
-                  <div class="drama-res-actions">
-                    <el-button :disabled="drama?.permissions?.can_edit === false" size="small" @click="openEditDramaChar(item)">编辑</el-button>
-                  </div>
                 </div>
               </div>
             </template>
@@ -217,8 +205,8 @@
         <template v-if="activeResTab === 'scene'">
           <div class="drama-res-list">
             <template v-if="projectResources.length">
-              <div v-for="item in projectResources" :key="item.id" class="drama-res-item">
-                <div class="drama-res-cover" @click="openPreview(assetImageUrl(item))">
+              <div v-for="item in projectResources" :key="item.id" class="drama-res-item" role="button" :tabindex="drama?.permissions?.can_edit === false ? -1 : 0" :aria-label="`编辑${item.name || item.location || resourceLabel}`" :aria-disabled="drama?.permissions?.can_edit === false" @click="openResourceEditor(item)" @keydown.enter.prevent="openResourceEditor(item)" @keydown.space.prevent="openResourceEditor(item)">
+                <div class="drama-res-cover">
                   <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
                   <span v-else class="library-placeholder">暂无图</span>
                 </div>
@@ -228,9 +216,6 @@
                     <el-tag size="small" type="info">{{ item.time }}</el-tag>
                   </div>
                   <div class="drama-res-desc">{{ (item.description || item.prompt || '').slice(0, 80) }}</div>
-                  <div class="drama-res-actions">
-                    <el-button :disabled="drama?.permissions?.can_edit === false" size="small" @click="openEditDramaScene(item)">编辑</el-button>
-                  </div>
                 </div>
               </div>
             </template>
@@ -242,8 +227,8 @@
         <template v-if="activeResTab === 'prop'">
           <div class="drama-res-list">
             <template v-if="projectResources.length">
-              <div v-for="item in projectResources" :key="item.id" class="drama-res-item">
-                <div class="drama-res-cover" @click="openPreview(assetImageUrl(item))">
+              <div v-for="item in projectResources" :key="item.id" class="drama-res-item" role="button" :tabindex="drama?.permissions?.can_edit === false ? -1 : 0" :aria-label="`编辑${item.name || item.location || resourceLabel}`" :aria-disabled="drama?.permissions?.can_edit === false" @click="openResourceEditor(item)" @keydown.enter.prevent="openResourceEditor(item)" @keydown.space.prevent="openResourceEditor(item)">
+                <div class="drama-res-cover">
                   <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
                   <span v-else class="library-placeholder">暂无图</span>
                 </div>
@@ -253,9 +238,6 @@
                     <el-tag size="small" type="info">{{ item.type }}</el-tag>
                   </div>
                   <div class="drama-res-desc">{{ (item.description || item.prompt || '').slice(0, 80) }}</div>
-                  <div class="drama-res-actions">
-                    <el-button :disabled="drama?.permissions?.can_edit === false" size="small" @click="openEditDramaProp(item)">编辑</el-button>
-                  </div>
                 </div>
               </div>
             </template>
@@ -356,8 +338,10 @@
     <!-- 从素材库导入 -->
     <el-dialog
       v-model="importVisible"
-      :title="`从素材库导入${importType === 'char' ? '角色' : importType === 'scene' ? '场景' : '道具'}`"
+      :title="`选择${importType === 'char' ? '角色' : importType === 'scene' ? '场景' : '道具'}导入`"
       width="min(760px, 94vw)"
+      top="4vh"
+      :close-on-click-modal="!importing" :close-on-press-escape="!importing" :show-close="!importing"
       destroy-on-close
       @open="loadImportList"
     >
@@ -367,8 +351,9 @@
       <p class="import-tip">导入后直接成为本项目的制作资源，保留素材库中的原始条目。</p>
       <div v-if="importError" class="resource-error" role="alert">{{ importError }}<el-button size="small" @click="loadImportList">重试</el-button></div>
       <div v-loading="importLoading" class="library-list import-list">
-        <div v-for="item in importList" :key="item.id" class="library-item">
-          <div class="library-item-cover" @click="openPreview(assetImageUrl(item))">
+        <div v-for="item in importList" :key="item.id" class="library-item import-choice" :class="{ selected: importSelected(item), unavailable: resourceExists(item) }" role="checkbox" :aria-checked="importSelected(item)" :aria-label="item.name || item.location || '未命名素材'" :aria-disabled="resourceExists(item) || importing" :tabindex="resourceExists(item) || importing ? -1 : 0" @click="toggleImport(item)" @keydown.enter.prevent="toggleImport(item)" @keydown.space.prevent="toggleImport(item)">
+          <span class="import-check" aria-hidden="true">{{ importSelected(item) ? '✓' : '' }}</span>
+          <div class="library-item-cover">
             <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
             <span v-else class="library-placeholder">暂无图</span>
           </div>
@@ -377,9 +362,7 @@
               {{ importType === 'scene' ? (item.location || item.time || '未命名') : (item.name || '未命名') }}
             </div>
             <div class="library-item-desc">{{ (item.description || item.prompt || '').slice(0, 80) }}</div>
-            <div class="library-item-actions">
-              <el-button size="small" type="primary" :loading="importingId === item.id" :disabled="resourceExists(item) || importingId !== null || drama?.permissions?.can_edit === false" @click="doImport(item)">{{ resourceExists(item) ? '项目中已存在' : '导入' }}</el-button>
-            </div>
+            <small v-if="resourceExists(item)" class="import-existing">项目中已存在</small>
           </div>
         </div>
         <div v-if="!importLoading && !importError && importList.length === 0" class="library-empty">素材库暂无内容</div>
@@ -396,7 +379,9 @@
         />
       </div>
       <template #footer>
-        <el-button @click="importVisible = false">关闭</el-button>
+        <span class="import-selection-count">已选择 {{ importSelection.length }} 项</span>
+        <el-button :disabled="importing" @click="importVisible = false">取消</el-button>
+        <el-button type="primary" :loading="importing" :disabled="!importSelection.length || drama?.permissions?.can_edit === false" @click="importSelectedResources">导入所选</el-button>
       </template>
     </el-dialog>
 
@@ -418,6 +403,7 @@ import request from '@/utils/request'
 import ProjectCollaborationBar from '@/components/ProjectCollaborationBar.vue'
 import ProjectMembers from '@/components/ProjectMembers.vue'
 import ProjectResults from '@/components/ProjectResults.vue'
+import ProjectDangerZone from '@/components/ProjectDangerZone.vue'
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -704,7 +690,7 @@ async function loadDrama() {
   loading.value = true
   try {
     let d = await dramaAPI.get(dramaId)
-    d = await backfillDramaStylePromptMetadataIfNeeded(dramaAPI, dramaId, d)
+    if (!d.permissions?.collaboration_enabled) d = await backfillDramaStylePromptMetadataIfNeeded(dramaAPI, dramaId, d)
     drama.value = d
     episodes.value = d.episodes || []
     infoForm.title = d.title || ''
@@ -841,6 +827,11 @@ function selectResourceTab(tab) {
   resourceKeyword.value = ''
   router.replace({ query: { ...route.query, tab: 'resources', resource: tab } })
 }
+function openResourceEditor(item) {
+  if (drama.value?.permissions?.can_edit === false) return
+  const open = { char: openEditDramaChar, scene: openEditDramaScene, prop: openEditDramaProp }[activeResTab.value]
+  open?.(item)
+}
 const previewUrl = ref(null)
 function openPreview(url) { if (url) previewUrl.value = url }
 
@@ -854,11 +845,13 @@ const importPage = ref(1)
 const importPageSize = ref(20)
 const importTotal = ref(0)
 const importKw = ref('')
-const importingId = ref(null)
+const importing = ref(false)
+const importSelection = ref([])
 let importKwTimer = null
 
 function openImport(type) {
   importType.value = type
+  importSelection.value = []
   importKw.value = ''
   importPage.value = 1
   importVisible.value = true
@@ -887,17 +880,28 @@ function resourceExists(item) {
   return (rows || []).some(row => (importType.value === 'scene' ? row.location : row.name) === name)
 }
 
-async function doImport(item) {
-  if (importingId.value || resourceExists(item) || drama.value?.permissions?.can_edit === false) return
-  importingId.value = item.id
+function importSelected(item) { return importSelection.value.some(row => row.id === item.id) }
+function toggleImport(item) {
+  if (importing.value || resourceExists(item) || drama.value?.permissions?.can_edit === false) return
+  importSelection.value = importSelected(item) ? importSelection.value.filter(row => row.id !== item.id) : [...importSelection.value, item]
+}
+async function importSelectedResources() {
+  if (importing.value || !importSelection.value.length || drama.value?.permissions?.can_edit === false) return
+  importing.value = true
+  let imported = 0
   try {
-    await dramaAPI.importResource(dramaId, { type: resourceKinds[importType.value], library_id: item.id })
-    await loadDrama()
-    ElMessage.success('已添加到本项目制作资源')
+    for (const item of [...importSelection.value]) {
+      await dramaAPI.importResource(dramaId, { type: resourceKinds[importType.value], library_id: item.id })
+      importSelection.value = importSelection.value.filter(row => row.id !== item.id)
+      imported++
+      await loadDrama()
+    }
+    importVisible.value = false
+    ElMessage.success(`已导入 ${imported} 项制作资源`)
   } catch (error) {
-    ElMessage.error(error.message || '导入失败')
+    ElMessage.error(`${imported ? `已导入 ${imported} 项。` : ''}${error.message || '导入失败'}，其余选择已保留`)
   } finally {
-    importingId.value = null
+    importing.value = false
   }
 }
 
@@ -1311,4 +1315,21 @@ html.light .btn-theme {
   .project-workspace-tabs { width:100%; gap:4px; box-sizing:border-box; }
   .project-workspace-tabs button { flex:1; padding:12px 4px; white-space:nowrap; font-size:13px; }
 }
+.drama-detail .episode-actions { grid-column:5; grid-row:1/3; display:flex; flex-direction:column; align-items:flex-end; gap:14px; }
+.drama-detail .episode-actions .episode-enter { display:flex; align-items:center; gap:5px; }
+.episode-delete { display:inline-flex; align-items:center; gap:5px; margin:0; padding:0; border:0; background:none; color:var(--el-color-danger); font:inherit; font-size:13px; cursor:pointer; }
+.episode-delete:disabled { opacity:.4; cursor:not-allowed; }
+.episode-delete:focus-visible,.drama-res-item:focus-visible,.import-choice:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.drama-res-item[role="button"] { cursor:pointer; }
+.drama-res-item[aria-disabled="true"] { cursor:default; }
+.drama-res-item[role="button"]:hover { border-color:var(--accent); }
+.import-choice { cursor:pointer; }
+.import-list { max-height:min(42dvh,420px); overflow-y:auto; }
+.import-choice.selected { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 12%,var(--bg-surface)); }
+.import-choice.unavailable { opacity:.55; cursor:default; }
+.import-check { display:grid; place-items:center; flex-shrink:0; width:20px; height:20px; border:1px solid var(--border-subtle); border-radius:5px; color:white; }
+.selected .import-check { background:var(--accent); border-color:var(--accent); }
+.import-existing { color:var(--text-muted); }
+.import-selection-count { margin-right:16px; font-size:13px; color:var(--text-muted); }
+@media(max-width:900px) { .drama-detail .episode-actions { grid-column:3; grid-row:1/5; } }
 </style>

@@ -1,6 +1,7 @@
 import { reactive, watch, onScopeDispose } from 'vue'
 import * as Y from 'yjs'
 import request from '@/utils/request'
+import { createClientRequestId } from '@/utils/requestId'
 
 export const projectSession = reactive({ id: null, enabled: false, connected: false, canEdit: false, revision: 0, participants: [], pending: 0, error: '', drafts: [] })
 let socket
@@ -31,7 +32,7 @@ function acceptText(message) {
 
 function send(input) {
   if (!socket || socket.readyState !== WebSocket.OPEN) return Promise.reject(new Error('协作连接已断开，请稍后重试'))
-  const request_id = crypto.randomUUID()
+  const request_id = createClientRequestId()
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { requests.delete(request_id); reject(new Error('协作保存未确认，请保留页面等待重连')) }, 15000)
     requests.set(request_id, { resolve, reject, timer })
