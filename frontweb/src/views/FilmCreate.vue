@@ -643,14 +643,14 @@
         </el-form-item>
         <el-form-item label="外貌描述">
           <div class="character-field-stack">
-            <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-project-text="{ kind: 'characters', id: editCharacterForm.id, field: 'appearance' }" v-model="editCharacterForm.appearance" type="textarea" :autosize="{ minRows: 4, maxRows: 10 }" placeholder="外貌描述（尽量详细）" />
+            <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editCharacterForm.appearance" type="textarea" :autosize="{ minRows: 4, maxRows: 10 }" placeholder="外貌描述（尽量详细）" />
             <div class="character-field-actions">
               <el-button v-if="characterDescriptionSourceLabel" size="small" :loading="extractingCharAppearance" @click="extractEditCharacterDescription">{{ characterDescriptionSourceLabel }}</el-button>
             </div>
           </div>
         </el-form-item>
         <el-form-item label="简介">
-          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-project-text="{ kind: 'characters', id: editCharacterForm.id, field: 'description' }" v-model="editCharacterForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="角色背景简介" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editCharacterForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="角色背景简介" />
         </el-form-item>
         <el-form-item v-if="editCharacterForm.id" label="音色参考">
           <div class="character-inline-control">
@@ -668,7 +668,7 @@
           <div style="width:100%">
             <div class="character-field-help">最终提示词，可修改</div>
             <el-input
-              v-project-text="{ kind: 'characters', id: editCharacterForm.id, field: 'polished_prompt' }" v-model="editCharacterForm.polished_prompt"
+              v-model="editCharacterForm.polished_prompt"
               type="textarea"
               :autosize="{ minRows: 5, maxRows: 16 }"
               :placeholder="editCharacterPromptGenerating ? 'AI 正在生成提示词，请稍候…' : '点击「重新生成提示词」由 AI 自动生成，或直接在此输入'"
@@ -798,7 +798,7 @@
           <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editPropForm.type" placeholder="如：物品、建筑" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-project-text="{ kind: 'props', id: editPropForm.id, field: 'description' }" v-model="editPropForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="道具描述" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editPropForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="道具描述" />
         </el-form-item>
         <el-form-item label="图生提示词">
           <div style="width:100%">
@@ -807,7 +807,7 @@
               <el-button size="small" :loading="editPropPromptGenerating" @click="doGeneratePropPrompt">重新生成提示词</el-button>
             </div>
             <el-input
-              v-project-text="{ kind: 'props', id: editPropForm.id, field: 'prompt' }" v-model="editPropForm.prompt"
+              v-model="editPropForm.prompt"
               type="textarea"
               :autosize="{ minRows: 5, maxRows: 16 }"
               :placeholder="editPropPromptGenerating ? 'AI 正在生成提示词，请稍候…' : '点击「重新生成提示词」由 AI 自动生成，或直接在此输入'"
@@ -858,7 +858,7 @@
           <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editSceneForm.time" placeholder="如：白天、傍晚" />
         </el-form-item>
         <el-form-item label="场景描述">
-          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-project-text="{ kind: 'scenes', id: editSceneForm.id, field: 'prompt' }" v-model="editSceneForm.prompt" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="场景的简要描述，供 AI 生成四视图时参考" />
+          <el-input :disabled="projectSession.enabled && !projectSession.canEdit" v-model="editSceneForm.prompt" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="场景的简要描述，供 AI 生成四视图时参考" />
         </el-form-item>
         <el-form-item v-if="editSceneForm.id">
           <template #label>
@@ -870,7 +870,7 @@
               <el-button size="small" :loading="editScenePromptGenerating" @click="doGenerateSceneSinglePrompt">重新生成提示词</el-button>
             </div>
             <el-input
- :disabled="projectSession.enabled && !projectSession.canEdit"              v-project-text="{ kind: 'scenes', id: editSceneForm.id, field: 'polished_prompt_single' }" v-model="editSceneForm.polished_prompt_single"
+ :disabled="projectSession.enabled && !projectSession.canEdit"              v-model="editSceneForm.polished_prompt_single"
               type="textarea"
               :autosize="{ minRows: 5, maxRows: 16 }"
               placeholder="单图场景提示词，点击场景列表的「AI 生成」按钮（不勾选四宫格）后会自动生成"
@@ -888,7 +888,7 @@
               <el-button size="small" :loading="editScenePromptGenerating" @click="doGenerateScenePrompt">重新生成提示词</el-button>
             </div>
             <el-input
-              v-project-text="{ kind: 'scenes', id: editSceneForm.id, field: 'polished_prompt' }" v-model="editSceneForm.polished_prompt"
+              v-model="editSceneForm.polished_prompt"
               type="textarea"
               :autosize="{ minRows: 5, maxRows: 16 }"
               :placeholder="editScenePromptGenerating ? 'AI 正在生成四视图提示词，请稍候…' : '点击「重新生成提示词」由 AI 自动生成，或直接在此输入'"
@@ -993,7 +993,7 @@
           <el-input v-model="editCharLibraryForm.category" placeholder="可选" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-project-text="{ kind: 'character_libraries', id: editCharLibraryForm.id, field: 'description' }" v-model="editCharLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
+          <el-input v-model="editCharLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
         </el-form-item>
         <el-form-item label="标签">
           <el-input v-model="editCharLibraryForm.tags" placeholder="可选，逗号分隔" />
@@ -1073,7 +1073,7 @@
           <el-input v-model="editPropLibraryForm.category" placeholder="可选" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-project-text="{ kind: 'prop_libraries', id: editPropLibraryForm.id, field: 'description' }" v-model="editPropLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
+          <el-input v-model="editPropLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
         </el-form-item>
         <el-form-item label="标签">
           <el-input v-model="editPropLibraryForm.tags" placeholder="可选，逗号分隔" />
@@ -1156,7 +1156,7 @@
           <el-input v-model="editSceneLibraryForm.category" placeholder="可选" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-project-text="{ kind: 'scene_libraries', id: editSceneLibraryForm.id, field: 'description' }" v-model="editSceneLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
+          <el-input v-model="editSceneLibraryForm.description" type="textarea" :rows="3" placeholder="可选" />
         </el-form-item>
         <el-form-item label="标签">
           <el-input v-model="editSceneLibraryForm.tags" placeholder="可选，逗号分隔" />

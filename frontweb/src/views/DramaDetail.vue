@@ -271,9 +271,9 @@
             <el-option label="次要角色" value="minor" />
           </el-select>
         </el-form-item>
-        <el-form-item label="描述"><el-input v-project-text="{ kind: 'characters', id: editDramaCharForm.id, field: 'description' }" v-model="editDramaCharForm.description" type="textarea" :rows="3" placeholder="角色背景描述" /></el-form-item>
-        <el-form-item label="性格"><el-input v-project-text="{ kind: 'characters', id: editDramaCharForm.id, field: 'personality' }" v-model="editDramaCharForm.personality" placeholder="性格特征" /></el-form-item>
-        <el-form-item label="外貌"><el-input v-project-text="{ kind: 'characters', id: editDramaCharForm.id, field: 'appearance' }" v-model="editDramaCharForm.appearance" type="textarea" :rows="2" placeholder="外貌特征（影响图片生成）" /></el-form-item>
+        <el-form-item label="描述"><el-input v-model="editDramaCharForm.description" type="textarea" :rows="3" placeholder="角色背景描述" /></el-form-item>
+        <el-form-item label="性格"><el-input v-model="editDramaCharForm.personality" placeholder="性格特征" /></el-form-item>
+        <el-form-item label="外貌"><el-input v-model="editDramaCharForm.appearance" type="textarea" :rows="2" placeholder="外貌特征（影响图片生成）" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDramaCharVisible = false">取消</el-button>
@@ -299,8 +299,8 @@
         </el-form-item>
         <el-form-item label="地点"><el-input v-model="editDramaSceneForm.location" /></el-form-item>
         <el-form-item label="时间"><el-input v-model="editDramaSceneForm.time" placeholder="如：浅色/夜晚" /></el-form-item>
-        <el-form-item label="描述"><el-input v-project-text="{ kind: 'scenes', id: editDramaSceneForm.id, field: 'description' }" v-model="editDramaSceneForm.description" type="textarea" :rows="3" placeholder="场景描述" /></el-form-item>
-        <el-form-item label="图片提示词"><el-input v-project-text="{ kind: 'scenes', id: editDramaSceneForm.id, field: 'prompt' }" v-model="editDramaSceneForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
+        <el-form-item label="描述"><el-input v-model="editDramaSceneForm.description" type="textarea" :rows="3" placeholder="场景描述" /></el-form-item>
+        <el-form-item label="图片提示词"><el-input v-model="editDramaSceneForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDramaSceneVisible = false">取消</el-button>
@@ -326,8 +326,8 @@
         </el-form-item>
         <el-form-item label="名称"><el-input v-model="editDramaPropForm.name" /></el-form-item>
         <el-form-item label="类型"><el-input v-model="editDramaPropForm.type" placeholder="如：关键道具、背景物件" /></el-form-item>
-        <el-form-item label="描述"><el-input v-project-text="{ kind: 'props', id: editDramaPropForm.id, field: 'description' }" v-model="editDramaPropForm.description" type="textarea" :rows="3" placeholder="道具描述" /></el-form-item>
-        <el-form-item label="图片提示词"><el-input v-project-text="{ kind: 'props', id: editDramaPropForm.id, field: 'prompt' }" v-model="editDramaPropForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
+        <el-form-item label="描述"><el-input v-model="editDramaPropForm.description" type="textarea" :rows="3" placeholder="道具描述" /></el-form-item>
+        <el-form-item label="图片提示词"><el-input v-model="editDramaPropForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDramaPropVisible = false">取消</el-button>
@@ -399,6 +399,7 @@
 </template>
 
 <script setup>
+import { captureProjectEdit } from '@/utils/projectSnapshots'
 import request from '@/utils/request'
 import ProjectCollaborationBar from '@/components/ProjectCollaborationBar.vue'
 import ProjectMembers from '@/components/ProjectMembers.vue'
@@ -453,6 +454,7 @@ const episodeBatchImportDialogRef = ref(null)
 
 function openEditDramaChar(item) {
   editDramaCharForm.value = {
+    requestConfig: captureProjectEdit('characters', item.id),
     id: item.id, name: item.name ?? '', role: item.role ?? 'minor',
     description: item.description ?? '', personality: item.personality ?? '',
     appearance: item.appearance ?? '',
@@ -471,7 +473,7 @@ async function saveDramaChar() {
       description: editDramaCharForm.value.description || null,
       personality: editDramaCharForm.value.personality || null,
       appearance: editDramaCharForm.value.appearance || null,
-    })
+    }, editDramaCharForm.value.requestConfig)
     ElMessage.success('已保存')
     editDramaCharVisible.value = false
     loadDrama()
@@ -525,6 +527,7 @@ async function generateDramaCharImg() {
 
 function openEditDramaScene(item) {
   editDramaSceneForm.value = {
+    requestConfig: captureProjectEdit('scenes', item.id),
     id: item.id, location: item.location ?? '', time: item.time ?? '',
     description: item.description ?? '', prompt: item.prompt ?? '',
     image_url: item.image_url ?? '', local_path: item.local_path ?? null,
@@ -541,7 +544,7 @@ async function saveDramaScene() {
       time: editDramaSceneForm.value.time || null,
       description: editDramaSceneForm.value.description || null,
       prompt: editDramaSceneForm.value.prompt || null,
-    })
+    }, editDramaSceneForm.value.requestConfig)
     ElMessage.success('已保存')
     editDramaSceneVisible.value = false
     loadDrama()
@@ -597,6 +600,7 @@ async function generateDramaSceneImg() {
 
 function openEditDramaProp(item) {
   editDramaPropForm.value = {
+    requestConfig: captureProjectEdit('props', item.id),
     id: item.id, name: item.name ?? '', type: item.type ?? '',
     description: item.description ?? '', prompt: item.prompt ?? '',
     image_url: item.image_url ?? '', local_path: item.local_path ?? null,
@@ -613,7 +617,7 @@ async function saveDramaProp() {
       type: editDramaPropForm.value.type || null,
       description: editDramaPropForm.value.description || null,
       prompt: editDramaPropForm.value.prompt || null,
-    })
+    }, editDramaPropForm.value.requestConfig)
     ElMessage.success('已保存')
     editDramaPropVisible.value = false
     loadDrama()

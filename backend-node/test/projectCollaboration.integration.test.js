@@ -200,6 +200,16 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
   fs.unlinkSync(path.join(cfg.storage.local_path, 'sample.txt'));
   assert.equal(fs.readFileSync(path.join(cfg.storage.local_path, copy.body.data.local_path), 'utf8'), 'durable-media-fixture');
   const revoked = once(editorSocket, 'close');
+  const layoutBaseline = (await request(owner.token, 'GET', prefix)).body.data.revision;
+  const layoutHeaders = revision => ({ 'x-project-operation': crypto.randomUUID(), 'x-project-revision': String(revision) });
+  const collaboratorLayout = { version: 1, nodes: { a: { x: 100, y: 0 }, b: { x: 0, y: 0 } } };
+  assert.equal((await request(editor.token, 'PUT', `${prefix}/canvas-layout`, { canvas_layout: collaboratorLayout }, layoutHeaders(layoutBaseline))).status, 200);
+  const staleLayout = { version: 1, nodes: { a: { x: 0, y: 0 }, b: { x: 100, y: 0 } } };
+  assert.equal((await request(owner.token, 'PUT', `${prefix}/canvas-layout`, { canvas_layout: staleLayout }, layoutHeaders(layoutBaseline))).status, 409);
+  const refreshedLayout = (await request(owner.token, 'GET', prefix)).body.data;
+  assert.deepEqual(refreshedLayout.metadata.canvas_layout.nodes, collaboratorLayout.nodes);
+  const mergedLayout = { version: 1, nodes: { a: { x: 100, y: 0 }, b: { x: 100, y: 0 } } };
+  assert.equal((await request(owner.token, 'PUT', `${prefix}/canvas-layout`, { canvas_layout: mergedLayout }, layoutHeaders(refreshedLayout.revision))).status, 200);
   assert.equal((await request(owner.token, 'DELETE', `${prefix}/collaboration/members/${editor.id}`)).status, 200);
   assert.equal((await revoked)[0], 4403);
   assert.equal((await request(editor.token, 'GET', prefix)).status, 404);
@@ -212,6 +222,7 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
   assert.equal(legacyAfter.permissions.collaboration_enabled, false);
   assert.equal((await request(viewer.token, 'GET', `/dramas/${legacyId}`)).status, 404);
   assert.equal((await request(owner.token, 'GET', prefix)).body.data.description, '替换文本');
+  assert.deepEqual((await request(owner.token, 'GET', prefix)).body.data.metadata.canvas_layout.nodes, mergedLayout.nodes);
   assert.equal((await request(viewer.token, 'GET', `/assets/${copy.body.data.id}`)).status, 200);
   assert.equal(await (await mediaRequest(viewer.token)).text(), 'durable-media-fixture');
   a.destroy(); b.destroy();

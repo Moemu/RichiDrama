@@ -10,8 +10,8 @@ export const characterLibraryAPI = {
   create(data) {
     return request.post('/character-library', data)
   },
-  update(id, data) {
-    return request.put(`/character-library/${id}`, data)
+  update(id, data, config) {
+    return request.put(`/character-library/${id}`, data, config)
   },
   delete(id) {
     return request.delete(`/character-library/${id}`)

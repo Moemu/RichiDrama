@@ -16,8 +16,8 @@ export const sceneAPI = {
   generateImage(data) {
     return request.post('/scenes/generate-image', data)
   },
-  update(sceneId, data) {
-    return request.put(`/scenes/${sceneId}`, data)
+  update(sceneId, data, config) {
+    return request.put(`/scenes/${sceneId}`, data, config)
   },
   delete(sceneId) {
     return request.delete(`/scenes/${sceneId}`)

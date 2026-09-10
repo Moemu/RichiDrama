@@ -53,11 +53,11 @@ export const dramaAPI = {
   saveProgress(id, data) {
     return request.put(`/dramas/${id}/progress`, data)
   },
-  saveCanvasLayout(id, canvasLayout, workflowGroups) {
+  saveCanvasLayout(id, canvasLayout, workflowGroups, config) {
     const body = {}
     if (canvasLayout != null) body.canvas_layout = canvasLayout
     if (workflowGroups !== undefined) body.workflow_groups = workflowGroups
-    return request.put(`/dramas/${id}/canvas-layout`, body)
+    return request.put(`/dramas/${id}/canvas-layout`, body, config)
   },
   getStoryboards(episodeId) {
     return request.get(`/episodes/${episodeId}/storyboards`)

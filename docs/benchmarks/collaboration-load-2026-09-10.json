@@ -1,0 +1,201 @@
+{
+  "timestamp": "2026-09-10T08:17:37.501Z",
+  "host": {
+    "platform": "win32",
+    "node": "v24.21.0",
+    "cpu": "AMD Ryzen 9 7940HX with Radeon Graphics        ",
+    "logicalCpus": 32,
+    "ramGiB": 15.215641021728516
+  },
+  "profiles": [
+    {
+      "users": 10,
+      "requestedSeconds": 60,
+      "durationSeconds": 60.006783500000004,
+      "offered": 600,
+      "sent": 600,
+      "skipped": 0,
+      "acknowledged": 600,
+      "updatesPerSecond": 9.998869544474083,
+      "ackMs": {
+        "count": 600,
+        "p50": 3.2801000000035856,
+        "p95": 8.204200000000128,
+        "p99": 15.24720000000525,
+        "max": 23.249199999998382
+      },
+      "allPeersMs": {
+        "count": 600,
+        "p50": 7.990200000000186,
+        "p95": 12.42450000000099,
+        "p99": 20.471599999997125,
+        "max": 28.735599999999977
+      },
+      "unobservedUpdates": 0,
+      "refreshMs": {
+        "count": 790,
+        "p50": 18.137300000002142,
+        "p95": 31.211699999999837,
+        "p99": 34.51230000000032,
+        "max": 39.216999999996915
+      },
+      "receivedMiB": 217.6268424987793,
+      "errors": [],
+      "server": {
+        "type": "metrics",
+        "cpuOneCorePercent": 13.568182994160697,
+        "peakRssMiB": 180.4375,
+        "peakHeapMiB": 65.73202514648438,
+        "eventLoopP95Ms": 20.791295,
+        "eventLoopP99Ms": 28.311551,
+        "eventLoopMaxMs": 40.042495,
+        "sqliteErrors": 0
+      },
+      "generator": {
+        "cpuOneCorePercent": 6.249293465296302,
+        "eventLoopP99Ms": 21.037055,
+        "schedulerLagMs": {
+          "count": 600,
+          "p50": 6.4527000000016415,
+          "p95": 13.634500000000116,
+          "p99": 14.547700000002806,
+          "max": 15.116900000000896
+        }
+      },
+      "consistency": {
+        "allClientsAndDatabase": true,
+        "hash": "570e99d0956df15d98b36066c585b4462e6554a1cceeb48273a6a211b077db6f",
+        "offlineReplay": true,
+        "restart": true,
+        "reconnectMs": 207.25950000000012,
+        "restartMs": 794.3705000000045
+      }
+    },
+    {
+      "users": 30,
+      "requestedSeconds": 60,
+      "durationSeconds": 59.999374300000014,
+      "offered": 1800,
+      "sent": 1800,
+      "skipped": 0,
+      "acknowledged": 1800,
+      "updatesPerSecond": 30.000312853262532,
+      "ackMs": {
+        "count": 1800,
+        "p50": 4.5578999999997905,
+        "p95": 65.62699999999313,
+        "p99": 92.66330000000016,
+        "max": 135.74580000000424
+      },
+      "allPeersMs": {
+        "count": 1800,
+        "p50": 21.23530000000028,
+        "p95": 84.01880000000529,
+        "p99": 109.46630000000005,
+        "max": 154.07700000000477
+      },
+      "unobservedUpdates": 0,
+      "refreshMs": {
+        "count": 2370,
+        "p50": 84.83510000001115,
+        "p95": 218.51660000000265,
+        "p99": 317.0722000000096,
+        "max": 429.81930000000284
+      },
+      "receivedMiB": 2035.3205347061157,
+      "errors": [],
+      "server": {
+        "type": "metrics",
+        "cpuOneCorePercent": 77.71854270998844,
+        "peakRssMiB": 277.43359375,
+        "peakHeapMiB": 104.16270446777344,
+        "eventLoopP95Ms": 53.247999,
+        "eventLoopP99Ms": 197.918719,
+        "eventLoopMaxMs": 401.604607,
+        "sqliteErrors": 0
+      },
+      "generator": {
+        "cpuOneCorePercent": 59.32395198327925,
+        "eventLoopP99Ms": 22.331391,
+        "schedulerLagMs": {
+          "count": 1800,
+          "p50": 0.7666333333327202,
+          "p95": 13.044999999998254,
+          "p99": 14.460466666670982,
+          "max": 15.3656333333347
+        }
+      },
+      "consistency": {
+        "allClientsAndDatabase": true,
+        "hash": "f8aff7d4b3104660c3c6e1bf03e12e9b294007f61169fa676fc2325bf35498f1",
+        "offlineReplay": true,
+        "restart": true,
+        "reconnectMs": 1130.725999999995,
+        "restartMs": 1109.1787999999942
+      }
+    },
+    {
+      "users": 50,
+      "requestedSeconds": 60,
+      "durationSeconds": 60.02162840000002,
+      "offered": 3000,
+      "sent": 1558,
+      "skipped": 1442,
+      "acknowledged": 1558,
+      "updatesPerSecond": 25.95730974869718,
+      "ackMs": {
+        "count": 1558,
+        "p50": 1409.2895000000135,
+        "p95": 1956.1408999999985,
+        "p99": 2069.4410999999964,
+        "max": 2222.160900000017
+      },
+      "allPeersMs": {
+        "count": 1558,
+        "p50": 1443.7695999999996,
+        "p95": 1995.3930999999866,
+        "p99": 2110.300199999998,
+        "max": 2263.778900000005
+      },
+      "unobservedUpdates": 0,
+      "refreshMs": {
+        "count": 1500,
+        "p50": 1638.9878000000026,
+        "p95": 1960.7468999999983,
+        "p99": 2059.7983999999997,
+        "max": 4105.829300000012
+      },
+      "receivedMiB": 3034.834282875061,
+      "errors": [],
+      "server": {
+        "type": "metrics",
+        "cpuOneCorePercent": 103.42258861303897,
+        "peakRssMiB": 361.12109375,
+        "peakHeapMiB": 108.08367156982422,
+        "eventLoopP95Ms": 2170.552319,
+        "eventLoopP99Ms": 2214.592511,
+        "eventLoopMaxMs": 2214.592511,
+        "sqliteErrors": 0
+      },
+      "generator": {
+        "cpuOneCorePercent": 99.47081009218333,
+        "eventLoopP99Ms": 46.039039,
+        "schedulerLagMs": {
+          "count": 3000,
+          "p50": 0.4330000000190921,
+          "p95": 21.25140000000829,
+          "p99": 46.53090000001248,
+          "max": 87.07610000000568
+        }
+      },
+      "consistency": {
+        "allClientsAndDatabase": true,
+        "hash": "5b79324cb89b8d4d9de6606e2466497b490ca65bbc0ac5b5ea4ad47fb16303af",
+        "offlineReplay": true,
+        "restart": true,
+        "reconnectMs": 2342.392599999992,
+        "restartMs": 1874.0619000000006
+      }
+    }
+  ]
+}

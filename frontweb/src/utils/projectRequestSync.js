@@ -12,12 +12,18 @@ export function installProjectRequestSync(request) {
     if (['get', 'head', 'options'].includes(method)) return config
     const body = typeof FormData !== 'undefined' && config.data instanceof FormData ? Object.fromEntries(config.data.entries()) : config.data
     const match = /^\/(dramas|episodes|storyboards|characters|scenes|props|assets|character-library|scene-library|prop-library)\/(\d+)(.*)$/.exec(config.url || '')
-    const known = match && projectSnapshot(match[1], Number(match[2]))
+    const known = config.projectBaseline || (match && projectSnapshot(match[1], Number(match[2])))
     const scoped = Number(known?.__projectId) === projectSession.id || (match?.[1] === 'dramas' && Number(match[2]) === projectSession.id) || Number(body?.drama_id) === projectSession.id || Number(projectSnapshot('episodes', body?.episode_id)?.__projectId) === projectSession.id || Number(projectSnapshot('storyboards', body?.storyboard_id)?.__projectId) === projectSession.id
     if (!scoped) return config
     if (!projectSession.connected) throw new Error('协作连接已断开，请等待重连后再执行此操作')
     if (!projectSession.canEdit) throw new Error('当前为只读成员，无法修改项目')
     config.headers['X-Project-Operation'] ||= createClientRequestId()
+    const useBaselineRevision = () => {
+      const revision = known?.__projectRevision ?? projectSnapshot('dramas', projectSession.id)?.revision
+      if (!Number.isSafeInteger(revision)) throw new Error('请先刷新项目内容后再执行此操作')
+      config.headers['X-Project-Revision'] ??= revision
+    }
+    if (config.projectBaseline) useBaselineRevision()
     if (match?.[1] === 'dramas' && match[3] === '/outline' && hasPendingProjectText('dramas', Number(match[2]), 'description')) {
       config.data = { ...config.data }
       delete config.data.summary
@@ -32,10 +38,10 @@ export function installProjectRequestSync(request) {
         next.metadata = Object.fromEntries(Object.entries(next.metadata).filter(([field, value]) => !equal(value, known.metadata[field])))
       }
       if (next.omni_prompt_document && hasPendingProjectText('storyboards', Number(match[2]), 'universal_segment_text')) delete next.omni_prompt_document.text
-      if (Object.keys(next).some(field => ['character_ids', 'characters', 'prop_ids', 'scene_id', 'omni_asset_ids', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'workflow_groups'].includes(field))) config.headers['X-Project-Revision'] = projectSession.revision
+      if (Object.keys(next).some(field => ['character_ids', 'characters', 'prop_ids', 'scene_id', 'omni_asset_ids', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'workflow_groups'].includes(field))) useBaselineRevision()
       config.data = next
     } else {
-      config.headers['X-Project-Revision'] = projectSession.revision
+      useBaselineRevision()
     }
     return config
   })

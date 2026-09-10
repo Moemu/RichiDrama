@@ -1,3 +1,4 @@
+import { captureProjectEdit } from '@/utils/projectSnapshots'
 import { ref, reactive, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { sceneAPI } from '@/api/scenes'
@@ -138,6 +139,7 @@ export function useScenes(deps) {
   function editScene(scene) {
     stopScenePromptPoll()
     editSceneForm.value = {
+      requestConfig: captureProjectEdit('scenes', scene.id),
       id: scene.id,
       location: scene.location || '',
       time: scene.time || '',
@@ -268,7 +270,7 @@ export function useScenes(deps) {
           prompt: nullableText(form.prompt),
           polished_prompt: nullableText(form.polished_prompt),
           polished_prompt_single: nullableText(form.polished_prompt_single)
-        })
+        }, form.requestConfig)
         await saveSceneRefImageIfAny(form.id)
         ElMessage.success('场景已保存')
       } else {
@@ -458,6 +460,7 @@ export function useScenes(deps) {
 
   function openEditSceneLibrary(item) {
     editSceneLibraryForm.value = {
+      requestConfig: captureProjectEdit('scene-library', item.id),
       id: item.id,
       location: item.location ?? '',
       time: item.time ?? '',
@@ -478,7 +481,7 @@ export function useScenes(deps) {
         category: editSceneLibraryForm.value.category || null,
         description: editSceneLibraryForm.value.description || null,
         tags: editSceneLibraryForm.value.tags || null
-      })
+      }, editSceneLibraryForm.value.requestConfig)
       ElMessage.success('已保存')
       showEditSceneLibrary.value = false
       loadSceneLibraryList()

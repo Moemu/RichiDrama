@@ -10,8 +10,8 @@ export const sceneLibraryAPI = {
   create(data) {
     return request.post('/scene-library', data)
   },
-  update(id, data) {
-    return request.put(`/scene-library/${id}`, data)
+  update(id, data, config) {
+    return request.put(`/scene-library/${id}`, data, config)
   },
   delete(id) {
     return request.delete(`/scene-library/${id}`)

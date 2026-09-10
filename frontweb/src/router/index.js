@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { safeRedirectPath } from '@/utils/routeRecovery'
 import { readAuthUser } from '@/utils/authUser'
+import { confirmProjectNavigation } from '@/utils/projectNavigation'
 
 // Preview builds bake a " (preview)" suffix in (Dockerfile.preview's
 // PREVIEW_TITLE_BADGE); production builds leave it empty.
@@ -94,6 +95,7 @@ const router = createRouter({
   ]
 })
 
+router.beforeEach(confirmProjectNavigation)
 router.beforeEach((to) => {
   if (to.meta.title) {
     document.title = `${to.meta.title} - 瑞池传媒短剧平台${TITLE_BADGE}`

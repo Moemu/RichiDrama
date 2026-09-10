@@ -174,6 +174,7 @@
 
 <script setup>
 import { projectSession } from '@/composables/useProjectCollaboration'
+import { captureProjectEdit } from '@/utils/projectSnapshots'
 import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -226,7 +227,9 @@ const busyLabel = computed(() => {
   return st?.message || (busyStep.value ? CANVAS_NODE_STATUS_LABELS[busyStep.value] : '')
 })
 
+let relationRequestConfig
 function syncForm(sb) {
+  relationRequestConfig = captureProjectEdit('storyboards', sb?.id)
   form.title = sb?.title || ''
   form.action = sb?.action || ''
   form.dialogue = sb?.dialogue || ''
@@ -272,7 +275,7 @@ async function onRelationChange() {
       character_ids: characterIds.value,
       scene_id: sceneId.value,
       prop_ids: propIds.value,
-    })
+    }, relationRequestConfig)
     await ctx?.refreshDrama?.(true)
   } catch (e) {
     ElMessage.error(e?.message || '关联保存失败')

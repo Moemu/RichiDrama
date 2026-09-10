@@ -1,3 +1,4 @@
+import { captureProjectEdit } from '@/utils/projectSnapshots'
 import { ref, reactive, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { characterAPI } from '@/api/characters'
@@ -161,6 +162,7 @@ export function useCharacters(deps) {
   function editCharacter(char) {
     stopCharacterPromptPoll()
     editCharacterForm.value = {
+      requestConfig: captureProjectEdit('characters', char.id),
       id: char.id,
       name: char.name || '',
       role: char.role || '',
@@ -239,7 +241,7 @@ export function useCharacters(deps) {
           description: nullableText(form.description),
           polished_prompt: nullableText(form.polished_prompt),
           stages: nullableText(form.stages)
-        })
+        }, form.requestConfig)
         await saveCharRefImageIfAny(form.id)
         ElMessage.success('角色已保存')
       } else {
@@ -481,6 +483,7 @@ export function useCharacters(deps) {
 
   function openEditCharLibrary(item) {
     editCharLibraryForm.value = {
+      requestConfig: captureProjectEdit('character-library', item.id),
       id: item.id,
       name: item.name ?? '',
       category: item.category ?? '',
@@ -499,7 +502,7 @@ export function useCharacters(deps) {
         category: editCharLibraryForm.value.category || null,
         description: editCharLibraryForm.value.description || null,
         tags: editCharLibraryForm.value.tags || null
-      })
+      }, editCharLibraryForm.value.requestConfig)
       ElMessage.success('已保存')
       showEditCharLibrary.value = false
       loadCharLibraryList()

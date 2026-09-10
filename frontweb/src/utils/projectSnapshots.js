@@ -1,12 +1,17 @@
 const snapshots = new Map()
 export const projectKind = kind => ({ 'character-library': 'character_libraries', 'scene-library': 'scene_libraries', 'prop-library': 'prop_libraries' }[kind] || kind)
 export function projectSnapshot(kind, id) { return snapshots.get(`${projectKind(kind)}:${id}`) }
-export function rememberProjectEntity(kind, entity, parentProjectId = null) {
+export function captureProjectEdit(kind, id) {
+  const baseline = projectSnapshot(kind, id)
+  return baseline?.__projectId ? { projectBaseline: structuredClone(baseline) } : undefined
+}
+export function rememberProjectEntity(kind, entity, parentProjectId = null, parentRevision = null) {
   if (!entity?.id) return
   const projectId = kind === 'dramas' ? entity.id : entity.drama_id ?? parentProjectId ?? projectSnapshot(kind, entity.id)?.__projectId ?? projectSnapshot('episodes', entity.episode_id)?.drama_id ?? null
-  snapshots.set(`${projectKind(kind)}:${entity.id}`, { ...projectSnapshot(kind, entity.id), ...structuredClone(entity), __projectId: projectId })
+  const revision = kind === 'dramas' ? entity.revision : parentRevision ?? projectSnapshot(kind, entity.id)?.__projectRevision ?? projectSnapshot('dramas', projectId)?.revision
+  snapshots.set(`${projectKind(kind)}:${entity.id}`, { ...projectSnapshot(kind, entity.id), ...structuredClone(entity), __projectId: projectId, ...(Number.isSafeInteger(revision) ? { __projectRevision: revision } : {}) })
   for (const childKind of ['episodes', 'storyboards', 'characters', 'scenes', 'props']) {
-    for (const child of entity[childKind] || []) rememberProjectEntity(childKind, child, projectId)
+    for (const child of entity[childKind] || []) rememberProjectEntity(childKind, child, projectId, revision)
   }
 }
 export function rememberProjectResponse(url, data) {

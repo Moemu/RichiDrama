@@ -131,6 +131,10 @@ export function closeProjectSession() {
   requests.clear()
 }
 
+export function hasUnsavedProjectText() {
+  return projectSession.drafts.length > 0 || [...documents.values()].some(entry => entry.dirty || entry.saving)
+}
+
 export async function bindProjectText(target, listener) {
   if (!projectSession.enabled || !target.id) return null
   const key = textKey(target)

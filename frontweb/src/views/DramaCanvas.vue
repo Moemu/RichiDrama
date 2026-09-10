@@ -28,6 +28,7 @@
         <span v-if="layoutSaveState === 'saving'" class="layout-status saving">保存中…</span>
         <span v-else-if="layoutSaveState === 'saved'" class="layout-status saved">已保存</span>
         <span v-else-if="layoutSaveState === 'error'" class="layout-status error">保存失败</span>
+        <el-button v-if="layoutSaveState === 'error'" size="small" @click="discardCanvasChanges">放弃修改并刷新</el-button>
 
         <div class="header-actions">
           <AccountBalanceBadge />
@@ -227,6 +228,7 @@
           @node-click="onNodeClick"
           @pane-click="onPaneClick"
           @pane-context-menu="onPaneContextMenu"
+          @node-drag-start="beginCanvasEdit"
           @node-drag-stop="scheduleLayoutSave"
           @viewport-change="onViewportChange"
           @move-end="savePersonalViewport"
@@ -339,6 +341,8 @@ const workflowRunning = ref(false)
 const workflowProgress = ref('')
 const layoutSaveState = ref('idle')
 const layoutDirty = ref(false)
+let canvasBaseline
+let canvasEditGeneration = 0
 const currentViewport = ref({ x: 0, y: 0, zoom: 0.75 })
 const focusedNodeId = ref(null)
 const canvasMainRef = ref(null)
@@ -438,9 +442,12 @@ function setHighlightAsset(assetNodeId) {
 }
 
 async function refreshDrama(preserveFocus = true) {
+  if (layoutDirty.value) return
   const keepId = preserveFocus ? focusedNodeId.value : null
   await loadDrama(true)
+  if (layoutDirty.value) return
   await loadForDrama(drama.value, filterEpisodeId.value)
+  if (layoutDirty.value) return
   rebuildGraph()
   if (keepId) focusedNodeId.value = keepId
 }
@@ -556,8 +563,29 @@ function savePersonalViewport() {
   } catch {}
 }
 
-function scheduleLayoutSave() {
+function beginCanvasEdit() {
+  canvasEditGeneration++
+  if (!layoutDirty.value) {
+    canvasBaseline = drama.value?.permissions?.collaboration_enabled
+      ? { projectBaseline: { __projectId: dramaId.value, __projectRevision: drama.value.revision } }
+      : undefined
+  }
   layoutDirty.value = true
+}
+
+async function discardCanvasChanges() {
+  try {
+    await ElMessageBox.confirm('放弃当前未保存的画布修改，并加载最新内容？', '刷新画布', { type: 'warning' })
+  } catch { return }
+  if (saveTimer) clearTimeout(saveTimer)
+  layoutDirty.value = false
+  canvasBaseline = undefined
+  layoutSaveState.value = 'idle'
+  await loadDrama()
+}
+
+function scheduleLayoutSave() {
+  beginCanvasEdit()
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     saveTimer = null
@@ -567,6 +595,8 @@ function scheduleLayoutSave() {
 
 async function persistCanvasState({ layoutOnly = false, groupsOnly = false } = {}) {
   if (!dramaId.value) return
+  beginCanvasEdit()
+  if (layoutSaveState.value === 'saving') return false
 
   let layoutPayload = null
   if (!groupsOnly) {
@@ -580,17 +610,20 @@ async function persistCanvasState({ layoutOnly = false, groupsOnly = false } = {
   const groupsPayload = groupsOnly || !layoutOnly ? workflowGroups.value : undefined
 
   layoutSaveState.value = 'saving'
+  const savedGeneration = canvasEditGeneration
   try {
-    const updated = await dramaAPI.saveCanvasLayout(dramaId.value, layoutPayload, groupsPayload)
+    const updated = await dramaAPI.saveCanvasLayout(dramaId.value, layoutPayload, groupsPayload, canvasBaseline)
     const meta = parseDramaMetadata(updated.metadata)
-    if (meta.canvas_layout) layoutCache.value = meta.canvas_layout
-    if (meta.workflow_groups) workflowGroups.value = meta.workflow_groups
+    const editedDuringSave = savedGeneration !== canvasEditGeneration
+    if (!editedDuringSave && meta.canvas_layout) layoutCache.value = meta.canvas_layout
+    if (!editedDuringSave && meta.workflow_groups) workflowGroups.value = meta.workflow_groups
     // 仅合并 metadata / 时间戳，勿用精简对象覆盖 episodes、characters 等完整数据
     if (drama.value && updated) {
       drama.value = {
         ...drama.value,
         metadata: updated.metadata,
         updated_at: updated.updated_at,
+        revision: updated.revision ?? drama.value.revision,
         title: updated.title ?? drama.value.title,
         style: updated.style ?? drama.value.style,
         genre: updated.genre ?? drama.value.genre,
@@ -612,14 +645,23 @@ async function persistCanvasState({ layoutOnly = false, groupsOnly = false } = {
       drama.value = updated
     }
     layoutSaveState.value = 'saved'
-    layoutDirty.value = false
+    layoutDirty.value = editedDuringSave
+    canvasBaseline = editedDuringSave && canvasBaseline
+      ? { projectBaseline: { ...canvasBaseline.projectBaseline, __projectRevision: updated.revision } }
+      : undefined
+    if (editedDuringSave) {
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => { saveTimer = null; persistCanvasState() }, 700)
+    }
     if (savedHintTimer) clearTimeout(savedHintTimer)
     savedHintTimer = setTimeout(() => {
       if (layoutSaveState.value === 'saved') layoutSaveState.value = 'idle'
     }, 2000)
+    return true
   } catch (e) {
     layoutSaveState.value = 'error'
     ElMessage.error(e?.message || '保存失败')
+    return false
   }
 }
 
@@ -631,6 +673,7 @@ const {
   submitCreate,
 } = useCanvasCrud({
   drama,
+  nodes,
   filterEpisodeId,
   layoutCache,
   focusedNodeId,
@@ -681,6 +724,7 @@ function focusScriptNode() {
 async function onAlignNodes() {
   if (!drama.value || !nodes.value.length || aligningNodes.value) return
   aligningNodes.value = true
+  beginCanvasEdit()
   focusedNodeId.value = null
   try {
     const { positions } = computeAutoLayoutPositions(drama.value, {
@@ -712,8 +756,7 @@ async function onAlignNodes() {
         currentViewport.value = { x: vp.x, y: vp.y, zoom: vp.zoom }
       }
     }
-    await persistCanvasState({ layoutOnly: true })
-    ElMessage.success('已对齐')
+    if (await persistCanvasState({ layoutOnly: true })) ElMessage.success('已对齐')
   } catch (e) {
     ElMessage.error(e?.message || '对齐失败')
   } finally {
@@ -723,15 +766,19 @@ async function onAlignNodes() {
 
 async function loadDrama(silent = false) {
   if (!dramaId.value) return
+  if (layoutDirty.value) return
   if (!silent) loading.value = true
   try {
-    drama.value = await dramaAPI.get(dramaId.value)
+    const loaded = await dramaAPI.get(dramaId.value)
+    if (layoutDirty.value) return
+    drama.value = loaded
     layoutCache.value = parseCanvasLayout(drama.value.metadata)
     syncWorkflowFromDrama()
     const vp = resolveViewport(layoutCache.value)
     currentViewport.value = vp
     if (route.query.episode) filterEpisodeId.value = Number(route.query.episode)
     await loadForDrama(drama.value, filterEpisodeId.value)
+    if (layoutDirty.value) return
     rebuildGraph()
   } catch (e) {
     if (!silent) ElMessage.error(e?.message || '加载项目失败')
@@ -751,13 +798,14 @@ async function onCreateWorkflowGroup() {
       cancelButtonText: '取消',
       inputValue: `工作流 ${workflowGroups.value.length + 1}`,
     })
+    beginCanvasEdit()
     workflowGroups.value = createWorkflowGroup(workflowGroups.value, {
       title: value?.trim() || undefined,
       storyboardIds: selectedStoryboardIds.value,
       pipeline: normalizePipeline(pipelineSteps.value),
     })
     activeGroupId.value = workflowGroups.value[workflowGroups.value.length - 1]?.id || null
-    await persistCanvasState({ groupsOnly: true })
+    if (!await persistCanvasState({ groupsOnly: true })) return
     rebuildGraph()
     ElMessage.success('工作流已创建')
   } catch (_) {}
@@ -767,9 +815,10 @@ async function onDeleteActiveGroup() {
   if (!activeGroupId.value) return
   try {
     await ElMessageBox.confirm('确定删除该工作流？', '删除工作流', { type: 'warning' })
+    beginCanvasEdit()
     workflowGroups.value = deleteWorkflowGroup(workflowGroups.value, activeGroupId.value)
     activeGroupId.value = workflowGroups.value[0]?.id || null
-    await persistCanvasState({ groupsOnly: true })
+    if (!await persistCanvasState({ groupsOnly: true })) return
     rebuildGraph()
     ElMessage.success('已删除')
   } catch (_) {}

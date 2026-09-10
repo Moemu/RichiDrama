@@ -18,6 +18,7 @@ import router from './router'
 import request from './utils/request'
 import projectText from './directives/projectText'
 import { installProjectRequestSync } from './utils/projectRequestSync'
+import { warnBeforeProjectUnload } from './utils/projectNavigation'
 
 const app = createApp({
   name: 'RootProvider',
@@ -38,6 +39,7 @@ const app = createApp({
 const pinia = createPinia()
 app.directive('project-text', projectText)
 installProjectRequestSync(request)
+window.addEventListener('beforeunload', warnBeforeProjectUnload)
 
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)

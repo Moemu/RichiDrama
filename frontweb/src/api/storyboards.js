@@ -73,8 +73,8 @@ export const storyboardsAPI = {
   create(data) {
     return request.post('/storyboards', data)
   },
-  update(id, data) {
-    return request.put(`/storyboards/${id}`, data)
+  update(id, data, config) {
+    return request.put(`/storyboards/${id}`, data, config)
   },
   getEpisodeGenerationSettings(episodeId) {
     return request.get(`/episodes/${episodeId}/generation-settings`)
