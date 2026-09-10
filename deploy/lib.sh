@@ -238,10 +238,11 @@ remove_preview_resources() {
   if mountpoint -q "$media_view" 2>/dev/null; then
     umount -l "$media_view" >/dev/null 2>&1 || true
   fi
-  # Drop any stale per-PR ingress reference (legacy layout) before removing the
-  # containers, so Nginx never proxies to an unavailable upstream.
+  # Remove only this preview's route before removing its container.
   if docker ps --format '{{.Names}}' | grep -Fqx "$HTTP_NGINX_CONTAINER"; then
-    docker exec "$HTTP_NGINX_CONTAINER" rm -f "/etc/nginx/conf.d/preview-pr-$pr.conf"
+    docker exec "$HTTP_NGINX_CONTAINER" rm -f "/etc/nginx/conf.d/preview-pr-$pr.conf" "/etc/nginx/sites-enabled/preview-pr-$pr.conf"
+    docker exec "$HTTP_NGINX_CONTAINER" nginx -t
+    docker exec "$HTTP_NGINX_CONTAINER" nginx -s reload
   fi
   mapfile -t preview_containers < <(docker ps -aq --filter "label=com.richidrama.preview-pr=$pr")
   ((${#preview_containers[@]} == 0)) || docker rm -f "${preview_containers[@]}" >/dev/null
@@ -289,6 +290,24 @@ install_ingress_conf_at() {
   ' sh "$conf_target"
 }
 
+render_preview_vhost() {
+  local template="$1" pr="$2"
+  validate_pr "$pr"
+  # Exact hostnames keep another PR's older shared template from changing
+  # this preview's protocol support. Keep DNS resolution at request time.
+  awk -v pr="$pr" '
+    /^resolver / { resolver = $0; next }
+    /^# Any other preview-zone/ { exit }
+    /server_name / {
+      print "    server_name pr-" pr ".preview.drama.richbest.cn;"
+      print "    set $preview_pr " pr ";"
+      print "    " resolver
+      next
+    }
+    { print }
+  ' "$template"
+}
+
 install_preview_ingress() {
   local vhost_conf="$1" auth_dir="$PREVIEW_ROOT/auth"
   [[ -r "$auth_dir/htpasswd" ]] || fail 'Preview basic-auth file is missing.'
@@ -311,6 +330,13 @@ install_preview_ingress() {
     docker exec "$HTTP_NGINX_CONTAINER" rm -f /etc/nginx/conf.d/minidrama-preview-vhost.conf
     install_ingress_conf_at "$vhost_conf" '/etc/nginx/sites-enabled/minidrama-preview-vhost.conf' || \
       fail 'Ingress did not load the preview vhost; neither conf.d nor sites-enabled is included.'
+  fi
+  local pr="${PR_NUMBER:?}" generated="$PREVIEW_ROOT/pr-${PR_NUMBER}/ingress.conf"
+  render_preview_vhost "$vhost_conf" "$pr" > "$generated"
+  if ! install_ingress_conf_at "$generated" "/etc/nginx/conf.d/preview-pr-$pr.conf"; then
+    docker exec "$HTTP_NGINX_CONTAINER" rm -f "/etc/nginx/conf.d/preview-pr-$pr.conf"
+    install_ingress_conf_at "$generated" "/etc/nginx/sites-enabled/preview-pr-$pr.conf" || \
+      fail 'Ingress did not load this preview route.'
   fi
 }
 

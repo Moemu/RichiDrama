@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
+
+test_root="$(mktemp -d)"
+if command -v cygpath >/dev/null 2>&1; then test_root="$(cygpath -m "$test_root")"; fi
+network="preview-ingress-test-$$"
+gateway="$network-gateway"
+backend="$network-backend"
+cleanup() {
+  docker rm -f "$gateway" "$backend" >/dev/null 2>&1 || true
+  docker network rm "$network" >/dev/null 2>&1 || true
+  rm -rf -- "$test_root"
+}
+trap cleanup EXIT
+mkdir -p "$test_root/conf"
+cp "$SCRIPT_DIR/nginx-preview-vhost.conf" "$test_root/conf/shared.conf"
+render_preview_vhost "$SCRIPT_DIR/nginx-preview-vhost.conf" 40 > "$test_root/conf/preview-pr-40.conf"
+render_preview_vhost "$SCRIPT_DIR/nginx-preview-vhost.conf" 41 > "$test_root/conf/preview-pr-41.conf"
+printf 'preview:%s\n' "$(openssl passwd -apr1 test-password)" > "$test_root/htpasswd"
+chmod -R a+rX "$test_root"
+docker network create "$network" >/dev/null
+docker run -d --name "$backend" --network "$network" --network-alias pr-40 --network-alias pr-41 \
+  --entrypoint node "local-minidrama:${GITHUB_SHA:?}" -e '
+    const http = require("http");
+    const crypto = require("crypto");
+    const server = http.createServer((req, res) => { res.writeHead(426); res.end(); });
+    server.on("upgrade", (req, socket) => {
+      const accept = crypto.createHash("sha1").update(req.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+      socket.end("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n");
+    });
+    server.listen(5679, "0.0.0.0");
+  ' >/dev/null
+docker run -d --name "$gateway" --network "$network" -p 127.0.0.1::80 \
+  -v "$test_root/conf:/etc/nginx/conf.d:ro" \
+  -v "$test_root/htpasswd:/etc/nginx/minidrama-preview.htpasswd:ro" nginx:1.27-alpine >/dev/null
+port="$(docker port "$gateway" 80/tcp | awk -F: '{print $NF}')"
+for attempt in {1..30}; do
+  if curl -s --max-time 1 "http://127.0.0.1:$port" >/dev/null; then break; fi
+  [[ "$attempt" != 30 ]] || fail 'Test ingress did not start.'
+  sleep 1
+done
+check_upgrade() {
+  local pr="$1" code
+  code="$(curl -sS --max-time 5 --http1.1 -o /dev/null -w '%{http_code}' \
+    -u preview:test-password -H "Host: pr-$pr.preview.drama.richbest.cn" \
+    -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Version: 13' \
+    "http://127.0.0.1:$port/api/v1/dramas/1/collaboration/socket" 2>/dev/null || true)"
+  [[ "$code" == 101 ]] || fail "PR $pr upgrade returned $code"
+}
+check_upgrade 40
+check_upgrade 41
+# Reproduce an older PR replacing the shared ingress without Upgrade headers.
+sed '/proxy_set_header Upgrade /d; /proxy_set_header Connection /d' \
+  "$SCRIPT_DIR/nginx-preview-vhost.conf" > "$test_root/conf/shared.conf"
+docker exec "$gateway" nginx -t
+docker exec "$gateway" nginx -s reload
+sleep 1
+check_upgrade 40
+check_upgrade 41
+printf 'Per-PR WebSocket upgrades survive a legacy shared configuration reload.\n'

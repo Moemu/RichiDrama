@@ -248,7 +248,7 @@
     </main>
 
     <!-- 制作角色 编辑 -->
-    <el-dialog v-model="editDramaCharVisible" title="编辑制作角色" width="min(500px, 94vw)" @close="editDramaCharForm = null">
+    <el-dialog v-model="editDramaCharVisible" title="编辑制作角色" width="min(720px, 94vw)" top="5vh" @close="editDramaCharForm = null">
       <el-form v-if="editDramaCharForm" label-width="80px">
         <el-form-item label="图片">
           <div class="lib-img-editor">
@@ -282,7 +282,7 @@
     </el-dialog>
 
     <!-- 制作场景 编辑 -->
-    <el-dialog v-model="editDramaSceneVisible" title="编辑制作场景" width="min(500px, 94vw)" @close="editDramaSceneForm = null">
+    <el-dialog v-model="editDramaSceneVisible" title="编辑制作场景" width="min(720px, 94vw)" top="5vh" @close="editDramaSceneForm = null">
       <el-form v-if="editDramaSceneForm" label-width="80px">
         <el-form-item label="图片">
           <div class="lib-img-editor">
@@ -309,7 +309,7 @@
     </el-dialog>
 
     <!-- 制作道具 编辑 -->
-    <el-dialog v-model="editDramaPropVisible" title="编辑制作道具" width="min(500px, 94vw)" @close="editDramaPropForm = null">
+    <el-dialog v-model="editDramaPropVisible" title="编辑制作道具" width="min(720px, 94vw)" top="5vh" @close="editDramaPropForm = null">
       <el-form v-if="editDramaPropForm" label-width="80px">
         <el-form-item label="图片">
           <div class="lib-img-editor">
