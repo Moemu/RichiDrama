@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { randomUUID } = require('crypto');
+const { signOpenApiRequest: signedHeaders } = require('./volcengineOpenApiSigning');
 
 const PROVIDER = 'volcengine';
 const ARK_VERSION = '2024-01-01';
@@ -15,7 +16,6 @@ function now() { return new Date().toISOString(); }
 function parse(value, fallback = {}) { try { return value ? JSON.parse(value) : fallback; } catch (_) { return fallback; } }
 function json(value) { return JSON.stringify(value == null ? {} : value); }
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
-function hmac(key, value, encoding) { return crypto.createHmac('sha256', key).update(value).digest(encoding); }
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -32,47 +32,6 @@ function sanitize(value, keyName = '') {
     out[key] = sanitize(child, key);
   }
   return out;
-}
-
-function encodeRFC3986(value) {
-  return encodeURIComponent(String(value)).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-}
-
-function canonicalQuery(params) {
-  return Object.entries(params).sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${encodeRFC3986(key)}=${encodeRFC3986(value)}`).join('&');
-}
-
-function signedHeaders({ accessKeyId, secretAccessKey, region, service, action, version, body, date = new Date() }) {
-  const bodyText = JSON.stringify(body || {});
-  const payloadHash = sha256(bodyText);
-  const xDate = date.toISOString().replace(/[:-]|\.\d{3}/g, '');
-  const shortDate = xDate.slice(0, 8);
-  const host = 'open.volcengineapi.com';
-  const contentType = 'application/json; charset=utf-8';
-  // Volcengine excludes content-type from signed headers. The generic
-  // OpenAPI endpoint also signs only headers explicitly supplied here.
-  const signed = 'x-content-sha256;x-date';
-  const headersText = `x-content-sha256:${payloadHash}\nx-date:${xDate}\n`;
-  const query = canonicalQuery({ Action: action, Version: version });
-  const canonicalRequest = `POST\n/\n${query}\n${headersText}\n${signed}\n${payloadHash}`;
-  const scope = `${shortDate}/${region}/${service}/request`;
-  const stringToSign = `HMAC-SHA256\n${xDate}\n${scope}\n${sha256(canonicalRequest)}`;
-  const dateKey = hmac(secretAccessKey, shortDate);
-  const regionKey = hmac(dateKey, region);
-  const serviceKey = hmac(regionKey, service);
-  const signingKey = hmac(serviceKey, 'request');
-  const signature = hmac(signingKey, stringToSign, 'hex');
-  return {
-    url: `https://${host}/?${query}`,
-    bodyText,
-    headers: {
-      'Content-Type': contentType,
-      'X-Content-Sha256': payloadHash,
-      'X-Date': xDate,
-      Authorization: `HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${signed}, Signature=${signature}`,
-    },
-  };
 }
 
 function credentials(db) {

@@ -1,0 +1,175 @@
+{
+  "source": {
+    "package": "@volcengine/openapi",
+    "version": "1.36.1",
+    "signerSha256": "b85d332b255ac749c538166ba72989b57c9388a5da6d5c20c2c6f2304f728288",
+    "method": "Offline SDK Signer.addAuthorization with fixed dates and dummy credentials; no HTTP requests.",
+    "url": "https://github.com/volcengine/volc-sdk-nodejs/blob/main/src/base/sign.ts"
+  },
+  "cases": [
+    {
+      "name": "legacy model activation prices",
+      "input": {
+        "accessKeyId": "AKLT_TEST_KEY",
+        "secretAccessKey": "TEST_SECRET",
+        "region": "cn-beijing",
+        "service": "ark",
+        "version": "2024-01-01",
+        "date": "2026-08-31T02:00:00.000Z",
+        "action": "ListModelActivations",
+        "body": {
+          "PageNumber": 1,
+          "PageSize": 100,
+          "WithPrice": true
+        }
+      },
+      "expected": {
+        "url": "https://open.volcengineapi.com/?Action=ListModelActivations&Version=2024-01-01",
+        "bodyText": "{\"PageNumber\":1,\"PageSize\":100,\"WithPrice\":true}",
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "X-Date": "20260831T020000Z",
+          "X-Content-Sha256": "fa3f95f8dea358005c806253449f67fd8f35b74fa8a9a353cf4a7274cd314dd8",
+          "Authorization": "HMAC-SHA256 Credential=AKLT_TEST_KEY/20260831/cn-beijing/ark/request, SignedHeaders=x-content-sha256;x-date, Signature=9e14de93bbe2767c351ee17832591933d9266f4d79fd0f16916ff1e92885c96e"
+        }
+      }
+    },
+    {
+      "name": "endpoint project remains body-only",
+      "input": {
+        "accessKeyId": "AKLT_TEST_KEY",
+        "secretAccessKey": "TEST_SECRET",
+        "region": "cn-shanghai",
+        "service": "ark",
+        "version": "2024-01-01",
+        "date": "2026-08-31T02:00:00.000Z",
+        "action": "ListEndpoints",
+        "body": {
+          "PageNumber": 2,
+          "PageSize": 100,
+          "ProjectName": "旧项目"
+        }
+      },
+      "expected": {
+        "url": "https://open.volcengineapi.com/?Action=ListEndpoints&Version=2024-01-01",
+        "bodyText": "{\"PageNumber\":2,\"PageSize\":100,\"ProjectName\":\"旧项目\"}",
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "X-Date": "20260831T020000Z",
+          "X-Content-Sha256": "70f83ccd35f3aa17a98a809e9d94bc3e46f327afb1c5dd1ff2c30dc4b80e18f3",
+          "Authorization": "HMAC-SHA256 Credential=AKLT_TEST_KEY/20260831/cn-shanghai/ark/request, SignedHeaders=x-content-sha256;x-date, Signature=a429c13e4cbddb7311924ed6d59a014d2183bff6ad288c1e9d17f10d0d06ac86"
+        }
+      }
+    },
+    {
+      "name": "billing service at UTC date boundary",
+      "input": {
+        "accessKeyId": "AKLT_TEST_KEY",
+        "secretAccessKey": "TEST_SECRET",
+        "region": "cn-beijing",
+        "service": "billing",
+        "version": "2022-01-01",
+        "date": "2026-09-01T00:00:00.000Z",
+        "action": "ListBillDetail",
+        "body": {
+          "BillPeriod": "2026-08",
+          "Offset": 0,
+          "Limit": 300
+        }
+      },
+      "expected": {
+        "url": "https://open.volcengineapi.com/?Action=ListBillDetail&Version=2022-01-01",
+        "bodyText": "{\"BillPeriod\":\"2026-08\",\"Offset\":0,\"Limit\":300}",
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "X-Date": "20260901T000000Z",
+          "X-Content-Sha256": "9483e347099bc072fa982000a771785ff74e1583f722f8fb1c3d8a9d4718be64",
+          "Authorization": "HMAC-SHA256 Credential=AKLT_TEST_KEY/20260901/cn-beijing/billing/request, SignedHeaders=x-content-sha256;x-date, Signature=b9ea6b5271ddee6dfc9730dd5899dcdec6470ce04981dc0abd988944eea51ca2"
+        }
+      }
+    },
+    {
+      "name": "asset project query escaping and UTF-8 body",
+      "input": {
+        "accessKeyId": "AKLT_TEST_KEY",
+        "secretAccessKey": "TEST_SECRET",
+        "region": "cn-beijing",
+        "service": "ark",
+        "version": "2024-01-01",
+        "date": "2026-08-31T02:00:00.000Z",
+        "action": "ListAssets",
+        "projectName": "项目 A/+'!*()",
+        "body": {
+          "ProjectName": "项目 A/+'!*()",
+          "Name": "中文素材",
+          "PageSize": 10
+        }
+      },
+      "expected": {
+        "url": "https://open.volcengineapi.com/?Action=ListAssets&ProjectName=%E9%A1%B9%E7%9B%AE%20A%2F%2B%27%21%2A%28%29&Version=2024-01-01",
+        "bodyText": "{\"ProjectName\":\"项目 A/+'!*()\",\"Name\":\"中文素材\",\"PageSize\":10}",
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "X-Date": "20260831T020000Z",
+          "X-Content-Sha256": "28ea3009e7e4140c8c8738af44cb179446fd59d6f9c708f0e10c92aaf3ce47fd",
+          "Authorization": "HMAC-SHA256 Credential=AKLT_TEST_KEY/20260831/cn-beijing/ark/request, SignedHeaders=x-content-sha256;x-date, Signature=e1df31df63f44f06ae65d5e6d673f312e1fa5066359a7e38a227b6b3710395b5"
+        }
+      }
+    },
+    {
+      "name": "BytePlus session credentials",
+      "input": {
+        "accessKeyId": "AKLT_TEST_KEY",
+        "secretAccessKey": "TEST_SECRET",
+        "region": "ap-southeast-1",
+        "service": "ark",
+        "version": "2024-01-01",
+        "date": "2026-08-31T02:00:00.000Z",
+        "host": "open.byteplusapi.com",
+        "action": "GetAsset",
+        "projectName": "default",
+        "sessionToken": "TEST_SESSION_TOKEN+/=",
+        "body": {
+          "Id": "asset-test",
+          "ProjectName": "default"
+        }
+      },
+      "expected": {
+        "url": "https://open.byteplusapi.com/?Action=GetAsset&ProjectName=default&Version=2024-01-01",
+        "bodyText": "{\"Id\":\"asset-test\",\"ProjectName\":\"default\"}",
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "X-Date": "20260831T020000Z",
+          "X-Security-Token": "TEST_SESSION_TOKEN+/=",
+          "X-Content-Sha256": "ec0522c37c593e3a675f7f14af873a533bf2902446435078358e4843ee05b4d9",
+          "Authorization": "HMAC-SHA256 Credential=AKLT_TEST_KEY/20260831/ap-southeast-1/ark/request, SignedHeaders=x-content-sha256;x-date;x-security-token, Signature=9a77f18b97433b885a5099a20898c7064820ac130f3b5594f5eab1712b9d857e"
+        }
+      }
+    },
+    {
+      "name": "empty body and optional parameters",
+      "input": {
+        "accessKeyId": "AKLT_TEST_KEY",
+        "secretAccessKey": "TEST_SECRET",
+        "region": "cn-beijing",
+        "service": "ark",
+        "version": "2024-01-01",
+        "date": "2026-08-31T02:00:00.000Z",
+        "action": "ListAssetGroups",
+        "projectName": "",
+        "sessionToken": "",
+        "body": {}
+      },
+      "expected": {
+        "url": "https://open.volcengineapi.com/?Action=ListAssetGroups&Version=2024-01-01",
+        "bodyText": "{}",
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "X-Date": "20260831T020000Z",
+          "X-Content-Sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "Authorization": "HMAC-SHA256 Credential=AKLT_TEST_KEY/20260831/cn-beijing/ark/request, SignedHeaders=x-content-sha256;x-date, Signature=4acc2db47823682de7d6cbb0a0b2c3da79444cfe6dbb1d4870e43b4918a1bb98"
+        }
+      }
+    }
+  ]
+}
