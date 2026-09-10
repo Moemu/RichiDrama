@@ -7,8 +7,9 @@
       <section class="panel price-status" aria-label="供应商价格状态"><div class="section-heading"><div><h2>每日供应商价格</h2><p v-if="supplierPrices?.latest">最近成功：{{ supplierPrices.latest.day }} · {{ supplierPrices.latest.models }} 个型号<span v-if="supplierPrices.latest.day !== today" class="warning"> · 今日价格尚未获取</span></p><p v-else>尚无供应商价格快照。未计价用量会明确列出。</p></div><button :disabled="busy || priceRefreshing || supplierPrices?.status === 'completed'" @click="syncPrices">{{ priceRefreshing ? '正在获取价格…' : supplierPrices?.status === 'completed' ? '今日价格已获取' : '获取今日价格' }}</button></div><p>每天自动获取，直接用于成本估算。平台积分价目和人工审核不影响这里的价格。</p><p>账单固定费率：插帧 ¥0.60/分钟 · 画质增强 ¥2.50/分钟。按实际处理时长折算，不参与价格同步或审核。</p><p v-if="supplierPrices?.error" class="warning" role="status">{{ supplierPrices.error }}。仍可使用最近成功的价格估算。</p></section>
       <form class="panel filters" @submit.prevent="refresh(true)">
         <label>开始日期<input v-model="filters.date_from" type="date" required></label><label>结束日期<input v-model="filters.date_to" type="date" required></label>
-        <label>客户<select v-model="filters.organization_id" @change="filters.customer_kind = ''"><option value="">全部客户与个人</option><option v-for="c in customers" :key="c.id" :value="String(c.id)">{{ c.name }} #{{ c.id }}</option></select></label>
-        <label>项目 ID<input v-model="filters.drama_id" type="number" min="0" placeholder="全部项目"></label><label>执行用户 ID<input v-model="filters.user_id" type="number" min="0" placeholder="全部用户"></label>
+        <label>客户账户<select v-model="filters.organization_id" @change="filters.customer_kind = ''"><option value="">全部客户与个人</option><option v-for="c in customers" :key="c.id" :value="String(c.id)">{{ c.name }} #{{ c.id }}</option></select></label>
+        <label>项目<select v-model="filters.drama_id"><option value="">全部项目</option><option value="0">0 · 未关联项目</option><option v-for="p in filterOptions.projects" :key="p.id" :value="String(p.id)">{{ p.id }} · {{ p.title || '项目名称不可用' }}</option><option v-if="filters.drama_id && filters.drama_id !== '0' && !filterOptions.projects.some(p => String(p.id) === filters.drama_id)" :value="filters.drama_id">{{ filters.drama_id }} · 项目名称不可用</option></select></label>
+        <label>执行用户<select v-model="filters.user_id"><option value="">全部用户</option><option value="0">0 · 未知用户</option><option v-for="u in filterOptions.users" :key="u.id" :value="String(u.id)">{{ u.id }} · {{ u.username || '用户名不可用' }}</option><option v-if="filters.user_id && filters.user_id !== '0' && !filterOptions.users.some(u => String(u.id) === filters.user_id)" :value="filters.user_id">{{ filters.user_id }} · 用户名不可用</option></select></label>
         <label>模型<input v-model="filters.model" placeholder="完整模型名"></label><label>操作类型<input v-model="filters.source_kind" placeholder="全部操作"></label>
         <label>计价状态<select v-model="filters.cost_status"><option value="">全部状态</option><option v-for="(label,key) in costStatuses" :key="key" :value="key">{{ label }}</option></select></label>
         <div class="form-actions"><button class="primary" :disabled="busy">查询</button><button type="button" :disabled="busy" @click="reset">重置筛选</button></div><p v-if="filters.customer_kind" class="full">归属：{{ customerLabel(filters.customer_kind) }}</p>
@@ -61,6 +62,7 @@ const applied = ref(params()), tab = ref('query'), busy = ref(false), error = re
 const basis = 'supplier_daily_v1', supplierPrices = ref(null), priceRefreshing = ref(false)
 let pricePoll = null, disposed = false
 const customers = ref([]), reports = ref([]), report = ref(null), summary = ref(null), calls = ref({ items: [], total: 0 }), breakdown = ref({ items: [], total: 0 })
+const filterOptions = ref({ projects: [], users: [] })
 const page = ref(1), groupPage = ref(1), groupBy = ref('project'), detail = ref(null), detailPanel = ref(null)
 const reportForm = reactive({ organization_id: '', month: today.slice(0, 7) })
 const number = v => Number(v || 0).toLocaleString('zh-CN', { maximumFractionDigits: 4 })
@@ -79,7 +81,7 @@ function watchPrices() { priceRefreshing.value = supplierPrices.value?.status ==
 async function pollPrices() { pricePoll = null; if (disposed) return; try { supplierPrices.value = await api.supplierPrices(); watchPrices(); if (!priceRefreshing.value && !busy.value) await load() } catch (e) { priceRefreshing.value = false; error.value = e.message || '无法读取价格状态，请刷新' } }
 function syncPrices() { return perform(async () => { supplierPrices.value = await api.syncSupplierPrices(); watchPrices(); if (!priceRefreshing.value) await query() }) }
 onUnmounted(() => { disposed = true; clearTimeout(pricePoll) })
-onMounted(() => perform(async () => { const [c, r] = await Promise.all([adminAPI.customerOrganizations(), api.reports()]); customers.value = c; reports.value = r; await query() }))
+onMounted(() => perform(async () => { const [c, r, options] = await Promise.all([adminAPI.customerOrganizations(), api.reports(), api.filterOptions()]); customers.value = c; reports.value = r; filterOptions.value = options; await query() }))
 </script>
 <style scoped>
 .cost-workspace { width: 100%; min-width: 0; max-width: 1680px; margin: 0 auto; padding: 28px; color: var(--text-primary); }

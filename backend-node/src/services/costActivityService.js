@@ -220,4 +220,21 @@ function createReport(db, actor, input) {
     return require('./costQueryService').report(db, id);
   })();
 }
-module.exports = { activity, detail, records, createReport };
+function filterOptions(db) {
+  const projects = db.prepare(`WITH candidates AS (
+    SELECT id, title, 1 current FROM dramas
+    UNION ALL SELECT drama_id, project_title_snapshot, 0 FROM billing_usage_logs
+    UNION ALL SELECT drama_id, project_title_snapshot, 0 FROM billing_transactions WHERE type='authorization'
+    UNION ALL SELECT drama_id, project_title, 0 FROM cost_calls WHERE origin='live'
+  ) SELECT id, COALESCE(MAX(CASE WHEN current=1 THEN NULLIF(title,'') END), MAX(NULLIF(title,''))) title
+    FROM candidates WHERE id IS NOT NULL AND id>0 GROUP BY id ORDER BY id DESC`).all();
+  const users = db.prepare(`WITH ids AS (
+    SELECT id FROM users UNION SELECT user_id FROM billing_usage_logs
+    UNION SELECT user_id FROM billing_transactions WHERE type='authorization'
+    UNION SELECT user_id FROM cost_calls WHERE origin='live'
+  ) SELECT ids.id,u.username FROM ids LEFT JOIN users u ON u.id=ids.id
+    WHERE ids.id IS NOT NULL AND ids.id>0 ORDER BY ids.id`).all();
+  return { projects, users };
+}
+
+module.exports = { activity, detail, records, createReport, filterOptions };

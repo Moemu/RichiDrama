@@ -6,6 +6,30 @@ const ledger = require('../src/services/costLedgerService');
 const prices = require('../src/services/providerPriceService');
 const ai = require('../src/services/aiConfigService');
 
+test('cost filter options include current and historical projects and survive restart without changing usage', async () => {
+  const f = await modelCatalogFixture();
+  try {
+    seedCostActivity(f.db, f.admin.id);
+    const member = require('../src/services/authService').createUser(f.db, { username: 'filter-user', password: 'fixture-password' }, f.admin.id);
+    f.db.prepare("INSERT INTO dramas(id,title,owner_user_id,created_at,updated_at) VALUES(74,'另一用户的项目',?,'2026-09-01','2026-09-01')").run(member.id);
+    f.db.prepare("UPDATE dramas SET title='',deleted_at='2026-09-09' WHERE id=73").run();
+    const original = JSON.stringify(f.db.prepare('SELECT * FROM billing_usage_logs ORDER BY id').all());
+    const path = '/admin/costs/filter-options';
+    assert.equal((await f.request('GET', path)).status, 401);
+    const memberCookie = (await f.request('POST', '/auth/login', { username: member.username, password: 'fixture-password' })).cookie;
+    assert.equal((await f.request('GET', path, undefined, memberCookie)).status, 403);
+    const cookie = (await f.request('POST', '/auth/login', { username: f.admin.username, password: 'fixture-password' })).cookie;
+    const result = await f.request('GET', path, undefined, cookie);
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body.data.projects.find(p => p.id === 73), { id: 73, title: '历史项目名称' });
+    assert.deepEqual(result.body.data.projects.find(p => p.id === 74), { id: 74, title: '另一用户的项目' });
+    assert.deepEqual(result.body.data.users.find(u => u.id === member.id), { id: member.id, username: 'filter-user' });
+    await f.restart();
+    assert.deepEqual((await f.request('GET', path, undefined, cookie)).body.data, result.body.data);
+    assert.equal(JSON.stringify(f.db.prepare('SELECT * FROM billing_usage_logs ORDER BY id').all()), original);
+  } finally { await f.close(); }
+});
+
 test('activity reads original prices and usage without setup, imports or repricing; snapshots survive restart', async () => {
   const f = await modelCatalogFixture();
   try {
