@@ -115,6 +115,7 @@ function createApp() {
   taskService.failOrphanedAsyncTasksOnStartup(db, log);
 
   const app = express();
+  app.set('query parser', 'extended');
   // Only explicitly trusted proxy addresses may supply the recovery rate-limit IP.
   if (process.env.AUTH_TRUST_PROXY) app.set('trust proxy', process.env.AUTH_TRUST_PROXY.split(',').map((value) => value.trim()).filter(Boolean));
   const webDist = process.env.WEB_DIST_PATH || path.join(process.cwd(), '..', 'frontweb', 'dist');
@@ -210,7 +211,7 @@ function createApp() {
       if (fs.existsSync(fav)) res.sendFile(fav);
       else res.status(404).end();
     });
-    app.get('*', (req, res, next) => {
+    app.get('/{*splat}', (req, res, next) => {
       if (req.path.startsWith('/api')) return next();
       const indexHtml = path.join(webDist, 'index.html');
       if (fs.existsSync(indexHtml)) res.sendFile(indexHtml);
