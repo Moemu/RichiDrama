@@ -70,6 +70,12 @@ test('public signup cannot grant console access; global writes require an admini
       assert.equal(signup.body.data.user.console_access, false);
       assert.equal(signup.body.data.user.account_kind, 'creator');
       assert.equal(signup.body.data.user.is_active, true);
+      const duplicate = await request('POST', '/auth/register', {
+        username: `public-${index}`, password: 'test-password',
+      });
+      assert.equal(duplicate.status, 400);
+      assert.equal(duplicate.body.error.message, '该用户名已被使用');
+      assert.doesNotMatch(JSON.stringify(duplicate.body), /constraint|users\.username/i);
       assert.equal((await request('GET', '/admin/users', undefined, signup.cookie)).status, 403);
       creatorCookie = signup.cookie;
     }

@@ -7,6 +7,7 @@ const { getDb } = require('./db/index.js');
 const { loadConfig, getActiveProfile } = require('./config/index.js');
 const logger = require('./logger.js');
 const { setupRouter } = require('./routes/index.js');
+const response = require('./response.js');
 
 function resolveHttpErrorStatus(err) {
   if (err?.code === 'LIMIT_FILE_SIZE' || String(err?.message || '').includes('File too large')) return 413;
@@ -243,8 +244,9 @@ function createApp() {
       // express.sendFile reports an invalid or stale media Range as 416. This
       // is a normal media protocol response, not an application failure.
       if (status === 416) return res.status(416).set('Content-Range', 'bytes */*').end();
-      const message = isFileTooLarge ? '文件超过此上传接口的大小限制，请压缩后重试' : (err.message || '服务器错误');
-      res.status(status).json({ success: false, error: { code: isFileTooLarge ? 'FILE_TOO_LARGE' : (status === 500 ? 'INTERNAL_ERROR' : 'REQUEST_ERROR'), message }, timestamp: new Date().toISOString() });
+      const message = isFileTooLarge ? '文件超过此上传接口的大小限制，请压缩后重试' : err;
+      response.error(res, status, isFileTooLarge ? 'FILE_TOO_LARGE' : (status === 500 ? 'INTERNAL_ERROR' : 'REQUEST_ERROR'),
+        status === 500 ? response.INTERNAL_ERROR_MESSAGE : message);
     }
   });
 
