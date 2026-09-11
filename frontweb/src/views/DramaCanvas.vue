@@ -230,7 +230,7 @@
           @move-end="scheduleLayoutSave"
           @selection-change="onSelectionChange"
         >
-          <CanvasFlowAligner />
+          <CanvasFlowAligner :episode-id="renderedEpisodeId" />
           <Background pattern-color="#3f3f46" :gap="20" />
           <Controls />
           <MiniMap pannable zoomable />
@@ -337,6 +337,7 @@ const workflowProgress = ref('')
 const layoutSaveState = ref('idle')
 const layoutDirty = ref(false)
 const currentViewport = ref({ x: 0, y: 0, zoom: 0.75 })
+const renderedEpisodeId = ref(null)
 const focusedNodeId = ref(null)
 const canvasMainRef = ref(null)
 const contextMenuVisible = ref(false)
@@ -405,6 +406,7 @@ function rebuildGraph() {
   }
   nodes.value = nextNodes
   edges.value = nextEdges
+  renderedEpisodeId.value = filterEpisodeId.value
 }
 
 function applyHighlight() {
