@@ -81,8 +81,8 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
   const read = await request(editor.token, 'GET', `${prefix}/collaboration/text?kind=dramas&id=${id}&field=description`);
   assert.equal(read.status, 200);
   const initial = read.body.data;
-  const socketUrl = base.replace(/^http/, 'ws') + `${prefix}/collaboration/socket`;
   const connect = async token => {
+    const socketUrl = base.replace(/^http/, 'ws') + `${prefix}/collaboration/socket`;
     const socket = new WebSocket(socketUrl, { origin: new URL(base).origin, headers: { cookie: `lmd_session=${encodeURIComponent(token)}` } });
     await once(socket, 'open');
     return socket;
@@ -145,6 +145,27 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
   const shot = await request(editor.token, 'POST', '/storyboards', { episode_id: episodeId, title: '素材引用' });
   assert.equal(shot.status, 201);
   const shotId = shot.body.data.id;
+  const promptTarget = `kind=storyboards&id=${shotId}&field=universal_segment_text`;
+  const promptRefs = [{ asset_id: copy.body.data.id, alias: '声音', occurrence: 0 }];
+  assert.equal((await request(editor.token, 'PUT', `/storyboards/${shotId}`, { universal_segment_text: '原始提示词', omni_prompt_document: { text: '原始提示词', refs: promptRefs } })).status, 200);
+  const originalPrompt = (await request(editor.token, 'GET', `${prefix}/collaboration/text?${promptTarget}`)).body.data;
+  const promptSuggestion = db.prepare('INSERT INTO project_generated_suggestions (drama_id,entity_kind,entity_id,field,proposed_text,created_at) VALUES (?,?,?,?,?,?)')
+    .run(id, 'storyboards', shotId, 'universal_segment_text', '应用建议后的提示词', new Date().toISOString()).lastInsertRowid;
+  const appliedPrompt = await request(editor.token, 'POST', `${prefix}/collaboration/suggestions/${promptSuggestion}/apply`, { expected_text: originalPrompt.text });
+  assert.equal(appliedPrompt.status, 200);
+  assert.ok(appliedPrompt.body.data.epoch > originalPrompt.epoch);
+  const promptAfterApply = (await request(editor.token, 'GET', `/storyboards/${shotId}`)).body.data;
+  assert.equal(promptAfterApply.universal_segment_text, '应用建议后的提示词');
+  assert.deepEqual(promptAfterApply.omni_prompt_document, { text: '应用建议后的提示词', refs: promptRefs });
+  const refsOnly = await request(editor.token, 'PUT', `/storyboards/${shotId}`, { omni_prompt_document: { refs: [] } });
+  assert.equal(refsOnly.status, 200);
+  assert.deepEqual(refsOnly.body.data.omni_prompt_document, { text: '应用建议后的提示词', refs: [] });
+  assert.equal((await request(editor.token, 'GET', `${prefix}/collaboration/text?${promptTarget}`)).body.data.text, '应用建议后的提示词');
+  await stop(); await start();
+  const restoredPrompt = (await request(owner.token, 'GET', `/storyboards/${shotId}`)).body.data;
+  assert.equal(restoredPrompt.universal_segment_text, '应用建议后的提示词');
+  assert.deepEqual(restoredPrompt.omni_prompt_document, { text: '应用建议后的提示词', refs: [] });
+  assert.equal((await request(owner.token, 'GET', `${prefix}/collaboration/text?${promptTarget}`)).body.data.text, '应用建议后的提示词');
   const bound = await request(editor.token, 'PUT', `/storyboards/${shotId}`, { audio_local_path: 'sample.txt' });
   assert.equal(bound.status, 200);
   assert.equal((await request(viewer.token, 'GET', `/storyboards/${shotId}`)).body.data.audio_local_path, copy.body.data.local_path);
@@ -199,7 +220,7 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
   await request(editor.token, 'DELETE', `/assets/${source.body.data.id}`);
   fs.unlinkSync(path.join(cfg.storage.local_path, 'sample.txt'));
   assert.equal(fs.readFileSync(path.join(cfg.storage.local_path, copy.body.data.local_path), 'utf8'), 'durable-media-fixture');
-  const revoked = once(editorSocket, 'close');
+  const revoked = once(await connect(editor.token), 'close');
   const shotBaseline = (await request(owner.token, 'GET', `/storyboards/${shotId}`)).body.data;
   assert.equal((await request(owner.token, 'GET', `/episodes/${episodeId}/generation-settings`)).status, 200);
   const settingsReadRevision = (await request(owner.token, 'GET', prefix)).body.data.revision;

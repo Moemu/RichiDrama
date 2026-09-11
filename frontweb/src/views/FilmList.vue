@@ -310,6 +310,7 @@ import { Delete, PictureFilled } from '@element-plus/icons-vue'
 import AppHeader from '@/components/ui/AppHeader.vue'
 import { useTheme } from '@/composables/useTheme'
 import { dramaAPI } from '@/api/drama'
+import { loadAllProjects } from '@/utils/projectList'
 import { characterLibraryAPI } from '@/api/characterLibrary'
 import { sceneLibraryAPI } from '@/api/sceneLibrary'
 import { propLibraryAPI } from '@/api/propLibrary'
@@ -831,7 +832,7 @@ const importFileInput = ref(null)
 function loadList() {
   loading.value = true
   const requests = [
-    dramaAPI.list({ page: 1, page_size: 50 }),
+    loadAllProjects(params => dramaAPI.list(params)),
     omniVideoAPI.listSequences(),
     omniVideoAPI.assets({ page: 1, page_size: 40 }),
     videosAPI.list({ page: 1, page_size: 12, status: 'completed' }),

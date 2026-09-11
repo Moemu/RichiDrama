@@ -5,7 +5,7 @@ import { projectSnapshot } from '@/utils/projectSnapshots'
 const bindings = new WeakMap()
 
 function mount(el, binding) {
-  const state = { target: binding.value, disposed: false, binding: null, composing: false, remote: false }
+  const state = { target: binding.value, disposed: false, binding: null, composing: false, remote: false, version: 0 }
   bindings.set(el, state)
   const input = el.matches('textarea,input') ? el : el.querySelector('textarea,input')
   if (!input) return
@@ -28,16 +28,18 @@ function mount(el, binding) {
     }
     state.remote = false
   }
-  state.stop = watch(() => [projectSession.enabled, state.target?.id], async ([enabled]) => {
+  state.stop = watch(() => [projectSession.enabled, projectSession.id, state.target?.id], async ([enabled]) => {
+    const version = ++state.version
     state.binding?.dispose()
+    state.binding = null
     if (!enabled || !state.target?.id) return
     if (state.target.kind.endsWith('_libraries') && Number(projectSnapshot(state.target.kind, state.target.id)?.__projectId) !== projectSession.id) return
     try {
-      const result = await bindProjectText(state.target, update)
-      if (state.disposed) result?.dispose()
+      const result = await bindProjectText(state.target, value => { if (version === state.version) update(value) })
+      if (state.disposed || version !== state.version) result?.dispose()
       else state.binding = result
-    } catch (error) { projectSession.error = error.message }
-  }, { immediate: true })
+    } catch (error) { if (!state.disposed && version === state.version) projectSession.error = error.message }
+  }, { immediate: true, flush: 'sync' })
   const onInput = () => { if (!state.remote && !state.composing) state.binding?.change(input.value) }
   const onStart = () => { state.composing = true; state.binding?.compositionStart() }
   const onEnd = () => { state.composing = false; state.binding?.compositionEnd(input.value) }
@@ -45,7 +47,7 @@ function mount(el, binding) {
   const onBlur = () => projectPresence(null)
   for (const [event, fn] of Object.entries({ input: onInput, compositionstart: onStart, compositionend: onEnd, focus: onFocus, blur: onBlur })) input.addEventListener(event, fn)
   state.cleanup = () => {
-    state.disposed = true; state.stop?.(); stopPermission(); state.binding?.dispose()
+    state.disposed = true; state.version++; state.stop?.(); stopPermission(); state.binding?.dispose()
     for (const [event, fn] of Object.entries({ input: onInput, compositionstart: onStart, compositionend: onEnd, focus: onFocus, blur: onBlur })) input.removeEventListener(event, fn)
   }
 }

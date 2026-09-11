@@ -17,7 +17,7 @@ function routes(db, log, cfg) {
         // migrates existing character/scene/prop images once.
         if (query.drama_id) require('../services/assetMappingService').syncDramaAssets(db, log, query.drama_id);
         const { items, total, page, pageSize } = assetService.list(db, query);
-        response.successWithPagination(res, items.map(item => require('../services/projectAssetService').decorate(db, item)), total, page, pageSize);
+        response.successWithPagination(res, require('../services/projectAssetService').decorateMany(db, items), total, page, pageSize);
       } catch (err) {
         log.error('assets list', { error: err.message });
         response.internalError(res, err.message);

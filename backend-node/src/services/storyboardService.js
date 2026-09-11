@@ -167,7 +167,7 @@ function activeOmniAssetIds(db, storyboardId, rawIds, ownerUserId, log) {
 }
 
 function updateStoryboard(db, log, id, req, ownerUserId = null) {
-  const row = db.prepare('SELECT id, updated_at FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
+  const row = db.prepare('SELECT id, updated_at, universal_segment_text FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!row) return null;
   validateStoryboardLocalPaths(req);
   validateWritableMediaReferences(db, req, ownerUserId, [

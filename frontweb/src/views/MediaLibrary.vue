@@ -11,10 +11,10 @@
       </div>
       <div class="header-actions">
         <AccountBalanceBadge />
-        <el-button type="warning" plain :disabled="(projectSession.enabled && !projectSession.canEdit) || !selectedIds.size" @click="batchDelete">批量归档{{ selectedIds.size ? `（${selectedIds.size}）` : '' }}</el-button>
-        <el-button type="danger" plain :disabled="(projectSession.enabled && !projectSession.canEdit) || !total" @click="clearLibrary">一键归档{{ projectDramaId ? '项目素材' : '素材库' }}</el-button>
+        <el-button type="warning" plain :disabled="projectReadOnly || !selectedIds.size" @click="batchDelete">批量归档{{ selectedIds.size ? `（${selectedIds.size}）` : '' }}</el-button>
+        <el-button type="danger" plain :disabled="projectReadOnly || !total" @click="clearLibrary">一键归档{{ projectDramaId ? '项目素材' : '素材库' }}</el-button>
         <el-button plain :disabled="!total || selectingAll" @click="selectAllFiltered">{{ selectingAll ? '正在全选…' : '全选筛选结果' }}</el-button>
-        <el-button type="primary" plain :disabled="projectSession.enabled && !projectSession.canEdit" @click="triggerUpload">
+        <el-button type="primary" plain :disabled="projectReadOnly" @click="triggerUpload">
           <el-icon><Upload /></el-icon>
           上传素材
         </el-button>
@@ -48,7 +48,7 @@
       <span>正在上传 {{ uploadProgress.current }}/{{ uploadProgress.total }}...</span>
       <el-progress :percentage="uploadPercent" :stroke-width="8" :show-text="false" />
     </div>
-    <div v-if="failedUploads.length" class="upload-progress"><span>失败 {{ failedUploads.length }} 个</span><el-button size="small" @click="retryFailedUploads">重新上传失败项</el-button></div>
+    <div v-if="failedUploads.length" class="upload-progress"><span>失败 {{ failedUploads.length }} 个</span><el-button :disabled="projectReadOnly" size="small" @click="retryFailedUploads">重新上传失败项</el-button></div>
 
     <!-- 媒体网格 -->
     <div v-loading="loading" class="media-grid">
@@ -76,9 +76,9 @@
               >
                 <el-icon><ZoomIn /></el-icon>
               </el-button>
-              <el-button size="small" plain title="重命名素材" aria-label="重命名素材" @click.stop="renameItem(item)"><el-icon><Edit /></el-icon></el-button>
-              <el-button size="small" plain :type="item.is_favorite ? 'warning' : 'info'" :title="item.is_favorite ? '取消收藏' : '收藏素材'" :aria-label="item.is_favorite ? '取消收藏素材' : '收藏素材'" @click.stop="toggleFavorite(item)"><el-icon><StarFilled v-if="item.is_favorite" /><Star v-else /></el-icon></el-button>
-              <el-button
+              <el-button :disabled="projectReadOnly" size="small" plain title="重命名素材" aria-label="重命名素材" @click.stop="renameItem(item)"><el-icon><Edit /></el-icon></el-button>
+              <el-button :disabled="projectReadOnly" size="small" plain :type="item.is_favorite ? 'warning' : 'info'" :title="item.is_favorite ? '取消收藏' : '收藏素材'" :aria-label="item.is_favorite ? '取消收藏素材' : '收藏素材'" @click.stop="toggleFavorite(item)"><el-icon><StarFilled v-if="item.is_favorite" /><Star v-else /></el-icon></el-button>
+              <el-button :disabled="projectReadOnly"
                 size="small"
                 type="danger"
                 plain
@@ -100,7 +100,7 @@
       <div v-if="!loading && mediaItems.length === 0" class="empty-media">
         <el-icon class="empty-icon"><Files /></el-icon>
         <div><b>素材库还是空的</b><p>上传后可在创作与分镜中使用。</p></div>
-        <div class="empty-media-actions"><el-button type="primary" :disabled="projectSession.enabled && !projectSession.canEdit" @click="triggerUpload"><el-icon><Upload /></el-icon>上传首个素材</el-button><el-button @click="$router.push('/free-create')">先去自由创作</el-button></div>
+        <div class="empty-media-actions"><el-button type="primary" :disabled="projectReadOnly" @click="triggerUpload"><el-icon><Upload /></el-icon>上传首个素材</el-button><el-button @click="$router.push('/free-create')">先去自由创作</el-button></div>
       </div>
     </div>
 
@@ -120,9 +120,9 @@
       <span>已选 {{ selectedIds.size }} 项</span>
       <el-button size="small" @click="selectAllFiltered">选中全部筛选结果</el-button>
       <el-button size="small" @click="clearSelection">取消选择</el-button>
-      <el-button v-if="canConcatSelected" size="small" @click="concatSelectedVideos">拼接选中视频</el-button>
-      <el-button size="small" type="primary" plain @click="batchCertifyRealPeople">批量标记含真人并认证</el-button>
-      <el-button size="small" type="danger" plain @click="batchDelete">批量归档</el-button>
+      <el-button :disabled="projectReadOnly" v-if="canConcatSelected" size="small" @click="concatSelectedVideos">拼接选中视频</el-button>
+      <el-button :disabled="projectReadOnly" size="small" type="primary" plain @click="batchCertifyRealPeople">批量标记含真人并认证</el-button>
+      <el-button :disabled="projectReadOnly" size="small" type="danger" plain @click="batchDelete">批量归档</el-button>
       <el-button size="small" type="primary" @click="createWithSelected">用选中素材创作</el-button>
     </div>
 
@@ -136,20 +136,20 @@
           class="preview-video"
           autoplay
         />
-        <div v-if="previewItem?.type === 'video'" class="trim-controls"><el-input-number v-model="trimStart" :min="0" :max="Math.max(0, trimEnd - .1)" :step=".1" size="small"/><span>至</span><el-input-number v-model="trimEnd" :min="trimStart + .1" :max="Number(previewItem.duration) || 3600" :step=".1" size="small"/><small>将导出 {{ Math.max(0, trimEnd - trimStart).toFixed(1) }} 秒 / 原片 {{ Number(previewItem.duration || 0).toFixed(1) }} 秒</small><el-button size="small" :loading="trimming" @click="trimVideo">裁切为新素材</el-button></div>
-        <audio v-else-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" controls />
+        <audio v-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" controls />
         <AudioWaveform v-if="previewItem?.type === 'audio'" :src="itemUrl(previewItem)" />
-        <img v-else-if="previewItem" :src="itemUrl(previewItem)" class="preview-image" />
+        <img v-if="previewItem?.type === 'image'" :src="itemUrl(previewItem)" class="preview-image" />
       </div>
+      <div v-if="previewItem?.type === 'video'" class="trim-controls"><el-input-number v-model="trimStart" :min="0" :max="Math.max(0, trimEnd - .1)" :step=".1" size="small"/><span>至</span><el-input-number v-model="trimEnd" :min="trimStart + .1" :max="Number(previewItem.duration) || 3600" :step=".1" size="small"/><small>将导出 {{ Math.max(0, trimEnd - trimStart).toFixed(1) }} 秒 / 原片 {{ Number(previewItem.duration || 0).toFixed(1) }} 秒</small><el-button :disabled="projectReadOnly" size="small" :loading="trimming" @click="trimVideo">裁切为新素材</el-button></div>
       <div class="preview-meta">
         <div class="meta-row"><span>名称：</span>{{ previewItem?.name || '未命名' }}</div>
         <div class="meta-row"><span>大小：</span>{{ formatSize(previewItem?.size) }}</div>
         <div class="meta-row"><span>创建时间：</span>{{ formatChinaDateTime(previewItem?.created_at, '—') }}</div>
-        <div class="meta-row tag-editor"><span>标签：</span><el-input v-model="editableTags" size="small" placeholder="用逗号分隔" @change="saveTags" /></div>
+        <div class="meta-row tag-editor"><span>标签：</span><el-input :disabled="projectReadOnly" v-model="editableTags" size="small" placeholder="用逗号分隔" @change="saveTags" /></div>
         <section v-if="previewItem" class="remote-library-row">
           <div><b>上传到素材库</b></div>
           <span class="remote-library-status" :class="sd2Status(previewItem)">{{ sd2Label(previewItem) }}</span>
-          <el-button
+          <el-button :disabled="projectReadOnly"
             size="small"
             type="primary"
             plain
@@ -158,7 +158,7 @@
           >{{ libraryActionLabel(previewItem) }}</el-button>
           <p v-if="previewItem?.seedance2_asset?.error" class="remote-library-error">{{ previewItem.seedance2_asset.error }}</p>
         </section>
-        <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人</el-checkbox><span v-if="previewItem?.requires_sd2_identity">{{ sd2Label(previewItem) }}，系统自动准备，生成会自动等待。</span></div>
+        <div v-if="previewItem?.type === 'image'" class="sd2-preview-row"><el-checkbox :disabled="projectReadOnly" :model-value="!!previewItem?.requires_sd2_identity" @change="setIdentity(previewItem, $event)">含真人</el-checkbox><span v-if="previewItem?.requires_sd2_identity">{{ sd2Label(previewItem) }}，系统自动准备，生成会自动等待。</span></div>
         <section v-if="previewItem" class="asset-lineage">
           <div class="asset-lineage-title"><span>版本与来源</span><el-button text size="small" :loading="lineageLoading" @click="loadLineage(previewItem.id)">刷新</el-button></div>
           <div v-if="lineageLoading" class="asset-lineage-empty">正在加载素材谱系…</div>
@@ -170,7 +170,7 @@
           </template>
         </section>
       </div>
-      <template #footer><el-button v-if="previewItem" type="danger" plain @click="forceDetachItem(previewItem)">从全部可编辑镜头解除并归档</el-button><el-button @click="showPreview = false">关闭</el-button></template>
+      <template #footer><el-button :disabled="projectReadOnly" v-if="previewItem" type="danger" plain @click="forceDetachItem(previewItem)">从全部可编辑镜头解除并归档</el-button><el-button @click="showPreview = false">关闭</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -221,6 +221,7 @@ const uploadPercent = computed(() => uploadProgress.value.total
 const router = useRouter()
 const route = useRoute()
 const projectDramaId = computed(() => { const id = Number(route.query.drama_id); return Number.isInteger(id) && id > 0 ? id : null })
+const projectReadOnly = computed(() => !!projectDramaId.value && (projectSession.id !== projectDramaId.value || !projectSession.canEdit))
 const assetScope = computed(() => projectDramaId.value ? 'project' : 'global')
 let keywordTimer = null
 
@@ -233,10 +234,12 @@ function returnToSource() {
 }
 
 function triggerUpload() {
+  if (projectReadOnly.value) return
   uploadInput.value?.click()
 }
 
 async function onUpload(e) {
+  if (projectReadOnly.value) return
   const files = Array.from(e.target.files || [])
   if (!files.length) return
   uploading.value = true
@@ -245,6 +248,7 @@ async function onUpload(e) {
   const limits = await omniVideoAPI.uploadLimits().catch(() => null)
   failedUploads.value = []
   for (const file of files) {
+    if (projectReadOnly.value) break
     try {
       const type = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : null
       const maxMb = type ? Number(limits?.files?.[type]?.max_mb) : 0
@@ -384,6 +388,7 @@ function openLineageItem(item) {
 }
 
 async function trimVideo() {
+  if (projectReadOnly.value) return
   if (!previewItem.value || trimming.value) return
   trimming.value = true
   try {
@@ -394,9 +399,11 @@ async function trimVideo() {
 }
 
 async function concatSelectedVideos() {
+  if (projectReadOnly.value) return
   if (!canConcatSelected.value) return
   try {
     await ElMessageBox.confirm(`将按当前素材排序拼接 ${selectedMedia.value.length} 段视频，并保留原素材。`, '拼接视频', { type: 'info' })
+    if (projectReadOnly.value) return
     const item = await omniVideoAPI.concatAssets(selectedMedia.value.map((entry) => entry.id))
     mediaItems.value.unshift(normalizeItem(item)); total.value++
     clearSelection()
@@ -407,6 +414,7 @@ async function concatSelectedVideos() {
 }
 
 async function saveTags() {
+  if (projectReadOnly.value) return
   if (!previewItem.value) return
   const tags = [...new Set(editableTags.value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean))].slice(0, 12)
   try {
@@ -422,6 +430,7 @@ async function saveTags() {
 }
 
 async function toggleFavorite(item) {
+  if (projectReadOnly.value) return
   try {
     const updated = await omniVideoAPI.updateAsset(item.id, { is_favorite: !item.is_favorite })
     Object.assign(item, updated)
@@ -432,7 +441,9 @@ async function toggleFavorite(item) {
 }
 
 async function deleteItem(item) {
+  if (projectReadOnly.value) return
   await ElMessageBox.confirm('确定归档该素材？归档后新镜头不能再选用；已有镜头不受影响。', '归档确认', { type: 'warning' })
+  if (projectReadOnly.value) return
   try {
     await request.delete(`/assets/${item.id}`)
     ElMessage.success('已归档；已有镜头引用保持不变')
@@ -443,8 +454,10 @@ async function deleteItem(item) {
 }
 
 async function forceDetachItem(item) {
+  if (projectReadOnly.value) return
   try {
     await ElMessageBox.confirm(`确定从全部可编辑分镜和自由创作镜头中解除“${item.name || `素材 ${item.id}`}”的引用并归档？此操作会移除对应 @ 引用。`, '危险操作', { type: 'error', confirmButtonText: '解除全部引用并归档', cancelButtonText: '取消' })
+    if (projectReadOnly.value) return
     const result = await omniVideoAPI.forceDetachAsset(item.id)
     ElMessage.success(result?.message || '已解除全部可编辑镜头引用并归档')
     showPreview.value = false
@@ -455,8 +468,10 @@ async function forceDetachItem(item) {
 }
 
 async function renameItem(item) {
+  if (projectReadOnly.value) return
   try {
     const { value } = await ElMessageBox.prompt('输入素材名称', '重命名素材', { inputValue: item.name || '' })
+    if (projectReadOnly.value) return
     const updated = await omniVideoAPI.updateAsset(item.id, { name: String(value || '').trim() || item.name })
     Object.assign(item, updated)
     ElMessage.success('素材名称已更新')
@@ -472,6 +487,7 @@ function libraryActionLabel(item) {
   return '上传到素材库'
 }
 async function uploadToRemoteLibrary(item) {
+  if (projectReadOnly.value) return
   if (!item?.id || libraryUploadingId.value) return
   libraryUploadingId.value = item.id
   try {
@@ -489,12 +505,13 @@ async function uploadToRemoteLibrary(item) {
   }
 }
 async function setIdentity(item, value) {
+  if (projectReadOnly.value) return
   const previous = !!item.requires_sd2_identity
   item.requires_sd2_identity = !!value
   try {
     const updated = await omniVideoAPI.updateAsset(item.id, { requires_sd2_identity: !!value })
     Object.assign(item, updated)
-    if (value && sd2Status(item) !== 'active') {
+    if (value && !projectReadOnly.value && sd2Status(item) !== 'active') {
       const out = await omniVideoAPI.certifyAsset(item.id)
       if (out?.seedance2_asset) item.seedance2_asset = out.seedance2_asset
     }
@@ -505,9 +522,11 @@ async function setIdentity(item, value) {
 }
 
 async function batchDelete() {
+  if (projectReadOnly.value) return
   const count = selectedIds.size
   const scopeLabel = projectDramaId.value ? '当前项目' : '全局素材库'
   await ElMessageBox.confirm(`确定归档选中的 ${count} 个素材？归档后新镜头不能再选用；已有镜头不受影响。范围：${scopeLabel}。`, '批量归档', { type: 'warning', confirmButtonText: '归档选中素材', cancelButtonText: '取消' })
+  if (projectReadOnly.value) return
   try {
     const result = await request.post('/assets/batch-delete', { ids: [...selectedIds], scope: assetScope.value, ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}) })
     clearSelection()
@@ -553,10 +572,12 @@ async function selectAllFiltered() {
 }
 
 async function batchCertifyRealPeople() {
+  if (projectReadOnly.value) return
   const ids = selectedMedia.value.filter((item) => item.type === 'image').map((item) => item.id)
   if (!ids.length) return ElMessage.warning('请选择至少一张图片素材')
   try {
     await ElMessageBox.confirm(`将 ${ids.length} 张图片标记为含真人并自动认证；生成会等待认证完成后继续。`, '批量真人认证', { type: 'info' })
+    if (projectReadOnly.value) return
     const result = await omniVideoAPI.certifyAssetsBatch(ids)
     ElMessage.success(result?.message || `已排队 ${ids.length} 张素材认证`)
     await loadMedia()
@@ -566,6 +587,7 @@ async function batchCertifyRealPeople() {
 }
 
 async function clearLibrary() {
+  if (projectReadOnly.value) return
   try {
     const isProjectLibrary = Boolean(projectDramaId.value)
     await ElMessageBox.confirm(
@@ -575,6 +597,7 @@ async function clearLibrary() {
       isProjectLibrary ? '一键归档项目素材' : '一键归档素材库',
       { type: 'warning', confirmButtonText: '确认归档', cancelButtonText: '取消' }
     )
+    if (projectReadOnly.value) return
     const result = await request.post('/assets/batch-delete', { all_matching: true, scope: assetScope.value, ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}), type: mediaType.value === 'all' ? undefined : mediaType.value, keyword: keyword.value || undefined, favorite: favoriteOnly.value ? 1 : undefined })
     clearSelection()
     showPreview.value = false

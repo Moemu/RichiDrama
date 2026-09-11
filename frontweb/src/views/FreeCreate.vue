@@ -206,7 +206,7 @@
 import { useProjectTextModel, projectSession } from '@/composables/useProjectCollaboration'
 import { advanceProjectEdit, mergeGenerationState } from '@/utils/projectWriteContract'
 import { projectSnapshot } from '@/utils/projectSnapshots'
-import { activeGenerationStatuses, localVideoUrl, normalizeJob, resolveShotPreviewJob, shotPreviewVideoUrl } from '@/utils/shotPreview'
+import { activeGenerationStatuses, pendingPreviewStatuses, localVideoUrl, normalizeJob, resolveShotPreviewJob, shotPreviewVideoUrl } from '@/utils/shotPreview'
 import ProjectCollaborationBar from '@/components/ProjectCollaborationBar.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -763,7 +763,7 @@ async function loadProjectVideos(storyboards) {
       storyboard_id: storyboard.id,
       page_size: 20,
     })
-    return [Number(storyboard.id), result?.items?.find(video => activeGenerationStatuses.has(video.status)) || bestPlayableVideo(result?.items)]
+    return [Number(storyboard.id), result?.items?.find(video => pendingPreviewStatuses.has(video.status)) || bestPlayableVideo(result?.items)]
   }))
   return new Map(groups)
 }
@@ -1035,7 +1035,7 @@ async function loadShotHistory(shot) {
     // Follow a restored task through completion or failure, without replacing
     // a version the user explicitly selected while history was loading.
     if (selectedHistoryJobId.value == null) {
-      selectedHistoryJobId.value = shotHistory.value.find(job => activeGenerationStatuses.has(job.status))?.id ?? null
+      selectedHistoryJobId.value = shotHistory.value.find(job => pendingPreviewStatuses.has(job.status))?.id ?? null
     }
     jobs.filter((job) => activeGenerationStatuses.has(job.status)).forEach((job) => poll(job.id))
   } catch (error) { if (Number(currentShot.value?.id) === shotId) ElMessage.warning(error?.message || '当前镜头的生成记录加载失败，请稍后刷新') }

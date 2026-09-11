@@ -109,7 +109,7 @@ module.exports = function projectRoutes(db, cfg, log) {
       const input = { kind: suggestion.entity_kind, id: suggestion.entity_id, field: suggestion.field };
       const current = collaboration.readText(db, req.params.id, req.auth.id, input);
       if (current.text !== req.body.expected_text) throw Object.assign(new Error('内容已更新，请重新比较后应用'), { status: 409 });
-      db.prepare(`UPDATE "${input.kind}" SET "${input.field}"=?,updated_at=? WHERE id=? AND deleted_at IS NULL`).run(suggestion.proposed_text, new Date().toISOString(), input.id);
+      collaboration.persistText(db, req.params.id, input, suggestion.proposed_text);
       db.prepare('UPDATE project_generated_suggestions SET applied_at=? WHERE id=?').run(new Date().toISOString(), suggestion.id);
       return collaboration.readText(db, req.params.id, req.auth.id, input);
     })();

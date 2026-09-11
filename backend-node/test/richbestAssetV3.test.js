@@ -198,8 +198,12 @@ test('character registration uploads once, becomes active, and is idempotent', a
     const first = await richbest.registerCharacter(env.db, log, { storage: { local_path: env.storage } }, 1, 7, { row: configRow(), fetchImpl: fakeFetch });
     assert.equal(first.ok, true);
     assert.equal(first.seedance2_asset.status, 'processing');
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    const saved = JSON.parse(env.db.prepare('SELECT seedance2_asset FROM characters WHERE id=1').get().seedance2_asset);
+    const deadline = Date.now() + 3000;
+    let saved;
+    do {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      saved = JSON.parse(env.db.prepare('SELECT seedance2_asset FROM characters WHERE id=1').get().seedance2_asset);
+    } while (saved.status === 'processing' && Date.now() < deadline);
     assert.equal(saved.status, 'active');
     assert.equal(saved.asset_url, 'asset://asset-1');
 

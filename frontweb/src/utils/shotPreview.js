@@ -1,4 +1,5 @@
 export const activeGenerationStatuses = new Set(['sd2_waiting', 'processing', 'upscale_pending', 'upscaling', 'interpolation_pending', 'interpolating', 'persisting'])
+export const pendingPreviewStatuses = new Set([...activeGenerationStatuses, 'billing_reconciliation'])
 
 export function localVideoUrl(video) {
   // Failed enhancement can leave a playable local source for explicit preview.
@@ -28,7 +29,7 @@ export function normalizeJob(data) {
 
 export function resolveShotPreviewJob(history, selectedId, boundId) {
   return history.find(job => String(job.id) === String(selectedId))
-    || history.find(job => activeGenerationStatuses.has(job.status))
+    || history.find(job => pendingPreviewStatuses.has(job.status))
     || history.find(job => job.is_current)
     || history.find(job => String(job.id) === String(boundId))
     || history[0] || null

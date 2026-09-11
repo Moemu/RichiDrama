@@ -21,6 +21,14 @@ test('explicit history preview remains available while another version is genera
   assert.equal(shotPreviewVideoUrl(job, shot), adopted.videoUrl)
 })
 
+test('refresh shows reconciliation ahead of adopted video without restarting automatic polling', () => {
+  const pending = { id: 2, status: 'billing_reconciliation' }
+  assert.equal(resolveShotPreviewJob([pending, adopted], null, 1), pending)
+  assert.equal(shotPreviewVideoUrl(pending, shot), '')
+  assert.equal(resolveShotPreviewJob([pending, adopted], 1, 1), adopted)
+  assert.equal(activeGenerationStatuses.has(pending.status), false)
+})
+
 test('a followed task keeps its own completion or failure instead of falling back to old media', () => {
   for (const status of ['completed', 'failed', 'unknown', 'billing_reconciliation']) {
     const latest = { id: 2, status, videoUrl: status === 'completed' ? '/static/new.mp4' : '' }

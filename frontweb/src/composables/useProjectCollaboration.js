@@ -8,6 +8,7 @@ let socket
 let reconnectTimer
 let refreshCallback
 let latestRevision = -1
+let sessionVersion = 0
 const documents = new Map()
 const requests = new Map()
 const textKey = input => `${input.kind}:${input.id}:${input.field}`
@@ -41,7 +42,7 @@ function send(input) {
 }
 
 async function flush(entry) {
-  if (!entry.dirty || entry.saving || !projectSession.connected) return
+  if (entry.sessionVersion !== sessionVersion || !entry.dirty || entry.saving || !projectSession.connected) return
   entry.saving = true
   projectSession.pending++
   const generation = entry.generation
@@ -49,6 +50,7 @@ async function flush(entry) {
     await send({ type: 'text_update', ...entry.target, epoch: entry.epoch, update: encode(Y.encodeStateAsUpdate(entry.doc, entry.serverVector ? decode(entry.serverVector) : undefined)) })
     if (generation === entry.generation) entry.dirty = false
   } catch (error) {
+    if (entry.sessionVersion !== sessionVersion) return
     projectSession.error = error.message
     if (error.code === 'ENTITY_DELETED') {
       projectSession.drafts.push({ key: textKey(entry.target), text: entry.doc.getText('content').toString() })
@@ -57,21 +59,29 @@ async function flush(entry) {
   }
   finally {
     entry.saving = false
-    projectSession.pending--
-    if (entry.dirty && generation !== entry.generation) void flush(entry)
+    if (entry.sessionVersion === sessionVersion) {
+      projectSession.pending--
+      if (entry.dirty && generation !== entry.generation) void flush(entry)
+    }
   }
 }
 
 function connect() {
   if (!projectSession.enabled || !projectSession.id) return
   const id = projectSession.id
+  const version = sessionVersion
   socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/v1/dramas/${id}/collaboration/socket`)
+  const connection = socket
+  const current = () => version === sessionVersion && socket === connection
+  const showError = error => { if (current()) projectSession.error = error.message }
   socket.onopen = () => {
+    if (!current()) return
     projectSession.connected = true
     projectSession.error = ''
-    for (const entry of documents.values()) void send({ type: 'text_read', ...entry.target, epoch: entry.epoch, state_vector: encode(Y.encodeStateVector(entry.doc)) }).then(() => flush(entry)).catch(error => { projectSession.error = error.message })
+    for (const entry of documents.values()) void send({ type: 'text_read', ...entry.target, epoch: entry.epoch, state_vector: encode(Y.encodeStateVector(entry.doc)) }).then(() => { if (current()) return flush(entry) }).catch(showError)
   }
   socket.onmessage = event => {
+    if (!current()) return
     const message = JSON.parse(event.data)
     if (message.type === 'state') {
       projectSession.participants = message.participants
@@ -79,7 +89,7 @@ function connect() {
       if (message.permissions) projectSession.canEdit = message.permissions.can_edit
       if (latestRevision !== message.revision) {
         latestRevision = message.revision
-        for (const entry of documents.values()) void send({ type: 'text_read', ...entry.target, epoch: entry.epoch, state_vector: encode(Y.encodeStateVector(entry.doc)) }).catch(error => { projectSession.error = error.message })
+        for (const entry of documents.values()) void send({ type: 'text_read', ...entry.target, epoch: entry.epoch, state_vector: encode(Y.encodeStateVector(entry.doc)) }).catch(showError)
         refreshCallback?.()
       }
     }
@@ -92,41 +102,49 @@ function connect() {
     }
   }
   socket.onclose = event => {
+    if (!current()) return
     projectSession.connected = false
     for (const pending of requests.values()) { clearTimeout(pending.timer); pending.reject(new Error('连接已断开，文本修改保留在当前页面')) }
     requests.clear()
     if (event.code === 4403) { projectSession.error = '项目权限已变更，请重新进入项目'; return }
-    if (projectSession.id === id) reconnectTimer = setTimeout(connect, 1500)
+    reconnectTimer = setTimeout(() => { if (current()) connect() }, 1500)
   }
 }
 
 export async function openProjectSession(dramaId, onRefresh) {
   closeProjectSession()
+  const version = sessionVersion
   projectSession.id = Number(dramaId)
   refreshCallback = onRefresh
-  const state = await request.get(`/dramas/${dramaId}/collaboration/state`)
-  if (projectSession.id !== Number(dramaId)) return
+  const state = await request.get(`/dramas/${dramaId}/collaboration/state`).catch(error => { if (version === sessionVersion) throw error })
+  if (version !== sessionVersion) return
   projectSession.enabled = state.permissions.collaboration_enabled
   projectSession.canEdit = state.permissions.can_edit
   projectSession.revision = state.revision
   projectSession.writeContractVersion = state.write_contract_version || 0
   if (projectSession.enabled) {
-    await request.post('/auth/session-cookie', {})
+    await request.post('/auth/session-cookie', {}).catch(error => { if (version === sessionVersion) throw error })
+    if (version !== sessionVersion) return
     connect()
   }
 }
 
 export function closeProjectSession() {
+  sessionVersion++
   projectSession.id = null
   projectSession.enabled = false
   projectSession.connected = false
+  projectSession.canEdit = false
+  projectSession.pending = 0
+  projectSession.revision = 0
+  refreshCallback = null
   projectSession.writeContractVersion = 0
   projectSession.participants = []
   projectSession.drafts = []
   projectSession.error = ''
   latestRevision = -1
   clearTimeout(reconnectTimer)
-  if (socket) { socket.onclose = null; socket.close(); socket = null }
+  if (socket) { socket.onopen = null; socket.onmessage = null; socket.onclose = null; socket.close(); socket = null }
   for (const entry of documents.values()) entry.doc.destroy()
   documents.clear()
   for (const pending of requests.values()) { clearTimeout(pending.timer); pending.reject(new Error('已离开项目')) }
@@ -139,13 +157,15 @@ export function hasUnsavedProjectText() {
 
 export async function bindProjectText(target, listener) {
   if (!projectSession.enabled || !target.id) return null
+  const version = sessionVersion
   const key = textKey(target)
   let entry = documents.get(key)
   if (!entry) {
-    const state = await request.get(`/dramas/${projectSession.id}/collaboration/text`, { params: target })
+    const state = await request.get(`/dramas/${projectSession.id}/collaboration/text`, { params: target }).catch(error => { if (version === sessionVersion) throw error })
+    if (version !== sessionVersion) return null
     entry = documents.get(key)
     if (!entry) {
-      entry = { target, epoch: state.epoch, serverVector: state.state_vector, doc: new Y.Doc(), listeners: new Set(), dirty: false, generation: 0 }
+      entry = { target, sessionVersion: version, epoch: state.epoch, serverVector: state.state_vector, doc: new Y.Doc(), listeners: new Set(), dirty: false, generation: 0 }
       Y.applyUpdate(entry.doc, decode(state.state))
       documents.set(key, entry)
     }
@@ -155,7 +175,7 @@ export async function bindProjectText(target, listener) {
   Y.applyUpdate(local, Y.encodeStateAsUpdate(entry.doc))
   let composing = false
   const receive = value => {
-    if (composing) return
+    if (version !== sessionVersion || composing) return
     if (localEpoch !== entry.epoch) { local.destroy(); local = new Y.Doc(); localEpoch = entry.epoch }
     Y.applyUpdate(local, Y.encodeStateAsUpdate(entry.doc))
     listener(value)
@@ -166,6 +186,7 @@ export async function bindProjectText(target, listener) {
     compositionStart() { composing = true },
     compositionEnd(value) { this.change(value); composing = false; receive(entry.doc.getText('content').toString()) },
     change(value) {
+      if (version !== sessionVersion || !projectSession.canEdit) return
       if (localEpoch !== entry.epoch) {
         projectSession.drafts.push({ key, text: value })
         projectSession.error = '内容已被替换；你的输入已保留为草稿。'

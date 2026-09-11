@@ -81,18 +81,22 @@ function updateText(db, dramaId, userId, input) {
       if ([...doc.share.keys()].some(key => key !== 'content') || !(doc.getText('content') instanceof Y.Text)) throw fail('协作更新包含未授权字段');
       const text = doc.getText('content').toString();
       if (text.length > 1_000_000) throw fail('文本超过长度限制');
-      const now = new Date().toISOString();
-      db.prepare(`UPDATE "${input.kind}" SET "${input.field}"=?, updated_at=? WHERE id=? AND deleted_at IS NULL`).run(text, now, Number(input.id));
-      if (input.kind === 'storyboards' && input.field === 'universal_segment_text') {
-        const row = db.prepare('SELECT omni_prompt_document_json FROM storyboards WHERE id=?').get(Number(input.id));
-        let promptDocument = {};
-        try { promptDocument = JSON.parse(row.omni_prompt_document_json || '{}'); } catch (_) {}
-        db.prepare('UPDATE storyboards SET omni_prompt_document_json=? WHERE id=?').run(JSON.stringify({ ...promptDocument, text }), Number(input.id));
-      }
+      persistText(db, dramaId, input, text);
       saveDocument(db, dramaId, input.kind, input.id, input.field, doc, epoch);
       return { kind: input.kind, id: Number(input.id), field: input.field, epoch, state: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'), state_vector: Buffer.from(Y.encodeStateVector(doc)).toString('base64'), text };
     } finally { doc.destroy(); }
   })();
+}
+
+function persistText(db, dramaId, input, text) {
+  target(db, dramaId, input.kind, input.id, input.field);
+  db.prepare(`UPDATE "${input.kind}" SET "${input.field}"=?, updated_at=? WHERE id=? AND deleted_at IS NULL`).run(text, new Date().toISOString(), Number(input.id));
+  if (input.kind === 'storyboards' && input.field === 'universal_segment_text') {
+    const row = db.prepare('SELECT universal_segment_text, omni_prompt_document_json FROM storyboards WHERE id=?').get(Number(input.id));
+    let promptDocument = {};
+    try { promptDocument = JSON.parse(row.omni_prompt_document_json || '{}'); } catch (_) {}
+    db.prepare('UPDATE storyboards SET omni_prompt_document_json=? WHERE id=?').run(JSON.stringify({ ...promptDocument, text: row.universal_segment_text }), Number(input.id));
+  }
 }
 
 function ensureRevisionTriggers(db) {
@@ -155,4 +159,4 @@ function captureTextBaseline(db, dramaId) {
   return baseline;
 }
 
-module.exports = { TEXT_FIELDS, readText, updateText, ensureRevisionTriggers, captureTextBaseline };
+module.exports = { TEXT_FIELDS, readText, updateText, persistText, ensureRevisionTriggers, captureTextBaseline };
