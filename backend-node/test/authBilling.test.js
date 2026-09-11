@@ -307,6 +307,10 @@ test('self registration creates a normal user and an authenticated session', () 
     assert.equal(session.user.username, 'new-creator');
     assert.equal(session.user.role, 'user');
     assert.ok(auth.authenticate(db, session.token));
+    assert.throws(
+      () => auth.register(db, { username: 'new-creator', password: 'Creator123' }),
+      (error) => error.code === 'USERNAME_TAKEN' && error.message === '该用户名已被使用',
+    );
   } finally { teardown(dbPath); }
 });
 

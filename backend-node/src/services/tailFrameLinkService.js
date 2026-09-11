@@ -63,7 +63,7 @@ function routes(db, cfg, log) {
           : path.join(storageBase, video.local_path.replace(/^\/+/, ''));
 
         if (!fs.existsSync(videoAbsPath)) {
-          return res.status(400).json({ error: '视频文件不存在: ' + video.local_path });
+          return res.status(400).json({ error: '视频文件不存在，请重新生成或上传后重试' });
         }
 
         // 5. 准备输出图片路径
@@ -92,7 +92,7 @@ function routes(db, cfg, log) {
 
         if (result.error || result.status !== 0) {
           log.error('[尾帧衔接] ffmpeg 失败', { stderr: result.stderr?.slice(-500) });
-          return res.status(500).json({ error: 'ffmpeg 提取帧失败: ' + (result.stderr || result.error?.message || '未知错误') });
+          return res.status(500).json({ error: '视频帧提取失败，请稍后重试' });
         }
 
         if (!fs.existsSync(outputAbsPath)) {
@@ -177,7 +177,7 @@ function routes(db, cfg, log) {
 
       } catch (err) {
         log.error('storyboards link-tail-frame', { error: err.message, stack: err.stack });
-        res.status(500).json({ error: err.message || '尾帧衔接失败' });
+        res.status(500).json({ error: '尾帧衔接失败，请稍后重试' });
       }
     }
   };

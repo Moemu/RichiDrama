@@ -140,6 +140,15 @@ function normalizeUsername(username) {
   return value;
 }
 
+function usernameTakenError() {
+  return Object.assign(new Error('该用户名已被使用'), { status: 400, code: 'USERNAME_TAKEN' });
+}
+
+function isUsernameConstraintError(error) {
+  return String(error?.code || '').startsWith('SQLITE_CONSTRAINT')
+    && /\busers\.username\b/i.test(String(error?.message || ''));
+}
+
 function register(db, input) {
   validateNewPassword(input.password);
   const user = createUser(db, {
@@ -167,9 +176,16 @@ function createUser(db, input, actorId) {
   const username = normalizeUsername(input.username);
   const at = now();
   const platformAdmin = input.account_kind === 'platform_admin' || input.console_access === true;
-  const info = db.prepare(`INSERT INTO users (username, password_hash, display_name, role, console_access, account_kind, is_active, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(username, hashPassword(input.password), String(input.display_name || username).trim(), platformAdmin ? 'admin' : 'user', platformAdmin ? 1 : 0, platformAdmin ? 'platform_admin' : 'creator', input.is_active === false ? 0 : 1, at, at);
+  if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) throw usernameTakenError();
+  let info;
+  try {
+    info = db.prepare(`INSERT INTO users (username, password_hash, display_name, role, console_access, account_kind, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(username, hashPassword(input.password), String(input.display_name || username).trim(), platformAdmin ? 'admin' : 'user', platformAdmin ? 1 : 0, platformAdmin ? 'platform_admin' : 'creator', input.is_active === false ? 0 : 1, at, at);
+  } catch (error) {
+    if (isUsernameConstraintError(error)) throw usernameTakenError();
+    throw error;
+  }
   const id = Number(info.lastInsertRowid);
   db.prepare('INSERT INTO billing_accounts (user_id, updated_at) VALUES (?, ?)').run(id, at);
   try { require('./tenantService').ensureDefaultTenant(db, actorId); } catch (_) {}
@@ -206,8 +222,13 @@ function changeUsername(db, userId, username) {
   if (!user) throw new Error('账户不存在');
   if (user.username === next) return user;
   const duplicate = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(next, user.id);
-  if (duplicate) throw new Error('该用户名已被使用');
-  db.prepare('UPDATE users SET username = ?, updated_at = ? WHERE id = ?').run(next, now(), user.id);
+  if (duplicate) throw usernameTakenError();
+  try {
+    db.prepare('UPDATE users SET username = ?, updated_at = ? WHERE id = ?').run(next, now(), user.id);
+  } catch (error) {
+    if (isUsernameConstraintError(error)) throw usernameTakenError();
+    throw error;
+  }
   return db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
 }
 
