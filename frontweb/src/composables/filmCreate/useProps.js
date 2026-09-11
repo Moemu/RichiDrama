@@ -1,3 +1,4 @@
+import { captureProjectEdit } from '@/utils/projectSnapshots'
 import { ref, reactive, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { propAPI } from '@/api/props'
@@ -93,7 +94,7 @@ export function useProps(deps) {
   const addingPropFromLibraryId = ref(null)
   let propLibraryKeywordTimer = null
 
-  const propLibraryTab = ref('library')
+  const propLibraryTab = ref('drama')
   const dramaAllPropList = ref([])
   const dramaAllPropLoading = ref(false)
   const dramaAllPropPage = ref(1)
@@ -139,6 +140,7 @@ export function useProps(deps) {
   function editProp(prop) {
     stopPropPromptPoll()
     editPropForm.value = {
+      requestConfig: captureProjectEdit('props', prop.id),
       id: prop.id,
       name: prop.name || '',
       type: prop.type || '',
@@ -247,7 +249,7 @@ export function useProps(deps) {
         type: nullableText(editPropForm.value.type),
         description: nullableText(editPropForm.value.description),
         prompt: nullableText(editPropForm.value.prompt)
-      })
+      }, editPropForm.value.requestConfig)
       await savePropRefImageIfAny(editPropForm.value.id)
       await loadDrama()
       showEditProp.value = false
@@ -410,9 +412,11 @@ export function useProps(deps) {
   }
 
   function onPropLibraryDialogOpen() {
-    if (propLibraryTab.value === 'library') loadPropLibraryList()
-    else if (propLibraryTab.value === 'drama') loadDramaAllPropList()
-    
+    propLibraryTab.value = 'drama'
+    propLibraryKeyword.value = ''
+    propLibraryPage.value = 1
+    loadPropLibraryList()
+    loadDramaAllPropList()
   }
 
   function onPropLibraryTabChange() {
@@ -435,6 +439,7 @@ export function useProps(deps) {
 
   function openEditPropLibrary(item) {
     editPropLibraryForm.value = {
+      requestConfig: captureProjectEdit('prop-library', item.id),
       id: item.id,
       name: item.name ?? '',
       category: item.category ?? '',
@@ -453,7 +458,7 @@ export function useProps(deps) {
         category: editPropLibraryForm.value.category || null,
         description: editPropLibraryForm.value.description || null,
         tags: editPropLibraryForm.value.tags || null
-      })
+      }, editPropLibraryForm.value.requestConfig)
       ElMessage.success('已保存')
       showEditPropLibrary.value = false
       loadPropLibraryList()

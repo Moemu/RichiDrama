@@ -16,7 +16,7 @@ test('自由创作只渲染一个提示词编辑器', async () => {
   const editorTags = source.match(/<OmniAssetPromptEditor\b/g) || []
 
   assert.equal(editorTags.length, 1)
-  assert.match(source, /<div class="shot-script"><OmniAssetPromptEditor\s+ref="promptEditorRef"\s+v-model="prompt"/)
+  assert.match(source, /<div class="shot-script"[^>]*><OmniAssetPromptEditor\s+:key="activeShotId"\s+ref="promptEditorRef"\s+v-model="prompt"/)
   assert.match(source, /class="insert-at-caret"/)
   assert.match(source, /promptEditorRef\?\.insertAtCaret\(promptAssetFor\(asset\)\)/)
   assert.match(source, /@keydown\.up\.prevent="selectRelative\(-1\)"/)
@@ -47,7 +47,7 @@ test('维护者工作流保留一键入口、缺图报价和分镜实时刷新',
   assert.match(film, /每段\(秒\)/)
   assert.match(film, /\.storyboard-stage-active \.workflow-shell\{[^}]*overflow:clip!important/)
   assert.match(film, /freeCreateRef\.value/)
-  assert.match(freeCreate, /defineExpose\(\{ refreshProjectShots \}\)/)
+  assert.match(freeCreate, /defineExpose\(\{ refreshProjectShots, refreshCollaboration \}\)/)
   assert.match(characters, /characterAPI\.generateImage\(char\.id, model \|\| undefined/)
   assert.match(scenes, /model: model \|\| undefined/)
   assert.match(props, /propAPI\.generateImage\(prop\.id, model \|\| undefined/)
@@ -130,7 +130,7 @@ test('角色资源卡和编辑器按图片、内容与底部操作分层', async
   const source = await readSource('../src/views/FilmCreate.vue')
 
   const cardBranch = source.match(/<template v-else-if="resourceCatalogType === 'character'">(.+?)<\/template>/)?.[1] || ''
-  assert.match(cardBranch, /class="character-card-edit"[\s\S]*>编辑<\/el-button>/)
+  assert.match(cardBranch, /class="character-card-edit"[^>]*@click="openResourceEditor\(resourceCatalogType, item\)"/)
   assert.match(cardBranch, /class="character-card-delete"[\s\S]*type="danger"[\s\S]*>删除<\/el-button>/)
   // 资源浏览器是唯一管理面：上传图/认证/生成图必须在卡片直达；音色与试听仍只在编辑器内。
   assert.match(cardBranch, /onUploadResourceClick/)
@@ -175,7 +175,7 @@ test('提示词富文本编辑器优先处理滚轮，不被工作台外层取�
   const source = await readSource('../src/views/FreeCreate.vue')
 
   assert.match(source, /textarea\.el-textarea__inner, \.prompt-rich-editor/)
-  assert.match(source, /promptEditor\.scrollHeight <= promptEditor\.clientHeight/)
+  assert.match(source, /panel\.scrollHeight <= panel\.clientHeight/)
 })
 
 test('提示词引用使用稳定素材别名并展示更清晰的缩略图', async () => {
@@ -465,7 +465,7 @@ test('剧本工具仍要求项目，自由全能生成允许可选的计费归�
   assert.match(freeCreate, /class="billing-project-field" aria-labelledby="billing-project-title"/)
   assert.match(freeCreate, /仅用于账单归类；不选择也可生成。/)
   assert.match(freeCreate, /\.\.\.\(optionalDramaId \? \{ drama_id: optionalDramaId \} : \{\}\)/)
-  assert.match(freeCreate, /:disabled="!!sequence\?\.drama_id"/)
+  assert.match(freeCreate, /:disabled="[^"]*!!sequence\?\.drama_id[^"]*"/)
   assert.match(freeCreate, /if \(Number\(seq\?\.drama_id\)\) freeProjectId\.value = Number\(seq\.drama_id\)/)
   assert.doesNotMatch(freeCreate, /请选择计费归属项目并补齐生成参数/)
 })
@@ -780,15 +780,14 @@ test('无作品账号使用固定的全局默认媒体资源', async () => {
   assert.doesNotMatch(source, /MediaRecorder|captureStream\(/)
 })
 
-test('单集项目页使用紧凑的制作概览而非展示型大标题', async () => {
+test('项目详情按分集、资源、成果和成员组织制作入口', async () => {
   const source = await readSource('../src/views/DramaDetail.vue')
 
-  assert.match(source, /class="episode-progress-heading"/)
-  assert.match(source, /制作概览/)
-  assert.match(source, /第 \{\{ episodes\[0\]\?\.episode_number/)
-  assert.match(source, /单集概览以“剧集信息 \+ 下一步”成对呈现/)
-  assert.match(source, /episode-next-step h3\{font-size:clamp\(1\.55rem,2\.15vw,2\.35rem\)/)
-  assert.match(source, /episodes-section\.is-single \.episode-grid\{height:auto;min-height:27rem/)
+  assert.match(source, /aria-label="项目工作区"/)
+  for (const label of ['分集', '制作资源', '成果', '成员与设置']) assert.ok(source.includes(`label:'${label}'`))
+  assert.match(source, /<ProjectResults/)
+  assert.match(source, /<ProjectMembers/)
+  assert.match(source, /<ProjectMediaResources/)
 })
 
 test('视频创作界面展示已持久化的任务进度和最近状态说明', async () => {

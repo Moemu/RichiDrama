@@ -10,6 +10,7 @@ const angleService = require('../services/angleService');
 const { buildUniversalSegmentUserPromptBundle } = require('../services/universalSegmentPromptBundle');
 const { normalizeUniversalSegmentShotDurations } = require('../services/universalSegmentDurationNormalize');
 const generationSettingsService = require('../services/generationSettingsService');
+const projectEditService = require('../services/projectEditService');
 
 /** 润色接口：邻镜结构化摘要（含全能片段与其它提示词字段） */
 function formatNeighborShotPolishContext(row) {
@@ -244,6 +245,7 @@ function routes(db, log) {
       try {
         const result = generationSettingsService.getEpisodeSettings(db, req.params.episode_id);
         if (!result) return response.notFound(res, '剧集不存在');
+        result.generation_state = projectEditService.generationState(db, result.episode_id);
         response.success(res, result);
       } catch (err) { response.internalError(res, err.message); }
     },
@@ -252,6 +254,7 @@ function routes(db, log) {
         const body = req.body || {};
         const result = generationSettingsService.setEpisodeDefaults(db, req.params.episode_id, body.defaults || body, body.override_policy);
         if (!result) return response.notFound(res, '剧集不存在');
+        result.generation_state = projectEditService.generationState(db, result.episode_id);
         response.success(res, result);
       } catch (err) { response.badRequest(res, err.message); }
     },
@@ -260,6 +263,7 @@ function routes(db, log) {
         const body = req.body || {};
         const result = generationSettingsService.setStoryboardSettings(db, req.params.id, body.settings || body, body.scope);
         if (!result) return response.notFound(res, '分镜不存在');
+        result.generation_state = projectEditService.generationState(db, result.episode_id);
         response.success(res, result);
       } catch (err) { response.badRequest(res, err.message); }
     },
@@ -267,6 +271,7 @@ function routes(db, log) {
       try {
         const result = generationSettingsService.clearStoryboardOverrides(db, req.params.id);
         if (!result) return response.notFound(res, '分镜不存在');
+        result.generation_state = projectEditService.generationState(db, result.episode_id);
         response.success(res, result);
       } catch (err) { response.badRequest(res, err.message); }
     },

@@ -1,3 +1,4 @@
+const projectAccess = require('./projectAccessService');
 const { normalizeStorageKey } = require('../utils/storagePath');
 const { validateWritableMediaReferences } = require('./mediaAuthorizationService');
 
@@ -12,8 +13,7 @@ function list(db, query) {
   const params = [];
   if (String(query.include_archived || '') !== '1' && String(query.include_archived || '').toLowerCase() !== 'true') sql += ' AND archived_at IS NULL';
   if (query.owner_user_id) {
-    sql += ' AND (owner_user_id = ? OR drama_id IN (SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL))';
-    params.push(Number(query.owner_user_id), Number(query.owner_user_id));
+    sql += ` AND ${projectAccess.assetPredicate(db, query.owner_user_id)}`;
   }
   const scope = String(query.scope || '').toLowerCase();
   if (scope === 'project') {
@@ -100,15 +100,12 @@ function getById(db, id) {
 // Assets may belong directly to a user or to one of that user's projects.
 // Keep this lookup aligned with list() so numeric IDs cannot bypass scope.
 function getByIdForOwner(db, id, ownerUserId) {
-  const r = db.prepare(`SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL
-    AND (owner_user_id = ? OR drama_id IN (
-      SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL
-    ))`).get(Number(id), Number(ownerUserId), Number(ownerUserId));
+  const r = db.prepare(`SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL AND ${projectAccess.assetPredicate(db, ownerUserId)}`).get(Number(id));
   return r ? rowToItem(r) : null;
 }
 
 function getLineage(db, id, ownerUserId = null) {
-  const ownedClause = ownerUserId == null ? '' : ` AND (owner_user_id = ${Number(ownerUserId)} OR drama_id IN (SELECT id FROM dramas WHERE owner_user_id = ${Number(ownerUserId)} AND deleted_at IS NULL))`;
+  const ownedClause = ownerUserId == null ? '' : ` AND ${projectAccess.assetPredicate(db, ownerUserId)}`;
   // Unscoped service callers are retained for maintenance/history tools and
   // may inspect tombstones. Authenticated HTTP callers always provide owner
   // scope and therefore cannot use lineage to discover another user's data.
@@ -201,9 +198,7 @@ function update(db, log, id, req, ownerUserId = null) {
   const row = ownerUserId == null
     ? db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(id))
     : db.prepare(`SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL
-      AND (owner_user_id = ? OR drama_id IN (
-        SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL
-      ))`).get(Number(id), Number(ownerUserId), Number(ownerUserId));
+      AND ${projectAccess.assetPredicate(db, ownerUserId, 'edit')}`).get(Number(id));
   if (!row) return null;
   validateWritableMediaReferences(db, req, ownerUserId);
   const updates = [];
@@ -227,18 +222,15 @@ function update(db, log, id, req, ownerUserId = null) {
 }
 
 function deleteById(db, log, id, ownerUserId = null) {
+  require('./projectAssetService').assertRemovable(db, id);
   const now = new Date().toISOString();
   const sql = ownerUserId == null
     ? 'UPDATE assets SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL'
     : `UPDATE assets SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL
-      AND (owner_user_id = ? OR drama_id IN (
-        SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL
-      ))`;
+      AND ${projectAccess.assetPredicate(db, ownerUserId, 'edit')}`;
   const remove = db.transaction(() => {
     detachEditableShotReferences(db, [id], ownerUserId, now);
-    const result = ownerUserId == null
-      ? db.prepare(sql).run(now, Number(id))
-      : db.prepare(sql).run(now, Number(id), Number(ownerUserId), Number(ownerUserId));
+    const result = db.prepare(sql).run(now, Number(id));
     return result.changes > 0;
   });
   return remove();
@@ -252,14 +244,13 @@ function referenceAliasFor(type, id) {
 // Archiving removes an asset from future library selection without mutating
 // any editable shot. Existing shots keep their asset_id and local media path.
 function archiveById(db, log, id, ownerUserId = null) {
+  require('./projectAssetService').assertRemovable(db, id);
   const now = new Date().toISOString();
   const sql = ownerUserId == null
     ? 'UPDATE assets SET archived_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL AND archived_at IS NULL'
     : `UPDATE assets SET archived_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL AND archived_at IS NULL
-      AND (owner_user_id = ? OR drama_id IN (SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL))`;
-  const result = ownerUserId == null
-    ? db.prepare(sql).run(now, now, Number(id))
-    : db.prepare(sql).run(now, now, Number(id), Number(ownerUserId), Number(ownerUserId));
+      AND ${projectAccess.assetPredicate(db, ownerUserId, 'edit')}`;
+  const result = db.prepare(sql).run(now, now, Number(id));
   return result.changes > 0;
 }
 
@@ -391,8 +382,8 @@ function archiveMany(db, log, options = {}) {
   const ownerId = Number(options.owner_user_id);
   if (!Number.isInteger(ownerId) || ownerId <= 0) throw new Error('缺少素材所有者');
   const normalizedIds = [...new Set((Array.isArray(options.ids) ? options.ids : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
-  let where = `deleted_at IS NULL AND archived_at IS NULL AND (owner_user_id = ? OR drama_id IN (SELECT id FROM dramas WHERE owner_user_id = ? AND deleted_at IS NULL))`;
-  const params = [ownerId, ownerId];
+  let where = `deleted_at IS NULL AND archived_at IS NULL AND ${projectAccess.assetPredicate(db, ownerId, 'edit')}`;
+  const params = [];
   if (options.scope === 'global') where += ' AND drama_id IS NULL';
   else if (options.scope === 'project') { where += ' AND drama_id = ?'; params.push(Number(options.drama_id)); }
   else if (options.scope && options.scope !== 'all') throw new Error('批量归档范围无效');
@@ -401,6 +392,7 @@ function archiveMany(db, log, options = {}) {
   if (options.keyword) { const value = `%${String(options.keyword).trim()}%`; where += ' AND (name LIKE ? OR tags_json LIKE ?)'; params.push(value, value); }
   if (String(options.favorite || '') === '1' || String(options.favorite || '').toLowerCase() === 'true') where += ' AND is_favorite = 1';
   const now = new Date().toISOString();
+  for (const row of db.prepare(`SELECT id FROM assets WHERE ${where}`).all(...params)) require('./projectAssetService').assertRemovable(db, row.id);
   const count = db.prepare(`UPDATE assets SET archived_at=?, updated_at=? WHERE id IN (SELECT id FROM assets WHERE ${where})`).run(now, now, ...params).changes;
   log.info('Assets archived in bulk', { owner_user_id: ownerId, scope: options.scope, drama_id: options.drama_id || null, count });
   return count;

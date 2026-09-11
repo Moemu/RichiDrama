@@ -276,8 +276,8 @@ function resolveAsset(db, input, ordinal, ownerUserId) {
   const row = db.prepare('SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL').get(Number(input.asset_id));
   if (!row) throw new Error(`素材 ${input.asset_id} 不存在或已删除`);
   if (ownerUserId) {
-    const owner = db.prepare('SELECT COALESCE(d.owner_user_id, a.owner_user_id) owner_user_id FROM assets a LEFT JOIN dramas d ON d.id = a.drama_id WHERE a.id = ?').get(Number(input.asset_id));
-    if (!owner || Number(owner.owner_user_id) !== Number(ownerUserId)) throw new Error(`素材 ${input.asset_id} 不存在或无权访问`);
+    const owner = require('./assetService').getByIdForOwner(db, input.asset_id, ownerUserId);
+    if (!owner) throw new Error(`素材 ${input.asset_id} 不存在或无权访问`);
   }
   if (row.processing_status && row.processing_status !== 'ready') throw new Error(`素材“${row.name || row.id}”尚未准备完成`);
   let seedance2_asset = null; try { seedance2_asset = row.seedance2_asset ? JSON.parse(row.seedance2_asset) : null; } catch (_) {}
@@ -721,9 +721,15 @@ function generationHistoryDetail(db, videoGenerationId, actor) {
     FROM video_generations v
     LEFT JOIN async_tasks t ON t.id=v.task_id AND t.deleted_at IS NULL
     WHERE v.id=? AND v.deleted_at IS NULL`).get(Number(videoGenerationId));
-  if (!generation || (Number(generation.owner_user_id) !== Number(actor?.id) && actor?.role !== 'admin')) {
+  if (!generation || (Number(generation.owner_user_id) !== Number(actor?.id) && !(generation.drama_id && require('./projectAccessService').installed(db) && require('./projectAccessService').access(db, generation.drama_id, actor?.id)))) {
     throw new Error('视频生成记录不存在或无权查看');
   }
+  if (Number(generation.owner_user_id) !== Number(actor?.id)) return {
+    id: generation.id, drama_id: generation.drama_id, storyboard_id: generation.storyboard_id,
+    status: generation.status, original_prompt: generation.prompt, request: {}, billing: null, assets: [],
+    output: { video_url: generation.local_path ? videoService.publicVideoUrl(null, generation.local_path) : null, poster_local_path: generation.poster_local_path, persisted_locally: Boolean(generation.local_path) },
+    created_at: generation.created_at, updated_at: generation.updated_at,
+  };
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE video_generation_id=? ORDER BY id DESC LIMIT 1').get(generation.id);
   const snapshot = safeSnapshot(parse(job?.request_snapshot_json)) || null;
   const assets = job
@@ -817,7 +823,12 @@ function list(db, query = {}) {
   const params = [];
   const filters = ['j.hidden_at IS NULL'];
   let currentStoryboard = null;
-  if (query.owner_user_id) { filters.push('j.owner_user_id = ?'); params.push(Number(query.owner_user_id)); }
+  if (query.owner_user_id) {
+    const projectAccess = require('./projectAccessService');
+    const enabled = projectAccess.installed(db) ? ' AND NOT EXISTS (SELECT 1 FROM project_collaboration c JOIN dramas d ON d.id=c.drama_id WHERE c.drama_id=v.drama_id AND d.deleted_at IS NULL)' : '';
+    filters.push(`((j.owner_user_id = ?${enabled}) OR v.drama_id IN (${projectAccess.projectIdsSql(db, query.owner_user_id)}))`);
+    params.push(Number(query.owner_user_id));
+  }
   if (String(query.tool_only || '') === '1' || String(query.tool_only || '').toLowerCase() === 'true') {
     filters.push('COALESCE(v.drama_id, 0) = 0 AND j.sequence_id IS NULL AND j.shot_id IS NULL AND COALESCE(j.storyboard_id, v.storyboard_id) IS NULL');
   }
@@ -845,11 +856,19 @@ function list(db, query = {}) {
         ? Number(item.active_video_generation_id) === Number(item.video_generation_id)
         : Boolean(item.storyboard_local_path && item.local_path && item.storyboard_local_path === item.local_path)),
     target_storyboard_id: currentStoryboard ? storyboardId : undefined,
-    can_retry_generation: canRetryGeneration(item),
+    can_retry_generation: Number(item.owner_user_id) === Number(query.owner_user_id) && canRetryGeneration(item),
     video_url: videoService.publicVideoUrl(item.video_url, item.local_path),
     postprocess_chain: `${require('./videoPostprocessPolicy').describe(item)} → 本地规范 ${item.aspect_ratio || '原画幅'}`,
     request_snapshot: safeSnapshot(parse(item.request_snapshot_json)),
-  }));
+  })).map(item => !query.owner_user_id || Number(item.owner_user_id) === Number(query.owner_user_id) ? item : sharedProjectJob(item));
+}
+
+function sharedProjectJob(item) {
+  const result = {};
+  for (const field of ['id', 'video_generation_id', 'owner_user_id', 'storyboard_id', 'status', 'prompt', 'model_requested', 'model_resolved', 'local_path', 'poster_local_path', 'resolution', 'aspect_ratio', 'created_at', 'updated_at', 'is_current', 'target_storyboard_id', 'task_progress', 'task_message']) result[field] = item[field];
+  result.can_retry_generation = false;
+  result.video_url = item.local_path ? videoService.publicVideoUrl(null, item.local_path) : null;
+  return result;
 }
 
 function hide(db, id, actor) {
@@ -952,7 +971,10 @@ function adoptSourceVideo(db, log, omniJobId, actor, options = {}) {
 }
 
 function adoptCompletedVersion(db, omniJobId, actor, targetStoryboardId = null) {
-  const job = assertOwnedJob(db, omniJobId, actor);
+  const shared = db.prepare(`SELECT j.id omni_job_id,j.owner_user_id,v.id video_generation_id,v.drama_id,v.storyboard_id,v.status,v.local_path
+    FROM omni_video_jobs j JOIN video_generations v ON v.id=j.video_generation_id WHERE j.id=? AND v.deleted_at IS NULL`).get(Number(omniJobId));
+  const job = shared?.drama_id && require('./projectAccessService').access(db, shared.drama_id, actor?.id)?.can_edit
+    ? shared : assertOwnedJob(db, omniJobId, actor);
   if (!job.storyboard_id || job.status !== 'completed' || !job.local_path) throw new Error('只有已完成并已本地归档的分镜历史版本可设为当前成片');
   const targetId = Number(targetStoryboardId || job.storyboard_id);
   const allowedIds = require('./storyboardIdentityService').historyStoryboardIds(db, targetId);
@@ -962,7 +984,8 @@ function adoptCompletedVersion(db, omniJobId, actor, targetStoryboardId = null) 
   const result = db.prepare(`UPDATE storyboards SET active_video_generation_id=?, video_url=?, local_path=?, status='completed',
     error_msg=NULL, updated_at=? WHERE id=? AND deleted_at IS NULL`).run(job.video_generation_id, videoUrl, job.local_path, now, targetId);
   if (!result.changes) throw new Error('分镜不存在或已删除');
-  return { ...get(db, job.omni_job_id), is_current: true, target_storyboard_id: targetId };
+  const resultJob = get(db, job.omni_job_id);
+  return { ...(Number(job.owner_user_id) === Number(actor.id) ? resultJob : sharedProjectJob({ ...resultJob, ...resultJob.generation, id: resultJob.id })), is_current: true, target_storyboard_id: targetId };
 }
 function retry(db, log, id, billingUser) {
   const job = assertOwnedJob(db, id, billingUser);
@@ -1101,3 +1124,5 @@ async function cancelJob(db, log, jobId, user) {
 }
 function clamp(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
 module.exports = { create, quote, get, generationHistoryDetail, list, hide, retry, cancelJob, retryPostprocess, adoptSourceVideo, adoptCompletedVersion, resumeSd2WaitingGenerations, startSd2WaitingGenerationRecovery, buildAuthorizationUsage, validateShotAssetLimits, assetLimitsForCapability, validateCreationMode, enforceSd2IdentityAssets, applySd2CertifiedAssetReferences, sd2IdentityState, safeAssetSummary, safeSnapshot, originalPromptFromSnapshot, promptReferenceEntries, selectPromptReferenceInputs, prioritizePromptReferenceAssets, bindPromptReferences, resolveAssetModelUrl, realPersonContentIndex, isCopyrightRestriction, locateRealPersonFailureAsset, locateCopyrightFailureAssets, copyrightFailureAssetSummary, importRealPersonFailureAsset, importCopyrightFailureAssets, isProviderInternalMaterialTimeout, isProviderInputImageFetchTimeout, isProviderInputMediaFetchTimeout, canRetryGeneration, SHOT_ASSET_LIMITS };
+
+module.exports.sharedProjectJob = sharedProjectJob;

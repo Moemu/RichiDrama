@@ -37,6 +37,7 @@ function toCharacterSavePayload(c) {
 export function useCanvasCrud(deps) {
   const {
     drama,
+    nodes,
     filterEpisodeId,
     layoutCache,
     focusedNodeId,
@@ -68,6 +69,8 @@ export function useCanvasCrud(deps) {
 
   async function saveNodePosition(nodeId, pos) {
     if (!pos || !nodeId) return
+    await refreshCanvas()
+    nodes.value = nodes.value.map(node => node.id === nodeId ? { ...node, position: { x: pos.x, y: pos.y } } : node)
     const prev = layoutCache.value || { version: 1, nodes: {} }
     layoutCache.value = {
       ...prev,

@@ -39,10 +39,13 @@ jobs:
       - name: Check deployment shell scripts
         run: |
           shellcheck -e SC1091 \
-            deploy/lib.sh deploy/preview-deploy deploy/preview-payment-smoke deploy/preview-remove deploy/preview-show deploy/preview-cleanup \
+            deploy/lib.sh deploy/preview-deploy deploy/preview-payment-smoke deploy/test-preview-ingress deploy/preview-remove deploy/preview-show deploy/preview-cleanup \
             deploy/release-deploy deploy/release-rollback deploy/install-operations
       - name: Install backend dependencies
         working-directory: backend-node
+        run: npm ci --no-audit --no-fund
+      - name: Install frontend dependencies for HTTP integration tests
+        working-directory: frontweb
         run: npm ci --no-audit --no-fund
       - name: Run backend tests
         working-directory: backend-node
@@ -112,3 +115,5 @@ jobs:
             -v "${GITHUB_WORKSPACE}/deploy/nginx-preview-vhost.conf:/etc/nginx/conf.d/default.conf:ro" \
             -v "${test_root}/minidrama-preview.htpasswd:/etc/nginx/minidrama-preview.htpasswd:ro" \
             nginx:1.27-alpine nginx -t
+      - name: Verify concurrent preview WebSocket routing
+        run: bash deploy/test-preview-ingress

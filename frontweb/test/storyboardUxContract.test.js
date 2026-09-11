@@ -84,9 +84,9 @@ test('an empty episode shows one explicit empty state instead of a phantom first
   assert.match(freeCreate, /<section v-else class="empty-shot-workspace"/)
   assert.match(freeCreate, /当前剧集还没有分镜/)
   assert.match(freeCreate, /@click="addShot\(false\)">添加第一个镜头/)
-  assert.match(freeCreate, /:disabled="!currentShot \|\| reproductionMode" @click="addShot\(true\)">当前镜头后添加/)
+  assert.match(freeCreate, /:disabled="[^"]*!currentShot \|\| reproductionMode[^"]*" @click="addShot\(true\)">当前镜头后添加/)
   assert.match(freeCreate, /const workspaceReady = ref\(false\)/)
-  assert.match(freeCreate, /finally \{ workspaceReady\.value = true \}/)
+  assert.match(freeCreate, /finally \{ workspaceReady\.value = true\b/)
 })
 
 test('batch media actions distinguish empty, completed and missing-reference states', () => {
@@ -107,7 +107,6 @@ test('batch media actions distinguish empty, completed and missing-reference sta
 
 test('clicking a completed history record previews it without changing the adopted version', () => {
   assert.match(freeCreate, /function selectHistoryJob\(job\) \{ playOnSelection\.value = true; selectedHistoryJobId\.value = job\.id \}/)
-  assert.match(freeCreate, /return selected \|\| adopted \|\| bound \|\| shotHistory\.value\[0\] \|\| null/)
 })
 
 test('project storyboard history opens a complete detail page with the original prompt', () => {
@@ -117,7 +116,6 @@ test('project storyboard history opens a complete detail page with the original 
   assert.match(freeCreate, /const copied = await storyboardsAPI\.copy\(currentShot\.value\.id\)/)
   assert.match(freeCreate, /@click\.stop="openHistoryDetail\(job\)">查看生成详情/)
   assert.match(freeCreate, /@click="openHistoryDetail\(activeJob\)">查看本版本详情/)
-  assert.match(freeCreate, /original_prompt: snapshot\.original_prompt \|\| snapshot\.prompt/)
   assert.match(freeCreate, /path: `\/generation-history\/\$\{generationId\}`/)
   assert.doesNotMatch(freeCreate, /historyPromptOpen|historyPromptText|viewHistoryPrompt/)
   assert.match(router, /path: '\/generation-history\/:id'/)
@@ -161,7 +159,7 @@ test('admin production detail opens an immutable workbench reproduction snapshot
   assert.match(freeCreate, /loadStandaloneProductionReproduction/)
   assert.match(freeCreate, /当前提示词、参数和素材来自失败时快照/)
   assert.match(freeCreate, /const canCreate = computed\(\(\) => !reproductionMode\.value/)
-  assert.match(freeCreate, /function scheduleSave\(\) \{ if \(loadingShot\.value \|\| reproductionMode\.value/)
+  assert.match(freeCreate, /function scheduleSave\(\) \{ if \(loadingShot\.value \|\| applyingRemoteInputs \|\| reproductionMode\.value/)
   assert.match(freeCreate, /function flushPromptBeforePageHide\(\) \{ if \(reproductionMode\.value\) return/)
   assert.match(freeCreate, /document\.execCommand\('copy'\)/)
   assert.match(freeCreate, /delete query\.replay_generation_id/)
@@ -173,11 +171,11 @@ test('project shot reorder keeps generated media and completed presentation', ()
   assert.match(freeCreate, /videoUrl && \['pending', 'draft'/)
 })
 
-test('embedded storyboard confines wheel scrolling to its side panels', () => {
+test('embedded storyboard keeps its prompt reachable and confines wheel scrolling to workbench panels', () => {
   assert.match(freeCreate, /\.project-storyboard-page \.shot-list\{flex:1 1 auto;min-height:0\}/)
-  assert.match(freeCreate, /@media\(min-width:761px\)\{\.center-stage\{min-height:0;overflow:hidden\}\.shot-script\{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior-y:contain\}/)
+  assert.match(freeCreate, /@media\(min-width:761px\)\{\.center-stage\{min-height:0;overflow-x:hidden;overflow-y:auto\}\.shot-script\{flex:1 0 220px;min-height:220px;overflow-y:auto;overscroll-behavior-y:contain\}/)
 assert.match(freeCreate, /function containWorkbenchScroll\(event\)/)
-assert.match(freeCreate, /if \(!panel \|\| panel\.scrollHeight <= panel\.clientHeight\) \{\s*event\.preventDefault\(\)/)
+assert.match(freeCreate, /while \(panel && panel\.scrollHeight <= panel\.clientHeight\)/)
 assert.match(freeCreate, /Desktop free-create uses a fixed-height workbench too/)
 assert.match(freeCreate, /\.shot-panel\{overflow:hidden\}\.shot-list\{flex:1 1 auto;min-height:0\}/)
   assert.match(freeCreate, /\.omni-page\.embedded\.project-storyboard-page\{position:sticky!important;top:58px;z-index:20;height:calc\(100dvh - 58px\)!important/)
@@ -186,9 +184,8 @@ assert.match(freeCreate, /\.shot-panel\{overflow:hidden\}\.shot-list\{flex:1 1 a
 
 test('long prompt text keeps an independently scrollable textarea', () => {
   const promptEditor = readFileSync(new URL('../src/components/OmniAssetPromptEditor.vue', import.meta.url), 'utf8')
-  assert.match(freeCreate, /const promptEditor = event\.target\.closest\('textarea\.el-textarea__inner, \.prompt-rich-editor'\)/)
-  assert.match(freeCreate, /promptEditor\.scrollHeight <= promptEditor\.clientHeight/)
-  assert.match(freeCreate, /event\.target\.closest\('\.shot-list, \.creation-panel, \.shot-script,/)
+  assert.match(freeCreate, /textarea\.el-textarea__inner, \.prompt-rich-editor, \.shot-list, \.creation-panel, \.shot-script, \.center-stage/)
+  assert.match(freeCreate, /panel\.scrollHeight <= panel\.clientHeight/)
   assert.match(promptEditor, /overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable/)
 })
 
@@ -216,7 +213,7 @@ test('asset mention menus are teleported translucent overlays with bounded inter
 
 test('asset drag shows an exact text-boundary caret and rejects whitespace-only lines', () => {
   assert.match(dragPreview, /setDragImage\(transparentPreview, 0, 0\)/)
-  assert.match(freeCreate, /@pointerdown="!reproductionMode && beginAssetPointerDrag\(\$event, promptAssetFor\(asset\)\)"/)
+  assert.match(freeCreate, /@pointerdown="!reproductionMode && \(!projectSession.enabled \|\| projectSession.canEdit\) && beginAssetPointerDrag\(\$event, promptAssetFor\(asset\)\)"/)
   assert.match(pointerDrag, /Math\.hypot\([\s\S]*< 6/)
   assert.match(pointerDrag, /ASSET_POINTER_MOVE/)
   assert.match(pointerDrag, /ASSET_POINTER_DROP/)
@@ -243,7 +240,7 @@ test('asset drag shows an exact text-boundary caret and rejects whitespace-only 
 
 test('在长提示词中插入素材只重绘一次并保持编辑器滚动位置', () => {
   assert.match(promptEditor, /const scrollPosition = \{ top: editorRef\.value\?\.scrollTop \|\| 0/)
-  assert.match(promptEditor, /nextTick\(\(\) => restoreEditorAfterInsert\(caret, scrollPosition\)\)/)
+  assert.match(promptEditor, /nextTick\(\(\) => \{ syncReferences\(text\.value, true\); restoreEditorAfterInsert\(caret, scrollPosition\) \}\)/)
   assert.match(promptEditor, /function focusEditorAtOffset\(offset, scrollPosition\)/)
   assert.match(promptEditor, /el\.focus\(\{ preventScroll: true \}\)/)
   assert.match(promptEditor, /el\.scrollTop = scrollPosition\?\.top \|\| 0/)

@@ -32,28 +32,27 @@ function itemRow(db, table, id) {
     WHERE l.id = ? AND l.deleted_at IS NULL`).get(Number(id));
 }
 
-function canRead(row, actor) {
+function canRead(db, row, actor) {
   if (!row) return false;
   const info = actorInfo(actor);
   if (!info) return true;
   if (row.drama_id == null) return true;
-  return Number(row.drama_owner_user_id) === info.id;
+  return !!require('./projectAccessService').access(db, row.drama_id, info.id);
 }
 
-function canWrite(row, actor) {
+function canWrite(db, row, actor) {
   if (!row) return false;
   const info = actorInfo(actor);
   if (!info) return true;
   if (row.drama_id == null) return info.role === 'admin' && info.console_access;
-  return Number(row.drama_owner_user_id) === info.id;
+  return !!require('./projectAccessService').access(db, row.drama_id, info.id)?.can_edit;
 }
 
 function canCreate(db, dramaId, actor) {
   const info = actorInfo(actor);
   if (!info) return true;
   if (dramaId == null || dramaId === '') return info.role === 'admin' && info.console_access;
-  const drama = db.prepare(`SELECT d.owner_user_id FROM dramas d WHERE d.id = ?${activeDramaPredicate('d')}`).get(Number(dramaId));
-  return !!drama && Number(drama.owner_user_id) === info.id;
+  return !!require('./projectAccessService').access(db, dramaId, info.id)?.can_edit;
 }
 
 function assertCreate(db, dramaId, actor) {
@@ -66,12 +65,12 @@ function assertCreate(db, dramaId, actor) {
 
 function read(db, table, id, actor) {
   const row = itemRow(db, table, id);
-  return canRead(row, actor) ? row : null;
+  return canRead(db, row, actor) ? row : null;
 }
 
 function writable(db, table, id, actor) {
   const row = itemRow(db, table, id);
-  return canWrite(row, actor) ? row : null;
+  return canWrite(db, row, actor) ? row : null;
 }
 
 module.exports = { activeDramaPredicate, actorId, assertCreate, read, writable };

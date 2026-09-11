@@ -10,8 +10,8 @@ export const propAPI = {
   create(data) {
     return request.post('/props', data)
   },
-  update(id, data) {
-    return request.put(`/props/${id}`, data)
+  update(id, data, config) {
+    return request.put(`/props/${id}`, data, config)
   },
   generatePrompt(id, model, style) {
     return request.post(`/props/${id}/generate-prompt`, { model, style })

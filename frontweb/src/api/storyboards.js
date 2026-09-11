@@ -73,8 +73,8 @@ export const storyboardsAPI = {
   create(data) {
     return request.post('/storyboards', data)
   },
-  update(id, data) {
-    return request.put(`/storyboards/${id}`, data)
+  update(id, data, config) {
+    return request.put(`/storyboards/${id}`, data, config)
   },
   getEpisodeGenerationSettings(episodeId) {
     return request.get(`/episodes/${episodeId}/generation-settings`)
@@ -82,8 +82,8 @@ export const storyboardsAPI = {
   updateEpisodeGenerationSettings(episodeId, data) {
     return request.patch(`/episodes/${episodeId}/generation-settings`, data)
   },
-  updateGenerationSettings(id, data) {
-    return request.patch(`/storyboards/${id}/generation-settings`, data)
+  updateGenerationSettings(id, data, config) {
+    return request.patch(`/storyboards/${id}/generation-settings`, data, config)
   },
   clearGenerationSettingsOverrides(id) {
     return request.delete(`/storyboards/${id}/generation-settings/overrides`)

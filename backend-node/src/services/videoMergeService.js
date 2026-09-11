@@ -40,8 +40,7 @@ function list(db, query = {}, actor = null) {
     params.push(query.drama_id);
   }
   if (scopedOwner != null) {
-    sql += ` AND ${scopedMergeOwnerSql()} = ?`;
-    params.push(scopedOwner);
+    sql += ` AND ${scopedMergeDramaSql()} IN (${require('./projectAccessService').projectIdsSql(db, scopedOwner)})`;
   }
   const rows = db.prepare('SELECT vm.* ' + sql + ' ORDER BY vm.created_at DESC').all(...params);
   return rows.map(rowToItem);
@@ -72,8 +71,7 @@ function getById(db, id, actor = null) {
   // keep the id first in the bound parameter list for readability below.
   const reorderedParams = [Number(id)];
   if (scopedOwner != null) {
-    sql += ` AND ${scopedMergeOwnerSql()} = ?`;
-    reorderedParams.push(scopedOwner);
+    sql += ` AND ${scopedMergeDramaSql()} IN (${require('./projectAccessService').projectIdsSql(db, scopedOwner)})`;
   }
   const r = db.prepare(sql).get(...reorderedParams);
   return r ? rowToItem(r) : null;
@@ -90,7 +88,7 @@ function create(db, log, req, actor = null) {
     throw error;
   }
   const actorId = ownerId(actor);
-  if (actorId != null && Number(episode.owner_user_id) !== actorId) {
+  if (actorId != null && !require('./projectAccessService').access(db, episode.drama_id, actorId)?.can_edit) {
     const error = new Error('资源不存在');
     error.code = 'NOT_FOUND';
     throw error;

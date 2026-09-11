@@ -16,7 +16,7 @@
       </div>
     </div>
 
-    <el-form label-position="left" label-width="36px" size="small" class="panel-form compact-form">
+    <el-form :disabled="projectSession.enabled && !projectSession.canEdit" label-position="left" label-width="36px" size="small" class="panel-form compact-form">
       <el-form-item label="标题">
         <el-input v-model="form.title" placeholder="分镜标题" @blur="saveMeta" />
       </el-form-item>
@@ -102,7 +102,7 @@
       <template v-if="isUniversal">
         <el-form-item label="全能词">
           <el-input
-            v-model="form.universal_segment_text"
+            v-project-text="{ kind: 'storyboards', id: storyboard?.id, field: 'universal_segment_text' }" v-model="form.universal_segment_text"
             type="textarea"
             :rows="2"
             resize="vertical"
@@ -111,7 +111,7 @@
         </el-form-item>
         <el-form-item label="视频词">
           <el-input
-            v-model="form.video_prompt"
+            v-project-text="{ kind: 'storyboards', id: storyboard?.id, field: 'video_prompt' }" v-model="form.video_prompt"
             type="textarea"
             :rows="2"
             resize="vertical"
@@ -123,7 +123,7 @@
         <div class="text-row-2">
           <el-form-item label="动作" class="flex-1">
             <el-input
-              v-model="form.action"
+              v-project-text="{ kind: 'storyboards', id: storyboard?.id, field: 'action' }" v-model="form.action"
               type="textarea"
               :rows="2"
               resize="vertical"
@@ -132,7 +132,7 @@
           </el-form-item>
           <el-form-item label="对白" class="flex-1">
             <el-input
-              v-model="form.dialogue"
+              v-project-text="{ kind: 'storyboards', id: storyboard?.id, field: 'dialogue' }" v-model="form.dialogue"
               type="textarea"
               :rows="2"
               resize="vertical"
@@ -142,7 +142,7 @@
         </div>
         <el-form-item label="生图词">
           <el-input
-            v-model="form.image_prompt"
+            v-project-text="{ kind: 'storyboards', id: storyboard?.id, field: 'image_prompt' }" v-model="form.image_prompt"
             type="textarea"
             :rows="2"
             resize="vertical"
@@ -151,7 +151,7 @@
         </el-form-item>
         <el-form-item label="视频词">
           <el-input
-            v-model="form.video_prompt"
+            v-project-text="{ kind: 'storyboards', id: storyboard?.id, field: 'video_prompt' }" v-model="form.video_prompt"
             type="textarea"
             :rows="2"
             resize="vertical"
@@ -173,6 +173,8 @@
 </template>
 
 <script setup>
+import { projectSession } from '@/composables/useProjectCollaboration'
+import { captureProjectEdit } from '@/utils/projectSnapshots'
 import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -225,7 +227,9 @@ const busyLabel = computed(() => {
   return st?.message || (busyStep.value ? CANVAS_NODE_STATUS_LABELS[busyStep.value] : '')
 })
 
+let relationRequestConfig
 function syncForm(sb) {
+  relationRequestConfig = captureProjectEdit('storyboards', sb?.id)
   form.title = sb?.title || ''
   form.action = sb?.action || ''
   form.dialogue = sb?.dialogue || ''
@@ -271,7 +275,7 @@ async function onRelationChange() {
       character_ids: characterIds.value,
       scene_id: sceneId.value,
       prop_ids: propIds.value,
-    })
+    }, relationRequestConfig)
     await ctx?.refreshDrama?.(true)
   } catch (e) {
     ElMessage.error(e?.message || '关联保存失败')

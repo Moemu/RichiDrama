@@ -24,16 +24,6 @@ function parseJsonColumn(value) {
   }
 }
 
-function safeParseJsonObject(value) {
-  const parsed = parseJsonColumn(value);
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-}
-
-function safeParseJsonArray(value) {
-  const parsed = parseJsonColumn(value);
-  return Array.isArray(parsed) ? parsed : [];
-}
-
 function createDrama(db, log, req) {
   const now = new Date().toISOString();
   let meta = {};
@@ -66,6 +56,7 @@ function createDrama(db, log, req) {
     now
   );
   const id = info.lastInsertRowid;
+  if (req.owner_user_id && require('./projectAccessService').installed(db)) require('./projectAccessService').enable(db, id, req.owner_user_id);
   log.info('Drama created', { drama_id: id });
   return getDramaById(db, id);
 }
@@ -180,8 +171,11 @@ function listDramas(db, query) {
   let sql = 'FROM dramas WHERE deleted_at IS NULL';
   const params = [];
   if (query.owner_user_id) {
-    sql += ' AND owner_user_id = ?';
-    params.push(Number(query.owner_user_id));
+    sql += ` AND id IN (${require('./projectAccessService').projectIdsSql(db, query.owner_user_id)})`;
+    if (query.membership === 'owned' || query.membership === 'joined') {
+      sql += query.membership === 'owned' ? ' AND owner_user_id = ?' : ' AND owner_user_id <> ?';
+      params.push(Number(query.owner_user_id));
+    }
   }
   if (query.status) {
     sql += ' AND status = ?';
@@ -301,7 +295,7 @@ function deleteDrama(db, log, dramaId) {
         WHERE drama_id = ? AND deleted_at IS NULL
           AND status IN ('sd2_waiting','processing','persisting','upscale_pending','upscaling','interpolation_pending','interpolating')`
     ).get(id).c;
-    if (active > 0) throw new Error(`项目还有 ${active} 个生成中的任务，请先等待完成或在全能创作中取消后再删除`);
+    if (active > 0) throw Object.assign(new Error(`项目还有 ${active} 个生成中的任务，请先等待完成或在全能创作中取消后再删除`), { status: 409 });
   }
   const result = db.prepare('UPDATE dramas SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').run(
     new Date().toISOString(),
@@ -379,6 +373,7 @@ function parseStoryboardCharacters(charactersStr) {
 function rowToStoryboard(r) {
   return {
     id: r.id,
+    ...require('./storyboardInputState').storyboardInputState(r),
     storyboard_uid: r.storyboard_uid ?? null,
     episode_id: r.episode_id,
     scene_id: r.scene_id,
@@ -398,13 +393,6 @@ function rowToStoryboard(r) {
     polished_prompt: r.polished_prompt ?? null,
     continuity_snapshot: r.continuity_snapshot ?? null,
     video_prompt: r.video_prompt,
-    text_model: r.text_model ?? null,
-    video_model: r.video_model ?? null,
-    video_resolution: r.video_resolution ?? null,
-    video_upscale_resolution: r.video_upscale_resolution ?? null,
-    video_target_fps: r.video_target_fps ?? null,
-    video_aspect_ratio: r.video_aspect_ratio ?? null,
-    generation_overrides: safeParseJsonObject(r.generation_overrides_json),
       shot_type: r.shot_type ?? null,
       angle: r.angle ?? null,
       angle_h: r.angle_h ?? null,
@@ -419,17 +407,6 @@ function rowToStoryboard(r) {
       segment_title: r.segment_title ?? null,
       creation_mode: r.creation_mode === 'universal' ? 'universal' : 'classic',
       universal_segment_text: r.universal_segment_text ?? null,
-      omni_prompt_document: safeParseJsonObject(r.omni_prompt_document_json),
-      omni_asset_ids: safeParseJsonArray(r.omni_asset_ids),
-      audio_strategy: r.audio_strategy || 'reference_only',
-      keep_original_audio: !!r.keep_original_audio,
-      audio_volume: r.audio_volume ?? 1,
-      audio_fade_seconds: r.audio_fade_seconds ?? 0,
-      omni_creation_mode: r.omni_creation_mode || 'multi_reference',
-      omni_asset_send_policy: r.omni_asset_send_policy || 'all_selected',
-      omni_first_frame_asset_id: r.omni_first_frame_asset_id != null ? Number(r.omni_first_frame_asset_id) : null,
-      omni_last_frame_asset_id: r.omni_last_frame_asset_id != null ? Number(r.omni_last_frame_asset_id) : null,
-      omni_asset_usage: safeParseJsonObject(r.omni_asset_usage_json),
       layout_description: r.layout_description ?? null,
       first_frame_image_id: r.first_frame_image_id ?? null,
       last_frame_image_id: r.last_frame_image_id ?? null,
@@ -487,6 +464,7 @@ function rowToScene(r) {
     id: r.id,
     drama_id: r.drama_id,
     location: r.location,
+    description: r.description,
     time: r.time,
     prompt: r.prompt,
     polished_prompt: r.polished_prompt || null,
@@ -528,7 +506,8 @@ function saveOutline(db, log, dramaId, req) {
   const drama = getDramaById(db, Number(dramaId));
   if (!drama) return false;
   const now = new Date().toISOString();
-  const tagsStr = Array.isArray(req.tags) ? JSON.stringify(req.tags) : null;
+  const collaborationEnabled = require('./projectAccessService').installed(db) && db.prepare('SELECT 1 FROM project_collaboration WHERE drama_id=?').get(Number(dramaId));
+  const tagsStr = req.tags === undefined && collaborationEnabled ? drama.tags : Array.isArray(req.tags) ? JSON.stringify(req.tags) : null;
   // Merge new metadata with existing metadata
   let existingMetadata = {};
   if (drama.metadata) {
@@ -792,7 +771,13 @@ function saveCanvasLayout(db, log, dramaId, req) {
     throw err;
   }
   const meta = storageLayout.parseMetadata(drama.metadata);
-  if (layout) meta.canvas_layout = layout;
+  if (layout) {
+    const collaborative = require('./projectAccessService').installed(db) && db.prepare('SELECT 1 FROM project_collaboration WHERE drama_id=?').get(Number(dramaId));
+    if (collaborative) {
+      const { viewport, ...sharedLayout } = layout;
+      meta.canvas_layout = { ...meta.canvas_layout, ...sharedLayout };
+    } else meta.canvas_layout = layout;
+  }
   if (workflowGroups !== undefined) meta.workflow_groups = workflowGroups;
   const now = new Date().toISOString();
   db.prepare('UPDATE dramas SET metadata = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(meta), now, dramaId);

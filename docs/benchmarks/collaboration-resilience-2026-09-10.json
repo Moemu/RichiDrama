@@ -1,0 +1,640 @@
+{
+  "timestamp": "2026-09-10T08:37:28.766Z",
+  "seed": 20260910,
+  "host": {
+    "node": "v24.21.0",
+    "platform": "win32",
+    "cpu": "AMD Ryzen 9 7940HX with Radeon Graphics        ",
+    "ramGiB": 15.215641021728516
+  },
+  "network": {
+    "oneWayDelayMs": [
+      20,
+      149
+    ],
+    "spikeProbability": 0.02,
+    "spikeExtraMs": 1000,
+    "orderedWebSocketMessages": true,
+    "tcpPacketLossEmulated": false
+  },
+  "profiles": [
+    {
+      "name": "overlapping-text-jitter",
+      "users": 20,
+      "projects": 1,
+      "documents": 1,
+      "seconds": 60,
+      "generatedEdits": 1200,
+      "acknowledgedBatches": 958,
+      "expectedTransportErrors": 0,
+      "unexpectedErrors": [],
+      "connectionsOpened": 20,
+      "foreignMessages": 0,
+      "ackMs": {
+        "count": 958,
+        "p50": 809.5733000000037,
+        "p95": 2735.169099999999,
+        "max": 5450.803799999998
+      },
+      "refreshMs": {
+        "count": 1564,
+        "p50": 760.1445000000022,
+        "p95": 3416.911,
+        "max": 4617.101800000004
+      },
+      "recoveryMs": 1439.1671999999962,
+      "metrics": {
+        "type": "metrics",
+        "cpuOneCorePercent": 54.2331578757829,
+        "peakRssMiB": 292.87890625,
+        "peakHeapMiB": 148.43582916259766,
+        "currentRssMiB": 282.70703125,
+        "currentHeapMiB": 80.37672424316406,
+        "openSockets": 20,
+        "eventLoopP95Ms": 68.681727,
+        "eventLoopP99Ms": 255.590399,
+        "eventLoopMaxMs": 897.056767,
+        "sqliteErrors": 0
+      },
+      "faults": {
+        "delayedMessages": 25096,
+        "spikes": 545,
+        "duplicateUpdates": 0,
+        "lostAcknowledgements": 0,
+        "forcedDisconnects": 0,
+        "upstreamFailures": 0
+      },
+      "checkpoints": [],
+      "hashes": [
+        {
+          "target": {
+            "kind": "dramas",
+            "id": 1,
+            "field": "description"
+          },
+          "hash": "e28f7d619b5976ca94bec067da787d1c9717bb1bcae652e2bbc133b5f20faa6a"
+        }
+      ],
+      "allGeneratedEditsConverged": true,
+      "acknowledgedDataDurable": true,
+      "draftsDrained": true
+    },
+    {
+      "name": "disconnect-ack-loss-replay",
+      "users": 20,
+      "projects": 1,
+      "documents": 1,
+      "seconds": 60,
+      "generatedEdits": 1200,
+      "acknowledgedBatches": 860,
+      "expectedTransportErrors": 133,
+      "unexpectedErrors": [],
+      "connectionsOpened": 76,
+      "foreignMessages": 0,
+      "ackMs": {
+        "count": 860,
+        "p50": 566.317200000005,
+        "p95": 2684.5386,
+        "max": 6030.033500000005
+      },
+      "refreshMs": {
+        "count": 2207,
+        "p50": 334.2844000000041,
+        "p95": 3867.466400000005,
+        "max": 6236.635999999999
+      },
+      "recoveryMs": 3758.114300000001,
+      "metrics": {
+        "type": "metrics",
+        "cpuOneCorePercent": 60.07930942653278,
+        "peakRssMiB": 299.10546875,
+        "peakHeapMiB": 112.79307556152344,
+        "currentRssMiB": 288.65234375,
+        "currentHeapMiB": 42.140037536621094,
+        "openSockets": 19,
+        "eventLoopP95Ms": 69.533695,
+        "eventLoopP99Ms": 228.065279,
+        "eventLoopMaxMs": 1102.053375,
+        "sqliteErrors": 0
+      },
+      "faults": {
+        "delayedMessages": 26513,
+        "spikes": 607,
+        "duplicateUpdates": 68,
+        "lostAcknowledgements": 23,
+        "forcedDisconnects": 33,
+        "upstreamFailures": 2
+      },
+      "checkpoints": [],
+      "hashes": [
+        {
+          "target": {
+            "kind": "dramas",
+            "id": 2,
+            "field": "description"
+          },
+          "hash": "f98d8d4f35afb2b6c9b9a075318c556b9080e5cadbec9d6945e49c980e3818f9"
+        }
+      ],
+      "allGeneratedEditsConverged": true,
+      "acknowledgedDataDurable": true,
+      "draftsDrained": true
+    },
+    {
+      "name": "multi-project-multi-field",
+      "users": 20,
+      "projects": 4,
+      "documents": 8,
+      "seconds": 60,
+      "generatedEdits": 1200,
+      "acknowledgedBatches": 1115,
+      "expectedTransportErrors": 93,
+      "unexpectedErrors": [],
+      "connectionsOpened": 84,
+      "foreignMessages": 0,
+      "ackMs": {
+        "count": 1115,
+        "p50": 219.22939999998198,
+        "p95": 1156.1517000000167,
+        "max": 2196.172499999986
+      },
+      "refreshMs": {
+        "count": 1534,
+        "p50": 188.6689999999944,
+        "p95": 308.2093000000168,
+        "max": 2199.6716000000015
+      },
+      "recoveryMs": 1456.63440000001,
+      "metrics": {
+        "type": "metrics",
+        "cpuOneCorePercent": 26.766758401567312,
+        "peakRssMiB": 345.26953125,
+        "peakHeapMiB": 168.1568603515625,
+        "currentRssMiB": 284.52734375,
+        "currentHeapMiB": 78.16804504394531,
+        "openSockets": 20,
+        "eventLoopP95Ms": 21.512191,
+        "eventLoopP99Ms": 40.566783,
+        "eventLoopMaxMs": 178.126847,
+        "sqliteErrors": 0
+      },
+      "faults": {
+        "delayedMessages": 12305,
+        "spikes": 301,
+        "duplicateUpdates": 89,
+        "lostAcknowledgements": 31,
+        "forcedDisconnects": 33,
+        "upstreamFailures": 0
+      },
+      "checkpoints": [
+        {
+          "type": "cross-project-permission",
+          "nonMemberReadRejected": true
+        }
+      ],
+      "hashes": [
+        {
+          "target": {
+            "kind": "dramas",
+            "id": 3,
+            "field": "description"
+          },
+          "hash": "9142117f2e073d1d1f066ac08d1d6baf21666b4a554cd491ac0124958733b1c8"
+        },
+        {
+          "target": {
+            "kind": "episodes",
+            "id": 1,
+            "field": "script_content"
+          },
+          "hash": "da9fd219a3c64e51d038f63e0959b9553b67b6bc753d8df3af20dffc3e0b9543"
+        },
+        {
+          "target": {
+            "kind": "dramas",
+            "id": 4,
+            "field": "description"
+          },
+          "hash": "065fe96472b83e27ed517cacce9eed52f9497920a8039f03a8c161ecb913ca31"
+        },
+        {
+          "target": {
+            "kind": "episodes",
+            "id": 2,
+            "field": "script_content"
+          },
+          "hash": "d0ea624096f40bd933ed89a455c1ad53a9d8d0d628de86ae1700272fad219511"
+        },
+        {
+          "target": {
+            "kind": "dramas",
+            "id": 5,
+            "field": "description"
+          },
+          "hash": "2e623ec3dee24e6b4757cf732f04cd219cdd76219842469f0b13bb36a3d54e2a"
+        },
+        {
+          "target": {
+            "kind": "episodes",
+            "id": 3,
+            "field": "script_content"
+          },
+          "hash": "7a12d3e6af443b3482b906b711b8ad6dae2fabd58444ac757f468c952c2c38bb"
+        },
+        {
+          "target": {
+            "kind": "dramas",
+            "id": 6,
+            "field": "description"
+          },
+          "hash": "84f970be90ba467132bf8a8b1e788e1424f6d3347ae6af9e471b2b3bd05c75ff"
+        },
+        {
+          "target": {
+            "kind": "episodes",
+            "id": 4,
+            "field": "script_content"
+          },
+          "hash": "7625270a208a1c1cbafc033a19f8035c69f8767e90c534179bac16447be7c772"
+        }
+      ],
+      "allGeneratedEditsConverged": true,
+      "acknowledgedDataDurable": true,
+      "draftsDrained": true
+    },
+    {
+      "name": "abrupt-restart-during-writes",
+      "users": 20,
+      "projects": 1,
+      "documents": 1,
+      "seconds": 60,
+      "generatedEdits": 1200,
+      "acknowledgedBatches": 1139,
+      "expectedTransportErrors": 62,
+      "unexpectedErrors": [],
+      "connectionsOpened": 60,
+      "foreignMessages": 0,
+      "ackMs": {
+        "count": 1139,
+        "p50": 465.7754999999888,
+        "p95": 1421.8183000000136,
+        "max": 2573.392900000006
+      },
+      "refreshMs": {
+        "count": 1571,
+        "p50": 282.9402999999875,
+        "p95": 932.1031000000075,
+        "max": 2606.3505000000005
+      },
+      "recoveryMs": 1052.7494000000006,
+      "metrics": {
+        "type": "metrics",
+        "cpuOneCorePercent": 53.93096459145496,
+        "peakRssMiB": 254.8828125,
+        "peakHeapMiB": 106.61271667480469,
+        "currentRssMiB": 251.80859375,
+        "currentHeapMiB": 76.62940979003906,
+        "openSockets": 20,
+        "eventLoopP95Ms": 66.125823,
+        "eventLoopP99Ms": 176.685055,
+        "eventLoopMaxMs": 313.262079,
+        "sqliteErrors": 0
+      },
+      "faults": {
+        "delayedMessages": 29522,
+        "spikes": 649,
+        "duplicateUpdates": 0,
+        "lostAcknowledgements": 0,
+        "forcedDisconnects": 0,
+        "upstreamFailures": 0
+      },
+      "checkpoints": [
+        {
+          "type": "abrupt-restart",
+          "pendingWrites": 20,
+          "acknowledgedBeforeReplay": true
+        },
+        {
+          "type": "abrupt-restart",
+          "pendingWrites": 20,
+          "acknowledgedBeforeReplay": true
+        }
+      ],
+      "hashes": [
+        {
+          "target": {
+            "kind": "dramas",
+            "id": 7,
+            "field": "description"
+          },
+          "hash": "c57d178ca7c5ce89cfe20e5668f0f10487dbee2f099b9a5a31c522b6475996b7"
+        }
+      ],
+      "allGeneratedEditsConverged": true,
+      "acknowledgedDataDurable": true,
+      "draftsDrained": true
+    },
+    {
+      "name": "sustained-network-faults",
+      "users": 20,
+      "projects": 4,
+      "documents": 8,
+      "seconds": 600,
+      "generatedEdits": 12000,
+      "acknowledgedBatches": 11149,
+      "expectedTransportErrors": 921,
+      "unexpectedErrors": [],
+      "connectionsOpened": 688,
+      "foreignMessages": 0,
+      "ackMs": {
+        "count": 11149,
+        "p50": 240.84759999997914,
+        "p95": 1175.8029999999562,
+        "max": 2284.9089000000386
+      },
+      "refreshMs": {
+        "count": 15034,
+        "p50": 195.891100000008,
+        "p95": 334.0369000000064,
+        "max": 2236.1219000000274
+      },
+      "recoveryMs": 882.7591999999713,
+      "metrics": {
+        "type": "metrics",
+        "cpuOneCorePercent": 32.3332684350747,
+        "peakRssMiB": 286.84765625,
+        "peakHeapMiB": 98.82351684570312,
+        "currentRssMiB": 229.703125,
+        "currentHeapMiB": 44.1116943359375,
+        "openSockets": 19,
+        "eventLoopP95Ms": 23.937023,
+        "eventLoopP99Ms": 49.741823,
+        "eventLoopMaxMs": 191.758335,
+        "sqliteErrors": 0
+      },
+      "faults": {
+        "delayedMessages": 120761,
+        "spikes": 2916,
+        "duplicateUpdates": 885,
+        "lostAcknowledgements": 311,
+        "forcedDisconnects": 357,
+        "upstreamFailures": 0
+      },
+      "checkpoints": [
+        {
+          "type": "cross-project-permission",
+          "nonMemberReadRejected": true
+        },
+        {
+          "type": "sample",
+          "seconds": 60,
+          "generated": 1220,
+          "acknowledgements": 1125,
+          "dirtyClients": 20,
+          "metrics": {
+            "type": "metrics",
+            "cpuOneCorePercent": 19.60159768529835,
+            "peakRssMiB": 286.84765625,
+            "peakHeapMiB": 84.07593536376953,
+            "currentRssMiB": 283.58984375,
+            "currentHeapMiB": 60.027244567871094,
+            "openSockets": 18,
+            "eventLoopP95Ms": 19.939327,
+            "eventLoopP99Ms": 25.591807,
+            "eventLoopMaxMs": 58.327039,
+            "sqliteErrors": 0
+          }
+        },
+        {
+          "type": "sample",
+          "seconds": 120,
+          "generated": 2420,
+          "acknowledgements": 2239,
+          "dirtyClients": 20,
+          "metrics": {
+            "type": "metrics",
+            "cpuOneCorePercent": 20.25968383263881,
+            "peakRssMiB": 286.84765625,
+            "peakHeapMiB": 89.6715316772461,
+            "currentRssMiB": 275.52734375,
+            "currentHeapMiB": 62.16388702392578,
+            "openSockets": 18,
+            "eventLoopP95Ms": 19.890175,
+            "eventLoopP99Ms": 25.870335,
+            "eventLoopMaxMs": 64.552959,
+            "sqliteErrors": 0
+          }
+        },
+        {
+          "type": "sample",
+          "seconds": 180,
+          "generated": 3620,
+          "acknowledgements": 3355,
+          "dirtyClients": 20,
+          "metrics": {
+            "type": "metrics",
+            "cpuOneCorePercent": 21.048909495751474,
+            "peakRssMiB": 286.84765625,
+            "peakHeapMiB": 89.6715316772461,
+            "currentRssMiB": 272.609375,
+            "currentHeapMiB": 71.16030883789062,
+            "openSockets": 18,
+            "eventLoopP95Ms": 20.217855,
+            "eventLoopP99Ms": 25.952255,
+            "eventLoopMaxMs": 64.552959,
+            "sqliteErrors": 0
+          }
+        },
+        {
+          "type": "sample",
+          "seconds": 240,
+          "generated": 4820,
+          "acknowledgements": 4475,
+          "dirtyClients": 20,
+          "metrics": {
+            "type": "metrics",
+            "cpuOneCorePercent": 22.302881059027783,
+            "peakRssMiB": 286.84765625,
+            "peakHeapMiB": 90.45616912841797,
+            "currentRssMiB": 248.72265625,
+            "currentHeapMiB": 69.85884094238281,
+            "openSockets": 18,
+            "eventLoopP95Ms": 20.512767,
+            "eventLoopP99Ms": 27.115519,
+            "eventLoopMaxMs": 157.286399,
+            "sqliteErrors": 0
+          }
+        },
+        {
+          "type": "sample",
+          "seconds": 300,
+          "generated": 6020,
+          "acknowledgements": 5600,
+          "dirtyClients": 20,
+          "metrics": {
+            "type": "metrics",
+            "cpuOneCorePercent": 24.00930911630441,
+            "peakRssMiB": 286.84765625,
+            "peakHeapMiB": 95.50444793701172,
+            "currentRssMiB": 230.875,
+            "currentHeapMiB": 61.318992614746094,
+            "openSockets": 19,
+            "eventLoopP95Ms": 20.791295,
+            "eventLoopP99Ms": 29.360127,
+            "eventLoopMaxMs": 157.286399,
+            "sqliteErrors": 0
+          }
+        },
+        {
+          "type": "sample",
+          "seconds": 360,
+          "generated": 7220,
+          "acknowledgements": 6708,
+          "dirtyClients": 20,
+          "metrics": {
+            "type": "metrics",
+            "cpuOneCorePercent": 25.66687304315456,
+            "peakRssMiB": 286.84765625,
+            "peakHeapMiB": 98.82351684570312,
+            "currentRssMiB": 233.6796875,
+            "currentHeapMiB": 37.71282196044922,
+            "openSockets": 19,
+            "eventLoopP95Ms": 21.200895,
+            "eventLoopP99Ms": 32.653311,
+            "eventLoopMaxMs": 157.286399,
+            "sqliteErrors": 0
+          }
+        },
+        {
+          "type": "sample",
+          "seconds": 420,
+          "generated": 8420,
+          "acknowledgements": 7816,
+          "dirtyClients": 20,
+          "metrics": {
+            "type": "metrics",
+            "cpuOneCorePercent": 28.10733294138194,
+            "peakRssMiB": 286.84765625,
+            "peakHeapMiB": 98.82351684570312,
+            "currentRssMiB": 231.6875,
+            "currentHeapMiB": 57.73381042480469,
+            "openSockets": 19,
+            "eventLoopP95Ms": 21.725183,
+            "eventLoopP99Ms": 38.010879,
+            "eventLoopMaxMs": 175.767551,
+            "sqliteErrors": 0
+          }
+        },
+        {
+          "type": "sample",
+          "seconds": 480,
+          "generated": 9620,
+          "acknowledgements": 8926,
+          "dirtyClients": 20,
+          "metrics": {
+            "type": "metrics",
+            "cpuOneCorePercent": 30.02005974513923,
+            "peakRssMiB": 286.84765625,
+            "peakHeapMiB": 98.82351684570312,
+            "currentRssMiB": 233.47265625,
+            "currentHeapMiB": 58.978057861328125,
+            "openSockets": 19,
+            "eventLoopP95Ms": 22.659071,
+            "eventLoopP99Ms": 42.303487,
+            "eventLoopMaxMs": 188.743679,
+            "sqliteErrors": 0
+          }
+        },
+        {
+          "type": "sample",
+          "seconds": 540,
+          "generated": 10820,
+          "acknowledgements": 10034,
+          "dirtyClients": 20,
+          "metrics": {
+            "type": "metrics",
+            "cpuOneCorePercent": 31.306256916897357,
+            "peakRssMiB": 286.84765625,
+            "peakHeapMiB": 98.82351684570312,
+            "currentRssMiB": 228.5703125,
+            "currentHeapMiB": 81.25983428955078,
+            "openSockets": 18,
+            "eventLoopP95Ms": 23.494655,
+            "eventLoopP99Ms": 47.513599,
+            "eventLoopMaxMs": 191.758335,
+            "sqliteErrors": 0
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "target": {
+            "kind": "dramas",
+            "id": 8,
+            "field": "description"
+          },
+          "hash": "fdbff837ea89915eac5af758140269a93018fc4695ce76396ab0f77291f084a2"
+        },
+        {
+          "target": {
+            "kind": "episodes",
+            "id": 5,
+            "field": "script_content"
+          },
+          "hash": "da9fd219a3c64e51d038f63e0959b9553b67b6bc753d8df3af20dffc3e0b9543"
+        },
+        {
+          "target": {
+            "kind": "dramas",
+            "id": 9,
+            "field": "description"
+          },
+          "hash": "c14b901f3046842f463c0424779442dbb5fe052f6b0d0a99ac3381247dd0687c"
+        },
+        {
+          "target": {
+            "kind": "episodes",
+            "id": 6,
+            "field": "script_content"
+          },
+          "hash": "2697f1d8bca1a560806df84e3f7f5072de3609dd3ef66963ec2d3df59ce4a8c6"
+        },
+        {
+          "target": {
+            "kind": "dramas",
+            "id": 10,
+            "field": "description"
+          },
+          "hash": "3a5ad5c1f8dd126492e8802b0fae7485f1a87f9dfab82e126fb097805de8c09a"
+        },
+        {
+          "target": {
+            "kind": "episodes",
+            "id": 7,
+            "field": "script_content"
+          },
+          "hash": "7a12d3e6af443b3482b906b711b8ad6dae2fabd58444ac757f468c952c2c38bb"
+        },
+        {
+          "target": {
+            "kind": "dramas",
+            "id": 11,
+            "field": "description"
+          },
+          "hash": "8ecbb0838a42d54bbd534b29bfe448453f1b3b17e493fa5a718df44ff5737dd4"
+        },
+        {
+          "target": {
+            "kind": "episodes",
+            "id": 8,
+            "field": "script_content"
+          },
+          "hash": "2464843838184f58873f752b8e67dce7c4af40e2389f9c17d00ef18b13d790a1"
+        }
+      ],
+      "allGeneratedEditsConverged": true,
+      "acknowledgedDataDurable": true,
+      "draftsDrained": true
+    }
+  ]
+}

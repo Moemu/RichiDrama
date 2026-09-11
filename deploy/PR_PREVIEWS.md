@@ -36,7 +36,7 @@
 结构上只有三件套：
 
 - 每个 PR 一个容器 `minidrama-pr-<number>`，加入**生产所在的 Docker 网络**（`lens-rhyme_default`），别名 `pr-<number>`——与生产应用同构的网络位置。
-- 端口 80 入口加载一份静态 vhost `deploy/nginx-preview-vhost.conf`：按 `pr-<number>.preview.drama.richbest.cn` 匹配主机名，经 Basic Auth 后代理到对应容器。文件不随预览增删变化。
+- 端口 80 入口从 `deploy/nginx-preview-vhost.conf` 为每个 PR 生成精确域名配置，经 Basic Auth 后代理到对应容器。其他 PR 部署旧版共享配置时，不会覆盖当前 PR 的 WebSocket 转发规则。移除预览时同时移除其路由；历史预览继续使用共享规则。
 - `MINIDRAMA_PROFILE=preview` 标记运行档位（配置为空集，仅作 /ready 与日志的可观测信号）。
 
 基本鉴权凭据共享于 `/data/minidrama-previews/auth`。这是单人仓库下的有意取舍：预览代码即仓库成员自己的代码，作者门禁（author_association + 同仓库分支校验）是真正的安全边界，预览不应也无法“防御”作者本人。

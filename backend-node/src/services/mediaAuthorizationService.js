@@ -404,8 +404,31 @@ function authorizeMediaPath(db, keyOrUrl, user, options = {}) {
     };
   }
 
+  const canonicalProjectId = /^projects\/(\d+)_/.exec(key)?.[1];
+  if (canonicalProjectId && require('./projectAccessService').access(db, canonicalProjectId, userId)) {
+    return { allowed: true, status: 200, code: 'MEDIA_ALLOWED', key, matched: true, shared: true, fast_path: 'project_member' };
+  }
+  if (canonicalProjectOwnerId && canonicalProjectId && require('./projectAccessService').installed(db) && db.prepare('SELECT 1 FROM project_collaboration WHERE drama_id=?').get(Number(canonicalProjectId))) {
+    return { allowed: false, status: 404, code: 'MEDIA_NOT_FOUND', key, matched: true, reason: 'project_access_revoked' };
+  }
   const matches = [];
   for (const definition of DEFINITIONS) matches.push(...queryDefinition(db, definition, key, storageRoot));
+  const completedOutputFields = {
+    assets: ['local_path', 'thumbnail_local_path'],
+    image_generations: ['local_path'],
+    video_generations: ['local_path', 'poster_local_path', 'source_local_path', 'upscale_local_path'],
+    video_merges: ['merged_url'],
+  };
+  if (matches.some(match => match.row.__media_project_id
+    && completedOutputFields[match.definition.table]?.some(name => match.matches.some(field => fieldName(field) === name))
+    && require('./projectAccessService').access(db, match.row.__media_project_id, userId))) {
+    return { allowed: true, status: 200, code: 'MEDIA_ALLOWED', key, matched: true, shared: true };
+  }
+  if (require('./projectAccessService').installed(db) && matches.some(match => match.row.__media_project_id
+    && completedOutputFields[match.definition.table]?.some(name => match.matches.some(field => fieldName(field) === name))
+    && db.prepare('SELECT 1 FROM project_collaboration c JOIN dramas d ON d.id=c.drama_id WHERE d.id=? AND d.deleted_at IS NULL').get(match.row.__media_project_id))) {
+    return { allowed: false, status: 404, code: 'MEDIA_NOT_FOUND', key, matched: true, reason: 'project_access_revoked' };
+  }
   const projectOwnerId = canonicalProjectOwnerId;
   const candidates = matches.flatMap((match) => match.matches.flatMap((field) => {
     const candidate = candidateForMatch(db, match, field, projectOwnerId);

@@ -8,7 +8,7 @@ function routes(db, log, cfg) {
         const query = { ...req.query, owner_user_id: req.auth.id };
         if (String(query.scope || '').toLowerCase() === 'project') {
           const dramaId = Number(query.drama_id);
-          if (!Number.isInteger(dramaId) || dramaId <= 0 || !db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(dramaId, req.auth.id)) {
+          if (!Number.isInteger(dramaId) || dramaId <= 0 || !require('../services/projectAccessService').access(db, dramaId, req.auth.id)) {
             return response.notFound(res, '项目不存在');
           }
         }
@@ -17,7 +17,7 @@ function routes(db, log, cfg) {
         // migrates existing character/scene/prop images once.
         if (query.drama_id) require('../services/assetMappingService').syncDramaAssets(db, log, query.drama_id);
         const { items, total, page, pageSize } = assetService.list(db, query);
-        response.successWithPagination(res, items, total, page, pageSize);
+        response.successWithPagination(res, require('../services/projectAssetService').decorateMany(db, items), total, page, pageSize);
       } catch (err) {
         log.error('assets list', { error: err.message });
         response.internalError(res, err.message);
@@ -26,7 +26,7 @@ function routes(db, log, cfg) {
     create: (req, res) => {
       try {
         const body = req.body || {};
-        if (body.drama_id && !db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(Number(body.drama_id), req.auth.id)) return response.notFound(res, '项目不存在');
+        if (body.drama_id && !require('../services/projectAccessService').access(db, Number(body.drama_id), req.auth.id)) return response.notFound(res, '项目不存在');
         const item = assetService.create(db, log, { ...body, owner_user_id: req.auth.id });
         response.created(res, item);
       } catch (err) {
@@ -42,7 +42,7 @@ function routes(db, log, cfg) {
         const resourceType = String(req.body?.resource_type || '').trim();
         const resourceId = Number(req.body?.resource_id);
         if (!Number.isInteger(dramaId) || dramaId <= 0 || !Number.isInteger(resourceId) || resourceId <= 0) return response.badRequest(res, '请提供有效的项目与资源 ID');
-        if (!db.prepare('SELECT 1 FROM dramas WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL').get(dramaId, req.auth.id)) return response.notFound(res, '项目不存在');
+        if (!require('../services/projectAccessService').access(db, dramaId, req.auth.id)) return response.notFound(res, '项目不存在');
         const linked = require('../services/assetMappingService').linkProjectResource(db, log, dramaId, resourceType, resourceId);
         if (linked.status === 'not_found') return response.notFound(res, '项目资源不存在');
         if (linked.status === 'detached') return response.error(res, 409, 'RESOURCE_DETACHED', '该资源已从素材库解除关联；分镜引用不会自动恢复。');
@@ -56,7 +56,7 @@ function routes(db, log, cfg) {
       try {
         const item = assetService.getByIdForOwner(db, req.params.id, req.auth.id);
         if (!item) return response.notFound(res, '资源不存在');
-        response.success(res, item);
+        response.success(res, require('../services/projectAssetService').decorate(db, item));
       } catch (err) {
         log.error('assets get', { error: err.message });
         response.internalError(res, err.message);
@@ -93,11 +93,12 @@ function routes(db, log, cfg) {
         response.success(res, { message: '已归档：新镜头不可再选，已有镜头引用保持不变' });
       } catch (err) {
         log.error('assets archive', { error: err.message });
-        response.badRequest(res, err.message);
+        response.error(res, err.status || 400, err.code || 'ASSET_ARCHIVE_ERROR', err.message);
       }
     },
     forceDetach: (req, res) => {
       try {
+        require('../services/projectAssetService').assertRemovable(db, req.params.id);
         const current = assetService.getByIdForOwner(db, req.params.id, req.auth.id);
         if (!current) return response.notFound(res, '资源不存在');
         const impact = assetService.detachEditableShotReferences(db, [current.id], req.auth.id);
@@ -118,7 +119,7 @@ function routes(db, log, cfg) {
     listResourceLinks: (req, res) => {
       try {
         const dramaId = req.query?.drama_id == null ? null : Number(req.query.drama_id);
-        if (dramaId != null && (!Number.isInteger(dramaId) || !db.prepare('SELECT 1 FROM dramas WHERE id=? AND owner_user_id=? AND deleted_at IS NULL').get(dramaId, req.auth.id))) {
+        if (dramaId != null && (!Number.isInteger(dramaId) || !require('../services/projectAccessService').access(db, dramaId, req.auth.id))) {
           return response.notFound(res, '项目不存在');
         }
         const items = require('../services/assetMappingService').listResourceLinks(db, req.auth.id, dramaId, req.query?.status);
@@ -132,7 +133,7 @@ function routes(db, log, cfg) {
         const scope = String(body.scope || '').toLowerCase();
         if (!['global', 'project'].includes(scope)) return response.badRequest(res, '批量删除必须明确指定 global 或 project 素材范围');
         const dramaId = scope === 'project' ? Number(body.drama_id) : null;
-        if (scope === 'project' && (!Number.isInteger(dramaId) || dramaId <= 0 || !db.prepare('SELECT 1 FROM dramas WHERE id=? AND owner_user_id=? AND deleted_at IS NULL').get(dramaId, req.auth.id))) {
+        if (scope === 'project' && (!Number.isInteger(dramaId) || dramaId <= 0 || !require('../services/projectAccessService').access(db, dramaId, req.auth.id))) {
           return response.notFound(res, '项目不存在');
         }
         // all_matching is deliberately explicit so an empty selected list can

@@ -244,6 +244,7 @@ function getStoryboardsForEpisode(db, episodeId) {
     }
     return {
       id: r.id,
+      ...require('./storyboardInputState').storyboardInputState(r),
       storyboard_uid: r.storyboard_uid ?? null,
       episode_id: r.episode_id,
       scene_id: r.scene_id,
@@ -272,21 +273,6 @@ function getStoryboardsForEpisode(db, episodeId) {
       segment_title: r.segment_title ?? null,
       creation_mode: r.creation_mode === 'universal' ? 'universal' : 'classic',
       universal_segment_text: r.universal_segment_text ?? null,
-      omni_prompt_document: safeParseJsonObject(r.omni_prompt_document_json),
-      // 项目分镜工作台依赖这些字段恢复已选择的 @ 素材。此前列表接口遗漏它们，
-      // 导致素材虽已保存到数据库，但重新加载分镜时会表现为“引用丢失”。
-      omni_asset_ids: safeParseJsonArray(r.omni_asset_ids),
-      omni_asset_usage: safeParseJsonObject(r.omni_asset_usage_json),
-      omni_creation_mode: r.omni_creation_mode || 'multi_reference',
-      video_model: r.video_model ?? null,
-      video_resolution: r.video_resolution ?? null,
-      video_aspect_ratio: r.video_aspect_ratio ?? null,
-      omni_first_frame_asset_id: r.omni_first_frame_asset_id != null ? Number(r.omni_first_frame_asset_id) : null,
-      omni_last_frame_asset_id: r.omni_last_frame_asset_id != null ? Number(r.omni_last_frame_asset_id) : null,
-      audio_strategy: r.audio_strategy || 'reference_only',
-      keep_original_audio: !!r.keep_original_audio,
-      audio_volume: r.audio_volume ?? 1,
-      audio_fade_seconds: r.audio_fade_seconds ?? 0,
       characters: (() => {
         if (!r.characters) return [];
         if (typeof r.characters !== 'string') return Array.isArray(r.characters) ? r.characters : [];
@@ -1152,6 +1138,16 @@ async function processStoryboardGeneration(db, log, cfg, taskId, episodeId, mode
     taskService.updateTaskStatus(db, taskId, 'processing', 70, '正在保存分镜头...');
 
     // 首次生成保留增量恢复。重新生成只在完整结果可保存后替换旧分镜。
+    if (isRegeneration && require('./projectAccessService').installed(db)
+      && db.prepare('SELECT 1 FROM project_collaboration WHERE drama_id=(SELECT drama_id FROM episodes WHERE id=?)').get(episodeIdNum)
+      && !storyboardSnapshotsMatch(originalStoryboardSnapshot, getActiveStoryboardSnapshot(db, episodeIdNum))) {
+      const project = db.prepare('SELECT drama_id FROM episodes WHERE id=?').get(episodeIdNum);
+      const suggestion = db.prepare(`INSERT INTO project_generated_suggestions (drama_id,entity_kind,entity_id,field,proposed_text,created_at)
+        VALUES (?,'episodes',?,'storyboard_generation',?,?)`).run(project.drama_id, episodeIdNum, JSON.stringify({ storyboards, style, derive_options: deriveOpts }), new Date().toISOString());
+      db.prepare('UPDATE project_collaboration SET revision=revision+1 WHERE drama_id=?').run(project.drama_id);
+      taskService.updateTaskResult(db, taskId, { storyboards: getStoryboardsForEpisode(db, episodeIdNum), suggestion_id: Number(suggestion.lastInsertRowid), requires_application: true }, '分镜已被编辑，生成内容已保留，请比较后应用');
+      return;
+    }
     const saved = isRegeneration
       ? replaceStoryboardsAtomically(
         db, log, episodeId, storyboards, cfg, style, originalStoryboardSnapshot, deriveOpts

@@ -45,6 +45,8 @@ test('daily supplier costs use raw prices independently of platform review, reta
     f.db.prepare(`INSERT INTO supplier_cost_snapshots(id,snapshot_day,status,created_at,fetched_at,raw_json)
       VALUES('future',?,'completed',?,?,?)`).run(futureDay, futureAt, futureAt, JSON.stringify(activations.map(i => ({ ...i, MultiChargeItems: [] }))));
     assert.deepEqual((await get(filter)).summary, result.summary, 'future prices cannot overwrite prior estimates');
+    // Keep the dated report fixture from satisfying today's refresh on its calendar date.
+    f.db.prepare("DELETE FROM supplier_cost_snapshots WHERE id='future'").run();
     const tenant = f.db.prepare('SELECT id FROM tenants LIMIT 1').get();
     const org = require('../src/services/customerOrganizationService').saveOrganization(f.db,f.admin.id,{ name:'Daily report fixture',config_tenant_id:tenant.id });
     f.db.prepare('UPDATE billing_usage_logs SET organization_id=? WHERE id=?').run(org.id,'legacy-0');

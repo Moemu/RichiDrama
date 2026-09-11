@@ -10,8 +10,8 @@ export const propLibraryAPI = {
   create(data) {
     return request.post('/prop-library', data)
   },
-  update(id, data) {
-    return request.put(`/prop-library/${id}`, data)
+  update(id, data, config) {
+    return request.put(`/prop-library/${id}`, data, config)
   },
   delete(id) {
     return request.delete(`/prop-library/${id}`)

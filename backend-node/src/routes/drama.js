@@ -24,7 +24,7 @@ function getDrama(db, cfg) {
   return (req, res) => {
     const drama = dramaService.getDrama(db, req.params.id, cfg?.storage?.base_url);
     if (!drama) return response.notFound(res, '剧本不存在');
-    response.success(res, drama);
+    response.success(res, require('../services/projectAccessService').decorate(db, drama, req.auth.id));
   };
 }
 
@@ -43,8 +43,9 @@ function listDramas(db, log) {
         genre,
         keyword,
         owner_user_id: req.auth.id,
+        membership: req.query.membership,
       });
-      response.successWithPagination(res, dramas, total, p, ps);
+      response.successWithPagination(res, require('../services/projectAccessService').decorateMany(db, dramas, req.auth.id), total, p, ps);
     } catch (err) {
       log.errorw('List dramas failed', { error: err.message });
       response.internalError(res, '获取列表失败');
@@ -62,9 +63,13 @@ function updateDrama(db, log) {
 
 function deleteDrama(db, log) {
   return (req, res) => {
-    const ok = dramaService.deleteDrama(db, log, req.params.id);
-    if (!ok) return response.notFound(res, '剧本不存在');
-    response.success(res, { message: '删除成功' });
+    try {
+      const ok = dramaService.deleteDrama(db, log, req.params.id);
+      if (!ok) return response.notFound(res, '剧本不存在');
+      response.success(res, { message: '删除成功' });
+    } catch (error) {
+      response.error(res, error.status || 500, 'PROJECT_DELETE_FAILED', error.status ? error.message : '项目删除失败，请重试');
+    }
   };
 }
 

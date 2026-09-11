@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 
-const read = path => readFileSync(new URL(path, import.meta.url), 'utf8')
+const read = path => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 test('episode failures keep normalized errors and leave one notification to the caller', async () => {
   let rejectResponse
@@ -15,6 +15,7 @@ test('episode failures keep normalized errors and leave one notification to the 
     }),
   }
   const context = vm.createContext({
+    projectSession: { enabled: false },
     axios: { create: () => request }, localStorage: { getItem: () => null },
     window: { location: { pathname: '/film/1' } },
     ElMessage: { error: message => messages.push(message) },

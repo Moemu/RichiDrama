@@ -44,11 +44,13 @@ test('setupRouter tool writing and reverse workflows settle one authorization wi
   const log = { info() {}, warn() {}, error(...args) { errors.push(args); }, debug() {}, infow() {}, warnw() {}, errorw(...args) { errors.push(args); } };
   const providerCalls = [];
   let failNextProviderCall = false;
+  let pauseNextProviderCall = false;
   let providerSequence = 0;
   const provider = http.createServer((req, res) => {
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
-    req.on('end', () => {
+    req.on('end', async () => {
+      if (pauseNextProviderCall) { pauseNextProviderCall = false; await delay(300); }
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
       const isVision = Array.isArray(body.messages?.[1]?.content);
       const kind = isVision ? 'vision' : 'text';
@@ -245,6 +247,32 @@ test('setupRouter tool writing and reverse workflows settle one authorization wi
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM billing_usage_logs WHERE authorization_id=?').get(failedRun.billing_authorization_id).count, 0);
     assert.equal(billing.account(db, creator.id).frozen_micro, 0);
 
+    const ownerToken = creatorToken;
+    const editor = auth.createUser(db, { username: 'tool-project-editor', password: 'test-password' }, admin.id);
+    billing.adjustBalance(db, admin.id, editor.id, 100000, 'fixture editor balance', { idempotency_key: 'fixture-editor-balance' });
+    assert.equal((await request('PUT', `/dramas/${dramaId}/collaboration/members`, { username: editor.username, role: 'editor' })).status, 200);
+    const ownerBalance = billing.account(db, creator.id).balance_micro;
+    creatorToken = auth.login(db, editor.username, 'test-password').token;
+    pauseNextProviderCall = true;
+    const shared = await request('POST', '/tools/script_writing/runs', {
+      drama_id: dramaId, owner_user_id: creator.id, model: 'fixture-model', idempotency_key: 'fixture-editor-writing',
+      input: { premise: '成员自己的生成' },
+    });
+    assert.equal(shared.status, 201, JSON.stringify(shared.body));
+    const sharedRunId = shared.body.data.id;
+    assert.equal(shared.body.data.owner_user_id, editor.id, 'the caller cannot choose another payer');
+    creatorToken = ownerToken;
+    assert.equal((await request('DELETE', `/dramas/${dramaId}/collaboration/members/${editor.id}`)).status, 200);
+    assert.equal((await request('POST', `/tool-runs/${sharedRunId}/retry`, {})).status, 403);
+    const sharedResult = await waitForRun(sharedRunId);
+    assert.equal(sharedResult.status, 'completed', JSON.stringify(sharedResult));
+    assert.equal(sharedResult.billing_authorization_id, undefined, 'project readers cannot read another member billing record');
+    const persistedSharedRun = db.prepare('SELECT * FROM tool_runs WHERE id=?').get(sharedRunId);
+    assertLedger(persistedSharedRun, { request: 1, input_token: 7, output_token: 3 });
+    assert.equal(billing.account(db, creator.id).balance_micro, ownerBalance);
+    assert.equal(billing.account(db, editor.id).frozen_micro, 0);
+    const callsBeforeRestart = providerCalls.length;
+
     await stop();
     await start();
     const restored = await request('GET', `/tool-runs/${videoRun.id}`);
@@ -253,6 +281,8 @@ test('setupRouter tool writing and reverse workflows settle one authorization wi
     assert.equal(db.prepare('SELECT COUNT(*) n FROM cost_calls WHERE authorization_id=?').get(videoRun.billing_authorization_id).n, 4);
     assert.equal(restored.body.data.output.prompt, 'fixture video prompt');
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM billing_usage_logs WHERE authorization_id=?').get(videoRun.billing_authorization_id).count, 1);
+    assert.equal((await request('GET', `/tool-runs/${sharedRunId}`)).body.data.status, 'completed');
+    assert.equal(providerCalls.length, callsBeforeRestart, 'restart must not resubmit completed shared work');
   } finally {
     await stop();
     await new Promise((resolve) => provider.close(resolve));

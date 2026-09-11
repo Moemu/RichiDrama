@@ -116,7 +116,7 @@ function ensureEpisodeMaster(db, episodeId) {
     db.prepare('UPDATE episodes SET generation_defaults_json=?, updated_at=? WHERE id=?').run(JSON.stringify(defaults), at, Number(episodeId));
   }
   if (first) {
-    db.prepare('UPDATE storyboards SET generation_overrides_json=NULL WHERE id=?').run(first.id);
+    db.prepare('UPDATE storyboards SET generation_overrides_json=NULL WHERE id=? AND generation_overrides_json IS NOT NULL').run(first.id);
   }
   return defaults;
 }

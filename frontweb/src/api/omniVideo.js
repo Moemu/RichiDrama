@@ -34,7 +34,7 @@ export const omniVideoAPI = {
   linkProjectResource(body) { return request.post('/assets/project-resource-link', body || {}) },
   listResourceLinks(params) { return request.get('/asset-resource-links', { params: params || {} }) },
   restoreResourceLink(id) { return request.post(`/asset-resource-links/${id}/restore`) },
-  updateAsset(id, body) { return request.put(`/assets/${id}`, body) },
+  updateAsset(id, body, config) { return request.put(`/assets/${id}`, body, config) },
   deleteAsset(id) { return request.delete(`/assets/${id}`) },
   forceDetachAsset(id) { return request.post(`/assets/${id}/force-detach`) },
   assetLineage(id) { return request.get(`/assets/${id}/lineage`) },

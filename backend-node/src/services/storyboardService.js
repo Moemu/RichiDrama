@@ -167,7 +167,7 @@ function activeOmniAssetIds(db, storyboardId, rawIds, ownerUserId, log) {
 }
 
 function updateStoryboard(db, log, id, req, ownerUserId = null) {
-  const row = db.prepare('SELECT id, updated_at FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
+  const row = db.prepare('SELECT id, updated_at, universal_segment_text FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(Number(id));
   if (!row) return null;
   validateStoryboardLocalPaths(req);
   validateWritableMediaReferences(db, req, ownerUserId, [
@@ -209,7 +209,10 @@ function updateStoryboard(db, log, id, req, ownerUserId = null) {
       const val = req[key];
       if (key === 'omni_asset_ids') params.push(JSON.stringify(activeOmniAssetIds(db, id, val, ownerUserId, log)));
       else if (key === 'omni_asset_usage_json') params.push(JSON.stringify(parseJsonObject(val)));
-      else if (key === 'omni_prompt_document') params.push(JSON.stringify(val && typeof val === 'object' ? val : { text: '', refs: [] }));
+      else if (key === 'omni_prompt_document') {
+        const document = val && typeof val === 'object' ? val : { text: '', refs: [] };
+        params.push(JSON.stringify({ ...document, text: document.text ?? req.universal_segment_text ?? row.universal_segment_text ?? '' }));
+      }
       else if (key === 'keep_original_audio') params.push(val ? 1 : 0);
       else params.push(val);
     }
@@ -273,6 +276,7 @@ function getStoryboardById(db, id) {
   } catch (_) {}
   return {
     id: r.id,
+    ...require('./storyboardInputState').storyboardInputState(r),
     storyboard_uid: r.storyboard_uid ?? null,
     episode_id: r.episode_id,
     scene_id: r.scene_id,
@@ -292,13 +296,6 @@ function getStoryboardById(db, id) {
     polished_prompt: r.polished_prompt ?? null,
     continuity_snapshot: r.continuity_snapshot ?? null,
     video_prompt: r.video_prompt,
-    text_model: r.text_model ?? null,
-    video_model: r.video_model ?? null,
-    video_resolution: r.video_resolution ?? null,
-    video_upscale_resolution: r.video_upscale_resolution ?? null,
-    video_target_fps: r.video_target_fps ?? null,
-    video_aspect_ratio: r.video_aspect_ratio ?? null,
-    generation_overrides: parseJsonObject(r.generation_overrides_json),
     shot_type: r.shot_type,
     angle: r.angle,
     angle_h: r.angle_h ?? null,
@@ -313,17 +310,6 @@ function getStoryboardById(db, id) {
     segment_title: r.segment_title ?? null,
     creation_mode: r.creation_mode === 'universal' ? 'universal' : 'classic',
     universal_segment_text: r.universal_segment_text ?? null,
-    omni_prompt_document: parseJsonObject(r.omni_prompt_document_json),
-    omni_asset_ids: parseJsonArray(r.omni_asset_ids),
-    audio_strategy: r.audio_strategy || 'reference_only',
-    keep_original_audio: !!r.keep_original_audio,
-    audio_volume: r.audio_volume ?? 1,
-    audio_fade_seconds: r.audio_fade_seconds ?? 0,
-    omni_creation_mode: r.omni_creation_mode || 'multi_reference',
-    omni_asset_send_policy: r.omni_asset_send_policy || 'all_selected',
-    omni_first_frame_asset_id: r.omni_first_frame_asset_id != null ? Number(r.omni_first_frame_asset_id) : null,
-    omni_last_frame_asset_id: r.omni_last_frame_asset_id != null ? Number(r.omni_last_frame_asset_id) : null,
-    omni_asset_usage: parseJsonObject(r.omni_asset_usage_json),
     layout_description: r.layout_description ?? null,
     first_frame_image_id: r.first_frame_image_id ?? null,
     last_frame_image_id: r.last_frame_image_id ?? null,

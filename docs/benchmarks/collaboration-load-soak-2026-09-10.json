@@ -1,0 +1,77 @@
+{
+  "timestamp": "2026-09-10T08:21:44.532Z",
+  "host": {
+    "platform": "win32",
+    "node": "v24.21.0",
+    "cpu": "AMD Ryzen 9 7940HX with Radeon Graphics        ",
+    "logicalCpus": 32,
+    "ramGiB": 15.215641021728516
+  },
+  "profiles": [
+    {
+      "users": 30,
+      "requestedSeconds": 180,
+      "durationSeconds": 180.0000111,
+      "offered": 5400,
+      "sent": 5400,
+      "skipped": 0,
+      "acknowledged": 5400,
+      "updatesPerSecond": 29.999998150000113,
+      "ackMs": {
+        "count": 5400,
+        "p50": 13.19199999999546,
+        "p95": 121.77139999999781,
+        "p99": 195.0127999999968,
+        "max": 295.2274000000034
+      },
+      "allPeersMs": {
+        "count": 5400,
+        "p50": 31.56960000000072,
+        "p95": 143.22409999999218,
+        "p99": 216.82730000000447,
+        "max": 313.7114999999976
+      },
+      "unobservedUpdates": 0,
+      "refreshMs": {
+        "count": 7050,
+        "p50": 96.27939999999944,
+        "p95": 346.76090000000113,
+        "p99": 596.8791000000056,
+        "max": 1615.6581000000006
+      },
+      "receivedMiB": 6145.064296722412,
+      "errors": [],
+      "server": {
+        "type": "metrics",
+        "cpuOneCorePercent": 85.6842399216539,
+        "peakRssMiB": 318.1953125,
+        "peakHeapMiB": 133.14617156982422,
+        "eventLoopP95Ms": 95.879167,
+        "eventLoopP99Ms": 302.776319,
+        "eventLoopMaxMs": 1055.916031,
+        "sqliteErrors": 0
+      },
+      "generator": {
+        "cpuOneCorePercent": 57.378329795003,
+        "eventLoopP99Ms": 22.724607,
+        "schedulerLagMs": {
+          "count": 5400,
+          "p50": 0.07033333336585201,
+          "p95": 12.672766666670213,
+          "p99": 14.265533333324129,
+          "max": 15.3142333333235
+        }
+      },
+      "consistency": {
+        "allClientsAndDatabase": true,
+        "hash": "1d1765aaf4c585acfbbe095eb0647592f7a59423eb2541c318533182925a5d64",
+        "offlineReplay": true,
+        "restart": true,
+        "reconnectMs": 1028.9096999999892,
+        "restartMs": 1434.2517999999982
+      },
+      "correctnessPassed": true,
+      "interactiveTargetMet": true
+    }
+  ]
+}

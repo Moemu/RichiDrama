@@ -1,6 +1,10 @@
 import request from '@/utils/request'
+import { projectSession, hasPendingProjectText } from '@/composables/useProjectCollaboration'
 
 export const dramaAPI = {
+  importResource(id, data) {
+    return request.post(`/dramas/${id}/resources/import`, data)
+  },
   list(params) {
     return request.get('/dramas', { params: params || {} })
   },
@@ -9,6 +13,9 @@ export const dramaAPI = {
   },
   get(id) {
     return request.get(`/dramas/${id}`)
+  },
+  getCharacters(id) {
+    return request.get(`/dramas/${id}/characters`)
   },
   update(id, data) {
     return request.put(`/dramas/${id}`, data)
@@ -20,6 +27,10 @@ export const dramaAPI = {
     return request.put(`/dramas/${id}/episode-edits`, { mode: 'append', episodes }, { errorHandledLocally: true })
   },
   updateEpisode(id, episode, patch) {
+    if (projectSession.enabled && projectSession.id === Number(id)) {
+      const fields = Object.fromEntries(Object.entries(patch).filter(([field, value]) => value !== undefined && !hasPendingProjectText('episodes', episode.id, field) && value !== episode[field]))
+      return request.patch(`/dramas/${id}/collaboration/episodes`, { updates: [{ id: episode.id, fields }] }, { errorHandledLocally: true, projectEpisodeBaseline: episode })
+    }
     return request.put(`/dramas/${id}/episode-edits`, {
       mode: 'update', episodes: [{ ...patch, id: episode.id,
         expected_title: episode.title, expected_script_content: episode.script_content }],
@@ -40,11 +51,11 @@ export const dramaAPI = {
   saveProgress(id, data) {
     return request.put(`/dramas/${id}/progress`, data)
   },
-  saveCanvasLayout(id, canvasLayout, workflowGroups) {
+  saveCanvasLayout(id, canvasLayout, workflowGroups, config) {
     const body = {}
     if (canvasLayout != null) body.canvas_layout = canvasLayout
     if (workflowGroups !== undefined) body.workflow_groups = workflowGroups
-    return request.put(`/dramas/${id}/canvas-layout`, body)
+    return request.put(`/dramas/${id}/canvas-layout`, body, config)
   },
   getStoryboards(episodeId) {
     return request.get(`/episodes/${episodeId}/storyboards`)

@@ -6,12 +6,14 @@
     <div
       ref="editorRef"
       class="prompt-rich-editor"
-      contenteditable="true"
+      :contenteditable="!readonly"
       role="textbox"
       aria-multiline="true"
       aria-label="镜头提示词"
       :data-placeholder="placeholder"
       @input="onInput"
+      @compositionstart="startComposition"
+      @compositionend="endComposition"
       @keyup="onCursorChange"
       @click="onCursorChange"
       @focus="onCursorChange"
@@ -48,8 +50,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { insertTokenAtOffset } from '@/utils/promptInsertion'
 import { ASSET_POINTER_CANCEL, ASSET_POINTER_DROP, ASSET_POINTER_MOVE } from '@/utils/assetPointerDrag'
-import { assetAliasValues, findAssetMentions, promptAliasForAsset } from '@/utils/assetMentions'
+import { assetAliasValues, assetsWithReferenceAliases, findAssetMentions, promptAliasForAsset, resolveAssetReferences } from '@/utils/assetMentions'
 const props = defineProps({
+  readonly: { type: Boolean, default: false },
   modelValue: { type: String, default: '' },
   /** 全部可选素材（不限于已选）；插入未选中的时会 emit pick 自动加入创作 */
   assets: { type: Array, default: () => [] },
@@ -59,7 +62,10 @@ const props = defineProps({
   referenceDocument: { type: Object, default: () => ({ refs: [] }) },
   placeholder: { type: String, default: '描述你要生成的视频；输入 @ 引用素材，或直接把左侧素材拖入此处' },
 })
-const emit = defineEmits(['update:modelValue', 'pick', 'references'])
+const emit = defineEmits(['update:modelValue', 'pick', 'references', 'compositionstart', 'compositionend'])
+let composing = false
+function startComposition() { composing = true; emit('compositionstart') }
+function endComposition() { composing = false; onInput(); emit('compositionend') }
 const editorRef = ref(null)
 const editorRoot = ref(null)
 const text = ref(props.modelValue)
@@ -73,7 +79,6 @@ let layoutCache = null
 let dragRaf = 0
 let pickerRaf = 0
 let latestDragPoint = null
-let emittedReferenceSignature = ''
 
 watch(() => props.modelValue, (value) => { if (value !== text.value) { text.value = value; nextTick(() => renderEditor(value)) }; syncReferences(value || '') })
 watch(() => props.assets, () => { syncReferences(text.value); nextTick(() => renderEditor(text.value)) }, { deep: false })
@@ -99,12 +104,14 @@ const pickerAssets = computed(() => pickerMatches.value.slice(0, 30))
 const pickerMatchCount = computed(() => pickerMatches.value.length)
 const resolvedReferences = ref([])
 const unresolved = ref([])
+const referenceAssets = computed(() => assetsWithReferenceAliases(props.assets, props.referenceDocument))
 
 function onInput() {
+  if (composing || props.readonly) return
   clearLayoutCache()
   text.value = serializeEditor()
   emit('update:modelValue', text.value)
-  syncReferences(text.value)
+  syncReferences(text.value, true)
   nextTick(onCursorChange)
 }
 
@@ -184,26 +191,11 @@ function positionPickerAndMention() {
 function assetMatchesAlias(asset, alias) {
   return assetAliasValues(asset).includes(alias)
 }
-function syncReferences(value) {
-  const refs = []; const unresolvedRefs = []; const occurrences = new Map()
-  const persisted = Array.isArray(props.referenceDocument?.refs) ? props.referenceDocument.refs : []
-  for (const mention of findAssetMentions(value, props.assets)) {
-    const alias = mention.alias; const occurrence = occurrences.get(alias) || 0
-    occurrences.set(alias, occurrence + 1)
-    const matches = (props.assets || []).filter((asset) => asset && assetMatchesAlias(asset, alias))
-    const previous = persisted.find((entry) => String(entry?.alias || '') === alias && Number(entry?.occurrence || 0) === occurrence && matches.some((asset) => Number(asset.id) === Number(entry.asset_id)))
-    const asset = previous ? matches.find((item) => Number(item.id) === Number(previous.asset_id)) : (matches.length === 1 ? matches[0] : null)
-    if (asset) refs.push({ asset_id: asset.id, alias, occurrence, start: mention.index, end: mention.end })
-    else if (matches.length > 1) unresolvedRefs.push({ alias, occurrence, candidate_asset_ids: matches.map((asset) => asset.id) })
-  }
-  resolvedReferences.value = refs
-  unresolved.value = unresolvedRefs
-  const documentValue = { text: value || '', refs, unresolved: unresolvedRefs }
-  const signature = JSON.stringify(documentValue)
-  if (signature !== emittedReferenceSignature) {
-    emittedReferenceSignature = signature
-    emit('references', documentValue)
-  }
+function syncReferences(value, publish = false) {
+  const documentValue = resolveAssetReferences(value, props.assets, props.referenceDocument)
+  resolvedReferences.value = documentValue.refs
+  unresolved.value = documentValue.unresolved
+  if (publish) emit('references', documentValue)
 }
 
 /** 插入素材 @引用；若未选中则通知父组件加入创作 */
@@ -234,10 +226,9 @@ function insertAsset(asset, opts = {}) {
     lastCaretOffset.value = caret
   } else return
   emit('update:modelValue', text.value)
-  syncReferences(text.value)
   // 这里以前同时执行了多次 render + focusEditorEnd；任一次聚焦末尾都会
   // 让长提示词的内部滚动条跳回顶部。插入后只重绘一次，并恢复原视口。
-  nextTick(() => restoreEditorAfterInsert(caret, scrollPosition))
+  nextTick(() => { syncReferences(text.value, true); restoreEditorAfterInsert(caret, scrollPosition) })
   showPicker.value = false
 }
 
@@ -275,12 +266,15 @@ function serializeNode(node) {
 }
 function serializeEditor() { return [...(editorRef.value?.childNodes || [])].map(serializeNode).join('') }
 function renderEditor(value, force = false) {
+  if (composing) return
   const el = editorRef.value
-  if (!el || (!force && document.activeElement === el)) return
+  if (!el) return
+  const caret = !force && document.activeElement === el ? caretOffset() : null
+  const scrollPosition = { top: el.scrollTop, left: el.scrollLeft }
   el.replaceChildren()
   const source = String(value || '')
   let last = 0; const occurrences = new Map()
-  for (const mention of findAssetMentions(source, props.assets)) {
+  for (const mention of findAssetMentions(source, referenceAssets.value)) {
     if (mention.index > last) el.append(document.createTextNode(source.slice(last, mention.index)))
     const alias = mention.alias; const occurrence = occurrences.get(alias) || 0; occurrences.set(alias, occurrence + 1); const asset = matchingAsset(alias, occurrence)
     if (!asset) el.append(document.createTextNode(mention.token))
@@ -297,6 +291,7 @@ function renderEditor(value, force = false) {
     last = mention.end
   }
   if (last < source.length) el.append(document.createTextNode(source.slice(last)))
+  if (caret != null) focusEditorAtOffset(caret, scrollPosition)
 }
 function iconForAsset(type) { return type === 'video' ? '🎬' : type === 'audio' ? '🎵' : '🖼️' }
 function caretOffset() {

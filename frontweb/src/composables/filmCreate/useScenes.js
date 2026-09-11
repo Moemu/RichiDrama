@@ -1,3 +1,4 @@
+import { captureProjectEdit } from '@/utils/projectSnapshots'
 import { ref, reactive, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { sceneAPI } from '@/api/scenes'
@@ -86,7 +87,7 @@ export function useScenes(deps) {
   const addingSceneFromLibraryId = ref(null)
   let sceneLibraryKeywordTimer = null
 
-  const sceneLibraryTab = ref('library')
+  const sceneLibraryTab = ref('drama')
   const dramaAllSceneList = ref([])
   const dramaAllSceneLoading = ref(false)
   const dramaAllScenePage = ref(1)
@@ -138,6 +139,7 @@ export function useScenes(deps) {
   function editScene(scene) {
     stopScenePromptPoll()
     editSceneForm.value = {
+      requestConfig: captureProjectEdit('scenes', scene.id),
       id: scene.id,
       location: scene.location || '',
       time: scene.time || '',
@@ -268,7 +270,7 @@ export function useScenes(deps) {
           prompt: nullableText(form.prompt),
           polished_prompt: nullableText(form.polished_prompt),
           polished_prompt_single: nullableText(form.polished_prompt_single)
-        })
+        }, form.requestConfig)
         await saveSceneRefImageIfAny(form.id)
         ElMessage.success('场景已保存')
       } else {
@@ -399,7 +401,7 @@ export function useScenes(deps) {
     }
     dramaAllSceneLoading.value = true
     try {
-      const res = await sceneAPI.list(dramaId.value)
+      const res = await dramaAPI.get(dramaId.value)
       let list = Array.isArray(res) ? res : (res?.items ?? res?.scenes ?? [])
       const kw = (dramaAllSceneKeyword.value || '').trim().toLowerCase()
       if (kw) {
@@ -431,8 +433,11 @@ export function useScenes(deps) {
   }
 
   function onSceneLibraryDialogOpen() {
-    if (sceneLibraryTab.value === 'library') loadSceneLibraryList()
-    else if (sceneLibraryTab.value === 'drama') loadDramaAllSceneList()
+    sceneLibraryTab.value = 'drama'
+    sceneLibraryKeyword.value = ''
+    sceneLibraryPage.value = 1
+    loadSceneLibraryList()
+    loadDramaAllSceneList()
   }
 
   function onSceneLibraryTabChange() {
@@ -455,6 +460,7 @@ export function useScenes(deps) {
 
   function openEditSceneLibrary(item) {
     editSceneLibraryForm.value = {
+      requestConfig: captureProjectEdit('scene-library', item.id),
       id: item.id,
       location: item.location ?? '',
       time: item.time ?? '',
@@ -475,7 +481,7 @@ export function useScenes(deps) {
         category: editSceneLibraryForm.value.category || null,
         description: editSceneLibraryForm.value.description || null,
         tags: editSceneLibraryForm.value.tags || null
-      })
+      }, editSceneLibraryForm.value.requestConfig)
       ElMessage.success('已保存')
       showEditSceneLibrary.value = false
       loadSceneLibraryList()
@@ -544,6 +550,7 @@ export function useScenes(deps) {
           location: item.location || existingScene.location,
           time: item.time || existingScene.time,
           prompt: existingScene.prompt || item.prompt || '',
+          description: item.description || existingScene.description || undefined,
           image_url: item.image_url || existingScene.image_url || undefined,
           local_path: item.local_path || existingScene.local_path || undefined,
         })
@@ -555,6 +562,7 @@ export function useScenes(deps) {
           location: item.location || '',
           time: item.time || '',
           prompt: item.prompt || '',
+          description: item.description || undefined,
           image_url: item.image_url || undefined,
           local_path: item.local_path || undefined,
         })

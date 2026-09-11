@@ -22,6 +22,8 @@
         <span v-else class="project-media-placeholder">{{ typeLabel(item.type) }}</span>
         <span class="project-media-name">{{ item.name || '未命名素材' }}</span>
         <small>项目素材 · {{ typeLabel(item.type) }}</small>
+        <small v-if="item.project_source">由 {{ item.project_source.added_by_name || '成员' }} 加入的独立副本</small>
+        <small v-for="(usage, index) in item.usages" :key="index">{{ usage.episode_title || '制作资源' }} · {{ usage.storyboard_id ? `分镜 ${usage.storyboard_id}` : `${usage.resource_type} ${usage.resource_id}` }}</small>
       </button>
       <p v-if="!loading && !error && !items.length" class="project-media-empty">{{ keyword || mediaType !== 'all' ? '没有匹配的项目素材，请调整筛选条件。' : '本项目暂无媒体素材，可上传图片、视频或音频。' }}</p>
     </div>
@@ -42,6 +44,7 @@
 import { ref, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '@/utils/request'
+import { projectSession } from '@/composables/useProjectCollaboration'
 
 const props = defineProps({ dramaId: { type: Number, required: true } })
 const router = useRouter()
@@ -99,6 +102,7 @@ function openLibrary() {
   } })
 }
 watch(() => props.dramaId, () => { items.value = []; previewItem.value = null; resetAndLoad() }, { immediate: true })
+watch(() => projectSession.revision, () => { if (Number(projectSession.id) === Number(props.dramaId)) loadMedia() })
 onBeforeUnmount(() => { clearTimeout(searchTimer); ++requestVersion })
 </script>
 

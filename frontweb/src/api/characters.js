@@ -17,8 +17,8 @@ export const characterAPI = {
       style
     })
   },
-  update(characterId, data) {
-    return request.put(`/characters/${characterId}`, data)
+  update(characterId, data, config) {
+    return request.put(`/characters/${characterId}`, data, config)
   },
   putImage(characterId, data) {
     return request.put(`/characters/${characterId}/image`, data)

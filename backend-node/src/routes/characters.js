@@ -82,11 +82,11 @@ function routes(db, cfg, log, uploadService) {
         // ownership guard cannot protect every item. Check all rows before
         // queuing any provider work.
         for (const characterId of normalizedIds) {
-          const row = db.prepare(`SELECT c.id, d.owner_user_id
+          const row = db.prepare(`SELECT c.id, c.drama_id
             FROM characters c
             JOIN dramas d ON d.id = c.drama_id
             WHERE c.id = ? AND c.deleted_at IS NULL AND d.deleted_at IS NULL`).get(characterId);
-          if (!row || Number(row.owner_user_id) !== Number(req.auth.id)) {
+          if (!row || !require('../services/projectAccessService').access(db, row.drama_id, req.auth.id)?.can_edit) {
             return response.notFound(res, '资源不存在');
           }
         }

@@ -89,12 +89,12 @@ function routes(db, log, cfg) {
       }
       const rows = [];
       for (const id of requestedIds) {
-        const row = db.prepare(`SELECT s.id, s.dialogue, d.owner_user_id
+        const row = db.prepare(`SELECT s.id, s.dialogue, d.owner_user_id, d.id drama_id
           FROM storyboards s
           JOIN episodes e ON e.id = s.episode_id
           JOIN dramas d ON d.id = e.drama_id
           WHERE s.id = ? AND s.deleted_at IS NULL AND e.deleted_at IS NULL AND d.deleted_at IS NULL`).get(id);
-        if (!row || Number(row.owner_user_id) !== Number(req.auth.id)) {
+        if (!row || !require('../services/projectAccessService').access(db, row.drama_id, req.auth.id)?.can_edit) {
           return response.notFound(res, '资源不存在');
         }
         rows.push(row);
