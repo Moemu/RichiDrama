@@ -45,7 +45,7 @@ function listDramas(db, log) {
         owner_user_id: req.auth.id,
         membership: req.query.membership,
       });
-      response.successWithPagination(res, dramas.map(item => require('../services/projectAccessService').decorate(db, item, req.auth.id)), total, p, ps);
+      response.successWithPagination(res, require('../services/projectAccessService').decorateMany(db, dramas, req.auth.id), total, p, ps);
     } catch (err) {
       log.errorw('List dramas failed', { error: err.message });
       response.internalError(res, '获取列表失败');

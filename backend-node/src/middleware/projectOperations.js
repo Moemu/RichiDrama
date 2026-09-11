@@ -13,7 +13,7 @@ module.exports = function projectOperations(db) {
     const operationId = req.headers['x-project-operation'];
     const version = req.headers['x-project-revision'];
     if (operationId && (typeof operationId !== 'string' || operationId.length > 100)) return response.badRequest(res, '操作 ID 无效');
-    const hash = crypto.createHash('sha256').update(JSON.stringify([req.method, req.originalUrl, req.body])).update(req.file?.buffer || Buffer.alloc(0)).digest('hex');
+    const hash = operationId ? crypto.createHash('sha256').update(JSON.stringify([req.method, req.originalUrl, req.body])).update(req.file?.buffer || Buffer.alloc(0)).digest('hex') : null;
     if (operationId) {
       const previous = db.prepare('SELECT * FROM project_operations WHERE drama_id=? AND operation_id=?').get(dramaId, operationId);
       if (previous) {

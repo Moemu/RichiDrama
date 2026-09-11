@@ -130,7 +130,7 @@ test('角色资源卡和编辑器按图片、内容与底部操作分层', async
   const source = await readSource('../src/views/FilmCreate.vue')
 
   const cardBranch = source.match(/<template v-else-if="resourceCatalogType === 'character'">(.+?)<\/template>/)?.[1] || ''
-  assert.match(cardBranch, /class="character-card-edit"[\s\S]*>编辑<\/el-button>/)
+  assert.match(cardBranch, /class="character-card-edit"[^>]*@click="openResourceEditor\(resourceCatalogType, item\)"/)
   assert.match(cardBranch, /class="character-card-delete"[\s\S]*type="danger"[\s\S]*>删除<\/el-button>/)
   // 资源浏览器是唯一管理面：上传图/认证/生成图必须在卡片直达；音色与试听仍只在编辑器内。
   assert.match(cardBranch, /onUploadResourceClick/)

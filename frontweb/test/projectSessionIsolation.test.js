@@ -10,6 +10,47 @@ const collaboration = await import(await browserModuleUrl(new URL('../src/compos
 }))
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 
+test('received text updates skip redundant reads while unseen revisions still refresh documents', async t => {
+  const previous = { socket: globalThis.WebSocket, location: globalThis.location }
+  const sent = []
+  let socket
+  const doc = new Y.Doc()
+  const text = { epoch: 1, state: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'), state_vector: Buffer.from(Y.encodeStateVector(doc)).toString('base64') }
+  class TestSocket {
+    static OPEN = 1
+    readyState = 1
+    constructor() { socket = this }
+    send(raw) {
+      const request = JSON.parse(raw)
+      sent.push(request)
+      queueMicrotask(() => this.onmessage({ data: JSON.stringify({ ...request, ...text, type: 'text' }) }))
+    }
+    close() {}
+  }
+  globalThis.WebSocket = TestSocket
+  globalThis.location = { protocol: 'http:', host: 'fixture.invalid' }
+  globalThis.sessionGet = async url => url.endsWith('/text') ? text : { permissions: { collaboration_enabled: true, can_edit: true }, revision: 1 }
+  globalThis.sessionPost = async () => ({})
+  t.after(() => {
+    collaboration.closeProjectSession(); doc.destroy()
+    globalThis.WebSocket = previous.socket; globalThis.location = previous.location
+    delete globalThis.sessionGet; delete globalThis.sessionPost
+  })
+  await collaboration.openProjectSession(1)
+  socket.onopen()
+  const state = revision => socket.onmessage({ data: JSON.stringify({ type: 'state', revision, participants: [] }) })
+  state(1)
+  await collaboration.bindProjectText({ kind: 'dramas', id: 1, field: 'description' }, () => {})
+  await collaboration.bindProjectText({ kind: 'storyboards', id: 2, field: 'dialogue' }, () => {})
+  sent.length = 0
+  socket.onmessage({ data: JSON.stringify({ type: 'text', kind: 'dramas', id: 1, field: 'description', ...text, before_revision: 1, revision: 2 }) })
+  state(2)
+  assert.equal(sent.length, 0)
+  state(4)
+  assert.equal(sent.filter(message => message.type === 'text_read').length, 2)
+  await Promise.resolve()
+})
+
 test('departed project callbacks cannot replace an active session, including reentry to the same project', async t => {
   const previous = { socket: globalThis.WebSocket, location: globalThis.location }
   const sockets = []

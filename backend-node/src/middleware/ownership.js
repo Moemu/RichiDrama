@@ -35,6 +35,8 @@ function ownershipGuard(db) {
     const checkProject = (kind, id) => {
       const resource = projectAccess.resource(db, kind, id);
       if (!resource?.drama_id) return false;
+      if (action === 'read' && kind !== 'dramas' && SQL_BY_KIND[kind]
+        && db.prepare('SELECT 1 FROM dramas WHERE id=? AND deleted_at IS NOT NULL').get(resource.drama_id)) return false;
       const permission = projectAccess.requireAccess(db, resource.drama_id, req.auth.id,
         kind === 'dramas' && req.method === 'DELETE' && /^\/dramas\/\d+\/?$/.test(req.path) ? 'manage' : action);
       if (action === 'edit' && ['images', 'videos', 'video-generations', 'omni-video-jobs', 'tasks', 'tool-runs'].includes(kind)

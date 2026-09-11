@@ -80,6 +80,16 @@ export function buildProjectWriteContract(config, known, match) {
     const changes = { ...body }
     if (Object.hasOwn(changes, 'summary')) { changes.description = changes.summary; delete changes.summary }
     checks.push(check('dramas', match[2], expectedFields(known || requireSnapshot('dramas', match[2]), changes)))
+  } else if (method === 'put' && match?.[1] === 'characters' && ['/image', '/image-from-library'].includes(match[3])) {
+    const baseline = known || requireSnapshot('characters', match[2])
+    const fields = match[3] === '/image-from-library' ? ['image_url', 'local_path'] : ['image_url', 'local_path', 'extra_images', 'ref_image'].filter(field => Object.hasOwn(body, field))
+    checks.push(check('characters', match[2], Object.fromEntries(fields.map(field => [field, baseline[field] ?? null]))))
+  } else if (method === 'put' && match?.[1] === 'scenes' && match[3] === '/prompt') {
+    checks.push(check('scenes', match[2], { prompt: (known || requireSnapshot('scenes', match[2])).prompt ?? null }))
+  } else if (method === 'put' && match?.[1] === 'storyboards' && /^\/frame-prompts\//.test(match[3])) {
+    const baseline = known || requireSnapshot('storyboards', match[2])
+    if (!Object.hasOwn(baseline, 'frame_prompts')) throw new Error('请先载入分镜帧提示词')
+    checks.push(check('storyboards', match[2], { frame_prompts: baseline.frame_prompts }))
   } else if (match && !match[3] && ['put', 'patch', 'delete'].includes(method)) {
     const baseline = known || requireSnapshot(match[1], match[2])
     checks.push(check(match[1], match[2], method === 'delete' ? { updated_at: baseline.updated_at } : expectedFields(baseline, body)))

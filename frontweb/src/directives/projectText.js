@@ -45,10 +45,11 @@ function mount(el, binding) {
   const onEnd = () => { state.composing = false; state.binding?.compositionEnd(input.value) }
   const onFocus = () => projectPresence(`${state.target.kind}:${state.target.id}:${state.target.field}`)
   const onBlur = () => projectPresence(null)
-  for (const [event, fn] of Object.entries({ input: onInput, compositionstart: onStart, compositionend: onEnd, focus: onFocus, blur: onBlur })) input.addEventListener(event, fn)
+  const events = { input: onInput, compositionstart: onStart, compositionend: onEnd, focus: onFocus, blur: onBlur }
+  for (const [event, fn] of Object.entries(events)) input.addEventListener(event, fn)
   state.cleanup = () => {
     state.disposed = true; state.version++; state.stop?.(); stopPermission(); state.binding?.dispose()
-    for (const [event, fn] of Object.entries({ input: onInput, compositionstart: onStart, compositionend: onEnd, focus: onFocus, blur: onBlur })) input.removeEventListener(event, fn)
+    for (const [event, fn] of Object.entries(events)) input.removeEventListener(event, fn)
   }
 }
 

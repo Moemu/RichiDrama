@@ -26,6 +26,11 @@ export function rememberProjectEntity(kind, entity, parentProjectId = null, pare
 }
 export function rememberProjectResponse(url, data) {
   const path = String(url || '').split('?')[0]
+  const frames = /^\/storyboards\/(\d+)\/frame-prompts$/.exec(path)
+  if (frames && Array.isArray(data?.frame_prompts)) {
+    rememberProjectEntity('storyboards', { id: Number(frames[1]), frame_prompts: data.frame_prompts.map(({ frame_type, prompt, description, layout }) => ({ frame_type, prompt, description, layout })).sort((a, b) => a.frame_type.localeCompare(b.frame_type)) })
+    return
+  }
   if (/^\/(episodes|storyboards)\/\d+\/generation-settings$/.test(path)) {
     const fields = { text_model: 'text_model', video_model: 'video_model', duration: 'duration', resolution: 'video_resolution', aspect_ratio: 'video_aspect_ratio', upscale_resolution: 'video_upscale_resolution', target_fps: 'video_target_fps' }
     for (const item of data?.storyboards || (data?.effective ? [data] : [])) {
@@ -36,7 +41,7 @@ export function rememberProjectResponse(url, data) {
     }
     return
   }
-  const direct = /^\/(dramas|episodes|storyboards|characters|scenes|props|assets|character-library|scene-library|prop-library)(?:\/\d+)?\/?$/.exec(path)
+  const direct = /^\/(dramas|episodes|storyboards|characters|scenes|props|assets|character-library|scene-library|prop-library|images|videos|video-generations|video-merges|omni-video-jobs|tasks|tool-runs)(?:\/[^/]+)?\/?$/.exec(path)
   const nested = /^\/(dramas|episodes)\/(\d+)\/(episodes|storyboards|characters|scenes|props)\/?$/.exec(path)
   const kind = data?.permissions && Array.isArray(data.episodes) ? 'dramas' : direct?.[1] || nested?.[3] || (path === '/storyboards/reorder' ? 'storyboards' : null)
   if (!kind) return

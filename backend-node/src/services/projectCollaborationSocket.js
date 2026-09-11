@@ -21,19 +21,22 @@ function attach(server, db) {
   const notify = dramaId => {
     if (closing || db.open === false) return;
     const participants = [];
+    const authorized = [];
     for (const socket of sockets.clients) {
       if (socket.dramaId !== dramaId) continue;
       try {
-        const { user } = authorize(socket);
+        const { user, permission } = authorize(socket);
         participants.push({ id: user.id, name: user.display_name || user.username, editing: socket.editing || null });
+        authorized.push({ socket, permission });
       } catch (_) { socket.close(4403, '项目访问权限已失效'); }
     }
     const revision = db.prepare('SELECT revision FROM project_collaboration WHERE drama_id=?').get(dramaId)?.revision || 0;
-    for (const socket of sockets.clients) {
-      if (socket.dramaId === dramaId) {
-        try { send(socket, { type: 'state', revision, participants, permissions: authorize(socket).permission }); }
-        catch (_) { socket.close(4403, '项目访问权限已失效'); }
-      }
+    for (const { socket, permission } of authorized) {
+      const state = { type: 'state', revision, participants, permissions: permission };
+      const serialized = JSON.stringify(state);
+      if (serialized === socket.lastState) continue;
+      send(socket, state);
+      socket.lastState = serialized;
     }
   };
   server.on('upgrade', (req, socket, head) => {
@@ -67,9 +70,14 @@ function attach(server, db) {
           socket.editing = typeof input.editing === 'string' ? input.editing.slice(0, 120) : null;
           notify(socket.dramaId);
         } else if (input.type === 'text_read' || input.type === 'text_update') {
+          const beforeRevision = db.prepare('SELECT revision FROM project_collaboration WHERE drama_id=?').get(socket.dramaId)?.revision;
           const result = input.type === 'text_read'
             ? collaboration.readText(db, socket.dramaId, user.id, input)
             : collaboration.updateText(db, socket.dramaId, user.id, input);
+          if (input.type === 'text_update') {
+            result.before_revision = beforeRevision;
+            result.revision = db.prepare('SELECT revision FROM project_collaboration WHERE drama_id=?').get(socket.dramaId)?.revision;
+          }
           send(socket, { type: 'text', request_id: requestId, ...result });
           if (input.type === 'text_update') {
             for (const peer of sockets.clients) {

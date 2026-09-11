@@ -33,6 +33,7 @@ function generationState(db, episodeId) {
 }
 
 function fieldValue(db, kind, row, field) {
+  if (kind === 'storyboards' && field === 'frame_prompts') return db.prepare('SELECT frame_type, prompt, description, layout FROM frame_prompts WHERE storyboard_id=? ORDER BY frame_type').all(row.id);
   if (kind === 'episodes' && field === 'storyboard_order') return identity.orderedActiveRows(db, row.id);
   if (kind === 'episodes' && field === 'generation_state') return generationState(db, row.id);
   if (field === 'omni_asset_usage_json') return row.omni_asset_usage;
@@ -43,6 +44,7 @@ function fieldValue(db, kind, row, field) {
 // Only synchronous edit handlers may run inside the same SQLite transaction as
 // these preconditions. Provider submission and other commands use idempotency.
 function supports(req) {
+  if (req.method === 'PUT' && /^\/(characters\/\d+\/(image|image-from-library)|scenes\/\d+\/prompt|storyboards\/\d+\/frame-prompts\/(first|key|last|panel|action))$/.test(req.path)) return true;
   if (['PUT', 'PATCH', 'DELETE'].includes(req.method) && /^\/(dramas|storyboards|characters|scenes|props|assets|character-library|scene-library|prop-library)\/\d+$/.test(req.path)) return true;
   if (req.method === 'PUT' && /^\/dramas\/\d+\/(canvas-layout|outline|progress)$/.test(req.path)) return true;
   if (req.method === 'PATCH' && /^\/dramas\/\d+\/collaboration\/episodes$/.test(req.path)) return true;

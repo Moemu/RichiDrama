@@ -8,6 +8,7 @@ let socket
 let reconnectTimer
 let refreshCallback
 let latestRevision = -1
+let textRevision = -1
 let sessionVersion = 0
 const documents = new Map()
 const requests = new Map()
@@ -88,12 +89,16 @@ function connect() {
       projectSession.revision = message.revision
       if (message.permissions) projectSession.canEdit = message.permissions.can_edit
       if (latestRevision !== message.revision) {
+        const needsTextRead = textRevision !== message.revision
         latestRevision = message.revision
-        for (const entry of documents.values()) void send({ type: 'text_read', ...entry.target, epoch: entry.epoch, state_vector: encode(Y.encodeStateVector(entry.doc)) }).catch(showError)
+        if (needsTextRead) for (const entry of documents.values()) void send({ type: 'text_read', ...entry.target, epoch: entry.epoch, state_vector: encode(Y.encodeStateVector(entry.doc)) }).catch(showError)
         refreshCallback?.()
       }
     }
-    if (message.type === 'text') acceptText(message)
+    if (message.type === 'text') {
+      acceptText(message)
+      if (Number.isSafeInteger(message.revision) && (message.before_revision === latestRevision || message.before_revision === textRevision)) textRevision = message.revision
+    }
     const pending = requests.get(message.request_id)
     if (pending) {
       clearTimeout(pending.timer); requests.delete(message.request_id)
@@ -143,6 +148,7 @@ export function closeProjectSession() {
   projectSession.drafts = []
   projectSession.error = ''
   latestRevision = -1
+  textRevision = -1
   clearTimeout(reconnectTimer)
   if (socket) { socket.onopen = null; socket.onmessage = null; socket.onclose = null; socket.close(); socket = null }
   for (const entry of documents.values()) entry.doc.destroy()

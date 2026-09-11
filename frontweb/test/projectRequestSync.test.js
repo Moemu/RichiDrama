@@ -45,6 +45,20 @@ test('legacy bulk replacement retains its version guard until it supports field 
   assert.equal(config.data._project_edit, undefined)
 })
 
+test('nested and parent-reference commands receive operation ids without claiming personal resources', () => {
+  rememberProjectEntity('scenes', { id: 810, drama_id: 800 })
+  rememberProjectEntity('characters', { id: 811, drama_id: 800 })
+  rememberProjectEntity('props', { id: 812, drama_id: 800 })
+  for (const [url, body] of [
+    ['/images/episode/801/backgrounds/extract', {}], ['/videos/episode/801/batch', {}],
+    ['/scenes/generate-image', { scene_id: 810 }], ['/images', { character_id: 811 }],
+    ['/images', { prop_id: 812 }], ['/storyboards/batch-infer-params', { storyboard_ids: [802] }],
+    ['/characters/batch-generate-images', { character_ids: [811] }],
+  ]) assert.ok(prepare('post', url, body).headers['X-Project-Operation'], url)
+  assert.equal(prepare('post', '/images', { prompt: '个人生成' }).headers['X-Project-Operation'], undefined)
+  assert.equal(prepare('post', '/images', { scene_id: 999999 }).headers['X-Project-Operation'], undefined)
+})
+
 test('generation edits use acknowledged parameters and preserve override semantics', () => {
   rememberProjectEntity('dramas', { id: 800, revision: 6, episodes: [{ id: 801, storyboards: [{ id: 802, episode_id: 801, duration: 15, video_resolution: '720p', video_aspect_ratio: '16:9', generation_overrides: {} }] }] })
   const config = prepare('patch', '/storyboards/802/generation-settings', { scope: 'current', settings: { duration: 10 } })

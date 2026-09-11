@@ -142,9 +142,13 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
   const again = await request(editor.token, 'POST', `${prefix}/collaboration/assets`, { asset_id: source.body.data.id });
   assert.equal(again.body.data.id, copy.body.data.id);
   const episodeId = (await request(editor.token, 'GET', prefix)).body.data.episodes[0].id;
+  assert.equal((await request(editor.token, 'PATCH', `${prefix}/collaboration/episodes`, { updates: [{ id: episodeId, fields: { script_content: '雨夜，主角打开一封信。' } }] })).status, 200);
   const shot = await request(editor.token, 'POST', '/storyboards', { episode_id: episodeId, title: '素材引用' });
   assert.equal(shot.status, 201);
   const shotId = shot.body.data.id;
+  const scopedBaseline = require('../src/services/projectCollaborationService').captureTextBaseline(db, id, { kind: 'storyboards', id: shotId });
+  assert.ok(scopedBaseline.size > 0);
+  assert.ok([...scopedBaseline.keys()].every(key => key.startsWith(`storyboards:${shotId}:`)));
   const promptTarget = `kind=storyboards&id=${shotId}&field=universal_segment_text`;
   const promptRefs = [{ asset_id: copy.body.data.id, alias: '声音', occurrence: 0 }];
   assert.equal((await request(editor.token, 'PUT', `/storyboards/${shotId}`, { universal_segment_text: '原始提示词', omni_prompt_document: { text: '原始提示词', refs: promptRefs } })).status, 200);
@@ -176,30 +180,62 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
   assert.equal((await request(editor.token, 'PUT', `/storyboards/${shotId}`, { title: '保留旧引用', audio_local_path: 'sample.txt' })).status, 200);
   assert.equal((await request(editor.token, 'GET', `/storyboards/${shotId}`)).body.data.audio_local_path, 'sample.txt');
   assert.equal(db.prepare('SELECT count(*) count FROM project_asset_copies').get().count, copyCount);
-  const aiClient = require('../src/services/aiClient');
-  const taskService = require('../src/services/taskService');
-  const originalGenerate = aiClient.generateText;
-  const originalStatus = taskService.updateTaskStatus;
-  const originalResult = taskService.updateTaskResult;
-  const originalError = taskService.updateTaskError;
+  const missing = await request(editor.token, 'POST', '/assets', { name: '缺失本地文件', type: 'image', local_path: 'missing-fixture.png' });
+  assert.equal(missing.status, 201);
+  assert.equal((await request(editor.token, 'POST', `${prefix}/collaboration/assets`, { asset_id: missing.body.data.id })).status, 409);
+  const libraryId = Number(db.prepare('INSERT INTO character_libraries(drama_id,name,image_url,local_path) VALUES (?,?,?,?)').run(id, '历史素材引用', '/static/sample.txt', 'sample.txt').lastInsertRowid);
+  assert.equal((await request(editor.token, 'PUT', `/character-library/${libraryId}`, { name: '只改名称', image_url: '/static/sample.txt', local_path: 'sample.txt' })).status, 200);
+  assert.equal(db.prepare('SELECT local_path FROM character_libraries WHERE id=?').get(libraryId).local_path, 'sample.txt');
+  assert.equal(db.prepare('SELECT count(*) count FROM project_asset_copies').get().count, copyCount);
+  let providerCalls = 0;
   let generatedResult;
-  let generatedError;
+  let generationTaskId;
+  const provider = require('node:http').createServer(async (req, res) => {
+    req.resume();
+    await once(req, 'end');
+    providerCalls++;
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM billing_transactions WHERE type='authorization' AND user_id=?").get(editor.id).n, 1);
+    await request(editor.token, 'PUT', `/storyboards/${shotId}`, { title: '生成期间人工修改' });
+    const content = JSON.stringify([{ shot_number: 1, title: '生成的新分镜', duration: 5, action: '打开信封', characters: [] }]);
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'x-request-id': 'fixture-collaboration-text' });
+    res.end(`data: ${JSON.stringify({ id: 'fixture-collaboration-text', choices: [{ delta: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 } })}\n\ndata: [DONE]\n\n`);
+  });
+  provider.listen(0, '127.0.0.1'); await once(provider, 'listening');
   try {
-    aiClient.generateText = async () => {
-      await request(editor.token, 'PUT', `/storyboards/${shotId}`, { title: '生成期间人工修改' });
-      return JSON.stringify([{ shot_number: 1, title: '生成的新分镜', duration: 5, action: '打开信封', characters: [] }]);
-    };
-    taskService.updateTaskStatus = () => {};
-    taskService.updateTaskResult = (_db, _id, result) => { generatedResult = result; };
-    taskService.updateTaskError = (_db, _id, error) => { generatedError = error; };
-    await require('../src/services/episodeStoryboardService').processStoryboardGeneration(db, log, cfg, 'mock-structure', episodeId, 'mock', '', 'fixture', 'fixture', false, false);
+    const model = 'fixture-collaboration-text';
+    require('../src/services/aiConfigService').createConfig(db, log, { name: model, service_type: 'text', provider: 'fixture', api_protocol: 'openai', base_url: `http://127.0.0.1:${provider.address().port}`, endpoint: '/chat/completions', api_key: 'fixture-only', model: [model], default_model: model, is_default: true });
+    const admin = auth.createUser(db, { username: 'fixture_billing_admin', password, account_kind: 'platform_admin' });
+    const billing = require('../src/services/billingService');
+    const book = db.prepare("SELECT id FROM billing_price_books WHERE status='published' ORDER BY id LIMIT 1").get();
+    const now = new Date().toISOString();
+    for (const meter of ['input_token', 'output_token']) db.prepare('INSERT INTO billing_price_book_items (price_book_id,service_type,model,meter,unit_price_micro,is_free,created_at,updated_at) VALUES (?,?,?,?,?,0,?,?)').run(book.id, 'text', model, meter, 1, now, now);
+    billing.adjustBalance(db, admin.id, editor.id, 10000, 'isolated collaboration test');
+    const route = `/episodes/${episodeId}/storyboards`;
+    assert.equal((await request('', 'POST', route, { model })).status, 401);
+    assert.equal((await request(viewer.token, 'POST', route, { model })).status, 403);
+    assert.equal((await request(stranger.token, 'POST', route, { model })).status, 404);
+    assert.equal(providerCalls, 0);
+    const headers = { 'x-project-operation': crypto.randomUUID() };
+    const generated = await request(editor.token, 'POST', route, { model }, headers);
+    assert.equal(generated.status, 200, JSON.stringify(generated.body));
+    generationTaskId = generated.body.data.task_id;
+    assert.deepEqual((await request(editor.token, 'POST', route, { model }, headers)).body, generated.body);
+    let task;
+    for (let n = 0; n < 200; n++) {
+      task = (await request(editor.token, 'GET', `/tasks/${generationTaskId}`)).body.data;
+      if (['completed', 'failed'].includes(task?.status)) break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert.equal(task.status, 'completed', JSON.stringify(task));
+    generatedResult = JSON.parse(task.result);
+    assert.equal(providerCalls, 1);
+    const usage = db.prepare('SELECT * FROM billing_usage_logs WHERE user_id=? AND model=?').all(editor.id, model);
+    assert.equal(usage.length, 1);
+    assert.deepEqual(JSON.parse(usage[0].usage_json), { input_token: 7, output_token: 3 });
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM billing_transactions WHERE type='settlement' AND authorization_id=?").get(usage[0].authorization_id).n, 1);
   } finally {
-    aiClient.generateText = originalGenerate;
-    taskService.updateTaskStatus = originalStatus;
-    taskService.updateTaskResult = originalResult;
-    taskService.updateTaskError = originalError;
+    await new Promise(resolve => provider.close(resolve));
   }
-  assert.equal(generatedError, undefined);
   assert.equal(generatedResult.requires_application, true);
   assert.equal((await request(editor.token, 'GET', `/storyboards/${shotId}`)).body.data.title, '生成期间人工修改');
   const proposalRoute = `${prefix}/collaboration/suggestions/${generatedResult.suggestion_id}`;
@@ -257,5 +293,20 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
   assert.equal((await request(owner.token, 'GET', `/storyboards/${shotId}`)).body.data.audio_volume, 0.4);
   assert.equal((await request(viewer.token, 'GET', `/assets/${copy.body.data.id}`)).status, 200);
   assert.equal(await (await mediaRequest(viewer.token)).text(), 'durable-media-fixture');
+  assert.equal((await request(owner.token, 'GET', `/tasks/${generationTaskId}`)).body.data.status, 'completed');
+  assert.equal(providerCalls, 1, 'restart must not repeat the provider call');
+  const characterId = Number(db.prepare('INSERT INTO characters(drama_id,name) VALUES (?,?)').run(id, '历史角色').lastInsertRowid);
+  const sceneId = Number(db.prepare('INSERT INTO scenes(drama_id,location) VALUES (?,?)').run(id, '历史场景').lastInsertRowid);
+  const propId = Number(db.prepare('INSERT INTO props(drama_id,name) VALUES (?,?)').run(id, '历史道具').lastInsertRowid);
+  assert.equal((await request(owner.token, 'DELETE', prefix)).status, 200);
+  await stop(); await start();
+  for (const route of [`/characters/${characterId}`, `/scenes/${sceneId}`, `/props/${propId}`, `/storyboards/${shotId}`, `/assets/${copy.body.data.id}`]) {
+    assert.equal((await request(owner.token, 'GET', route)).status, 200, route);
+    assert.equal((await request(viewer.token, 'GET', route)).status, 404, route);
+    assert.equal((await request(stranger.token, 'GET', route)).status, 404, route);
+  }
+  assert.equal((await request(editor.token, 'GET', `/tasks/${generationTaskId}`)).body.data.status, 'completed');
+  assert.equal((await request(viewer.token, 'GET', `/tasks/${generationTaskId}`)).status, 404);
+  assert.equal((await request(owner.token, 'PUT', `/characters/${characterId}`, { name: '禁止修改已删除项目' })).status, 404);
   a.destroy(); b.destroy();
 });

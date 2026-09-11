@@ -46,6 +46,22 @@ function decorate(db, drama, userId) {
   return drama;
 }
 
+function decorateMany(db, dramas, userId) {
+  if (!dramas.length || !installed(db)) return dramas.map(drama => decorate(db, drama, userId));
+  const ids = dramas.map(drama => Number(drama.id)).join(',');
+  const revisions = new Map(db.prepare(`SELECT drama_id,revision FROM project_collaboration WHERE drama_id IN (${ids})`).all().map(row => [row.drama_id, row.revision]));
+  const grouped = new Map(dramas.map(drama => [drama.id, []]));
+  const rows = db.prepare(`SELECT d.id drama_id,u.id,u.username,u.display_name,'owner' role, '' joined_at FROM dramas d JOIN users u ON u.id=d.owner_user_id WHERE d.id IN (${ids})
+    UNION ALL SELECT m.drama_id,u.id,u.username,u.display_name,m.role,m.joined_at FROM project_members m JOIN users u ON u.id=m.user_id WHERE m.drama_id IN (${ids}) ORDER BY joined_at,id`).all();
+  for (const { drama_id, joined_at, ...member } of rows) grouped.get(drama_id).push(member);
+  return dramas.map(drama => {
+    const members = grouped.get(drama.id);
+    const enabled = revisions.has(drama.id);
+    const role = members.find(member => Number(member.id) === Number(userId) && (enabled || member.role === 'owner'))?.role;
+    return { ...drama, members, revision: revisions.get(drama.id) || 0, permissions: role ? { drama_id: drama.id, role, collaboration_enabled: enabled, can_edit: role !== 'viewer', can_manage: role === 'owner' } : null };
+  });
+}
+
 const RESOURCE_QUERIES = {
   dramas: 'SELECT id drama_id, owner_user_id FROM dramas WHERE id=? AND deleted_at IS NULL',
   episodes: 'SELECT drama_id FROM episodes WHERE id=? AND deleted_at IS NULL',
@@ -86,7 +102,8 @@ function projectIdsSql(db, userId, action = 'read') {
 function assetPredicate(db, userId, action = 'read') {
   const id = Number(userId);
   if (!Number.isSafeInteger(id) || id <= 0) return '0';
-  return `((drama_id IS NULL AND owner_user_id=${id}) OR drama_id IN (${projectIdsSql(db, id, action)}))`;
+  const historical = action === 'read' ? ` OR drama_id IN (SELECT id FROM dramas WHERE deleted_at IS NOT NULL AND owner_user_id=${id})` : '';
+  return `((drama_id IS NULL AND owner_user_id=${id}) OR drama_id IN (${projectIdsSql(db, id, action)})${historical})`;
 }
 
 function generationPredicate(db, userId, table) {
@@ -98,4 +115,4 @@ function generationPredicate(db, userId, table) {
   return `((owner_user_id=${id}${enabled})${shared})`;
 }
 
-module.exports = { installed, access, requireAccess, enable, members, decorate, resource, projectIdsSql, assetPredicate, generationPredicate };
+module.exports = { installed, access, requireAccess, enable, members, decorate, decorateMany, resource, projectIdsSql, assetPredicate, generationPredicate };

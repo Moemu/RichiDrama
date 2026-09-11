@@ -1,4 +1,5 @@
 import { captureProjectEdit } from '@/utils/projectSnapshots'
+import { projectSession } from '@/composables/useProjectCollaboration'
 import { ref, reactive, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { characterAPI } from '@/api/characters'
@@ -180,7 +181,7 @@ export function useCharacters(deps) {
       stages: char.stages ? (typeof char.stages === 'string' ? char.stages : JSON.stringify(char.stages, null, 2)) : '',
     }
     showEditCharacter.value = true
-    if (!char.polished_prompt && char.id && (char.appearance || char.description)) {
+    if (!(projectSession.enabled && !projectSession.canEdit) && !char.polished_prompt && char.id && (char.appearance || char.description)) {
       editCharacterPromptGenerating.value = true
       let elapsed = 0
       editCharacterPollTimer = setInterval(async () => {
@@ -228,6 +229,7 @@ export function useCharacters(deps) {
   }
 
   async function submitEditCharacter() {
+    if (projectSession.enabled && !projectSession.canEdit) return
     const form = editCharacterForm.value
     if (!form?.name?.trim() || !store.dramaId) return
     editCharacterSaving.value = true
@@ -282,6 +284,7 @@ export function useCharacters(deps) {
   }
 
   async function doGenerateCharacterPrompt() {
+    if (projectSession.enabled && !projectSession.canEdit) return
     const form = editCharacterForm.value
     if (!form?.id) return
     editCharacterPromptGenerating.value = true
@@ -653,6 +656,7 @@ export function useCharacters(deps) {
   }
 
   async function onSd2CertifyCharacter(char) {
+    if (projectSession.enabled && !projectSession.canEdit) return
     if (!char?.id) return
     if (!hasAssetImage(char)) {
       ElMessage.warning('请先为该角色生成或上传图片')
@@ -682,6 +686,7 @@ export function useCharacters(deps) {
   }
 
   async function onSd2CertifyRefresh(char) {
+    if (projectSession.enabled && !projectSession.canEdit) return
     if (!char?.id) return
     sd2CertifyingId.value = char.id
     try {
@@ -757,6 +762,7 @@ export function useCharacters(deps) {
   }
 
   async function onSd2VoiceRefresh(char) {
+    if (projectSession.enabled && !projectSession.canEdit) return
     if (!char?.id) return
     sd2VoiceUploadingId.value = char.id
     try {
@@ -771,6 +777,7 @@ export function useCharacters(deps) {
   }
 
   async function triggerSd2VoiceUpload(char) {
+    if (projectSession.enabled && !projectSession.canEdit) return
     if (!char?.id) return
     // 创建隐藏的 file input
     const input = document.createElement('input')

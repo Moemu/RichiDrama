@@ -64,13 +64,15 @@ function setupRouter(cfg, db, log) {
   r.use((req, res, next) => {
     if (!req.projectAccess?.collaboration_enabled || !['POST', 'PUT', 'PATCH'].includes(req.method) || req.path.includes('/collaboration/')) return next();
     try {
-      const target = /^\/(storyboards|characters|scenes|props|assets)\/(\d+)\/?$/.exec(req.path);
+      const target = /^\/(storyboards|characters|scenes|props|assets|character-library|scene-library|prop-library)\/(\d+)(?:\/image)?\/?$/.exec(req.path);
+      const table = target && ({ 'character-library': 'character_libraries', 'scene-library': 'scene_libraries', 'prop-library': 'prop_libraries' }[target[1]] || target[1]);
       const previous = target && ['PUT', 'PATCH'].includes(req.method)
-        ? db.prepare(`SELECT * FROM ${target[1]} WHERE id=?`).get(Number(target[2])) : null;
+        ? db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(Number(target[2])) : null;
       if (previous) {
         for (const field of ['omni_asset_ids', 'omni_asset_usage_json']) {
           try { previous[field] = JSON.parse(previous[field]); } catch (_) {}
         }
+        if (previous.metadata_json) { try { previous.metadata = JSON.parse(previous.metadata_json); } catch (_) {} }
       }
       req.body = require('../services/projectAssetService').prepareReferences(db, cfg, log, req.projectAccess.drama_id, req.auth.id, req.body, previous);
       next();
@@ -98,7 +100,9 @@ function setupRouter(cfg, db, log) {
   r.use((req, res, next) => {
     if (!req.projectAccess?.collaboration_enabled || !/generate|generation|polish|extract|rebuild|infer/.test(req.path) || req.method === 'GET') return next();
     const context = require('../services/billingRequestContext');
-    return context.run({ ...(context.current() || {}), project_text_baseline: require('../services/projectCollaborationService').captureTextBaseline(db, req.projectAccess.drama_id) }, next);
+    const entity = /^\/(characters|scenes|props|storyboards)\/(\d+)\//.exec(req.path);
+    const target = entity ? { kind: entity[1], id: Number(entity[2]) } : null;
+    return context.run({ ...(context.current() || {}), project_text_baseline: require('../services/projectCollaborationService').captureTextBaseline(db, req.projectAccess.drama_id, target) }, next);
   });
   const drama = dramaRoutes(db, cfg, log);
   const task = taskRoutes(db, log);

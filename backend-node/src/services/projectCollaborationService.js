@@ -2,6 +2,7 @@
 
 const Y = require('yjs');
 const access = require('./projectAccessService');
+const textColumns = new WeakMap();
 
 const TEXT_FIELDS = {
   dramas: ['description'],
@@ -100,6 +101,7 @@ function persistText(db, dramaId, input, text) {
 }
 
 function ensureRevisionTriggers(db) {
+  textColumns.delete(db);
   db.function('project_text_write_allowed', (kind, id, field, previous, next) => {
     const baseline = require('./billingRequestContext').current()?.project_text_baseline;
     const key = `${kind}:${id}:${field}`;
@@ -145,14 +147,18 @@ function ensureRevisionTriggers(db) {
   }
 }
 
-function captureTextBaseline(db, dramaId) {
+function captureTextBaseline(db, dramaId, target = null) {
   const baseline = new Map();
-  for (const [kind, fields] of Object.entries(TEXT_FIELDS)) {
+  if (!textColumns.has(db)) textColumns.set(db, Object.entries(TEXT_FIELDS).map(([kind, fields]) => {
     const columns = new Set(db.prepare(`PRAGMA table_info(${kind})`).all().map(column => column.name));
-    const available = fields.filter(field => columns.has(field));
+    return [kind, fields.filter(field => columns.has(field))];
+  }));
+  for (const [kind, available] of textColumns.get(db)) {
+    if (target && target.kind !== kind) continue;
     if (!available.length) continue;
     const scope = kind === 'dramas' ? 'id=?' : kind === 'storyboards' ? 'episode_id IN (SELECT id FROM episodes WHERE drama_id=? AND deleted_at IS NULL)' : 'drama_id=?';
-    for (const row of db.prepare(`SELECT id,${available.map(field => `"${field}"`).join(',')} FROM ${kind} WHERE ${scope} AND deleted_at IS NULL`).all(Number(dramaId))) {
+    const params = target ? [Number(dramaId), Number(target.id)] : [Number(dramaId)];
+    for (const row of db.prepare(`SELECT id,${available.map(field => `"${field}"`).join(',')} FROM ${kind} WHERE ${scope} AND deleted_at IS NULL${target ? ' AND id=?' : ''}`).all(...params)) {
       for (const field of available) baseline.set(`${kind}:${row.id}:${field}`, row[field]);
     }
   }

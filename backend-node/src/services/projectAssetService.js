@@ -6,17 +6,17 @@ const crypto = require('crypto');
 const access = require('./projectAccessService');
 const assets = require('./assetService');
 const { normalizeMediaReference } = require('./mediaAuthorizationService');
+const { resolveStorageFile } = require('../utils/storagePath');
 
 function localFile(root, reference) {
   const key = normalizeMediaReference(reference, root);
   if (!key) throw Object.assign(new Error('素材尚未持久化到本地'), { status: 409 });
-  const absolute = path.resolve(root, key);
-  const relative = path.relative(root, absolute);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw Object.assign(new Error('素材路径无效'), { status: 400 });
-  const real = fs.realpathSync(absolute);
-  const realRelative = path.relative(fs.realpathSync(root), real);
-  if (realRelative.startsWith('..') || path.isAbsolute(realRelative) || !fs.statSync(real).isFile()) throw Object.assign(new Error('素材路径无效'), { status: 400 });
-  return real;
+  try { return resolveStorageFile(root, key); }
+  catch (error) {
+    if (['ENOENT', 'ENOTDIR'].includes(error.code)) throw Object.assign(new Error('素材本地文件不存在，请重新上传'), { status: 409 });
+    if (error.code === 'INVALID_MEDIA_PATH' || error.message === '媒体路径不是文件') throw Object.assign(error, { status: 400 });
+    throw error;
+  }
 }
 
 function join(db, cfg, log, dramaId, sourceId, userId) {

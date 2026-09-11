@@ -14,8 +14,15 @@ export function installProjectRequestSync(request) {
     if (['get', 'head', 'options'].includes(method)) return config
     const body = typeof FormData !== 'undefined' && config.data instanceof FormData ? Object.fromEntries(config.data.entries()) : config.data
     const match = /^\/(dramas|episodes|storyboards|characters|scenes|props|assets|character-library|scene-library|prop-library)\/(\d+)(.*)$/.exec(config.url || '')
-    const known = config.projectBaseline || (match && projectSnapshot(match[1], Number(match[2])))
-    const scoped = Number(known?.__projectId) === projectSession.id || (match?.[1] === 'dramas' && Number(match[2]) === projectSession.id) || Number(body?.drama_id) === projectSession.id || Number(projectSnapshot('episodes', body?.episode_id)?.__projectId) === projectSession.id || Number(projectSnapshot('storyboards', body?.storyboard_id)?.__projectId) === projectSession.id
+    const command = /^\/(images|videos|video-generations|video-merges|omni-video-jobs|tasks|tool-runs)\/([^/]+)(?:\/|$)/.exec(config.url || '')
+    const known = config.projectBaseline || (match && projectSnapshot(match[1], Number(match[2]))) || (command && projectSnapshot(command[1], command[2]))
+    const nested = /^\/[^/]+\/(episode|scene|image)\/(\d+)(?:\/|$)/.exec(config.url || '')
+    const references = { drama_id: 'dramas', episode_id: 'episodes', storyboard_id: 'storyboards', character_id: 'characters', scene_id: 'scenes', prop_id: 'props' }
+    const belongs = (kind, id) => kind === 'dramas' ? Number(id) === projectSession.id : Number(projectSnapshot(kind, id)?.__projectId) === projectSession.id
+    const scoped = Number(known?.__projectId) === projectSession.id || (match && belongs(match[1], match[2]))
+      || (nested && belongs({ episode: 'episodes', scene: 'scenes', image: 'images' }[nested[1]], nested[2]))
+      || Object.entries(references).some(([field, kind]) => belongs(kind, body?.[field]))
+      || [['episode_ids', 'episodes'], ['storyboard_ids', 'storyboards'], ...(config.url === '/characters/batch-generate-images' ? [['character_ids', 'characters']] : [])].some(([field, kind]) => Array.isArray(body?.[field]) && body[field].some(id => belongs(kind, id)))
     if (!scoped) return config
     if (!projectSession.canEdit) throw new Error('当前为只读成员，无法修改项目')
     config.headers['X-Project-Operation'] ||= createClientRequestId()
@@ -48,7 +55,7 @@ export function installProjectRequestSync(request) {
     if (projectSession.writeContractVersion >= 1) {
       const contract = buildProjectWriteContract(config, known, match)
       if (contract) config.data = { ...config.data, _project_edit: contract }
-      else if (['put', 'patch', 'delete'].includes(method)) useBaselineRevision()
+      else if (match && ['put', 'patch', 'delete'].includes(method)) useBaselineRevision()
     } else {
       useBaselineRevision()
     }

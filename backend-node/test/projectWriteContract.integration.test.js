@@ -155,6 +155,31 @@ test('actual frontend writes isolate fields and commands across continuous proje
   assert.equal((await client.put(`${projectUrl}/canvas-layout`, { canvas_layout: layout }, oldCanvas)).status, 409);
   const denied = await raw(viewer.token, 'PUT', `/assets/${asset.id}`, { requires_sd2_identity: false, _project_edit: { version: 1, checks: [] } });
   assert.equal(denied.status, 403);
+  await raw(owner.token, 'PUT', `${projectUrl}/characters`, { characters: [{ name: '连续图片编辑' }] });
+  const character = (await read()).characters[0];
+  for (const image of ['data:image/png;base64,YQ==', 'data:image/png;base64,Yg==']) {
+    await unrelated();
+    ok(await client.put(`/characters/${character.id}/image`, { image_url: image }));
+    assert.equal(snapshots.projectSnapshot('characters', character.id).image_url, image);
+  }
+  const imageBaseline = snapshots.captureProjectEdit('characters', character.id);
+  ok(await client.put(`/characters/${character.id}/image`, { image_url: 'data:image/png;base64,Yw==' }));
+  assert.equal((await client.put(`/characters/${character.id}/image`, { image_url: 'data:image/png;base64,ZA==' }, imageBaseline)).status, 409);
+  const scene = ok(await client.post('/scenes', { drama_id: projectId, location: '车站', prompt: '初始' }), 201);
+  await read();
+  for (const prompt of ['第一次修改', '第二次修改']) {
+    await unrelated();
+    ok(await client.put(`/scenes/${scene.id}/prompt`, { prompt }));
+    assert.equal(snapshots.projectSnapshot('scenes', scene.id).prompt, prompt);
+  }
+  await client.get(`/storyboards/${first.id}/frame-prompts`);
+  for (const prompt of ['第一帧提示词', '第二帧提示词']) {
+    await unrelated();
+    ok(await client.put(`/storyboards/${first.id}/frame-prompts/first`, { prompt }));
+  }
+  const frameBaseline = snapshots.captureProjectEdit('storyboards', first.id);
+  await raw(peer.token, 'PUT', `/storyboards/${first.id}/frame-prompts/first`, { prompt: '其他人的帧提示词' });
+  assert.equal((await client.put(`/storyboards/${first.id}/frame-prompts/first`, { prompt: '过时覆盖' }, frameBaseline)).status, 409);
   const legacyId = Number(db.prepare('INSERT INTO dramas(title,owner_user_id) VALUES(?,?)').run('历史私有项目', owner.id).lastInsertRowid);
   await stop(); await start(); client.defaults.baseURL = base;
   assert.equal((await raw(owner.token, 'GET', `/assets/${asset.id}`)).data.data.requires_sd2_identity, true);
