@@ -15,6 +15,7 @@ function attach(server, db) {
     const user = auth.authenticate(db, socket.credential);
     if (user.must_change_password) throw new Error('请先修改临时密码');
     const permission = access.requireAccess(db, socket.dramaId, user.id);
+    if (!permission.collaboration_enabled) throw new Error('项目协作已关闭');
     if (!permission.collaboration_enabled) throw new Error('项目未启用协作');
     return { user, permission };
   };

@@ -63,7 +63,7 @@ test('actual frontend writes isolate fields and commands across continuous proje
   const contractUrl = await browserModuleUrl(path.join(front, 'src/utils/projectWriteContract.js'), { './projectSnapshots': href('src/utils/projectSnapshots.js') });
   const state = (await raw(owner.token, 'GET', `${projectUrl}/collaboration/state`)).data.data;
   globalThis.writeContractSession = { id: projectId, enabled: true, canEdit: true, connected: false, revision: state.revision, writeContractVersion: state.write_contract_version };
-  const sessionUrl = moduleSourceUrl('export const projectSession = globalThis.writeContractSession; export const hasPendingProjectText = (kind, id, field) => kind === "episodes" && field === globalThis.boundEpisodeField;');
+  const sessionUrl = moduleSourceUrl('export const savePendingProjectText = async () => {}; export const projectSession = globalThis.writeContractSession; export const hasPendingProjectText = (kind, id, field) => kind === "episodes" && field === globalThis.boundEpisodeField;');
   const { installProjectRequestSync } = await import(await browserModuleUrl(path.join(front, 'src/utils/projectRequestSync.js'), {
     '@/composables/useProjectCollaboration': sessionUrl,
     './projectSnapshots': href('src/utils/projectSnapshots.js'),

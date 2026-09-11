@@ -26,7 +26,7 @@ import { dramaAPI } from '@/api/drama'
 const props = defineProps({ dramaId: { type: [Number, String], required: true }, title: { type: String, default: '' }, permissions: { type: Object, default: () => ({}) }, members: { type: Array, default: () => [] } })
 const emit = defineEmits(['updated'])
 const router = useRouter()
-const candidates = computed(() => props.members.filter(member => member.role !== 'owner'))
+const candidates = computed(() => props.permissions.collaboration_enabled ? props.members.filter(member => member.role !== 'owner') : [])
 const transferVisible = ref(false); const targetId = ref(null); const transferring = ref(false); const deleting = ref(false)
 async function transfer() {
   if (!targetId.value || transferring.value) return
