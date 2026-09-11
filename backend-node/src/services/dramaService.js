@@ -713,6 +713,7 @@ function saveEpisodes(db, log, dramaId, req) {
   const drama = getDramaById(db, did);
   if (!drama) return false;
   const episodes = req.episodes || [];
+  if (req.mode != null) return require('./episodeEditService').editEpisodes(db, did, req);
   const now = new Date().toISOString();
 
   // 按 episode_number upsert：保留已有分集的 id，避免关联数据（角色/场景/道具/分镜）孤岛化

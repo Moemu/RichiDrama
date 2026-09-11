@@ -16,8 +16,19 @@ export const dramaAPI = {
   delete(id) {
     return request.delete(`/dramas/${id}`)
   },
-  saveEpisodes(id, episodes) {
-    return request.put(`/dramas/${id}/episodes`, { episodes })
+  appendEpisodes(id, episodes) {
+    return request.put(`/dramas/${id}/episode-edits`, { mode: 'append', episodes })
+  },
+  updateEpisode(id, episode, patch) {
+    return request.put(`/dramas/${id}/episode-edits`, {
+      mode: 'update', episodes: [{ ...patch, id: episode.id,
+        expected_title: episode.title, expected_script_content: episode.script_content }],
+    })
+  },
+  deleteEpisode(id, episode) {
+    return request.put(`/dramas/${id}/episode-edits`, {
+      mode: 'delete', episodes: [{ id: episode.id, expected_updated_at: episode.updated_at }],
+    })
   },
   saveCharacters(id, data) {
     return request.put(`/dramas/${id}/characters`, data)

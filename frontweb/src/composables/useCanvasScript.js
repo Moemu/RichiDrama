@@ -29,22 +29,6 @@ export function scriptNodeId(episodeId) {
   return `script:${episodeId}`
 }
 
-function buildEpisodesPayload(drama, episodeId, patch) {
-  return (drama?.episodes || []).map((ep, i) => {
-    const base = {
-      episode_number: ep.episode_number ?? i + 1,
-      title: ep.title || `第${ep.episode_number ?? i + 1}集`,
-      script_content: ep.script_content || '',
-      description: ep.description ?? null,
-      duration: ep.duration ?? 0,
-    }
-    if (Number(ep.id) === Number(episodeId)) {
-      return { ...base, ...patch }
-    }
-    return base
-  })
-}
-
 /** 画布：剧本编辑 + 从剧本提取角色/场景/道具 */
 export function useCanvasScript(deps) {
   const { drama, dramaId, refreshCanvas, nodeStatus } = deps
@@ -79,11 +63,12 @@ export function useCanvasScript(deps) {
     scriptBusy.value = true
     setScriptBusy(episodeId, 'save_script', CANVAS_NODE_STATUS_LABELS.save_script)
     try {
-      const payload = buildEpisodesPayload(d, episodeId, {
+      const episode = (d.episodes || []).find(ep => Number(ep.id) === Number(episodeId))
+      if (!episode) throw new Error('分集不存在，请刷新页面')
+      await dramaAPI.updateEpisode(did, episode, {
         script_content: (scriptContent || '').trim(),
         title: (title || '').trim() || undefined,
       })
-      await dramaAPI.saveEpisodes(did, payload)
       await refreshCanvas(true)
       ElMessage.success('剧本已保存')
     } finally {

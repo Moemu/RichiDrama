@@ -15,6 +15,6 @@ export const generationAPI = {
   },
   /** 根据故事梗概 + 风格/类型/集数 生成剧本；传 drama_id 时异步生成并入库，返回 { task_id, status } */
   generateStory(body) {
-    return request.post('/generation/story', body)
+    return request.post('/generation/story/append', body)
   }
 }

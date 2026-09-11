@@ -99,13 +99,12 @@ import { ElMessage } from 'element-plus'
 import { Upload } from '@element-plus/icons-vue'
 
 const props = defineProps({
+  importEpisodes: { type: Function, required: true },
   startEpisodeNumber: {
     type: Number,
     default: 1,
   },
 })
-
-const emit = defineEmits(['import'])
 
 const visible = ref(false)
 const activeTab = ref('config')
@@ -246,7 +245,7 @@ async function confirmImport() {
   }
   importing.value = true
   try {
-    await emit('import', previewEpisodes.value.map((episode) => ({
+    await props.importEpisodes(previewEpisodes.value.map((episode) => ({
       episode_number: episode.episode_number,
       title: episode.title,
       script_content: episode.script_content,
