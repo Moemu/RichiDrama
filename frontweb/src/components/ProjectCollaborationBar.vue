@@ -13,7 +13,7 @@
 <script setup>
 import { computed, onBeforeUnmount, watch } from 'vue'
 import ProjectSuggestions from './ProjectSuggestions.vue'
-import { closeProjectSession, openProjectSession, projectSession, retryPendingProjectText } from '@/composables/useProjectCollaboration'
+import { closeProjectSession, openProjectSession, projectSession, retryPendingProjectText, hasUnsavedProjectText } from '@/composables/useProjectCollaboration'
 const props = defineProps({ dramaId: { type: [Number, String], required: true } })
 const emit = defineEmits(['refresh', 'refresh-workbench'])
 function editingLabel(location) {
@@ -27,7 +27,7 @@ const names = computed(() => [...new Map(projectSession.participants.map(person 
 let deferred
 const refreshPage = () => {
   clearTimeout(deferred)
-  if (document.activeElement?.matches('input,textarea,[contenteditable="true"]') || document.querySelector('.el-dialog[aria-modal="true"]')) {
+  if (hasUnsavedProjectText() || document.activeElement?.matches('input,textarea,[contenteditable="true"]') || document.querySelector('.el-dialog[aria-modal="true"]')) {
     deferred = setTimeout(refreshPage, 1000)
     return
   }

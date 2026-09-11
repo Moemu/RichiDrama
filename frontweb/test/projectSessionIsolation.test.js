@@ -10,6 +10,53 @@ const collaboration = await import(await browserModuleUrl(new URL('../src/compos
 }))
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 
+test('explicit save confirms offline text through HTTP and preserves failed drafts for retry', async t => {
+  const previous = { socket: globalThis.WebSocket, location: globalThis.location }
+  const doc = new Y.Doc()
+  const target = { kind: 'episodes', id: 8, field: 'script_content' }
+  const snapshot = () => ({ ...target, epoch: 1, state: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'), state_vector: Buffer.from(Y.encodeStateVector(doc)).toString('base64') })
+  globalThis.WebSocket = class { close() {} }
+  globalThis.location = { protocol: 'http:', host: 'fixture.invalid' }
+  globalThis.sessionGet = async url => url.endsWith('/text') ? snapshot() : { permissions: { collaboration_enabled: true, can_edit: true }, revision: 1 }
+  globalThis.sessionPost = async () => ({})
+  t.after(() => {
+    collaboration.closeProjectSession(); doc.destroy()
+    globalThis.WebSocket = previous.socket; globalThis.location = previous.location
+    delete globalThis.sessionGet; delete globalThis.sessionPost
+  })
+  await collaboration.openProjectSession(1)
+  let visible = ''
+  const binding = await collaboration.bindProjectText(target, text => { visible = text })
+  binding.change('断线新剧本')
+  visible = ''
+  binding.restoreDraft()
+  assert.equal(visible, '断线新剧本', 'a refresh cannot replace the unsaved document with old server text')
+  globalThis.sessionPost = async () => { throw new Error('HTTP unavailable') }
+  await assert.rejects(collaboration.savePendingProjectText(), /HTTP unavailable/)
+  assert.equal(collaboration.hasUnsavedProjectText(), true)
+  assert.equal(doc.getText('content').toString(), '')
+  const response = deferred()
+  let sent
+  globalThis.sessionPost = async (url, input) => {
+    assert.equal(url, '/dramas/1/collaboration/text')
+    sent = input
+    await response.promise
+    Y.applyUpdate(doc, Buffer.from(input.update, 'base64'))
+    return snapshot()
+  }
+  let confirmed = false
+  const saving = collaboration.savePendingProjectText().then(() => { confirmed = true })
+  await Promise.resolve()
+  assert.equal(confirmed, false)
+  assert.equal(sent.id, 8)
+  response.resolve()
+  await saving
+  assert.equal(visible, '断线新剧本')
+  assert.equal(doc.getText('content').toString(), '断线新剧本')
+  assert.equal(collaboration.hasUnsavedProjectText(), false)
+  binding.dispose()
+})
+
 test('received text updates skip redundant reads while unseen revisions still refresh documents', async t => {
   const previous = { socket: globalThis.WebSocket, location: globalThis.location }
   const sent = []

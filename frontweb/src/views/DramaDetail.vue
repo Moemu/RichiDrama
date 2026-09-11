@@ -141,7 +141,7 @@
                 <span class="episode-num">第 {{ ep.episode_number ?? ep.number ?? '?' }} 集</span>
               </div>
               <div class="episode-title">{{ ep.title || '未命名' }}</div>
-              <div class="episode-assignee" @click.stop><el-select :model-value="ep.assignee_user_id" :disabled="!drama?.permissions?.can_edit" clearable placeholder="分配负责人" size="small" @change="value => assignEpisode(ep.id, value)"><el-option v-for="member in (drama?.members || []).filter(item => item.role !== 'viewer')" :key="member.id" :value="member.id" :label="member.display_name || member.username" /></el-select></div>
+              <div class="episode-assignee" @click.stop><el-select :model-value="ep.assignee_user_id" :disabled="!drama?.permissions?.can_edit || !drama?.permissions?.collaboration_enabled" clearable placeholder="分配负责人" size="small" @change="value => assignEpisode(ep.id, value)"><el-option v-for="member in (drama?.members || []).filter(item => item.role !== 'viewer')" :key="member.id" :value="member.id" :label="member.display_name || member.username" /></el-select></div>
               <div class="episode-preview">{{ (ep.script_content || '').slice(0, 120) || '暂无剧本' }}</div>
               <div class="episode-stats">
                 <span class="ep-stat">

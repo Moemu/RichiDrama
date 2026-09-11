@@ -11,7 +11,7 @@ test('directive discards late bindings after permission toggles, target changes,
     const entry = { target, disposed: 0, changes: [] }
     entry.finish = value => {
       listener(value)
-      resolve({ dispose() { entry.disposed++ }, change(value) { entry.changes.push(value) } })
+      resolve({ dispose() { entry.disposed++ }, change(value) { entry.changes.push(value) }, restoreDraft() { if (entry.changes.length) listener(entry.changes.at(-1)) } })
     }
     requests.push(entry)
   })
@@ -48,6 +48,10 @@ test('directive discards late bindings after permission toggles, target changes,
   input.value = '当前修改'; input.dispatchEvent(new Event('input'))
   assert.deepEqual(requests[1].changes, ['当前修改'])
   assert.deepEqual(requests[0].changes, [])
+  input.value = '刷新返回的旧正文'
+  directive.updated(input, binding(1))
+  assert.equal(input.value, '当前修改')
+  assert.deepEqual(requests[1].changes, ['当前修改'], 'restoring a draft must not create another local edit')
 
   directive.updated(input, binding(2))
   directive.updated(input, binding(3))

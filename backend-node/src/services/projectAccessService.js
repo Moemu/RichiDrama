@@ -7,7 +7,7 @@ function installed(db) {
 function access(db, dramaId, userId) {
   const drama = db.prepare('SELECT id, owner_user_id FROM dramas WHERE id=? AND deleted_at IS NULL').get(Number(dramaId));
   if (!drama) return null;
-  const enabled = installed(db) && !!db.prepare('SELECT 1 FROM project_collaboration WHERE drama_id=?').get(drama.id);
+  const enabled = installed(db) && !!db.prepare('SELECT 1 FROM project_collaboration WHERE drama_id=? AND disabled_at IS NULL').get(drama.id);
   const role = Number(drama.owner_user_id) === Number(userId) ? 'owner'
     : enabled ? db.prepare('SELECT role FROM project_members WHERE drama_id=? AND user_id=?').get(drama.id, Number(userId))?.role : null;
   if (!role) return null;
@@ -25,7 +25,13 @@ function requireAccess(db, dramaId, userId, action = 'read') {
 
 function enable(db, dramaId, userId) {
   requireAccess(db, dramaId, userId, 'manage');
-  db.prepare('INSERT OR IGNORE INTO project_collaboration (drama_id, enabled_at) VALUES (?,?)').run(Number(dramaId), new Date().toISOString());
+  db.prepare(`INSERT INTO project_collaboration (drama_id, enabled_at) VALUES (?,?)
+    ON CONFLICT(drama_id) DO UPDATE SET disabled_at=NULL,revision=revision+1 WHERE disabled_at IS NOT NULL`).run(Number(dramaId), new Date().toISOString());
+}
+
+function disable(db, dramaId, userId) {
+  requireAccess(db, dramaId, userId, 'manage');
+  db.prepare('UPDATE project_collaboration SET disabled_at=?,revision=revision+1 WHERE drama_id=? AND disabled_at IS NULL').run(new Date().toISOString(), Number(dramaId));
 }
 
 function members(db, dramaId) {
@@ -49,16 +55,17 @@ function decorate(db, drama, userId) {
 function decorateMany(db, dramas, userId) {
   if (!dramas.length || !installed(db)) return dramas.map(drama => decorate(db, drama, userId));
   const ids = dramas.map(drama => Number(drama.id)).join(',');
-  const revisions = new Map(db.prepare(`SELECT drama_id,revision FROM project_collaboration WHERE drama_id IN (${ids})`).all().map(row => [row.drama_id, row.revision]));
+  const states = new Map(db.prepare(`SELECT drama_id,revision,disabled_at FROM project_collaboration WHERE drama_id IN (${ids})`).all().map(row => [row.drama_id, row]));
   const grouped = new Map(dramas.map(drama => [drama.id, []]));
   const rows = db.prepare(`SELECT d.id drama_id,u.id,u.username,u.display_name,'owner' role, '' joined_at FROM dramas d JOIN users u ON u.id=d.owner_user_id WHERE d.id IN (${ids})
     UNION ALL SELECT m.drama_id,u.id,u.username,u.display_name,m.role,m.joined_at FROM project_members m JOIN users u ON u.id=m.user_id WHERE m.drama_id IN (${ids}) ORDER BY joined_at,id`).all();
   for (const { drama_id, joined_at, ...member } of rows) grouped.get(drama_id).push(member);
   return dramas.map(drama => {
     const members = grouped.get(drama.id);
-    const enabled = revisions.has(drama.id);
+    const state = states.get(drama.id);
+    const enabled = !!state && !state.disabled_at;
     const role = members.find(member => Number(member.id) === Number(userId) && (enabled || member.role === 'owner'))?.role;
-    return { ...drama, members, revision: revisions.get(drama.id) || 0, permissions: role ? { drama_id: drama.id, role, collaboration_enabled: enabled, can_edit: role !== 'viewer', can_manage: role === 'owner' } : null };
+    return { ...drama, members, revision: state?.revision || 0, permissions: role ? { drama_id: drama.id, role, collaboration_enabled: enabled, can_edit: role !== 'viewer', can_manage: role === 'owner' } : null };
   });
 }
 
@@ -95,7 +102,7 @@ function resource(db, kind, id) {
 function projectIdsSql(db, userId, action = 'read') {
   const id = Number(userId);
   if (!Number.isSafeInteger(id) || id <= 0) return 'SELECT id FROM dramas WHERE 0';
-  const member = installed(db) ? ` OR id IN (SELECT m.drama_id FROM project_members m JOIN project_collaboration c ON c.drama_id=m.drama_id WHERE m.user_id=${id}${action === 'edit' ? " AND m.role='editor'" : ''})` : '';
+  const member = installed(db) ? ` OR id IN (SELECT m.drama_id FROM project_members m JOIN project_collaboration c ON c.drama_id=m.drama_id WHERE c.disabled_at IS NULL AND m.user_id=${id}${action === 'edit' ? " AND m.role='editor'" : ''})` : '';
   return `SELECT id FROM dramas WHERE deleted_at IS NULL AND (owner_user_id=${id}${member})`;
 }
 
@@ -115,4 +122,4 @@ function generationPredicate(db, userId, table) {
   return `((owner_user_id=${id}${enabled})${shared})`;
 }
 
-module.exports = { installed, access, requireAccess, enable, members, decorate, decorateMany, resource, projectIdsSql, assetPredicate, generationPredicate };
+module.exports = { installed, access, requireAccess, enable, disable, members, decorate, decorateMany, resource, projectIdsSql, assetPredicate, generationPredicate };

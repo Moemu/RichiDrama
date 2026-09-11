@@ -42,16 +42,28 @@ function send(input) {
   })
 }
 
-async function flush(entry) {
-  if (entry.sessionVersion !== sessionVersion || !entry.dirty || entry.saving || !projectSession.connected) return
-  entry.saving = true
+function flush(entry, http = false) {
+  if (entry.saving) return entry.saving
+  if (entry.sessionVersion !== sessionVersion || !entry.dirty || (!http && !projectSession.connected)) return
+  entry.saving = saveText(entry, http)
+  return entry.saving
+}
+
+async function saveText(entry, http) {
   projectSession.pending++
   const generation = entry.generation
+  entry.error = null
   try {
-    await send({ type: 'text_update', ...entry.target, epoch: entry.epoch, update: encode(Y.encodeStateAsUpdate(entry.doc, entry.serverVector ? decode(entry.serverVector) : undefined)) })
+    const input = { ...entry.target, epoch: entry.epoch, update: encode(Y.encodeStateAsUpdate(entry.doc, entry.serverVector ? decode(entry.serverVector) : undefined)) }
+    if (http) {
+      const result = await request.post(`/dramas/${projectSession.id}/collaboration/text`, input, { errorHandledLocally: true })
+      if (entry.sessionVersion !== sessionVersion) return
+      acceptText(result)
+    } else await send({ type: 'text_update', ...input })
     if (generation === entry.generation) entry.dirty = false
   } catch (error) {
     if (entry.sessionVersion !== sessionVersion) return
+    entry.error = error
     projectSession.error = error.message
     if (error.code === 'ENTITY_DELETED') {
       projectSession.drafts.push({ key: textKey(entry.target), text: entry.doc.getText('content').toString() })
@@ -65,6 +77,20 @@ async function flush(entry) {
       if (entry.dirty && generation !== entry.generation) void flush(entry)
     }
   }
+}
+
+export async function savePendingProjectText() {
+  const version = sessionVersion
+  for (const entry of documents.values()) {
+    if (entry.saving) await entry.saving
+    while (entry.dirty && version === sessionVersion) {
+      await flush(entry, true)
+      if (entry.error) throw entry.error
+    }
+  }
+  if (version !== sessionVersion) throw new Error('项目已切换，请重新检查保存结果')
+  if (projectSession.drafts.length) throw new Error('存在未确认的草稿，请先复制并处理草稿后再保存')
+  projectSession.error = ''
 }
 
 function connect() {
@@ -189,6 +215,7 @@ export async function bindProjectText(target, listener) {
   entry.listeners.add(receive)
   receive(entry.doc.getText('content').toString())
   return {
+    restoreDraft() { if (entry.dirty || entry.saving) receive(entry.doc.getText('content').toString()) },
     compositionStart() { composing = true },
     compositionEnd(value) { this.change(value); composing = false; receive(entry.doc.getText('content').toString()) },
     change(value) {

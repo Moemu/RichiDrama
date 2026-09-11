@@ -15,6 +15,10 @@ module.exports = function projectRoutes(db, cfg, log) {
     access.enable(db, req.params.id, req.auth.id);
     return { enabled: true };
   }));
+  router.post('/disable', handle(req => {
+    access.disable(db, req.params.id, req.auth.id);
+    return { enabled: false };
+  }));
   router.get('/members', handle(req => {
     access.requireAccess(db, req.params.id, req.auth.id);
     return access.members(db, req.params.id);

@@ -1,4 +1,4 @@
-import { hasPendingProjectText, projectSession } from '@/composables/useProjectCollaboration'
+import { hasPendingProjectText, projectSession, savePendingProjectText } from '@/composables/useProjectCollaboration'
 import { projectKind, projectSnapshot } from './projectSnapshots'
 import { createClientRequestId } from './requestId'
 import { projectFieldValue, equalProjectValue, buildProjectWriteContract } from './projectWriteContract'
@@ -7,7 +7,7 @@ export { projectSnapshot } from './projectSnapshots'
 const equal = equalProjectValue
 
 export function installProjectRequestSync(request) {
-  request.interceptors.request.use(config => {
+  request.interceptors.request.use(async config => {
     if (config.projectWritePrepared) return config
     if (!projectSession.enabled || !projectSession.id || /\/collaboration\/(text|state)$/.test(config.url || '')) return config
     const method = String(config.method || 'get').toLowerCase()
@@ -25,6 +25,8 @@ export function installProjectRequestSync(request) {
       || [['episode_ids', 'episodes'], ['storyboard_ids', 'storyboards'], ...(config.url === '/characters/batch-generate-images' ? [['character_ids', 'characters']] : [])].some(([field, kind]) => Array.isArray(body?.[field]) && body[field].some(id => belongs(kind, id)))
     if (!scoped) return config
     if (!projectSession.canEdit) throw new Error('当前为只读成员，无法修改项目')
+    try { await savePendingProjectText() }
+    catch (error) { error.config ||= config; throw error }
     config.headers['X-Project-Operation'] ||= createClientRequestId()
     const useBaselineRevision = () => {
       const revision = known?.__projectRevision ?? projectSnapshot('dramas', projectSession.id)?.revision

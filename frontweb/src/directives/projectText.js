@@ -58,6 +58,7 @@ export default {
   updated(el, binding) {
     const state = bindings.get(el)
     if (JSON.stringify(state?.target) !== JSON.stringify(binding.value)) { state?.cleanup?.(); mount(el, binding) }
+    else state?.binding?.restoreDraft?.()
   },
   beforeUnmount(el) { bindings.get(el)?.cleanup?.(); bindings.delete(el) },
 }
