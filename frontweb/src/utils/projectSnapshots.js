@@ -31,7 +31,13 @@ export function rememberProjectResponse(url, data) {
     rememberProjectEntity('storyboards', { id: Number(frames[1]), frame_prompts: data.frame_prompts.map(({ frame_type, prompt, description, layout }) => ({ frame_type, prompt, description, layout })).sort((a, b) => a.frame_type.localeCompare(b.frame_type)) })
     return
   }
-  if (/^\/(episodes|storyboards)\/\d+\/generation-settings$/.test(path)) {
+  if (/^\/(episodes|storyboards)\/\d+\/generation-settings(?:\/overrides)?$/.test(path)) {
+    if (Array.isArray(data?.generation_state)) {
+      for (const [id, text_model, video_model, duration, video_resolution, video_aspect_ratio, video_upscale_resolution, video_target_fps, generation_overrides] of data.generation_state) {
+        rememberProjectEntity('storyboards', { id, text_model, video_model, duration, video_resolution, video_aspect_ratio, video_upscale_resolution, video_target_fps, generation_overrides })
+      }
+      return
+    }
     const fields = { text_model: 'text_model', video_model: 'video_model', duration: 'duration', resolution: 'video_resolution', aspect_ratio: 'video_aspect_ratio', upscale_resolution: 'video_upscale_resolution', target_fps: 'video_target_fps' }
     for (const item of data?.storyboards || (data?.effective ? [data] : [])) {
       const known = projectSnapshot('storyboards', item.id)

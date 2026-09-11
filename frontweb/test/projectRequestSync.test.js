@@ -6,7 +6,7 @@ import { captureProjectEdit, projectSnapshot, rememberProjectEntity, rememberPro
 const sessionUrl = moduleSourceUrl(`export const projectSession = { enabled: true, id: 800, connected: false, canEdit: true, revision: 90, writeContractVersion: 1 }; export const hasPendingProjectText = () => false`)
 const snapshotsUrl = new URL('../src/utils/projectSnapshots.js', import.meta.url).href
 const writeUrl = await browserModuleUrl(new URL('../src/utils/projectWriteContract.js', import.meta.url), { './projectSnapshots': snapshotsUrl })
-const { advanceProjectEdit } = await import(writeUrl)
+const { advanceProjectEdit, mergeGenerationState } = await import(writeUrl)
 const { installProjectRequestSync } = await import(await browserModuleUrl(new URL('../src/utils/projectRequestSync.js', import.meta.url), {
   '@/composables/useProjectCollaboration': sessionUrl,
   './projectSnapshots': snapshotsUrl,
@@ -67,6 +67,19 @@ test('generation edits use acknowledged parameters and preserve override semanti
   const next = prepare('patch', '/storyboards/802/generation-settings', { scope: 'current', settings: { duration: 12 } })
   assert.equal(next.data._project_edit.checks[0].fields.generation_state[0][3], 10)
   assert.deepEqual(next.data._project_edit.checks[0].fields.generation_state[0][8], { duration: 10 })
+})
+
+test('generation baselines use stored values while the UI retains inherited effective settings', () => {
+  const raw = [[802, 'auto', 'auto', 5, '720p', '16:9', null, null, {}]]
+  const contract = { episode_id: 801, generation_state: raw, storyboards: [{ id: 802, overrides: {}, effective: { duration: 15, upscale_resolution: '1080p' } }] }
+  rememberProjectResponse('/episodes/801/generation-settings', contract)
+  assert.deepEqual(prepare('patch', '/storyboards/802/generation-settings', { settings: { duration: 10 } }).data._project_edit.checks[0].fields.generation_state, raw)
+  const baseline = mergeGenerationState([], contract)
+  assert.deepEqual(baseline, raw)
+  baseline[0][3] = 9
+  assert.equal(contract.generation_state[0][3], 5)
+  rememberProjectResponse('/storyboards/802/generation-settings/overrides', { ...contract, generation_state: [[802, 'auto', 'auto', 15, '720p', '16:9', '1080p', null, {}]] })
+  assert.equal(projectSnapshot('storyboards', 802).duration, 15)
 })
 
 test('unchanged aliases are omitted and successful field acknowledgements advance the baseline', () => {

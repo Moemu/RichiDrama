@@ -127,7 +127,26 @@ test('actual frontend writes isolate fields and commands across continuous proje
   assert.deepEqual(snapshots.projectSnapshot('episodes', episodeId).storyboard_order, [second.id, first.id]);
   await unrelated();
   ok(await client.put('/storyboards/reorder', { episode_id: episodeId, ids: [first.id, second.id] }));
+  // Historical inherited rows can differ from the displayed master settings.
+  db.prepare('UPDATE storyboards SET duration=5, video_upscale_resolution=NULL WHERE id=?').run(second.id);
+  await stop(); await start(); client.defaults.baseURL = base;
+  const inherited = ok(await client.get(`/episodes/${episodeId}/generation-settings`));
+  assert.notEqual(inherited.storyboards.find(row => row.id === second.id).effective.duration, 5);
+  assert.equal(inherited.generation_state.find(row => row[0] === second.id)[3], 5);
+  assert.equal(db.prepare('SELECT duration FROM storyboards WHERE id=?').get(second.id).duration, 5, 'reading must preserve historical raw parameters');
+  const { mergeGenerationState } = await import(contractUrl);
+  const displayedBaseline = mergeGenerationState([], inherited);
+  const custom = ok(await client.patch(`/storyboards/${second.id}/generation-settings`, { scope: 'current', settings: { duration: 6 } }, { projectGenerationBaseline: displayedBaseline }));
+  const customBaseline = mergeGenerationState(displayedBaseline, custom);
+  const modelChanged = ok(await client.patch(`/storyboards/${second.id}/generation-settings`, { scope: 'current', settings: { duration: 7, video_model: 'isolated-test-video' } }, { projectGenerationBaseline: customBaseline }));
+  assert.equal(modelChanged.effective.video_model, 'isolated-test-video');
+  const staleGenerationBaseline = mergeGenerationState(customBaseline, modelChanged);
+  assert.equal((await raw(peer.token, 'PATCH', `/storyboards/${second.id}/generation-settings`, { scope: 'current', settings: { duration: 8 } })).status, 200);
+  const realConflict = await client.patch(`/storyboards/${second.id}/generation-settings`, { scope: 'current', settings: { duration: 9 } }, { projectGenerationBaseline: staleGenerationBaseline });
+  assert.equal(realConflict.status, 409);
+  assert.equal(realConflict.data.error.code, 'PROJECT_FIELD_CHANGED');
   await client.get(`/episodes/${episodeId}/generation-settings`);
+  ok(await client.delete(`/storyboards/${second.id}/generation-settings/overrides`));
   for (const duration of [10, 12, 8]) {
     await unrelated();
     ok(await client.patch(`/storyboards/${first.id}/generation-settings`, { scope: 'current', settings: { duration } }));

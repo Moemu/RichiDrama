@@ -25,6 +25,7 @@ export function advanceProjectEdit(baseline, changes, saved) {
 }
 
 export function mergeGenerationState(previous, contract) {
+  if (Array.isArray(contract.generation_state)) return structuredClone(contract.generation_state)
   const rows = contract.storyboards || (contract.effective ? [contract] : [])
   const updates = new Map(rows.filter(row => row.effective).map(row => [Number(row.id), [Number(row.id), row.effective.text_model || 'auto', row.effective.video_model || 'auto', row.effective.duration, row.effective.resolution, row.effective.aspect_ratio, row.effective.upscale_resolution ?? null, row.effective.target_fps ?? null, row.overrides || {}]]))
   return contract.storyboards ? rows.map(row => updates.get(Number(row.id))) : previous.map(row => updates.get(row[0]) || row)

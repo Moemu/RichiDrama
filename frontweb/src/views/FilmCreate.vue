@@ -276,7 +276,7 @@
             {{ pipelinePanelExpanded ? '收起配置 ▴' : '展开配置 ▾' }}
           </el-button>
           <template v-if="pipelinePanelExpanded">
-            <GenerationSettings :model-value="projectGenerationSettings" :max-duration="15" include-generation-quote @update:model-value="setProjectGenerationSettings" />
+            <GenerationSettings :model-value="projectGenerationSettings" :max-duration="15" include-generation-quote @update:model-value="updateProjectGenerationSettings" />
             <el-button :disabled="projectSession.enabled && !projectSession.canEdit" size="small" plain @click="applyProjectGenerationSettingsToStoryboards">应用到全部分镜</el-button>
             <el-select :disabled="projectSession.enabled && !projectSession.canEdit" v-model="scriptLanguage" placeholder="分镜语言" clearable style="width: 105px">
               <el-option label="中文" value="zh" />
@@ -1396,6 +1396,9 @@ function setProjectGenerationSettings(next = {}) {
   if (next.aspect_ratio) projectAspectRatio.value = next.aspect_ratio
   projectUpscaleResolution.value = next.upscale_resolution || null
   projectTargetFps.value = next.target_fps || null
+}
+function updateProjectGenerationSettings(next) {
+  setProjectGenerationSettings(next)
   saveProjectSettings(false)
 }
 
