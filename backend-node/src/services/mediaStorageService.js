@@ -180,9 +180,8 @@ function streamObjectByKey(cfg, localPath, req, res, options = {}) {
     const cleanup = () => {
       removeListener(req, 'aborted', onClientClose);
       removeListener(res, 'close', onClientClose);
-      removeListener(res, 'error', onClientError);
-      removeListener(upstream, 'error', onUpstreamError);
-      removeListener(upstreamRes, 'error', onUpstreamError);
+      // destroy() can emit errors after settlement. Keep the guarded error
+      // listeners for each stream's lifetime so cancellation cannot crash Node.
       removeListener(upstreamRes, 'aborted', onUpstreamAborted);
     };
     const settle = (result) => {
@@ -228,10 +227,9 @@ function streamObjectByKey(cfg, localPath, req, res, options = {}) {
 
     const handleUpstreamResponse = (response) => {
       upstreamRes = response;
-      response.once('error', onUpstreamError);
+      response.on('error', onUpstreamError);
       response.once('aborted', onUpstreamAborted);
       if (clientClosed) {
-        removeListener(response, 'error', onUpstreamError);
         removeListener(response, 'aborted', onUpstreamAborted);
         response.resume();
         response.destroy();

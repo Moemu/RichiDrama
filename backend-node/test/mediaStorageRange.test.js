@@ -161,3 +161,31 @@ test('cold OSS stream terminates the downstream when the provider body aborts', 
   ]);
   assert.notEqual(outcome, 'end');
 });
+
+test('cold OSS cancellation before response headers keeps the server alive', async (t) => {
+  let received;
+  const upstreamReceived = new Promise(resolve => { received = resolve; });
+  let closed;
+  const upstreamClosed = new Promise(resolve => { closed = resolve; });
+  const upstream = http.createServer((req, res) => {
+    res.once('close', closed);
+    received();
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  t.after(() => { upstream.closeAllConnections(); upstream.close(); });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lmd-cold-header-abort-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = express();
+  app.use('/static', staticHandler(cfg(`http://127.0.0.1:${upstream.address().port}`), root));
+  app.get('/health', (req, res) => res.json({ ok: true }));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const request = http.get(`${base}/static/videos/header-abort.mp4`);
+  request.on('error', () => {});
+  await upstreamReceived;
+  request.destroy();
+  await upstreamClosed;
+  assert.deepEqual(await (await fetch(`${base}/health`)).json(), { ok: true });
+});
