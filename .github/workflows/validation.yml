@@ -44,6 +44,9 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend-node
         run: npm ci --no-audit --no-fund
+      - name: Install frontend dependencies for HTTP integration tests
+        working-directory: frontweb
+        run: npm ci --no-audit --no-fund
       - name: Run backend tests
         working-directory: backend-node
         run: node --test test/*.test.js
