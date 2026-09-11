@@ -3,7 +3,7 @@ import * as Y from 'yjs'
 import request from '@/utils/request'
 import { createClientRequestId } from '@/utils/requestId'
 
-export const projectSession = reactive({ id: null, enabled: false, connected: false, canEdit: false, revision: 0, participants: [], pending: 0, error: '', drafts: [] })
+export const projectSession = reactive({ id: null, enabled: false, connected: false, canEdit: false, revision: 0, writeContractVersion: 0, participants: [], pending: 0, error: '', drafts: [] })
 let socket
 let reconnectTimer
 let refreshCallback
@@ -109,6 +109,7 @@ export async function openProjectSession(dramaId, onRefresh) {
   projectSession.enabled = state.permissions.collaboration_enabled
   projectSession.canEdit = state.permissions.can_edit
   projectSession.revision = state.revision
+  projectSession.writeContractVersion = state.write_contract_version || 0
   if (projectSession.enabled) {
     await request.post('/auth/session-cookie', {})
     connect()
@@ -119,6 +120,7 @@ export function closeProjectSession() {
   projectSession.id = null
   projectSession.enabled = false
   projectSession.connected = false
+  projectSession.writeContractVersion = 0
   projectSession.participants = []
   projectSession.drafts = []
   projectSession.error = ''

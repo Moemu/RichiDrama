@@ -1,13 +1,14 @@
 import { hasPendingProjectText, projectSession } from '@/composables/useProjectCollaboration'
 import { projectKind, projectSnapshot } from './projectSnapshots'
 import { createClientRequestId } from './requestId'
-import { projectFieldValue, refreshProjectEditBaseline } from './projectEditBaseline'
+import { projectFieldValue, equalProjectValue, buildProjectWriteContract } from './projectWriteContract'
 export { projectSnapshot } from './projectSnapshots'
 
-const equal = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+const equal = equalProjectValue
 
 export function installProjectRequestSync(request) {
-  request.interceptors.request.use(async config => {
+  request.interceptors.request.use(config => {
+    if (config.projectWritePrepared) return config
     if (!projectSession.enabled || !projectSession.id || /\/collaboration\/(text|state)$/.test(config.url || '')) return config
     const method = String(config.method || 'get').toLowerCase()
     if (['get', 'head', 'options'].includes(method)) return config
@@ -23,7 +24,6 @@ export function installProjectRequestSync(request) {
       if (!Number.isSafeInteger(revision)) throw new Error('请先刷新项目内容后再执行此操作')
       config.headers['X-Project-Revision'] ??= revision
     }
-    if (config.projectBaseline) useBaselineRevision()
     if (match?.[1] === 'dramas' && match[3] === '/outline' && hasPendingProjectText('dramas', Number(match[2]), 'description')) {
       config.data = { ...config.data }
       delete config.data.summary
@@ -43,16 +43,16 @@ export function installProjectRequestSync(request) {
         if (equal(document, baselineDocument)) delete next.omni_prompt_document
         else next.omni_prompt_document = document
       }
-      if (Object.keys(next).some(field => ['character_ids', 'characters', 'prop_ids', 'scene_id', 'omni_asset_ids', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id', 'workflow_groups'].includes(field))) useBaselineRevision()
       config.data = next
+    }
+    if (projectSession.writeContractVersion >= 1) {
+      const contract = buildProjectWriteContract(config, known, match)
+      if (contract) config.data = { ...config.data, _project_edit: contract }
+      else if (['put', 'patch', 'delete'].includes(method)) useBaselineRevision()
     } else {
       useBaselineRevision()
     }
-    if (config.headers['X-Project-Revision'] !== undefined) {
-      const episode = projectSnapshot('episodes', known?.episode_id)
-      const episodeBaseline = episode && { ...episode, storyboards: episode.storyboards?.map(row => projectSnapshot('storyboards', row.id) || row) }
-      await refreshProjectEditBaseline(request, config, known, match, projectSession.id, episodeBaseline)
-    }
+    config.projectWritePrepared = true
     return config
   })
 }

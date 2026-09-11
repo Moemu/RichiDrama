@@ -27,7 +27,6 @@ export const dramaAPI = {
   saveEpisodes(id, episodes) {
     const baseline = projectSnapshot('dramas', Number(id))
     if (projectSession.enabled && projectSession.id === Number(id) && baseline) {
-      if (!projectSession.connected) return Promise.reject(new Error('连接已断开，请等待重连后保存'))
       const updates = []; const creates = []; const retained = new Set()
       for (const episode of episodes) {
         const existing = (baseline.episodes || []).find(item => episode.id ? item.id === episode.id : item.episode_number === episode.episode_number)

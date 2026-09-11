@@ -117,7 +117,7 @@ module.exports = function projectRoutes(db, cfg, log) {
   router.post('/assets', handle(req => require('../services/projectAssetService').join(db, cfg, log, req.params.id, req.body.asset_id, req.auth.id)));
   router.get('/state', handle(req => {
     const permissions = access.requireAccess(db, req.params.id, req.auth.id);
-    return { permissions, revision: db.prepare('SELECT revision FROM project_collaboration WHERE drama_id=?').get(Number(req.params.id))?.revision || 0 };
+    return { permissions, write_contract_version: 1, revision: db.prepare('SELECT revision FROM project_collaboration WHERE drama_id=?').get(Number(req.params.id))?.revision || 0 };
   }));
   router.get('/results', handle(req => {
     access.requireAccess(db, req.params.id, req.auth.id);

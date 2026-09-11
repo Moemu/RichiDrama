@@ -567,7 +567,7 @@ function beginCanvasEdit() {
   canvasEditGeneration++
   if (!layoutDirty.value) {
     canvasBaseline = drama.value?.permissions?.collaboration_enabled
-      ? { projectBaseline: { __projectId: dramaId.value, __projectRevision: drama.value.revision } }
+      ? { projectBaseline: { __projectId: dramaId.value, __projectRevision: drama.value.revision, metadata: JSON.parse(JSON.stringify(drama.value.metadata || {})) } }
       : undefined
   }
   layoutDirty.value = true
@@ -647,7 +647,7 @@ async function persistCanvasState({ layoutOnly = false, groupsOnly = false } = {
     layoutSaveState.value = 'saved'
     layoutDirty.value = editedDuringSave
     canvasBaseline = editedDuringSave && canvasBaseline
-      ? { projectBaseline: { ...canvasBaseline.projectBaseline, __projectRevision: updated.revision } }
+      ? { projectBaseline: { ...canvasBaseline.projectBaseline, __projectRevision: updated.revision, metadata: JSON.parse(JSON.stringify(updated.metadata || {})) } }
       : undefined
     if (editedDuringSave) {
       if (saveTimer) clearTimeout(saveTimer)

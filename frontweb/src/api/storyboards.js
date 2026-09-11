@@ -82,8 +82,8 @@ export const storyboardsAPI = {
   updateEpisodeGenerationSettings(episodeId, data) {
     return request.patch(`/episodes/${episodeId}/generation-settings`, data)
   },
-  updateGenerationSettings(id, data) {
-    return request.patch(`/storyboards/${id}/generation-settings`, data)
+  updateGenerationSettings(id, data, config) {
+    return request.patch(`/storyboards/${id}/generation-settings`, data, config)
   },
   clearGenerationSettingsOverrides(id) {
     return request.delete(`/storyboards/${id}/generation-settings/overrides`)

@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const response = require('../response');
+const edits = require('../services/projectEditService');
 
 module.exports = function projectOperations(db) {
   return (req, res, next) => {
@@ -20,19 +21,47 @@ module.exports = function projectOperations(db) {
         return res.status(saved.status).json(saved.body);
       }
     }
-    const revision = db.prepare('SELECT revision FROM project_collaboration WHERE drama_id=?').get(dramaId)?.revision;
-    if (version !== undefined && Number(version) !== revision) return response.error(res, 409, 'PROJECT_CHANGED', '项目内容已更新，请检查最新内容后重试');
-    if (operationId) {
-      const unresolved = { status: 409, body: { success: false, error: { code: 'OPERATION_PENDING', message: '此操作已受理，结果尚未确认。请刷新查看，勿重复提交生成。' } } };
-      db.prepare('INSERT INTO project_operations (drama_id,operation_id,actor_id,request_hash,response_json,created_at) VALUES (?,?,?,?,?,?)')
-        .run(dramaId, operationId, req.auth.id, hash, JSON.stringify(unresolved), new Date().toISOString());
-      const json = res.json.bind(res);
-      res.json = body => {
-        db.prepare('UPDATE project_operations SET response_json=? WHERE drama_id=? AND operation_id=?')
-          .run(JSON.stringify({ status: res.statusCode, body }), dramaId, operationId);
-        return json(body);
-      };
+    const contract = req.body?._project_edit;
+    if (contract !== undefined && !edits.supports(req)) return response.badRequest(res, '此操作不支持字段编辑校验');
+    const json = res.json.bind(res);
+    let pendingResponse;
+    const apply = () => {
+      if (contract !== undefined) {
+        edits.validate(db, dramaId, contract);
+        const { _project_edit, ...body } = req.body;
+        req.body = body;
+      } else {
+        const revision = db.prepare('SELECT revision FROM project_collaboration WHERE drama_id=?').get(dramaId)?.revision;
+        if (version !== undefined && Number(version) !== revision) return response.error(res, 409, 'PROJECT_CHANGED', '项目内容已更新，请检查最新内容后重试');
+      }
+      if (operationId) {
+        const unresolved = { status: 409, body: { success: false, error: { code: 'OPERATION_PENDING', message: '此操作已受理，结果尚未确认。请刷新查看，勿重复提交生成。' } } };
+        db.prepare('INSERT INTO project_operations (drama_id,operation_id,actor_id,request_hash,response_json,created_at) VALUES (?,?,?,?,?,?)')
+          .run(dramaId, operationId, req.auth.id, hash, JSON.stringify(unresolved), new Date().toISOString());
+      }
+      if (operationId || contract !== undefined) {
+        res.json = body => {
+          if (contract !== undefined && res.statusCode < 400 && body?.success !== false) body = { ...body, project_edit: edits.acknowledgement(db, dramaId, contract) };
+          if (operationId) {
+            db.prepare('UPDATE project_operations SET response_json=? WHERE drama_id=? AND operation_id=?')
+              .run(JSON.stringify({ status: res.statusCode, body }), dramaId, operationId);
+          }
+          if (contract !== undefined) { pendingResponse = body; return res; }
+          return json(body);
+        };
+      }
+      next();
+    };
+    if (contract === undefined) return apply();
+    try {
+      db.transaction(() => {
+        apply();
+        if (pendingResponse === undefined) throw new Error('Project edit handler must complete synchronously');
+      }).immediate();
+      return json(pendingResponse);
+    } catch (error) {
+      res.json = json;
+      return response.error(res, error.status || 500, error.code || 'PROJECT_EDIT_FAILED', error.status ? error.message : '项目保存失败，请重试', error.details);
     }
-    next();
   };
 };

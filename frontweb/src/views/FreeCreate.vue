@@ -111,7 +111,7 @@
         <div v-if="chosenImageAssets.length" class="identity-options">
           <div class="identity-heading"><b>素材声明</b><small>仅勾选含真人的素材。</small></div>
           <div v-for="asset in chosenImageAssets" :key="asset.id" class="identity-row">
-            <el-checkbox :model-value="asset.requires_sd2_identity" :disabled="(projectSession.enabled && !projectSession.canEdit) || (reproductionMode)" @change="setRealPerson(asset, $event)">{{ assetDisplayName(asset) }}</el-checkbox>
+            <el-checkbox :model-value="asset.requires_sd2_identity" :disabled="(projectSession.enabled && !projectSession.canEdit) || reproductionMode || realPersonSavingIds.has(asset.id)" @change="setRealPerson(asset, $event)">{{ assetDisplayName(asset) }}</el-checkbox>
             <small v-if="asset.requires_sd2_identity" class="identity-help">系统将自动完成真人素材准备。</small>
           </div>
         </div>
@@ -204,6 +204,8 @@
 
 <script setup>
 import { useProjectTextModel, projectSession } from '@/composables/useProjectCollaboration'
+import { advanceProjectEdit, mergeGenerationState } from '@/utils/projectWriteContract'
+import { projectSnapshot } from '@/utils/projectSnapshots'
 import ProjectCollaborationBar from '@/components/ProjectCollaborationBar.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -246,6 +248,7 @@ const selected = ref(new Set()), selectedOrder = ref([]), selectedOrderSet = com
 const promptDocument = ref({ text: '', refs: [] })
 const keepOriginalAudio = ref(false), audioVolume = ref(1), audioFadeSeconds = ref(0), creating = ref(false), certifyingId = ref(null), extractingPosition = ref(''), savedResultJobId = ref(null), requestPreviewOpen = ref(false), polishingPrompt = ref(false), polishSuggestion = ref(''), stagePhase = ref(''), fileInput = ref(null), uploadLimits = ref(null)
 const retryingJobIds = reactive(new Set())
+const realPersonSavingIds = reactive(new Set())
 const draggedShotId = ref(null), draggedAssetId = ref(null), loadingShot = ref(false)
 const collaborativePrompt = useProjectTextModel(() => isProjectMode.value && !loadingShot.value ? { kind: 'storyboards', id: activeShotId.value, field: 'universal_segment_text' } : null, prompt)
 const generationModes = ref({}), masterShotId = ref(null), projectGenerationDirty = ref(false)
@@ -263,6 +266,9 @@ const reproductionMode = ref(null)
 let saveTimer = null
 let promptRevision = 0
 let projectGenerationRevision = 0
+let activeShotEditBaseline
+let displayedGenerationState = []
+let activeGenerationEditState = []
 let shotSelectionRevision = 0
 const enqueueShotSave = createShotSaveQueue()
 let restoredDraftNoticeShown = false
@@ -714,6 +720,7 @@ function projectShot(storyboard, video = null) {
   const rawStatus = video?.status || storyboard.status
   return {
     ...rest,
+    editBaseline: { ...JSON.parse(JSON.stringify(storyboard)), __projectId: projectDramaId.value, __projectRevision: projectSnapshot('storyboards', storyboard.id)?.__projectRevision },
     video_url: videoUrl,
     poster_local_path: video?.poster_local_path || null,
     status: videoUrl && ['pending', 'draft', '', null, undefined].includes(rawStatus) ? 'completed' : rawStatus,
@@ -731,9 +738,10 @@ function projectShot(storyboard, video = null) {
 
 function applyGenerationContract(contract) {
   if (!contract) return
-  masterShotId.value = contract.master_storyboard_id || contract.storyboards?.[0]?.id || null
+  displayedGenerationState = mergeGenerationState(displayedGenerationState, contract)
+  masterShotId.value = contract.master_storyboard_id || contract.storyboards?.[0]?.id || masterShotId.value
   const modes = { ...generationModes.value }
-  for (const item of contract.storyboards || []) {
+  for (const item of contract.storyboards || (contract.effective ? [contract] : [])) {
     const shot = shots.value.find((candidate) => Number(candidate.id) === Number(item.id))
     modes[item.id] = item.mode || (Number(item.id) === Number(masterShotId.value) ? 'master' : 'inherited')
     if (shot && item.effective) shot.settings = {
@@ -1023,7 +1031,7 @@ async function loadFreeScopedAssets() {
   return { items: [...(global.items || []), ...(project.items || [])] }
 }
 
-function loadShot(shot) { shotSelectionRevision += 1; loadingShot.value = true; projectGenerationDirty.value = false; activeShotId.value = shot.id; shotHistory.value = []; shotHistoryShotId.value = shot.id; selectedHistoryJobId.value = null; prompt.value = shot.prompt ?? ''; promptDocument.value = shot.prompt_document || promptDocumentFor(prompt.value); const settings = shot.settings || {}; model.value = settings.model === 'auto' ? '' : (settings.model || ''); creationMode.value = settings.creation_mode || 'multi_reference'; aspectRatio.value = settings.aspect_ratio || '16:9'; duration.value = normalizeDuration(settings.duration || 5); resolution.value = settings.resolution || '720p'; upscaleResolution.value = settings.upscale_resolution || null; targetFps.value = settings.target_fps || null; audioStrategy.value = settings.audio_strategy || 'reference_only'; keepOriginalAudio.value = !!settings.keep_original_audio; audioVolume.value = settings.audio_volume ?? 1; audioFadeSeconds.value = settings.audio_fade_seconds ?? 0; const materialIds = (shot.assets || []).map((item) => Number(item.asset_id)).filter((id) => assets.value.some((asset) => asset.id === id)); const firstFrameId = Number(shot.omni_first_frame_asset_id) || null; const lastFrameId = Number(shot.omni_last_frame_asset_id) || null; selectedOrder.value = [...new Set(materialIds)]; (shot.assets || []).forEach((saved) => { const asset = assets.value.find((item) => item.id === Number(saved.asset_id)); if (asset) asset.usage = Number(saved.asset_id) === firstFrameId ? 'first_frame' : Number(saved.asset_id) === lastFrameId ? 'last_frame' : saved.usage || asset.usage }); restorePromptDraftForShot(shot); setPromptReferences(promptDocument.value); loadShotHistory(shot); queueMicrotask(() => { loadingShot.value = false; projectGenerationDirty.value = false }) }
+function loadShot(shot) { activeShotEditBaseline = shot.editBaseline ? JSON.parse(JSON.stringify(shot.editBaseline)) : undefined; activeGenerationEditState = JSON.parse(JSON.stringify(displayedGenerationState)); shotSelectionRevision += 1; loadingShot.value = true; projectGenerationDirty.value = false; activeShotId.value = shot.id; shotHistory.value = []; shotHistoryShotId.value = shot.id; selectedHistoryJobId.value = null; prompt.value = shot.prompt ?? ''; promptDocument.value = shot.prompt_document || promptDocumentFor(prompt.value); const settings = shot.settings || {}; model.value = settings.model === 'auto' ? '' : (settings.model || ''); creationMode.value = settings.creation_mode || 'multi_reference'; aspectRatio.value = settings.aspect_ratio || '16:9'; duration.value = normalizeDuration(settings.duration || 5); resolution.value = settings.resolution || '720p'; upscaleResolution.value = settings.upscale_resolution || null; targetFps.value = settings.target_fps || null; audioStrategy.value = settings.audio_strategy || 'reference_only'; keepOriginalAudio.value = !!settings.keep_original_audio; audioVolume.value = settings.audio_volume ?? 1; audioFadeSeconds.value = settings.audio_fade_seconds ?? 0; const materialIds = (shot.assets || []).map((item) => Number(item.asset_id)).filter((id) => assets.value.some((asset) => asset.id === id)); const firstFrameId = Number(shot.omni_first_frame_asset_id) || null; const lastFrameId = Number(shot.omni_last_frame_asset_id) || null; selectedOrder.value = [...new Set(materialIds)]; (shot.assets || []).forEach((saved) => { const asset = assets.value.find((item) => item.id === Number(saved.asset_id)); if (asset) asset.usage = Number(saved.asset_id) === firstFrameId ? 'first_frame' : Number(saved.asset_id) === lastFrameId ? 'last_frame' : saved.usage || asset.usage }); restorePromptDraftForShot(shot); setPromptReferences(promptDocument.value); loadShotHistory(shot); queueMicrotask(() => { loadingShot.value = false; projectGenerationDirty.value = false }) }
 async function loadShotHistory(shot) {
   if (!shot?.id) return
   const shotId = Number(shot.id)
@@ -1076,26 +1084,30 @@ async function saveCurrentShot(showMessage = true) {
   const savingProjectMode = isProjectMode.value
   const savingGenerationDirty = projectGenerationDirty.value
   const savingGenerationRevision = projectGenerationRevision
-  const savingEpisodeId = projectEpisodeId.value
+  const savingEditBaseline = activeShotEditBaseline
+  const savingGenerationBaseline = activeGenerationEditState
   return enqueueShotSave(savingShotId, async () => {
     const target = findShotById(shots.value, savingShotId)
     if (!target) return
     if (savingProjectMode) {
       if (savingGenerationDirty) {
-        const changed = await storyboardsAPI.updateGenerationSettings(savingShotId, { scope: 'current', settings: { video_model: settings.model || 'auto', duration: settings.duration, resolution: settings.resolution, aspect_ratio: settings.aspect_ratio, upscale_resolution: settings.upscale_resolution, target_fps: settings.target_fps } })
-        applyGenerationContract(changed.storyboards ? changed : await storyboardsAPI.getEpisodeGenerationSettings(savingEpisodeId))
+        const changed = await storyboardsAPI.updateGenerationSettings(savingShotId, { scope: 'current', settings: { video_model: settings.model || 'auto', duration: settings.duration, resolution: settings.resolution, aspect_ratio: settings.aspect_ratio, upscale_resolution: settings.upscale_resolution, target_fps: settings.target_fps } }, { projectGenerationBaseline: savingGenerationBaseline })
+        savingGenerationBaseline.splice(0, savingGenerationBaseline.length, ...mergeGenerationState(savingGenerationBaseline, changed))
+        applyGenerationContract(changed)
         if (savingGenerationRevision === projectGenerationRevision && Number(activeShotId.value) === Number(savingShotId)) projectGenerationDirty.value = false
       }
       const ids = savingAssets.map((asset) => asset.asset_id)
       const usage = Object.fromEntries(savingAssets.map((asset) => [asset.asset_id, asset.usage]))
-      const updated = await storyboardsAPI.update(savingShotId, {
+      const changes = {
         expected_updated_at: target.updated_at,
         universal_segment_text: savingPrompt, omni_prompt_document: savingPromptDocument, omni_asset_ids: ids, omni_asset_usage_json: usage,
         omni_creation_mode: settings.creation_mode, omni_asset_send_policy: settings.asset_selection_policy, audio_strategy: settings.audio_strategy,
         keep_original_audio: settings.keep_original_audio, audio_volume: settings.audio_volume, audio_fade_seconds: settings.audio_fade_seconds,
         omni_first_frame_asset_id: savingAssets.find((asset) => asset.usage === 'first_frame')?.asset_id || null,
         omni_last_frame_asset_id: savingAssets.find((asset) => asset.usage === 'last_frame')?.asset_id || null,
-      })
+      }
+      const updated = await storyboardsAPI.update(savingShotId, changes, savingEditBaseline ? { projectBaseline: savingEditBaseline } : undefined)
+      advanceProjectEdit(savingEditBaseline, changes, updated)
       mergeSavedShot(shots.value, savingShotId, projectShot(updated), { preserveMedia: true })
       if (savingAssets.some((asset, index) => Number(updated.omni_asset_ids?.[index]) !== asset.asset_id) && Number(activeShotId.value) === Number(savingShotId)) {
         const refreshedAssets = await loadProjectScopedAssets()
@@ -1311,18 +1323,27 @@ async function refreshCertificationUntilSettled(asset) {
   }
 }
 async function setRealPerson(asset, value) {
+  if (realPersonSavingIds.has(asset.id)) return
+  const previous = !!asset.requires_sd2_identity
+  const config = projectSession.enabled && Number(asset.drama_id) === projectSession.id
+    ? { projectBaseline: { id: asset.id, __projectId: asset.drama_id, requires_sd2_identity: previous } } : undefined
+  realPersonSavingIds.add(asset.id)
   asset.requires_sd2_identity = !!value
+  let declarationSaved = false
   try {
-    const updated = await omniVideoAPI.updateAsset(asset.id, { requires_sd2_identity: !!value })
+    const updated = await omniVideoAPI.updateAsset(asset.id, { requires_sd2_identity: !!value }, config)
     Object.assign(asset, updated)
+    declarationSaved = true
     if (value && asset.type === 'image') {
       const out = await omniVideoAPI.certifyAsset(asset.id)
       if (out?.seedance2_asset) asset.seedance2_asset = out.seedance2_asset
       if (sd2Pending(asset)) void refreshCertificationUntilSettled(asset).catch(showCertificationError)
     }
   } catch (error) {
-    asset.requires_sd2_identity = !value
-    ElMessage.error(error.message || '真人声明保存或认证失败')
+    if (!declarationSaved) asset.requires_sd2_identity = previous
+    ElMessage.error(declarationSaved ? `声明已保存，认证失败：${error.message || '请稍后重试'}` : error.message || '真人声明保存失败')
+  } finally {
+    realPersonSavingIds.delete(asset.id)
   }
 }
 function onUsageChange(asset) { void asset; scheduleSave() }
