@@ -115,28 +115,9 @@ export function useCanvasCrud(deps) {
     const dramaId = drama.value?.id
     if (!dramaId) throw new Error('项目未加载')
 
-    const list = drama.value.episodes || []
-    const nextNum = list.length > 0
-      ? Math.max(...list.map((ep) => Number(ep.episode_number) || 0), 0) + 1
-      : 1
-    const title = (form.title || '').trim() || `第${nextNum}集`
-
-    const updated = list.map((ep, i) => ({
-      episode_number: ep.episode_number ?? i + 1,
-      title: ep.title || `第${ep.episode_number ?? i + 1}集`,
-      script_content: ep.script_content || '',
-      description: ep.description ?? null,
-      duration: ep.duration ?? 0,
-    }))
-    updated.push({
-      episode_number: nextNum,
-      title,
-      script_content: '',
-      description: null,
-      duration: 0,
-    })
-
-    await dramaAPI.saveEpisodes(dramaId, updated)
+    const title = (form.title || '').trim()
+    const result = await dramaAPI.appendEpisodes(dramaId, [{ title, script_content: '' }])
+    const nextNum = result.episodes[0].episode_number
     await refreshCanvas()
 
     const newEp = (drama.value?.episodes || []).find((ep) => Number(ep.episode_number) === nextNum)
@@ -147,7 +128,7 @@ export function useCanvasCrud(deps) {
       await refreshCanvas()
     }
     pendingFlowPosition.value = null
-    ElMessage.success(`已添加${title}`)
+    ElMessage.success(`已添加${title || `第${nextNum}集`}`)
   }
 
   async function createCharacter(form) {

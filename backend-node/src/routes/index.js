@@ -258,6 +258,12 @@ function setupRouter(cfg, db, log) {
   r.get('/dramas/:id/characters', drama.getCharacters);
   r.put('/dramas/:id/characters', drama.saveCharacters);
   r.put('/dramas/:id/episodes', drama.saveEpisodes);
+  r.put('/dramas/:id/episode-edits', (req, res) => {
+    if (!['append', 'update', 'delete'].includes(req.body?.mode)) {
+      return response.badRequest(res, '必须指定分集操作');
+    }
+    return drama.saveEpisodes(req, res);
+  });
   r.put('/dramas/:id/progress', drama.saveProgress);
   r.put('/dramas/:id/canvas-layout', drama.saveCanvasLayout);
   r.get('/dramas/:id/props', drama.listProps);
@@ -297,10 +303,14 @@ function setupRouter(cfg, db, log) {
   });
 
   // 故事生成：带 drama_id 时异步生成并入库；否则同步返回 episodes（兼容旧调用）
-  r.post('/generation/story', async (req, res) => {
+  r.post(['/generation/story', '/generation/story/append'], async (req, res) => {
     const storyGenerationService = require('../services/storyGenerationService');
     try {
       const body = req.body || {};
+      if (req.path === '/generation/story/append') {
+        if (!body.drama_id) return response.badRequest(res, 'drama_id 必填');
+        body.episode_save_mode = 'append';
+      }
       if (body.drama_id) {
         const dramaId = Number(body.drama_id);
         const ownsDrama = Number.isInteger(dramaId) && dramaId > 0 && db.prepare(
@@ -323,6 +333,7 @@ function setupRouter(cfg, db, log) {
       response.success(res, result);
     } catch (err) {
       log.error('generation/story', { error: err.message });
+      if (err.status === 400) return response.badRequest(res, err.message);
       if (err.message && (err.message.includes('未配置') || err.message.includes('必填') || err.message.includes('不存在'))) {
         return response.badRequest(res, err.message);
       }

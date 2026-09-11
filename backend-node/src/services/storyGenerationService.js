@@ -111,6 +111,7 @@ async function processStoryGeneration(db, log, taskId, req) {
     taskService.updateTaskStatus(db, taskId, 'processing', 75, '正在保存剧本...');
 
     const saved = dramaService.saveEpisodes(db, log, dramaId, {
+      ...(req.episode_save_mode === 'append' ? { mode: 'append' } : {}),
       episodes: episodes.map((ep, i) => ({
         episode_number: ep.episode ?? i + 1,
         title: ep.title || `第${ep.episode ?? i + 1}集`,
@@ -135,6 +136,7 @@ async function processStoryGeneration(db, log, taskId, req) {
     taskService.updateTaskResult(db, taskId, {
       drama_id: dramaId,
       episode_count: episodes.length,
+      ...(saved.episodes ? { episodes: saved.episodes } : {}),
     });
     log.info('Story generation completed and saved', { task_id: taskId, drama_id: dramaId, episode_count: episodes.length });
   } catch (err) {
@@ -144,6 +146,9 @@ async function processStoryGeneration(db, log, taskId, req) {
 }
 
 function startStoryGeneration(db, log, req) {
+  if (req.episode_save_mode != null && req.episode_save_mode !== 'append') {
+    throw Object.assign(new Error('不支持的分集保存方式'), { status: 400 });
+  }
   const dramaId = String(req.drama_id || '');
   if (!dramaId) throw new Error('drama_id 必填');
   if (!dramaService.getDramaById(db, Number(dramaId))) {

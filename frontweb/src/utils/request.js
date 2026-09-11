@@ -123,7 +123,7 @@ request.interceptors.response.use(
     // 413 通常由 nginx 反代层返回（HTML 响应体，非 JSON），需单独给出可读提示
     const backendMsg = error.response?.data?.error?.message
     const msg = status >= 500 ? (ERROR_MESSAGES[status] || ERROR_MESSAGES[500]) : (backendMsg || ERROR_MESSAGES[status] || error.message || '网络错误')
-    ElMessage.error(msg)
+    if (!error.config?.errorHandledLocally) ElMessage.error(msg)
     // 将真实错误信息写回 message，使组件 catch 块可直接用 e.message 获取可读内容
     error.message = msg
     return Promise.reject(error)
