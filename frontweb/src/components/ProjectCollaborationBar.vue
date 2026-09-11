@@ -15,7 +15,7 @@ import { computed, onBeforeUnmount, watch } from 'vue'
 import ProjectSuggestions from './ProjectSuggestions.vue'
 import { closeProjectSession, openProjectSession, projectSession, retryPendingProjectText } from '@/composables/useProjectCollaboration'
 const props = defineProps({ dramaId: { type: [Number, String], required: true } })
-const emit = defineEmits(['refresh'])
+const emit = defineEmits(['refresh', 'refresh-workbench'])
 function editingLabel(location) {
   if (!location) return ''
   const [kind, id, field] = location.split(':')
@@ -25,14 +25,15 @@ function editingLabel(location) {
 }
 const names = computed(() => [...new Map(projectSession.participants.map(person => [person.id, person])).values()].map(person => person.name + editingLabel(person.editing)).join('、'))
 let deferred
-const refresh = () => {
+const refreshPage = () => {
   clearTimeout(deferred)
   if (document.activeElement?.matches('input,textarea,[contenteditable="true"]') || document.querySelector('.el-dialog[aria-modal="true"]')) {
-    deferred = setTimeout(refresh, 1000)
+    deferred = setTimeout(refreshPage, 1000)
     return
   }
   emit('refresh')
 }
+const refresh = () => { emit('refresh-workbench'); refreshPage() }
 watch(() => props.dramaId, async id => {
   if (!id) return
   try { await openProjectSession(id, refresh) }

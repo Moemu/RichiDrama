@@ -254,6 +254,7 @@ export function useProjectTextModel(targetGetter, model) {
   onScopeDispose(() => { version++; binding?.dispose(); stopTarget(); stopModel() })
   return {
     ready,
+    get applyingRemote() { return remote },
     compositionStart() { composing = true; binding?.compositionStart() },
     compositionEnd() { composing = false; binding?.compositionEnd(model.value || '') },
   }

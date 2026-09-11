@@ -47,7 +47,7 @@ test('维护者工作流保留一键入口、缺图报价和分镜实时刷新',
   assert.match(film, /每段\(秒\)/)
   assert.match(film, /\.storyboard-stage-active \.workflow-shell\{[^}]*overflow:clip!important/)
   assert.match(film, /freeCreateRef\.value/)
-  assert.match(freeCreate, /defineExpose\(\{ refreshProjectShots \}\)/)
+  assert.match(freeCreate, /defineExpose\(\{ refreshProjectShots, refreshCollaboration \}\)/)
   assert.match(characters, /characterAPI\.generateImage\(char\.id, model \|\| undefined/)
   assert.match(scenes, /model: model \|\| undefined/)
   assert.match(props, /propAPI\.generateImage\(prop\.id, model \|\| undefined/)
@@ -175,7 +175,7 @@ test('提示词富文本编辑器优先处理滚轮，不被工作台外层取�
   const source = await readSource('../src/views/FreeCreate.vue')
 
   assert.match(source, /textarea\.el-textarea__inner, \.prompt-rich-editor/)
-  assert.match(source, /promptEditor\.scrollHeight <= promptEditor\.clientHeight/)
+  assert.match(source, /panel\.scrollHeight <= panel\.clientHeight/)
 })
 
 test('提示词引用使用稳定素材别名并展示更清晰的缩略图', async () => {

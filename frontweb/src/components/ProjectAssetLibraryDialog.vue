@@ -1,5 +1,5 @@
 <template>
-  <el-dialog :model-value="modelValue" :title="title" width="760px" append-to-body @update:model-value="$emit('update:modelValue', $event)">
+  <el-dialog :model-value="modelValue" :title="title" width="min(760px, calc(100vw - 24px))" append-to-body @update:model-value="$emit('update:modelValue', $event)">
     <div class="project-asset-library-toolbar">
       <el-input :model-value="keyword" clearable placeholder="搜索图片、视频或音频素材" aria-label="搜索素材" @update:model-value="$emit('update:keyword', $event)" />
       <slot name="toolbar" />

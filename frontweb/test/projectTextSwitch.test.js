@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { effectScope, ref } from 'vue'
+import { effectScope, ref, watch } from 'vue'
 import * as Y from 'yjs'
 import { browserModuleUrl, moduleSourceUrl } from './helpers/browserModule.js'
 
@@ -32,6 +32,8 @@ test('switching shots never writes loaded text into the previous collaborative d
   })
   const selected = ref(1), prompt = ref('镜头1原文'), loading = ref(false)
   const editor = scope.run(() => collaboration.useProjectTextModel(() => loading.value ? null : target(selected.value), prompt))
+  const changes = []
+  scope.run(() => watch(prompt, value => changes.push({ value, remote: editor.applyingRemote }), { flush: 'sync' }))
   await settle()
   assert.equal(editor.ready.value, true)
   selected.value = 2
@@ -62,6 +64,8 @@ test('switching shots never writes loaded text into the previous collaborative d
   assert.equal(prompt.value, '镜头2原文', 'reloading the same shot must not publish its stale snapshot')
   assert.equal(collaboration.hasUnsavedProjectText(), false)
   prompt.value = '镜头2独立修改'
+  assert.equal(changes.at(-1).remote, false)
+  assert.ok(changes.some(change => change.value === '镜头2原文' && change.remote), 'remote hydration must be distinguishable from a local edit')
   for (const id of [1, 2, 3]) {
     let actual
     const binding = await collaboration.bindProjectText(target(id), value => { actual = value })

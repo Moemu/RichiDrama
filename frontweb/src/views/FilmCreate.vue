@@ -50,7 +50,7 @@
     <!-- 左侧固定侧边栏 -->
 
     <main class="main">
-      <ProjectCollaborationBar v-if="dramaId" :drama-id="dramaId" @refresh="loadDrama" />
+      <ProjectCollaborationBar v-if="dramaId" :drama-id="dramaId" @refresh="loadDrama" @refresh-workbench="freeCreateRef?.refreshCollaboration()" />
       <section class="workflow-shell" aria-label="短剧制作工作流">
         <div class="workflow-head">
           <div>

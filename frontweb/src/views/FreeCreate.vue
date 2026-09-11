@@ -1,6 +1,6 @@
 <template>
   <section class="omni-page" :class="{ 'project-storyboard-page': isProjectMode, embedded: embedded, 'is-reproduction': reproductionMode }" @wheel.capture="containWorkbenchScroll">
-    <ProjectCollaborationBar v-if="isProjectMode && !embedded" :drama-id="projectDramaId" />
+    <ProjectCollaborationBar v-if="isProjectMode && !embedded" :drama-id="projectDramaId" @refresh-workbench="refreshCollaboration" />
     <header v-if="!embedded" class="topbar">
       <div class="topbar-left">
         <span class="topbar-brand" aria-hidden="true"><img src="/brand/richi-logo-color.png" alt="" /></span>
@@ -204,7 +204,7 @@
 
 <script setup>
 import { useProjectTextModel, projectSession } from '@/composables/useProjectCollaboration'
-import { advanceProjectEdit, mergeGenerationState } from '@/utils/projectWriteContract'
+import { advanceProjectEdit, mergeGenerationState, equalProjectValue } from '@/utils/projectWriteContract'
 import { projectSnapshot } from '@/utils/projectSnapshots'
 import { activeGenerationStatuses, pendingPreviewStatuses, localVideoUrl, normalizeJob, resolveShotPreviewJob, shotPreviewVideoUrl } from '@/utils/shotPreview'
 import ProjectCollaborationBar from '@/components/ProjectCollaborationBar.vue'
@@ -219,7 +219,7 @@ import { storyboardsAPI } from '@/api/storyboards'
 import { adminAPI } from '@/api/account'
 import OmniAssetPromptEditor from '@/components/OmniAssetPromptEditor.vue'
 import ProjectAssetLibraryDialog from '@/components/ProjectAssetLibraryDialog.vue'
-import { findAssetMentions, promptAliasForAsset } from '@/utils/assetMentions'
+import { findAssetMentions, promptAliasForAsset, resolveAssetReferences } from '@/utils/assetMentions'
 import GenerationSettings from '@/components/GenerationSettings.vue'
 import { clearPromptDraft, currentDraftUserId, readPromptDraft, shouldRestorePromptDraft, writePromptDraft } from '@/utils/promptDraft'
 import { createShotSaveQueue, findShotById, mergeSavedShot } from '@/utils/shotSaveCoordinator'
@@ -266,11 +266,16 @@ const shotHistory = ref([]), shotHistoryShotId = ref(null), selectedHistoryJobId
 const reproductionMode = ref(null)
 let saveTimer = null
 let promptRevision = 0
+let hasLocalShotChanges = false
 let projectGenerationRevision = 0
 let activeShotEditBaseline
 let displayedGenerationState = []
 let activeGenerationEditState = []
 let shotSelectionRevision = 0
+let applyingRemoteInputs = false
+let collaborationRefresh = null
+let collaborationRefreshPending = false
+let shotSavesPending = 0
 const enqueueShotSave = createShotSaveQueue()
 let restoredDraftNoticeShown = false
 let generationClockTimer = null
@@ -320,7 +325,8 @@ function currentPromptDraftPayload() {
 }
 
 function persistCurrentPromptDraft() {
-  if (loadingShot.value || reproductionMode.value || !currentShot.value) return
+  if (loadingShot.value || applyingRemoteInputs || reproductionMode.value || !currentShot.value) return
+  hasLocalShotChanges = true
   promptRevision += 1
   writePromptDraft(localStorage, currentPromptDraftIdentity(), currentPromptDraftPayload())
 }
@@ -383,9 +389,10 @@ const promptAssets = computed(() => {
   })
 })
 function promptAssetFor(asset) { return promptAssets.value.find((item) => Number(item.id) === Number(asset?.id)) || asset }
-const referencedAssets = computed(() => chosenAssets.value.filter((asset) => selected.value.has(asset.id)))
+const resolvedPromptDocument = computed(() => resolveAssetReferences(prompt.value, promptAssets.value, promptDocument.value))
+const referencedAssets = computed(() => chosenAssets.value.filter(asset => promptReferencedIds.value.has(Number(asset.id))))
 const chosenImageAssets = computed(() => chosenAssets.value.filter((asset) => asset.type === 'image'))
-const promptReferencedIds = computed(() => new Set((promptDocument.value?.refs || []).map((entry) => Number(entry.asset_id)).filter(Number.isInteger)))
+const promptReferencedIds = computed(() => new Set(resolvedPromptDocument.value.refs.map(entry => Number(entry.asset_id))))
 const requestAssets = computed(() => chosenAssets.value.filter((asset) => promptReferencedIds.value.has(Number(asset.id))
   || (creationMode.value === 'first_last_frame' && ['first_frame', 'last_frame'].includes(asset.usage))))
 const activeProjectAssetId = computed(() => isProjectMode.value ? projectDramaId.value : (assetScope.value === 'project' ? Number(freeProjectId.value) || null : null))
@@ -638,30 +645,12 @@ function historyPoster(job) {
 }
 function containWorkbenchScroll(event) {
   if (!event.deltaY || !(event.target instanceof Element)) return
-  // 提示词有两种实现：旧版 Element Plus textarea 和当前的
-  // contenteditable 富文本编辑器。两者都必须优先吃掉自己的滚轮，
-  // 不能误落到 shot-script 后被外层固定工作台取消。
-  const promptEditor = event.target.closest('textarea.el-textarea__inner, .prompt-rich-editor')
-  if (promptEditor) {
-    if (promptEditor.scrollHeight <= promptEditor.clientHeight) {
-      event.preventDefault()
-      return
-    }
-    const atTop = promptEditor.scrollTop <= 0
-    const atBottom = promptEditor.scrollTop + promptEditor.clientHeight >= promptEditor.scrollHeight - 1
-    if ((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) event.preventDefault()
-    return
-  }
-  const panel = event.target.closest('.shot-list, .creation-panel, .shot-script, .material-pool, .selected-assets, .frame-picker-grid')
-  // The player area itself must never become a wheel-scrolling surface. This
-  // also prevents a list at its boundary from chaining the page underneath it.
-  if (!panel || panel.scrollHeight <= panel.clientHeight) {
-    event.preventDefault()
-    return
-  }
-  const atTop = panel.scrollTop <= 0
-  const atBottom = panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 1
-  if ((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) event.preventDefault()
+  const selector = 'textarea.el-textarea__inner, .prompt-rich-editor, .shot-list, .creation-panel, .shot-script, .center-stage, .material-pool, .selected-assets, .frame-picker-grid'
+  let panel = event.target.closest(selector)
+  while (panel && panel.scrollHeight <= panel.clientHeight) panel = panel.parentElement?.closest(selector)
+  // Keep wheel movement in the nearest scrollable workbench panel.
+  event.preventDefault()
+  if (panel) panel.scrollTop += event.deltaY
 }
 function sd2Status(asset) { return String(asset?.seedance2_asset?.status || 'none').toLowerCase() }
 function sd2Pending(asset) { return ['queued', 'uploading', 'registering', 'processing', 'reconciling'].includes(sd2Status(asset)) }
@@ -797,6 +786,65 @@ async function refreshProjectShots(preferredId = activeShotId.value, { light = f
   const target = shots.value.find((shot) => Number(shot.id) === Number(preferredId)) || shots.value[0] || null
   if (target) loadShot(target)
   else activeShotId.value = null
+}
+async function refreshCollaboration() {
+  if (!isProjectMode.value || reproductionMode.value) return
+  collaborationRefreshPending = true
+  if (!workspaceReady.value || shotSavesPending) return
+  if (collaborationRefresh) return collaborationRefresh
+  collaborationRefresh = (async () => {
+    while (collaborationRefreshPending) {
+      collaborationRefreshPending = false
+      const shotId = activeShotId.value
+      const readBaseline = JSON.stringify(activeShotEditBaseline)
+      const result = await dramaAPI.getStoryboards(projectEpisodeId.value)
+      const media = await loadProjectScopedAssets()
+      if (pollLifecycleStopped) return
+      if (shotSavesPending) { collaborationRefreshPending = true; return }
+      if (Number(shotId) !== Number(activeShotId.value) || reproductionMode.value) continue
+      if (readBaseline !== JSON.stringify(activeShotEditBaseline)) { collaborationRefreshPending = true; continue }
+      const remote = (result?.storyboards || []).find(item => Number(item.id) === Number(shotId))
+      if (!remote || !activeShotEditBaseline) continue
+      applyingRemoteInputs = true
+      try {
+        const baseline = activeShotEditBaseline
+        const selectionFields = ['omni_asset_ids', 'omni_asset_usage', 'omni_first_frame_asset_id', 'omni_last_frame_asset_id']
+        const selectionUnchanged = equalProjectValue(
+          chosenAssets.value.map(asset => ({ asset_id: Number(asset.id), usage: asset.usage || 'reference' })),
+          projectShot(baseline).assets,
+        )
+        const previousAssets = new Map(assets.value.map(asset => [Number(asset.id), asset]))
+        assets.value = media.items.map(asset => ({ ...asset, usage: previousAssets.get(Number(asset.id))?.usage || 'reference' }))
+        if (!selectionUnchanged) {
+          for (const id of selectedOrder.value) {
+            if (!assets.value.some(asset => Number(asset.id) === Number(id)) && previousAssets.has(Number(id))) assets.value.push(previousAssets.get(Number(id)))
+          }
+        }
+        if (selectionUnchanged) {
+          const shot = projectShot(remote)
+          selectedOrder.value = shot.assets.map(asset => asset.asset_id)
+          for (const saved of shot.assets) {
+            const asset = assets.value.find(item => Number(item.id) === Number(saved.asset_id))
+            if (asset) asset.usage = saved.usage
+          }
+          for (const field of selectionFields) baseline[field] = structuredClone(remote[field] ?? null)
+        }
+        const { text: localText, ...localRefs } = promptDocument.value || {}
+        const { text: baselineText, ...baselineRefs } = projectShot(baseline).prompt_document || { refs: [] }
+        if (equalProjectValue(localRefs, baselineRefs)) {
+          setPromptReferences({ ...(remote.omni_prompt_document || { refs: [] }), text: prompt.value })
+          baseline.omni_prompt_document = structuredClone(remote.omni_prompt_document)
+        }
+        const index = shots.value.findIndex(shot => Number(shot.id) === Number(shotId))
+        if (index >= 0) shots.value[index] = { ...shots.value[index], ...projectShot(remote), video_url: shots.value[index].video_url }
+        await nextTick()
+      } finally { applyingRemoteInputs = false }
+    }
+  })().catch(error => { ElMessage.error(error?.message || '协作素材刷新失败') }).finally(() => {
+    collaborationRefresh = null
+    if (collaborationRefreshPending && !shotSavesPending && !pollLifecycleStopped) void refreshCollaboration()
+  })
+  return collaborationRefresh
 }
 async function ensureProjectResourceAssets(project, mediaItems) {
   const all = (mediaItems || []).filter((asset) => asset && Number.isFinite(Number(asset.id)))
@@ -1012,7 +1060,7 @@ async function loadFreeScopedAssets() {
   return { items: [...(global.items || []), ...(project.items || [])] }
 }
 
-function loadShot(shot) { activeShotEditBaseline = shot.editBaseline ? JSON.parse(JSON.stringify(shot.editBaseline)) : undefined; activeGenerationEditState = JSON.parse(JSON.stringify(displayedGenerationState)); shotSelectionRevision += 1; loadingShot.value = true; projectGenerationDirty.value = false; activeShotId.value = shot.id; shotHistory.value = []; shotHistoryShotId.value = shot.id; selectedHistoryJobId.value = null; prompt.value = shot.prompt ?? ''; promptDocument.value = shot.prompt_document || promptDocumentFor(prompt.value); const settings = shot.settings || {}; model.value = settings.model === 'auto' ? '' : (settings.model || ''); creationMode.value = settings.creation_mode || 'multi_reference'; aspectRatio.value = settings.aspect_ratio || '16:9'; duration.value = normalizeDuration(settings.duration || 5); resolution.value = settings.resolution || '720p'; upscaleResolution.value = settings.upscale_resolution || null; targetFps.value = settings.target_fps || null; audioStrategy.value = settings.audio_strategy || 'reference_only'; keepOriginalAudio.value = !!settings.keep_original_audio; audioVolume.value = settings.audio_volume ?? 1; audioFadeSeconds.value = settings.audio_fade_seconds ?? 0; const materialIds = (shot.assets || []).map((item) => Number(item.asset_id)).filter((id) => assets.value.some((asset) => asset.id === id)); const firstFrameId = Number(shot.omni_first_frame_asset_id) || null; const lastFrameId = Number(shot.omni_last_frame_asset_id) || null; selectedOrder.value = [...new Set(materialIds)]; (shot.assets || []).forEach((saved) => { const asset = assets.value.find((item) => item.id === Number(saved.asset_id)); if (asset) asset.usage = Number(saved.asset_id) === firstFrameId ? 'first_frame' : Number(saved.asset_id) === lastFrameId ? 'last_frame' : saved.usage || asset.usage }); restorePromptDraftForShot(shot); setPromptReferences(promptDocument.value); loadShotHistory(shot); queueMicrotask(() => { loadingShot.value = false; projectGenerationDirty.value = false }) }
+function loadShot(shot) { activeShotEditBaseline = shot.editBaseline ? JSON.parse(JSON.stringify(shot.editBaseline)) : undefined; activeGenerationEditState = JSON.parse(JSON.stringify(displayedGenerationState)); shotSelectionRevision += 1; loadingShot.value = true; projectGenerationDirty.value = false; activeShotId.value = shot.id; shotHistory.value = []; shotHistoryShotId.value = shot.id; selectedHistoryJobId.value = null; prompt.value = shot.prompt ?? ''; promptDocument.value = shot.prompt_document || promptDocumentFor(prompt.value); const settings = shot.settings || {}; model.value = settings.model === 'auto' ? '' : (settings.model || ''); creationMode.value = settings.creation_mode || 'multi_reference'; aspectRatio.value = settings.aspect_ratio || '16:9'; duration.value = normalizeDuration(settings.duration || 5); resolution.value = settings.resolution || '720p'; upscaleResolution.value = settings.upscale_resolution || null; targetFps.value = settings.target_fps || null; audioStrategy.value = settings.audio_strategy || 'reference_only'; keepOriginalAudio.value = !!settings.keep_original_audio; audioVolume.value = settings.audio_volume ?? 1; audioFadeSeconds.value = settings.audio_fade_seconds ?? 0; const materialIds = (shot.assets || []).map((item) => Number(item.asset_id)).filter((id) => assets.value.some((asset) => asset.id === id)); const firstFrameId = Number(shot.omni_first_frame_asset_id) || null; const lastFrameId = Number(shot.omni_last_frame_asset_id) || null; selectedOrder.value = [...new Set(materialIds)]; (shot.assets || []).forEach((saved) => { const asset = assets.value.find((item) => item.id === Number(saved.asset_id)); if (asset) asset.usage = Number(saved.asset_id) === firstFrameId ? 'first_frame' : Number(saved.asset_id) === lastFrameId ? 'last_frame' : saved.usage || asset.usage }); hasLocalShotChanges = restorePromptDraftForShot(shot); setPromptReferences(promptDocument.value); loadShotHistory(shot); queueMicrotask(() => { loadingShot.value = false; projectGenerationDirty.value = false }) }
 async function loadShotHistory(shot) {
   if (!shot?.id) return
   const shotId = Number(shot.id)
@@ -1072,6 +1120,7 @@ async function saveCurrentShot(showMessage = true) {
   const savingGenerationRevision = projectGenerationRevision
   const savingEditBaseline = activeShotEditBaseline
   const savingGenerationBaseline = activeGenerationEditState
+  shotSavesPending += 1
   return enqueueShotSave(savingShotId, async () => {
     const target = findShotById(shots.value, savingShotId)
     if (!target) return
@@ -1101,7 +1150,7 @@ async function saveCurrentShot(showMessage = true) {
         selectedOrder.value = (updated.omni_asset_ids || []).map(Number)
         promptDocument.value = { ...(updated.omni_prompt_document || savingPromptDocument), text: prompt.value }
       }
-      if (savingRevision === promptRevision && Number(activeShotId.value) === Number(savingShotId)) clearPromptDraft(localStorage, savingIdentity)
+      if (savingRevision === promptRevision && Number(activeShotId.value) === Number(savingShotId)) { hasLocalShotChanges = false; clearPromptDraft(localStorage, savingIdentity) }
       if (showMessage) ElMessage.success('当前项目分镜已保存')
       return
     }
@@ -1112,11 +1161,14 @@ async function saveCurrentShot(showMessage = true) {
     mergeSavedShot(shots.value, savingShotId, updated)
     if (Number(sequence.value?.id) === Number(savingSequenceId)) sequence.value.name = savedSequence.name
     if (showMessage) ElMessage.success('整集与当前镜头已保存')
-    if (savingRevision === promptRevision && Number(activeShotId.value) === Number(savingShotId)) clearPromptDraft(localStorage, savingIdentity)
+    if (savingRevision === promptRevision && Number(activeShotId.value) === Number(savingShotId)) { hasLocalShotChanges = false; clearPromptDraft(localStorage, savingIdentity) }
+  }).finally(() => {
+    shotSavesPending -= 1
+    if (!shotSavesPending && collaborationRefreshPending && !pollLifecycleStopped) void refreshCollaboration()
   })
 }
 let autoSaveErrorShown = false
-function scheduleSave() { if (loadingShot.value || reproductionMode.value || !currentShot.value) return; clearTimeout(saveTimer); saveTimer = setTimeout(() => saveCurrentShot(false).then(() => { autoSaveErrorShown = false }).catch((error) => { if (!autoSaveErrorShown) { autoSaveErrorShown = true; ElMessage.error(error?.message || '自动保存失败，草稿仍保留在当前页面，请重试保存') } }), 650) }
+function scheduleSave() { if (loadingShot.value || applyingRemoteInputs || reproductionMode.value || !currentShot.value) return; clearTimeout(saveTimer); saveTimer = setTimeout(() => saveCurrentShot(false).then(() => { autoSaveErrorShown = false }).catch((error) => { if (!autoSaveErrorShown) { autoSaveErrorShown = true; ElMessage.error(error?.message || '自动保存失败，草稿仍保留在当前页面，请重试保存') } }), 650) }
 async function addShot(afterCurrent) {
   await saveCurrentShot(false)
   if (isProjectMode.value) {
@@ -1295,7 +1347,7 @@ function onPickFromEditor(asset) {
 function setPromptReferences(value) {
   promptDocument.value = value || { text: prompt.value, refs: [] }
   // 勾选只代表提示词中的 @ 引用；本镜已加入素材由 selectedOrder 独立保存。
-  const referencedIds = (promptDocument.value.refs || [])
+  const referencedIds = resolvedPromptDocument.value.refs
     .map((entry) => Number(entry.asset_id))
     .filter((id) => assets.value.some((asset) => Number(asset.id) === id))
   selected.value = new Set(referencedIds)
@@ -1360,7 +1412,7 @@ async function upload(files) { for (const file of Array.from(files || [])) { try
 function notifyBalanceChanged() { window.dispatchEvent(new CustomEvent('lmd:balance-changed')) }
 function replacePolledJob(id, job) { const index = jobs.value.findIndex((item) => String(item.id) === String(id)); const historyIndex = shotHistory.value.findIndex((item) => String(item.id) === String(id)); if (index >= 0) jobs.value[index] = job; if (historyIndex >= 0) shotHistory.value[historyIndex] = job }
 async function refreshUnknownJob(job) { try { const next = normalizeJob(await omniVideoAPI.get(job.id)); replacePolledJob(job.id, next); if (String(currentShot.value?.omni_job_id) === String(job.id)) currentShot.value.status = next.status; if (activeGenerationStatuses.has(next.status)) poll(next.id); else notifyBalanceChanged() } catch (error) { ElMessage.error(error.message || '状态刷新失败，请稍后重试') } }
-async function create() { if (creating.value || hasActiveShotGeneration.value) return; creating.value = true; stagePhase.value = '保存镜头'; try { if (!model.value || !currentCapability.value || !prompt.value.trim()) throw new Error('请补齐当前视频创作模式所需的素材与模型能力'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const optionalDramaId = Number(freeProjectId.value) || null; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id, ...(optionalDramaId ? { drama_id: optionalDramaId } : {}) }), prompt: prompt.value, prompt_document: promptDocument.value, asset_selection_policy: 'prompt_references', creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', upscale_resolution: upscaleResolution.value || null, target_fps: targetFps.value || null, audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: requestAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: promptAssetFor(asset).alias, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const status = res.status || 'processing'; const job = { id: res.omni_job_id, prompt: prompt.value, status, video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = status; notifyBalanceChanged(); stagePhase.value = status === 'sd2_waiting' ? '真人素材认证准备中，完成后自动生成' : '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
+async function create() { if (creating.value || hasActiveShotGeneration.value) return; creating.value = true; stagePhase.value = '保存镜头'; try { if (!model.value || !currentCapability.value || !prompt.value.trim()) throw new Error('请补齐当前视频创作模式所需的素材与模型能力'); await saveCurrentShot(false); stagePhase.value = '提交生成任务'; const optionalDramaId = Number(freeProjectId.value) || null; const res = await omniVideoAPI.create({ ...(isProjectMode.value ? { drama_id: projectDramaId.value, storyboard_id: currentShot.value.id } : { sequence_id: sequence.value.id, shot_id: currentShot.value.id, ...(optionalDramaId ? { drama_id: optionalDramaId } : {}) }), prompt: prompt.value, prompt_document: resolvedPromptDocument.value, asset_selection_policy: 'prompt_references', creation_mode: creationMode.value, model: model.value, aspect_ratio: aspectRatio.value, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', upscale_resolution: upscaleResolution.value || null, target_fps: targetFps.value || null, audio_strategy: audioStrategy.value, keep_original_audio: keepOriginalAudio.value, audio_volume: audioVolume.value, audio_fade_seconds: audioFadeSeconds.value, assets: requestAssets.value.map((asset, index) => ({ asset_id: asset.id, alias: promptAssetFor(asset).alias, usage: asset.usage, role: asset.usage === 'primary' ? 'primary' : 'reference', ordinal: index + 1 })) }); const status = res.status || 'processing'; const job = { id: res.omni_job_id, prompt: prompt.value, status, video_generation_id: res.video_generation_id, storyboard_id: isProjectMode.value ? currentShot.value.id : null, shot_id: isProjectMode.value ? null : currentShot.value.id, created_at: new Date().toISOString() }; jobs.value.unshift(job); shotHistory.value.unshift(job); selectedHistoryJobId.value = job.id; currentShot.value.omni_job_id = job.id; currentShot.value.status = status; notifyBalanceChanged(); stagePhase.value = status === 'sd2_waiting' ? '真人素材认证准备中，完成后自动生成' : '正在生成'; poll(job.id) } catch (error) { ElMessage.error(error.message || '任务提交失败') } finally { creating.value = false } }
 async function poll(id) {
   if (!id || pollingJobIds.has(String(id))) return
   pollingJobIds.add(String(id))
@@ -1404,7 +1456,7 @@ function downloadCurrentVideo() { if (!activeVideoUrl.value) return; const link 
 async function saveResultAsAsset() { const job = activeJob.value; if (!job?.videoUrl || savedResultJobId.value === job.id) return; try { const generation = job.generation || job; const asset = await omniVideoAPI.createAsset({ drama_id: (isProjectMode.value ? projectDramaId.value : freeProjectId.value) || null, name: `成片 ${job.video_generation_id || job.id}`, type: 'video', url: generation.video_url || job.video_url || job.videoUrl, local_path: generation.local_path || job.local_path || null, source_type: 'omni_generation', video_gen_id: job.video_generation_id || null, processing_status: 'ready', metadata: { source_omni_job_id: job.id, source_video_generation_id: job.video_generation_id || null, resolution: generation.output_resolution || generation.resolution || null, fps: generation.output_fps || null, duration_ms: generation.output_duration_ms || null, upscale_resolution: generation.upscale_resolution || null, target_fps: generation.target_fps || null, postprocess_chain: generation.postprocess_chain || null } }); const item = { ...asset, alias: asset.name, usage: 'motion' }; assets.value.unshift(item); savedResultJobId.value = job.id; toggle(item); ElMessage.success('成片已加入素材库，并已选入当前镜头') } catch (error) { ElMessage.error(error.message || '加入素材库失败') } }
 async function extractFrame(position) { if (!canExtractFrames.value || extractingPosition.value) return; extractingPosition.value = position; try { const asset = await omniVideoAPI.extractVideoFrame(activeJob.value.video_generation_id, position); const item = { ...asset, alias: asset.name, usage: position === 'first' ? 'first_frame' : 'last_frame' }; assets.value.unshift(item); toggle(item); ElMessage.success(position === 'first' ? '首帧已提取到素材库，并设为当前镜头首帧' : '尾帧已提取到素材库，并设为当前镜头尾帧') } catch (error) { ElMessage.error(error.message || '提取视频帧失败') } finally { extractingPosition.value = '' } }
 
-watch(prompt, () => { persistCurrentPromptDraft(); scheduleSave() })
+watch(prompt, () => { if (collaborativePrompt.applyingRemote) return; persistCurrentPromptDraft(); scheduleSave() }, { flush: 'sync' })
 watch(activeShotId, () => { previewVideoError.value = false; previewVideoProgress.value = false })
 watch([model, aspectRatio, duration, resolution, upscaleResolution, targetFps], () => { if (isProjectMode.value && !loadingShot.value) { projectGenerationDirty.value = true; projectGenerationRevision += 1 } persistCurrentPromptDraft(); scheduleSave() })
 watch([creationMode, audioStrategy, keepOriginalAudio, audioVolume, audioFadeSeconds], () => { persistCurrentPromptDraft(); scheduleSave() })
@@ -1419,7 +1471,7 @@ watch([assetScope, freeProjectId], async () => {
     selected.value = new Set([...selected.value].filter((id) => available.has(Number(id))))
   } catch (error) { ElMessage.error(error?.message || '素材来源加载失败') }
 })
-function flushPromptBeforePageHide() { if (reproductionMode.value) return; persistCurrentPromptDraft(); saveCurrentShot(false).catch((error) => console.warn('[FreeCreate] page-hide save failed:', error?.message)) }
+function flushPromptBeforePageHide() { if (reproductionMode.value) return; if (!hasLocalShotChanges) return; persistCurrentPromptDraft(); saveCurrentShot(false).catch((error) => console.warn('[FreeCreate] page-hide save failed:', error?.message)) }
 function onPromptVisibilityChange() { if (document.visibilityState === 'hidden') flushPromptBeforePageHide() }
 onBeforeUnmount(() => { pollLifecycleStopped = true; pendingPollVisibilityResumes.forEach((resume) => resume()); clearTimeout(saveTimer); clearTimeout(wheelShotTimer); window.clearTimeout(mediaLayerTransitionTimer); window.clearInterval(generationClockTimer); window.removeEventListener('pagehide', flushPromptBeforePageHide); document.removeEventListener('visibilitychange', onPromptVisibilityChange); flushPromptBeforePageHide() })
 onMounted(async () => {
@@ -1451,7 +1503,7 @@ onMounted(async () => {
     assets.value = (media.items || []).filter((item) => item && Number.isFinite(Number(item.id))).map((item) => ({ ...item, usage: item.type === 'image' ? 'reference' : item.type === 'video' ? 'motion' : 'ambience' }))
     projects.value = projectResult?.items || projectResult || []; capabilities.value = caps || []; uploadLimits.value = limits || null; jobs.value = (history || []).map(normalizeJob); jobs.value.filter((job) => activeGenerationStatuses.has(job.status)).forEach((job) => poll(job.id)); sequence.value = seq; if (Number(seq?.drama_id)) freeProjectId.value = Number(seq.drama_id); shots.value = seq.shots || []; if (shots.value[0]) loadShot(shots.value[0])
   } catch (error) { ElMessage.error(error.message || '全能创作工作台加载失败') }
-  finally { workspaceReady.value = true }
+  finally { workspaceReady.value = true; if (collaborationRefreshPending) void refreshCollaboration() }
 })
 onMounted(() => {
   // 媒体库的“用选中素材创作”会传递 assets=1,2,3；旧实现只识别单个
@@ -1478,7 +1530,7 @@ onMounted(() => {
 
 // 供宿主页(FilmCreate)在 AI 生成分镜等外部流程中实时刷新镜头列表:
 // light 模式仅重拉分镜与生成合同,不触发逐镜视频查询
-defineExpose({ refreshProjectShots })
+defineExpose({ refreshProjectShots, refreshCollaboration })
 </script>
 
 <style scoped>
@@ -1596,9 +1648,8 @@ defineExpose({ refreshProjectShots })
 .project-storyboard-page .shot-list{flex:1 1 auto;min-height:0}
 .empty-shot-workspace{grid-column:1 / 3;grid-row:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:clamp(28px,6vw,72px);border-right:1px solid var(--border-color);background:radial-gradient(circle at 50% 34%,color-mix(in srgb,var(--studio-accent) 12%,transparent),transparent 42%),var(--bg-page);color:var(--text-primary);text-align:center}.empty-shot-workspace h2,.empty-shot-workspace p{margin:0}.empty-shot-workspace h2{font-size:clamp(1.25rem,2vw,1.75rem)}.empty-shot-workspace p{max-width:34rem;color:var(--text-muted);line-height:1.6}.empty-shot-workspace .el-button{margin-top:8px}.empty-shot-kicker{color:var(--studio-accent);font-size:.75rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
 @media(max-width:720px){.empty-shot-workspace{order:-1;min-height:420px;border-right:0;border-bottom:1px solid var(--border-color)}}
-/* At short desktop heights, the prompt must shrink and scroll inside the stage.
-   It must never push the player above the visible workbench. */
-@media(min-width:761px){.center-stage{min-height:0;overflow:hidden}.shot-script{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior-y:contain}.project-storyboard-page .center-stage{height:100%}}
+/* Keep the editor usable at short desktop heights by scrolling the center panel. */
+@media(min-width:761px){.center-stage{min-height:0;overflow-x:hidden;overflow-y:auto}.shot-script{flex:1 0 220px;min-height:220px;overflow-y:auto;overscroll-behavior-y:contain}.project-storyboard-page .center-stage{height:100%}}
 /* 独立自由创作与项目分镜使用同一工作台方向：素材和参数在左、提示词居中、镜头轨道在右。 */
 @media(min-width:761px){
   .omni-page:not(.project-storyboard-page) .workbench{grid-template-columns:minmax(280px,320px) minmax(0,1fr) minmax(250px,290px)!important;gap:0;border:1px solid var(--border-color);border-radius:10px;overflow:hidden;box-shadow:var(--shadow-sm)}
