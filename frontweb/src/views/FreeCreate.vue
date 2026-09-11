@@ -206,6 +206,7 @@
 import { useProjectTextModel, projectSession } from '@/composables/useProjectCollaboration'
 import { advanceProjectEdit, mergeGenerationState } from '@/utils/projectWriteContract'
 import { projectSnapshot } from '@/utils/projectSnapshots'
+import { activeGenerationStatuses, localVideoUrl, normalizeJob, resolveShotPreviewJob, shotPreviewVideoUrl } from '@/utils/shotPreview'
 import ProjectCollaborationBar from '@/components/ProjectCollaborationBar.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -274,7 +275,6 @@ const enqueueShotSave = createShotSaveQueue()
 let restoredDraftNoticeShown = false
 let generationClockTimer = null
 const pollingJobIds = new Set()
-const activeGenerationStatuses = new Set(['sd2_waiting', 'processing', 'upscale_pending', 'upscaling', 'interpolation_pending', 'interpolating', 'persisting'])
 let pollLifecycleStopped = false
 const pendingPollVisibilityResumes = new Set()
 
@@ -397,17 +397,8 @@ const filteredProjectLibraryAssets = computed(() => {
   const keyword = projectLibraryKeyword.value.trim().toLowerCase()
   return visibleAssets.value.filter((asset) => !asset.archived_at && (!keyword || `${assetLegacyAliases(asset).join(' ')} ${asset.type || ''} ${typeName(asset.type)}`.toLowerCase().includes(keyword)))
 })
-const activeJob = computed(() => {
-  const selected = shotHistory.value.find((job) => String(job.id) === String(selectedHistoryJobId.value))
-  const adopted = shotHistory.value.find((job) => job.is_current)
-  const bound = shotHistory.value.find((job) => String(job.id) === String(currentShot.value?.omni_job_id))
-  // A history-card click is a preview action: play that version without
-  // changing the storyboard's adopted version. The previous priority order
-  // always returned `adopted`, so clicked records were highlighted but could
-  // never replace the source of the central player.
-  return selected || adopted || bound || shotHistory.value[0] || null
-})
-const activeVideoUrl = computed(() => activeJob.value?.videoUrl || currentShot.value?.video_url || '')
+const activeJob = computed(() => resolveShotPreviewJob(shotHistory.value, selectedHistoryJobId.value, currentShot.value?.omni_job_id))
+const activeVideoUrl = computed(() => shotPreviewVideoUrl(activeJob.value, currentShot.value))
 const topMediaLayerId = computed(() => mediaLayers.value.at(-1)?.id || null)
 function discardMediaLayer(id) {
   const index = mediaLayers.value.findIndex((layer) => layer.id === id)
@@ -674,22 +665,12 @@ function containWorkbenchScroll(event) {
 }
 function sd2Status(asset) { return String(asset?.seedance2_asset?.status || 'none').toLowerCase() }
 function sd2Pending(asset) { return ['queued', 'uploading', 'registering', 'processing', 'reconciling'].includes(sd2Status(asset)) }
-function localVideoUrl(video) {
-  // A post-processing failure can still leave a valid original/upscaled file.
-  // Prefer the final file, then the best retained source so storyboard cards
-  // never hide a playable result merely because enhancement did not finish.
-  const localPath = String(video?.local_path || video?.upscale_local_path || video?.source_local_path || '').replace(/^\/+/, '')
-  if (!localPath) return video?.video_url || video?.upscale_video_url || video?.source_video_url || ''
-  const version = video.updated_at || video.completed_at || video.id || ''
-  return `/static/${localPath}${version ? `?v=${encodeURIComponent(version)}` : ''}`
-}
 function bestPlayableVideo(items) {
   const videos = items || []
   return videos.find((video) => video.status === 'completed' && !!localVideoUrl(video))
     || videos.find((video) => !!localVideoUrl(video))
     || null
 }
-function normalizeJob(data) { const generation = data.generation || {}; const snapshot = data.request_snapshot || {}; return { ...data, ...generation, omni_job_id: data.id, original_prompt: snapshot.original_prompt || snapshot.prompt || data.original_prompt || data.prompt || generation.prompt || '', provider_prompt: generation.prompt || data.prompt || snapshot.prompt || '', status: generation.status || data.status || 'processing', error_msg: generation.error_msg || data.error_msg, task_progress: generation.task_progress ?? data.task_progress ?? null, task_message: generation.task_message || data.task_message || null, task_updated_at: generation.task_updated_at || data.task_updated_at || null, videoUrl: localVideoUrl(generation) || data.video_url, local_path: generation.local_path || data.local_path, duration: generation.duration || data.duration } }
 function legacyVideoHistoryItem(video) { return { ...video, id: `video-${video.id}`, omni_job_id: null, video_generation_id: video.id, status: video.status || 'completed', videoUrl: localVideoUrl(video), duration: video.duration } }
 function promptDocumentFor(text, preferredAssetIds = []) {
   const value = String(text || '')
@@ -782,7 +763,7 @@ async function loadProjectVideos(storyboards) {
       storyboard_id: storyboard.id,
       page_size: 20,
     })
-    return [Number(storyboard.id), bestPlayableVideo(result?.items)]
+    return [Number(storyboard.id), result?.items?.find(video => activeGenerationStatuses.has(video.status)) || bestPlayableVideo(result?.items)]
   }))
   return new Map(groups)
 }
@@ -1051,6 +1032,11 @@ async function loadShotHistory(shot) {
     const legacy = (videoResult?.items || []).filter((video) => !jobGenerationIds.has(Number(video.id))).map(legacyVideoHistoryItem)
     shotHistoryShotId.value = shotId
     shotHistory.value = [...jobs, ...legacy].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    // Follow a restored task through completion or failure, without replacing
+    // a version the user explicitly selected while history was loading.
+    if (selectedHistoryJobId.value == null) {
+      selectedHistoryJobId.value = shotHistory.value.find(job => activeGenerationStatuses.has(job.status))?.id ?? null
+    }
     jobs.filter((job) => activeGenerationStatuses.has(job.status)).forEach((job) => poll(job.id))
   } catch (error) { if (Number(currentShot.value?.id) === shotId) ElMessage.warning(error?.message || '当前镜头的生成记录加载失败，请稍后刷新') }
 }

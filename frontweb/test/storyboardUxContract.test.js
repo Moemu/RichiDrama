@@ -107,7 +107,6 @@ test('batch media actions distinguish empty, completed and missing-reference sta
 
 test('clicking a completed history record previews it without changing the adopted version', () => {
   assert.match(freeCreate, /function selectHistoryJob\(job\) \{ playOnSelection\.value = true; selectedHistoryJobId\.value = job\.id \}/)
-  assert.match(freeCreate, /return selected \|\| adopted \|\| bound \|\| shotHistory\.value\[0\] \|\| null/)
 })
 
 test('project storyboard history opens a complete detail page with the original prompt', () => {
@@ -117,7 +116,6 @@ test('project storyboard history opens a complete detail page with the original 
   assert.match(freeCreate, /const copied = await storyboardsAPI\.copy\(currentShot\.value\.id\)/)
   assert.match(freeCreate, /@click\.stop="openHistoryDetail\(job\)">查看生成详情/)
   assert.match(freeCreate, /@click="openHistoryDetail\(activeJob\)">查看本版本详情/)
-  assert.match(freeCreate, /original_prompt: snapshot\.original_prompt \|\| snapshot\.prompt/)
   assert.match(freeCreate, /path: `\/generation-history\/\$\{generationId\}`/)
   assert.doesNotMatch(freeCreate, /historyPromptOpen|historyPromptText|viewHistoryPrompt/)
   assert.match(router, /path: '\/generation-history\/:id'/)
