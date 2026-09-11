@@ -1,6 +1,5 @@
 import request from '@/utils/request'
 import { projectSession, hasPendingProjectText } from '@/composables/useProjectCollaboration'
-import { projectSnapshot } from '@/utils/projectRequestSync'
 
 export const dramaAPI = {
   importResource(id, data) {
@@ -24,23 +23,23 @@ export const dramaAPI = {
   delete(id) {
     return request.delete(`/dramas/${id}`)
   },
-  saveEpisodes(id, episodes) {
-    const baseline = projectSnapshot('dramas', Number(id))
-    if (projectSession.enabled && projectSession.id === Number(id) && baseline) {
-      const updates = []; const creates = []; const retained = new Set()
-      for (const episode of episodes) {
-        const existing = (baseline.episodes || []).find(item => episode.id ? item.id === episode.id : item.episode_number === episode.episode_number)
-        if (!existing) { creates.push(episode); continue }
-        retained.add(existing.id)
-        const fields = {}
-        for (const field of ['title', 'script_content', 'description', 'duration']) {
-          if (episode[field] !== undefined && !hasPendingProjectText('episodes', existing.id, field) && JSON.stringify(episode[field] ?? null) !== JSON.stringify(existing[field] ?? null)) fields[field] = episode[field]
-        }
-        if (Object.keys(fields).length) updates.push({ id: existing.id, fields })
-      }
-      return request.patch(`/dramas/${id}/collaboration/episodes`, { updates, creates, remove_ids: (baseline.episodes || []).filter(item => !retained.has(item.id)).map(item => item.id) })
+  appendEpisodes(id, episodes) {
+    return request.put(`/dramas/${id}/episode-edits`, { mode: 'append', episodes }, { errorHandledLocally: true })
+  },
+  updateEpisode(id, episode, patch) {
+    if (projectSession.enabled && projectSession.id === Number(id)) {
+      const fields = Object.fromEntries(Object.entries(patch).filter(([field, value]) => value !== undefined && !hasPendingProjectText('episodes', episode.id, field) && value !== episode[field]))
+      return request.patch(`/dramas/${id}/collaboration/episodes`, { updates: [{ id: episode.id, fields }] }, { errorHandledLocally: true, projectEpisodeBaseline: episode })
     }
-    return request.put(`/dramas/${id}/episodes`, { episodes })
+    return request.put(`/dramas/${id}/episode-edits`, {
+      mode: 'update', episodes: [{ ...patch, id: episode.id,
+        expected_title: episode.title, expected_script_content: episode.script_content }],
+    }, { errorHandledLocally: true })
+  },
+  deleteEpisode(id, episode) {
+    return request.put(`/dramas/${id}/episode-edits`, {
+      mode: 'delete', episodes: [{ id: episode.id, expected_updated_at: episode.updated_at }],
+    }, { errorHandledLocally: true })
   },
   saveCharacters(id, data) {
     return request.put(`/dramas/${id}/characters`, data)

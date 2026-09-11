@@ -44,6 +44,7 @@ function fieldValue(db, kind, row, field) {
 // Only synchronous edit handlers may run inside the same SQLite transaction as
 // these preconditions. Provider submission and other commands use idempotency.
 function supports(req) {
+  if (req.method === 'PUT' && /^\/dramas\/\d+\/episode-edits$/.test(req.path)) return true;
   if (req.method === 'PUT' && /^\/(characters\/\d+\/(image|image-from-library)|scenes\/\d+\/prompt|storyboards\/\d+\/frame-prompts\/(first|key|last|panel|action))$/.test(req.path)) return true;
   if (['PUT', 'PATCH', 'DELETE'].includes(req.method) && /^\/(dramas|storyboards|characters|scenes|props|assets|character-library|scene-library|prop-library)\/\d+$/.test(req.path)) return true;
   if (req.method === 'PUT' && /^\/dramas\/\d+\/(canvas-layout|outline|progress)$/.test(req.path)) return true;

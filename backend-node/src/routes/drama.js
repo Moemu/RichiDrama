@@ -117,7 +117,7 @@ function saveEpisodes(db, log) {
     if (!Array.isArray(body.episodes)) return response.badRequest(res, 'episodes 必填且为数组');
     const ok = dramaService.saveEpisodes(db, log, req.params.id, body);
     if (!ok) return response.notFound(res, '剧本不存在');
-    response.success(res, { message: '保存成功' });
+    response.success(res, { message: '保存成功', ...(typeof ok === 'object' ? ok : {}) });
   };
 }
 

@@ -72,8 +72,10 @@ export function buildProjectWriteContract(config, known, match) {
     const episode = requireSnapshot('episodes', episodeId)
     checks.push(check('episodes', episodeId, { generation_state: config.projectGenerationBaseline || episodeShots(episode).map(row => [row.id, row.text_model || 'auto', row.video_model || 'auto', row.duration, row.video_resolution, row.video_aspect_ratio, row.video_upscale_resolution ?? null, row.video_target_fps ?? null, row.generation_overrides || {}]) }))
   } else if (match?.[1] === 'dramas' && match[3] === '/collaboration/episodes') {
-    for (const update of body.updates || []) checks.push(check('episodes', update.id, expectedFields(requireSnapshot('episodes', update.id), update.fields)))
+    for (const update of body.updates || []) checks.push(check('episodes', update.id, expectedFields(config.projectEpisodeBaseline?.id === update.id ? config.projectEpisodeBaseline : requireSnapshot('episodes', update.id), update.fields)))
     for (const id of body.remove_ids || []) checks.push(check('episodes', id, { updated_at: requireSnapshot('episodes', id).updated_at }))
+  } else if (match?.[1] === 'dramas' && match[3] === '/episode-edits') {
+    // Explicit episode operations validate their own target fields or version.
   } else if (match?.[1] === 'dramas' && ['/canvas-layout', '/progress'].includes(match[3])) {
     const baseline = known || requireSnapshot('dramas', match[2])
     checks.push(check('dramas', match[2], { metadata: Object.fromEntries(Object.keys(body).map(field => [field, baseline.metadata?.[field] ?? null])) }))

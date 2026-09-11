@@ -123,7 +123,7 @@
         <div class="section-header">
           <div class="section-title">分集列表</div>
           <span class="section-count">共 {{ episodes.length }} 集</span>
-          <EpisodeBatchImportDialog v-if="drama?.permissions?.can_edit !== false" ref="episodeBatchImportDialogRef" :start-episode-number="nextEpisodeNumber" style="margin-left: auto" @import="onBatchImportEpisodes" />
+          <EpisodeBatchImportDialog v-if="drama?.permissions?.can_edit !== false" ref="episodeBatchImportDialogRef" :start-episode-number="nextEpisodeNumber" :import-episodes="onBatchImportEpisodes" style="margin-left: auto" />
           <el-button size="small" type="primary" :disabled="drama?.permissions?.can_edit === false" :loading="addingEpisode" @click="onAddEpisode">
             <el-icon><Plus /></el-icon>新增一集
           </el-button>
@@ -747,14 +747,7 @@ function epStatusLabel(status) {
 }
 
 async function onBatchImportEpisodes(importedEpisodes) {
-  const current = episodes.value.map((ep, i) => ({
-    episode_number: ep.episode_number ?? i + 1,
-    title: ep.title || '第' + (ep.episode_number ?? i + 1) + '集',
-    script_content: ep.script_content || '',
-    description: ep.description ?? null,
-    duration: ep.duration ?? 0,
-  }))
-  await dramaAPI.saveEpisodes(dramaId, [...current, ...importedEpisodes])
+  await dramaAPI.appendEpisodes(dramaId, importedEpisodes)
   await loadDrama()
 }
 
@@ -770,16 +763,7 @@ async function onDeleteEpisode(ep) {
   } catch { return }
   deletingEpisodeId.value = ep.id
   try {
-    const remaining = episodes.value
-      .filter((e) => e.id !== ep.id)
-      .map((e, i) => ({
-        episode_number: e.episode_number ?? i + 1,
-        title: e.title || '第' + (e.episode_number ?? i + 1) + '集',
-        script_content: e.script_content || '',
-        description: e.description ?? null,
-        duration: e.duration ?? 0,
-      }))
-    await dramaAPI.saveEpisodes(dramaId, remaining)
+    await dramaAPI.deleteEpisode(dramaId, ep)
     ElMessage.success(`${label} 已删除`)
     await loadDrama()
   } catch (e) {
@@ -792,21 +776,10 @@ async function onDeleteEpisode(ep) {
 async function onAddEpisode() {
   addingEpisode.value = true
   try {
-    const list = episodes.value
-    const nextNum = list.length > 0
-      ? Math.max(...list.map((e) => Number(e.episode_number) || 0), 0) + 1
-      : 1
-    const updated = list.map((ep, i) => ({
-      episode_number: ep.episode_number ?? i + 1,
-      title: ep.title || '第' + (ep.episode_number ?? i + 1) + '集',
-      script_content: ep.script_content || '',
-      description: ep.description ?? null,
-      duration: ep.duration ?? 0
-    }))
-    updated.push({ episode_number: nextNum, title: '第' + nextNum + '集', script_content: '', description: null, duration: 0 })
-    await dramaAPI.saveEpisodes(dramaId, updated)
-    ElMessage.success('已添加第' + nextNum + '集')
+    const result = await dramaAPI.appendEpisodes(dramaId, [{ script_content: '' }])
+    const nextNum = result.episodes[0].episode_number
     await loadDrama()
+    ElMessage.success('已添加第' + nextNum + '集')
   } catch (e) {
     ElMessage.error(e.message || '添加失败')
   } finally {

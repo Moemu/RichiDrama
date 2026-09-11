@@ -167,7 +167,7 @@
                     :disabled="(projectSession.enabled && !projectSession.canEdit) || (!!dramaId && (store.drama?.episodes?.length > 0) && !currentEpisodeId)"
                     @click="onGenerateScript"
                   >
-                    保存剧本
+                    {{ dramaId ? '保存当前集' : '保存剧本' }}
                   </el-button>
                 </div>
               </div>
@@ -1353,7 +1353,7 @@ const novelAiSummarize = ref(false)
 const novelImporting = ref(false)
 const scriptTitle = ref('')
 const selectedEpisodeId = ref(null)
-/** 保存剧本后用于恢复选中集（后端重插后 id 会变，用 episode_number 匹配） */
+/** 保存剧本后用于恢复选中集 */
 const savedCurrentEpisodeNumber = ref(1)
 const scriptLanguage = ref('zh')
 const scriptStoryboardStyle = ref('')
@@ -2768,7 +2768,7 @@ async function saveScriptToBackend(content) {
             script_content: first.script_content || trimmed,
           },
         ]
-    await dramaAPI.saveEpisodes(dramaId, episodes)
+    await dramaAPI.appendEpisodes(dramaId, episodes)
     await loadDrama()
     if (route.params.id === 'new') {
       router.replace('/film/' + dramaId)
@@ -2778,48 +2778,12 @@ async function saveScriptToBackend(content) {
     }
     return { created: true }
   }
-  if (multiFromMarkers) {
-    savedCurrentEpisodeNumber.value = 1
-    const payload = toPayload(parsed.episodes)
-    await dramaAPI.saveEpisodes(dramaId, payload)
-    if (storyInput.value?.trim()) {
-      await dramaAPI.saveOutline(dramaId, {
-        summary: storyInput.value.trim(),
-        genre: storyType.value || undefined,
-        style: generationStyle.value || undefined,
-        metadata: {
-          ...projectStylePromptMetadata(),
-          story_style: storyStyle.value || undefined,
-          aspect_ratio: projectAspectRatio.value || '16:9',
-        },
-      }).catch(() => {})
-    }
-    await loadDrama()
-    ElMessage.success(`已按「第N集/章/节」拆分为 ${payload.length} 集`)
-    return { created: false, splitEpisodes: true }
-  }
-  const episodes = store.drama?.episodes || []
-  savedCurrentEpisodeNumber.value = curEp?.episode_number ?? 1
-  const updated = episodes.map((ep, i) => {
-    const num = ep.episode_number ?? i + 1
-    const isCurrent = curEp && Number(ep.id) === Number(curEp.id)
-    const first = parsed.episodes[0]
-    const singleBody = first?.script_content ?? trimmed
-    const singleTitle = first?.title && String(first.title).trim()
-    return {
-      episode_number: num,
-      title: isCurrent
-        ? scriptTitle.value || singleTitle || '第' + num + '集'
-        : ep.title || '',
-      script_content: isCurrent ? (parsed.episodes.length === 1 && singleTitle ? singleBody : trimmed) : (ep.script_content || ''),
-      description: ep.description,
-      duration: ep.duration,
-    }
+  if (!curEp) throw new Error('请先选择要保存的集数')
+  savedCurrentEpisodeNumber.value = curEp.episode_number
+  await dramaAPI.updateEpisode(dramaId, curEp, {
+    title: scriptTitle.value || curEp.title,
+    script_content: trimmed,
   })
-  if (updated.length === 0) {
-    updated.push({ episode_number: 1, title: scriptTitle.value || '第1集', script_content: trimmed })
-  }
-  await dramaAPI.saveEpisodes(dramaId, updated)
   if (storyInput.value?.trim()) {
     await dramaAPI.saveOutline(dramaId, {
       summary: storyInput.value.trim(),
@@ -2928,7 +2892,7 @@ async function onPickScriptFromDialog(sourceId) {
   if (targetId != null) {
     try {
       await ElMessageBox.confirm(
-        '将把所选剧本的「故事梗概」与「各集剧本正文」写入当前工程。不会导入角色、场景、分镜与视频。若源剧本集数更少，多出来的分集将从本工程移除（原分镜可能失效）。是否继续？',
+        '将把所选剧本的「故事梗概」与「各集剧本正文」写入当前工程。不会导入角色、场景、分镜与视频。各集剧本将追加为新集，已有集数保持不变。是否继续？',
         '导入剧本到当前工程',
         { type: 'warning', confirmButtonText: '导入', cancelButtonText: '取消' }
       )
@@ -2966,7 +2930,7 @@ async function onPickScriptFromDialog(sourceId) {
       const workId = created.id
       store.setDrama({ id: workId })
       if (episodesPayload.length > 0) {
-        await dramaAPI.saveEpisodes(workId, episodesPayload)
+        await dramaAPI.appendEpisodes(workId, episodesPayload)
       }
       if (summary) {
         await dramaAPI.saveOutline(workId, { summary }).catch(() => {})
@@ -2982,7 +2946,7 @@ async function onPickScriptFromDialog(sourceId) {
       await dramaAPI.saveOutline(targetId, { summary }).catch(() => {})
     }
     if (episodesPayload.length > 0) {
-      await dramaAPI.saveEpisodes(targetId, episodesPayload)
+      await dramaAPI.appendEpisodes(targetId, episodesPayload)
     } else if (!summary) {
       ElMessage.warning('所选剧本没有可导入的梗概或分集正文')
       return
@@ -3076,10 +3040,10 @@ async function onImportNovel() {
     const plainScript = episodesListToPlainScript(
       rows.map((r) => ({ title: r.title, script_content: r.script_content }))
     )
-    if (store.dramaId && rows.length >= 2) {
-      await dramaAPI.saveEpisodes(store.dramaId, rows)
+    if (store.dramaId) {
+      await dramaAPI.appendEpisodes(store.dramaId, rows)
       await loadDrama()
-      ElMessage.success(`已导入并拆分为 ${rows.length} 集`)
+      ElMessage.success(`已追加导入 ${rows.length} 集`)
     } else {
       store.setScriptContent(plainScript || rows[0]?.script_content || '')
       ElMessage.success(
@@ -3123,26 +3087,10 @@ async function onGenerateScript() {
 
 async function onAddEpisode() {
   if (!store.dramaId) return
-  const list = store.drama?.episodes || []
-  const nextNum = list.length > 0
-    ? Math.max(...list.map((e) => Number(e.episode_number) || 0), 0) + 1
-    : 1
-  const updated = list.map((ep, i) => ({
-    episode_number: ep.episode_number ?? i + 1,
-    title: ep.title || '第' + (ep.episode_number ?? i + 1) + '集',
-    script_content: ep.script_content || '',
-    description: ep.description,
-    duration: ep.duration
-  }))
-  updated.push({
-    episode_number: nextNum,
-    title: '第' + nextNum + '集',
-    script_content: '',
-    description: null,
-    duration: 0
-  })
   try {
-    await dramaAPI.saveEpisodes(store.dramaId, updated)
+    const result = await dramaAPI.appendEpisodes(store.dramaId, [{ script_content: '' }])
+    const nextNum = result.episodes[0].episode_number
+    selectedEpisodeId.value = result.episodes[0].id
     savedCurrentEpisodeNumber.value = nextNum
     await loadDrama()
     ElMessage.success('已添加第' + nextNum + '集')

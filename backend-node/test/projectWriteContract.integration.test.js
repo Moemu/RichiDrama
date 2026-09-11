@@ -30,7 +30,7 @@ test('actual frontend writes isolate fields and commands across continuous proje
   }
   async function stop() { await new Promise(resolve => server.close(resolve)); db.close(); }
   await start();
-  t.after(async () => { await stop(); delete globalThis.writeContractSession; fs.rmSync(root, { recursive: true, force: true }); });
+  t.after(async () => { await stop(); delete globalThis.writeContractSession; delete globalThis.writeContractClient; delete globalThis.boundEpisodeField; fs.rmSync(root, { recursive: true, force: true }); });
   const password = crypto.randomBytes(18).toString('base64url');
   async function raw(token, method, route, data) {
     const response = await fetch(base + route, { method, signal: AbortSignal.timeout(10000), headers: { 'content-type': 'application/json', 'x-lmd-session': token || '' }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
@@ -63,7 +63,7 @@ test('actual frontend writes isolate fields and commands across continuous proje
   const contractUrl = await browserModuleUrl(path.join(front, 'src/utils/projectWriteContract.js'), { './projectSnapshots': href('src/utils/projectSnapshots.js') });
   const state = (await raw(owner.token, 'GET', `${projectUrl}/collaboration/state`)).data.data;
   globalThis.writeContractSession = { id: projectId, enabled: true, canEdit: true, connected: false, revision: state.revision, writeContractVersion: state.write_contract_version };
-  const sessionUrl = moduleSourceUrl('export const projectSession = globalThis.writeContractSession; export const hasPendingProjectText = () => false;');
+  const sessionUrl = moduleSourceUrl('export const projectSession = globalThis.writeContractSession; export const hasPendingProjectText = (kind, id, field) => kind === "episodes" && field === globalThis.boundEpisodeField;');
   const { installProjectRequestSync } = await import(await browserModuleUrl(path.join(front, 'src/utils/projectRequestSync.js'), {
     '@/composables/useProjectCollaboration': sessionUrl,
     './projectSnapshots': href('src/utils/projectSnapshots.js'),
@@ -200,6 +200,24 @@ test('actual frontend writes isolate fields and commands across continuous proje
   await raw(peer.token, 'PUT', `/storyboards/${first.id}/frame-prompts/first`, { prompt: '其他人的帧提示词' });
   assert.equal((await client.put(`/storyboards/${first.id}/frame-prompts/first`, { prompt: '过时覆盖' }, frameBaseline)).status, 409);
   const legacyId = Number(db.prepare('INSERT INTO dramas(title,owner_user_id) VALUES(?,?)').run('历史私有项目', owner.id).lastInsertRowid);
+  globalThis.writeContractClient = client;
+  const { dramaAPI } = await import(await browserModuleUrl(path.join(front, 'src/api/drama.js'), {
+    '@/utils/request': moduleSourceUrl('export default globalThis.writeContractClient;'),
+    '@/composables/useProjectCollaboration': sessionUrl,
+  }));
+  await unrelated();
+  const appendedEpisode = ok(await dramaAPI.appendEpisodes(projectId, [{ title: '追加集', script_content: '原稿' }])).episodes[0];
+  const episodeBaseline = (await read()).episodes.find(row => row.id === appendedEpisode.id);
+  await raw(peer.token, 'PUT', `${projectUrl}/episode-edits`, { mode: 'update', episodes: [{ id: episodeBaseline.id, expected_title: episodeBaseline.title, expected_script_content: episodeBaseline.script_content, script_content: '共享正文' }] });
+  globalThis.boundEpisodeField = 'script_content';
+  ok(await dramaAPI.updateEpisode(projectId, episodeBaseline, { title: '单集改名', script_content: '过时正文' }));
+  delete globalThis.boundEpisodeField;
+  let savedEpisode = (await read()).episodes.find(row => row.id === appendedEpisode.id);
+  assert.equal(savedEpisode.title, '单集改名');
+  assert.equal(savedEpisode.script_content, '共享正文', 'saving a bound editor must not overwrite the shared document');
+  assert.equal((await dramaAPI.updateEpisode(projectId, episodeBaseline, { title: '旧页面覆盖' })).status, 409);
+  await unrelated();
+  ok(await dramaAPI.deleteEpisode(projectId, savedEpisode));
   await stop(); await start(); client.defaults.baseURL = base;
   assert.equal((await raw(owner.token, 'GET', `/assets/${asset.id}`)).data.data.requires_sd2_identity, true);
   assert.equal((await raw(owner.token, 'GET', `/storyboards/${first.id}`)).data.data.audio_volume, 0.4);

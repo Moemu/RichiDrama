@@ -76,6 +76,7 @@ export async function runGenerateStoryFromPremise({
     try {
       const res = await generationAPI.generateStory({
         drama_id: dramaId,
+        episode_save_mode: 'append',
         premise: text,
         style: storyStyle || undefined,
         type: storyType || undefined,
@@ -102,24 +103,25 @@ export async function runGenerateStoryFromPremise({
         return { ok: false, error: pollRes?.error || '剧本生成失败' }
       }
 
-      savedCurrentEpisodeNumber.value = 1
+      const parsedResult = typeof pollRes?.result === 'string'
+        ? (() => { try { return JSON.parse(pollRes.result) } catch { return {} } })()
+        : (pollRes?.result || {})
+      const firstNumber = parsedResult.episodes?.[0]?.episode_number ?? 1
+      savedCurrentEpisodeNumber.value = firstNumber
 
       if (!skipPostLoad) {
         await loadDrama()
 
-        const firstEp = (store.drama?.episodes || [])[0]
+        const firstEp = (store.drama?.episodes || []).find(ep => ep.episode_number === firstNumber)
         if (firstEp) {
           selectedEpisodeId.value = firstEp.id
           onEpisodeSelect(firstEp.id)
         }
       }
 
-      const parsedResult = typeof pollRes?.result === 'string'
-        ? (() => { try { return JSON.parse(pollRes.result) } catch { return {} } })()
-        : (pollRes?.result || {})
-      const n = (store.drama?.episodes || []).length || parsedResult.episode_count || 1
+      const n = parsedResult.episode_count || 1
       if (!skipPostLoad) {
-        ElMessage.success(n > 1 ? `剧本已生成，共 ${n} 集，已默认选中第1集` : '剧本已生成并已保存')
+        ElMessage.success(`已追加生成 ${n} 集，已选中第${firstNumber}集`)
       } else {
         ElMessage.success(n > 1 ? `剧本已生成，共 ${n} 集` : '剧本已生成并已保存')
       }
