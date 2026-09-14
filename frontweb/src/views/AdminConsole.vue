@@ -131,6 +131,14 @@
     <el-drawer v-model="showProduction" title="生产任务处置" size="min(760px, 96vw)" class="production-detail-drawer">
       <template v-if="productionDetail">
         <div class="drawer-heading"><div><p class="drawer-title">任务 #{{ productionDetail.id }} · {{ stageStatusLabel(productionDetail.status) }}</p><p class="drawer-total-time">总耗时：{{ productionTotalElapsed(productionDetail) }}</p></div><el-button v-if="productionDetail.reproduction?.can_open_workbench" type="primary" @click="openProductionReproduction">在制作台复现</el-button></div>
+        <section class="production-output" aria-label="最终成片">
+          <h3>最终成片</h3>
+          <template v-if="productionDetail.status === 'completed' && productionDetail.local_path">
+            <video v-if="showProduction" :key="productionDetail.id" :src="`/api/v1/admin/production/${productionDetail.id}/output`" controls playsinline preload="metadata" @error="outputPreviewFailed = true" />
+            <p v-if="outputPreviewFailed" role="status">成片暂时无法播放，请检查媒体归档状态。</p>
+          </template>
+          <p v-else>暂无最终成片。</p>
+        </section>
         <section class="failure-snapshot" aria-label="任务生成请求快照">
           <h3>完整提示词</h3>
           <label>用户输入</label><el-input :model-value="productionDetail.reproduction?.prompt || productionDetail.prompt || ''" type="textarea" :rows="7" readonly/>
@@ -203,7 +211,7 @@ import { formatCredits } from '@/utils/billingPresentation'
 import OperationsTrendChart from '@/components/OperationsTrendChart.vue'
 import { formatChinaDateTime } from '@/utils/time'
 import { createClientRequestId } from '@/utils/requestId'
-import { productionStatusLabel, productionStatusTone, productionTimelineType } from '@/utils/productionPresentation'
+import { productionStatusLabel, productionStatusTone, productionTimelineType, latestExecutedStage } from '@/utils/productionPresentation'
 import AIConfigContent from '@/components/AIConfigContent.vue'
 import ProviderPriceSyncPanel from '@/components/ProviderPriceSyncPanel.vue'
 
@@ -217,6 +225,7 @@ if (governanceSettings.includes(route.query.settings)) governanceTab.value = rou
 const loading = ref(false); const overview = ref(null)
 const production = ref([]); const archives = ref([]); const reconciliations = ref([]); const users = ref([]); const books = ref([]); const tenants = ref([]); const customerOrganizations = ref([]); const availableConfigs = ref([]); const transactions = ref([]); const paymentOrders = ref([]); const usage = ref([]); const usageSummary = ref(null); const audits = ref([]); const projectUsage = ref(null); const projectUsageDetail = ref(null); const historicalUsage = ref({ items: [] }); const showHistoricalUsage = ref(false); const showProjectUsageDetail = ref(false)
 const productionDetail = ref(null); const showProduction = ref(false)
+const outputPreviewFailed = ref(false)
 const rebindCutoff = ref(''); const rebindCandidates = ref(null); const selectedRebindBindings = ref([]); const rebindRun = ref(null); const rebindLoading = ref(false)
 const showCreate = ref(false); const showBalance = ref(false); const showPrice = ref(false); const showTenant = ref(false); const showTenantConfigs = ref(false); const showUserGroup = ref(false); const showOrganization = ref(false); const showOrganizationBalance = ref(false); const selected = ref(null); const selectedOrganization = ref(null); const configTenant = ref(null); const editingPriceId = ref(null)
 const newUser = reactive({ username: '', display_name: '', password: '', account_kind: 'creator', tenant_id: null })
@@ -244,7 +253,11 @@ const pipeline = computed(() => {
   const summary = overview.value?.stage_summary || {}; const base = Math.max(1, Number(summary.generation?.completed || 0));
   return [{ key: 'generation', index: '01', label: '生成', total: summary.generation?.completed || 0, detail: `进行中 ${summary.generation?.active || 0}`, ratio: 100 }, { key: 'upscale', index: '02', label: '超分', total: summary.upscale?.completed || 0, detail: `异常 ${summary.upscale?.failed || 0}`, ratio: Math.min(100, Math.round(Number(summary.upscale?.completed || 0) / base * 100)) }, { key: 'interpolation', index: '03', label: '插帧', total: summary.interpolation?.completed || 0, detail: `异常 ${summary.interpolation?.failed || 0}`, ratio: Math.min(100, Math.round(Number(summary.interpolation?.completed || 0) / base * 100)) }, { key: 'archive', index: '04', label: '归档', total: summary.archive?.completed || 0, detail: `待处理 ${summary.archive?.active || 0}`, ratio: Math.min(100, Math.round(Number(summary.archive?.completed || 0) / base * 100)) }]
 })
-const canAdoptSource = computed(() => productionDetail.value?.omni_job_id && ['failed', 'cancelled', 'reconciliation_required'].includes(productionDetail.value.upscale_status || '') || productionDetail.value?.omni_job_id && ['failed', 'cancelled', 'reconciliation_required'].includes(productionDetail.value.interpolation_status || ''))
+const canAdoptSource = computed(() => {
+  const row = productionDetail.value
+  return row?.omni_job_id && row.status === 'failed' && row.source_local_path
+    && [row.upscale_status, row.interpolation_status].some(status => ['failed', 'cancelled', 'reconciliation_required'].includes(status))
+})
 
 function applyPage(target, name, result) { target.value = result.items || []; Object.assign(pages[name], { page: result.page || 1, page_size: result.page_size || 20, total: result.total || 0 }) }
 function priceConditions(item) { const raw = item?.conditions_json; if (!raw) return {}; if (typeof raw === 'object') return raw; try { return JSON.parse(raw) || {}; } catch (_) { return {}; } }
@@ -253,11 +266,13 @@ function rateConditionLabel(when = {}) { const labels = { has_video_input: '视�
 function priceUnit(value, meter, unitSize = 1) { const size = Number(unitSize) || 1; const quantity = size === 1000000 ? '100万' : formatCredits(size); return `${formatCredits(value)} 积分 / ${quantity} ${meter === 'input_image' ? '张输入图' : meter || '单位'}`; }
 function stageLabel(key) { return ({ generation: '生成', upscale: '超分', interpolation: '插帧', archive: '归档' })[key] || key }
 function stageStatusLabel(status) { return productionStatusLabel(status) }
-function latestExecutedStage(row) { return [...(row?.stages || [])].reverse().find((stage) => stage.selected !== false && stage.status !== 'not_selected') || { key: 'generation', status: row?.status || 'unknown' } }
 function stageMarkerType(status) { return productionTimelineType(status) }
 function formatElapsed(value) { const seconds = Math.max(0, Math.floor(Number(value || 0) / 1000)); return seconds >= 60 ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${seconds} 秒` }
 function productionTotalElapsed(row) { if (!row || !row.created_at) return '—'; const end = row.updated_at || row.created_at; const ms = Date.parse(end) - Date.parse(row.created_at); return Number.isFinite(ms) && ms >= 0 ? formatElapsed(ms) : '—' }
-function materialPreviewUrl(material) { const path = String(material?.thumbnail_local_path || material?.local_path || '').replace(/^\/+/, ''); return path ? `/static/${path}` : '' }
+function materialPreviewUrl(material) {
+  if (!material?.thumbnail_local_path && (material?.type !== 'image' || !material?.local_path)) return ''
+  return `/api/v1/admin/production/${productionDetail.value.id}/materials/${material.ordinal}${material.thumbnail_local_path ? '?thumbnail=1' : ''}`
+}
 function materialTypeLabel(type) { return ({ image: '图片', video: '视频', audio: '音频' })[type] || type || '素材' }
 function materialUsageLabel(usage) { return ({ identity: '身份参考', reference: '参考素材', primary: '主要素材', motion: '动态参考', ambience: '环境音', first_frame: '首帧', last_frame: '尾帧' })[usage] || usage || '参考素材' }
 function stageTone(status) { return productionStatusTone(status) }
@@ -327,7 +342,7 @@ async function loadCurrent() { if (activeView.value === 'overview') return refre
 async function openView(view) { activeView.value = view; syncRoute(); await loadCurrent() }
 async function drill(target = {}) { const view = target.tab || 'production'; if (view === 'production' && target.status) filters.production.status = target.status; if (view === 'production' && target.model) filters.production.model = target.model; if (view === 'archives') filters.archives.status = target.status || ''; if (view === 'reconciliations') filters.reconciliations.status = target.status || ''; await openView(view) }
 async function changePage(name, page) { pages[name].page = page; if (name === activeView.value) await loadCurrent(); else if (name === 'transactions' || name === 'usage' || name === 'audit') await loadGovernance() }
-async function openProduction(id) { productionDetail.value = await adminAPI.productionDetail(id); showProduction.value = true }
+async function openProduction(id) { productionDetail.value = await adminAPI.productionDetail(id); outputPreviewFailed.value = false; showProduction.value = true }
 function openProductionReproduction() {
   const replay = productionDetail.value?.reproduction
   if (!replay?.can_open_workbench) return ElMessage.warning('该任务没有可用的请求快照')
@@ -387,6 +402,10 @@ onMounted(async () => {
   // 轮询节奏跟随视图：概览 60s，其余视图 30s；治理视图只刷当前 tab。
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
+    if (showProduction.value && productionDetail.value?.id) {
+      const id = productionDetail.value.id
+      adminAPI.productionDetail(id).then((item) => { if (showProduction.value && productionDetail.value?.id === id) productionDetail.value = item }).catch(() => {})
+    }
     pollTick += 1
     const view = activeView.value
     try {
@@ -616,4 +635,5 @@ html.light .console{--ink:var(--text-primary);--muted:var(--text-muted);--line:v
   }
 }
 @media(max-width:45rem){.users-table-scroll{overflow-x:auto;max-width:100%}.users-table-scroll :deep(.el-table){min-width:1100px}.users-table-scroll :deep(.el-table__cell.is-fixed-column--right){position:static!important}}
+.production-output{margin:18px 0}.production-output h3{margin:0 0 12px}.production-output video{display:block;width:100%;max-height:min(420px,44vh);background:#000;border-radius:10px;object-fit:contain}.production-output p{color:var(--text-secondary);font-size:13px}
 </style>

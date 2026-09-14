@@ -52,12 +52,14 @@ function setVideoGenFailed(db, videoGenId, errorMsg, now) {
       require('./billingService').voidAuthorization(db, { id: interpolation.owner_user_id, role: 'admin' }, interpolation.billing_authorization_id, '视频生成失败，插帧未调用');
       db.prepare("UPDATE video_interpolation_jobs SET status='cancelled', error_msg=?, updated_at=? WHERE video_generation_id=?")
         .run(String(errorMsg || '视频生成失败').slice(0, 500), now, videoGenId);
+      db.prepare("UPDATE video_generations SET interpolation_status='cancelled' WHERE id=? AND interpolation_status IN ('awaiting_source','pending')").run(videoGenId);
     }
     const upscale = db.prepare('SELECT owner_user_id, billing_authorization_id FROM video_upscale_jobs WHERE video_generation_id=?').get(videoGenId);
     if (upscale?.billing_authorization_id) {
       require('./billingService').voidAuthorization(db, { id: upscale.owner_user_id, role: 'admin' }, upscale.billing_authorization_id, '视频生成失败，超分未调用');
       db.prepare("UPDATE video_upscale_jobs SET status='cancelled', error_msg=?, updated_at=? WHERE video_generation_id=?")
         .run(String(errorMsg || '视频生成失败').slice(0, 500), now, videoGenId);
+      db.prepare("UPDATE video_generations SET upscale_status='cancelled' WHERE id=? AND upscale_status IN ('awaiting_source','pending')").run(videoGenId);
     }
   } catch (_) {}
 }

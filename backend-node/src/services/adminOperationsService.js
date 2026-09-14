@@ -83,14 +83,15 @@ function providerSubmitTime(id) {
 }
 
 function stages(row) {
+  const stageStatus = (key) => row[`${key}_job_status`] || row[`${key}_status`] || 'not_selected';
   // 优先用供应商任务 ID 解析提交时刻；amk 工具类任务 ID（amk-tool-…）不含时间戳，
   // 回退到 provider_request_id（火山请求 ID 前 14 位即 yyyyMMddHHmmss 北京时间）。
   const upSubmit = providerSubmitTime(row.upscale_provider_task_id) || providerSubmitTime(row.upscale_provider_request_id);
   const ipSubmit = providerSubmitTime(row.interpolation_provider_task_id) || providerSubmitTime(row.interpolation_provider_request_id);
   const raw = [
     { key: 'generation', status: row.status, provider_task_id: row.provider_task_id || row.task_id || null, started_at: row.created_at, updated_at: row.updated_at },
-    { key: 'upscale', selected: !!row.upscale_status, status: row.upscale_status || 'not_selected', provider_task_id: row.upscale_provider_task_id || null, started_at: row.upscale_created_at || null, updated_at: row.upscale_updated_at || null },
-    { key: 'interpolation', selected: !!row.interpolation_status, status: row.interpolation_status || 'not_selected', provider_task_id: row.interpolation_provider_task_id || null, started_at: row.interpolation_created_at || null, updated_at: row.interpolation_updated_at || null },
+    { key: 'upscale', selected: stageStatus('upscale') !== 'not_selected', status: stageStatus('upscale'), provider_task_id: row.upscale_provider_task_id || null, started_at: row.upscale_created_at || null, updated_at: row.upscale_updated_at || null },
+    { key: 'interpolation', selected: stageStatus('interpolation') !== 'not_selected', status: stageStatus('interpolation'), provider_task_id: row.interpolation_provider_task_id || null, started_at: row.interpolation_created_at || null, updated_at: row.interpolation_updated_at || null },
     { key: 'archive', selected: !!(row.archive_record_status || row.archive_status), status: row.archive_record_status || row.archive_status || 'not_selected', started_at: row.archive_created_at || null, updated_at: row.archive_updated_at || null },
   ];
   return raw.map((stage) => {
@@ -103,7 +104,7 @@ function stages(row) {
     }
     if (stage.key === 'upscale' && upSubmit) start = upSubmit;
     if (stage.key === 'interpolation' && ipSubmit) start = ipSubmit;
-    return { ...stage, started_at: start, updated_at: end, elapsed_ms: elapsedMs(start, end), message: stageMessage(stage.key, stage.status) };
+    return { ...stage, started_at: start, updated_at: end, elapsed_ms: elapsedMs(start, end), message: stage.status === 'cancelled' ? '阶段已取消，不再等待或处理' : stageMessage(stage.key, stage.status) };
   });
 }
 

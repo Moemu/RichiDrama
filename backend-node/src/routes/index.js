@@ -232,6 +232,8 @@ function setupRouter(cfg, db, log) {
   adminRouter.get('/operations-reports', admin.reports);
   adminRouter.get('/production', admin.production);
   adminRouter.get('/production/:id', admin.productionDetail);
+  adminRouter.get('/production/:id/materials/:ordinal', admin.productionMaterial);
+  adminRouter.get('/production/:id/output', admin.productionMaterial);
   adminRouter.get('/media-archives', admin.mediaArchives);
   adminRouter.get('/richbest-asset-rebind-candidates', admin.richbestRebindCandidates);
   adminRouter.post('/richbest-asset-rebinds', admin.createRichbestRebind);
