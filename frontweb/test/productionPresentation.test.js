@@ -22,3 +22,15 @@ test('production detail uses a status-neutral material heading and structured ti
   assert.match(source, /stageStatusLabel\(stage\.status\)/)
   assert.match(source, /stage\.updated_at \? formatChinaDateTime\(stage\.updated_at\) : '未记录'/)
 })
+
+test('current stage respects main failure and active postprocessing', async () => {
+  const { latestExecutedStage } = await import('../src/utils/productionPresentation.js')
+  const stages = [{key:'generation',status:'failed'}, {key:'upscale',status:'cancelled'}, {key:'interpolation',status:'skipped'}]
+  assert.equal(latestExecutedStage({status:'failed',stages}).key, 'generation')
+  stages[0].status = 'upscaling'
+  stages[1].status = 'processing'
+  assert.equal(latestExecutedStage({status:'upscaling',stages}).key, 'upscale')
+  stages[0].status = 'failed'
+  stages[1].status = 'failed'
+  assert.equal(latestExecutedStage({status:'failed',stages}).key, 'upscale')
+})

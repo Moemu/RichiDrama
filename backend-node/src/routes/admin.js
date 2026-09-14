@@ -202,6 +202,24 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
       if (!item) return response.notFound(res, '生产任务不存在');
       response.success(res, item);
     },
+    productionMaterial: async (req, res, next) => {
+      if (req.auth?.role !== 'admin' || !req.auth?.console_access) return response.forbidden(res, '需要运营后台账号权限');
+      try {
+        const item = operations.productionDetail(db, req.params.id);
+        const material = item?.reproduction?.materials.find((entry) => entry.ordinal === Number(req.params.ordinal));
+        const key = req.params.ordinal === undefined
+          ? (item?.status === 'completed' ? item.local_path : null)
+          : (req.query.thumbnail === '1' ? material?.thumbnail_local_path : material?.local_path);
+        if (!key) return response.notFound(res, '素材不存在');
+        const mediaReq = Object.create(req);
+        Object.defineProperty(mediaReq, 'path', { value: '/' + key.split('/').map(encodeURIComponent).join('/') });
+        const root = require('path').resolve(cfg.storage?.local_path || './data/storage');
+        await require('../services/mediaStorageService').staticHandler(cfg, root, { privateCache: true })(mediaReq, res, (error) => {
+          if (error) return next(error);
+          return response.notFound(res, '素材文件不存在');
+        });
+      } catch (error) { next(error); }
+    },
     mediaArchives: (req, res) => response.success(res, operations.listArchives(db, req.query)),
     richbestRebindCandidates: guarded((req, res) => response.success(res, richbestRebind.listCandidates(db, req.query))),
     richbestRebindRun: (req, res) => {

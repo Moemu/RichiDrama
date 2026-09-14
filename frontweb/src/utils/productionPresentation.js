@@ -23,6 +23,16 @@ const STATUS_LABELS = {
 const FAILURE_STATUSES = new Set(['failed', 'retryable', 'invalid', 'cancelled', 'reconciliation_required'])
 const SUCCESS_STATUSES = new Set(['completed', 'oss_synced', 'local', 'local_ready'])
 
+export function latestExecutedStage(row) {
+  const stages = row?.stages || []
+  if (['failed', 'retryable', 'invalid', 'cancelled'].includes(row?.status)) {
+    return [...stages].reverse().find(stage => stage.key !== 'archive' && stage.status === 'failed') || { key: 'generation', status: row.status }
+  }
+  const key = ({ upscaling: 'upscale', upscale_pending: 'upscale', interpolating: 'interpolation', interpolation_pending: 'interpolation' })[row?.status]
+  if (key) return stages.find(stage => stage.key === key) || { key, status: row.status }
+  return [...stages].reverse().find(stage => stage.selected !== false && !['not_selected', 'skipped', 'awaiting_source', 'cancelled'].includes(stage.status)) || { key: 'generation', status: row?.status || 'unknown' }
+}
+
 export function productionStatusLabel(status) {
   const value = String(status || '').trim()
   return STATUS_LABELS[value] || value || '未知'
