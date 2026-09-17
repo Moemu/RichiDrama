@@ -21,7 +21,10 @@ export function normalizeJob(data) {
     task_progress: generation.task_progress ?? data.task_progress ?? null,
     task_message: generation.task_message || data.task_message || null,
     task_updated_at: generation.task_updated_at || data.task_updated_at || null,
-    videoUrl: localVideoUrl(generation) || data.video_url,
+    // 列表接口返回扁平字段（无 generation），详情/轮询返回 generation 行；
+    // 两者都可能出现归档的基础原片（source/upscale_local_path），都试一遍。
+    // video_url 不参与合并：列表与 get() 均已消毒为公开地址。
+    videoUrl: localVideoUrl(generation) || localVideoUrl(data) || data.video_url,
     local_path: generation.local_path || data.local_path,
     duration: generation.duration || data.duration,
   }
@@ -36,6 +39,10 @@ export function resolveShotPreviewJob(history, selectedId, boundId) {
 }
 
 export function shotPreviewVideoUrl(job, shot) {
-  if (job) return activeGenerationStatuses.has(job.status) ? '' : job.videoUrl || ''
-  return activeGenerationStatuses.has(shot?.status) ? '' : shot?.video_url || ''
+  // 认证/生成中还没有任何本地视频；进入后处理（超分/插帧/保存）后基础原片
+  // 已归档（localVideoUrl 会回退到 source/upscale_local_path），可直接预览，
+  // 不必等后处理完成才看到画面。
+  if (job && ['sd2_waiting', 'processing'].includes(job.status)) return ''
+  if (!job && activeGenerationStatuses.has(shot?.status)) return ''
+  return job ? job.videoUrl || '' : shot?.video_url || ''
 }
