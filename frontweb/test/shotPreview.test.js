@@ -5,12 +5,22 @@ import { activeGenerationStatuses, normalizeJob, resolveShotPreviewJob, shotPrev
 const adopted = { id: 1, status: 'completed', is_current: true, videoUrl: '/static/old.mp4' }
 const shot = { omni_job_id: 1, video_url: adopted.videoUrl }
 
-test('refresh prioritizes every active generation stage over the adopted video', () => {
+test('refresh prioritizes the running generation over the adopted video', () => {
   for (const status of activeGenerationStatuses) {
     const running = { id: 2, status, videoUrl: '/static/intermediate.mp4' }
     const job = resolveShotPreviewJob([running, adopted], null, shot.omni_job_id)
     assert.equal(job, running)
-    assert.equal(shotPreviewVideoUrl(job, shot), '')
+  }
+})
+
+test('generation stages hide the player; post-processing stages preview the base video', () => {
+  for (const status of ['sd2_waiting', 'processing']) {
+    const running = { id: 2, status, videoUrl: '/static/intermediate.mp4' }
+    assert.equal(shotPreviewVideoUrl(running, shot), '')
+  }
+  for (const status of ['upscale_pending', 'upscaling', 'interpolation_pending', 'interpolating', 'persisting']) {
+    const running = { id: 2, status, videoUrl: '/static/intermediate.mp4' }
+    assert.equal(shotPreviewVideoUrl(running, shot), '/static/intermediate.mp4')
   }
 })
 

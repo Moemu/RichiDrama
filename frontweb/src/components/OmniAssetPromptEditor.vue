@@ -12,6 +12,8 @@
       aria-label="镜头提示词"
       :data-placeholder="placeholder"
       @input="onInput"
+      @keydown="onKeydown"
+      @paste="onPaste"
       @compositionstart="startComposition"
       @compositionend="endComposition"
       @keyup="onCursorChange"
@@ -66,6 +68,21 @@ const emit = defineEmits(['update:modelValue', 'pick', 'references', 'compositio
 let composing = false
 function startComposition() { composing = true; emit('compositionstart') }
 function endComposition() { composing = false; onInput(); emit('compositionend') }
+// Chrome 在 contenteditable 里回车会把光标后的内容包进 <div>，而 serializeNode
+// 只把 <br> 还原成 '\n'，导致句中回车在下次重绘/保存同步后丢换行（句末回车
+// 生成 <div><br></div> 所以能幸存）。改为显式插入 <br>，两条路径行为一致。
+function onKeydown(event) {
+  if (event.key !== 'Enter' || event.isComposing || composing || props.readonly || event.ctrlKey || event.metaKey || event.altKey) return
+  event.preventDefault()
+  document.execCommand('insertLineBreak')
+}
+// 从网页等富文本来源粘贴的换行存在于 div/p 边界里，同样会被 serializeNode 丢掉；
+// 统一降级为纯文本插入，文本节点里的 '\n' 由 pre-wrap 直接渲染。
+function onPaste(event) {
+  if (props.readonly) return
+  event.preventDefault()
+  document.execCommand('insertText', false, event.clipboardData?.getData('text/plain') || '')
+}
 const editorRef = ref(null)
 const editorRoot = ref(null)
 const text = ref(props.modelValue)

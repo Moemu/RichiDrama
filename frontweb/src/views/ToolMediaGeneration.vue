@@ -93,7 +93,7 @@
           </div>
           <div v-if="featured" class="featured">
             <img v-if="media === 'image' && featured.image_url" :src="featured.image_url" :alt="featured.prompt || '生成图片'" width="1280" height="720" />
-            <video v-else-if="media === 'video' && (featured.local_path || featured.video_url)" :src="mediaUrl(featured)" controls playsinline />
+            <video v-else-if="media === 'video' && mediaUrl(featured)" :src="mediaUrl(featured)" controls playsinline />
             <div v-else class="empty-result"><GenerationFailureDetails v-if="featured.status === 'failed'" :job="featured" /><template v-else><span class="processing-mark" aria-hidden="true">{{ activeStatuses.has(featured.status) ? '◌' : '▶' }}</span><b>{{ statusText(featured.status) }}</b><small>{{ featured.task_message || '任务已保存，结果会自动更新。' }}</small></template></div>
             <footer><span>{{ statusText(featured.status) }}</span><b>{{ featured.prompt || '未填写提示词' }}</b><small>{{ formatDate(featured.updated_at || featured.created_at) }}</small></footer>
           </div>
@@ -138,6 +138,7 @@ import { formatChinaDateTime } from '@/utils/time'
 import { useModelOptions } from '@/composables/useModelOptions'
 import { isSeedanceOmniReferenceModel, materialRoutingPreview } from '@/utils/mediaRoutingPreview'
 import { chooseToolMediaFeatured } from '@/utils/toolMediaHistory'
+import { localVideoUrl } from '@/utils/shotPreview'
 import { getDefaultCapabilityModel } from '@/utils/modelSelection'
 
 const props = defineProps({ media: { type: String, required: true } })
@@ -187,7 +188,9 @@ const submitHint = computed(() => {
   return `已就绪 · 预计向模型发送 ${materialRouting.value.sent.total} 项${fallback}`
 })
 const statusText = (status) => ({ pending: '排队中', processing: '生成中', sd2_waiting: '素材准备中', upscale_pending: '等待画质增强', upscaling: '画质增强中', interpolation_pending: '等待补帧', interpolating: '画面补帧中', persisting: '保存成片', billing_reconciliation: '等待结算', completed: '已完成', failed: '生成失败', retryable: '可重试' }[status] || status || '草稿')
-const mediaUrl = (item) => item?.local_path ? `/static/${String(item.local_path).replace(/^\/+/, '')}` : item?.video_url || ''
+// 超分/插帧期间 final local_path 还没写，但基础原片已归档（source/upscale_local_path），
+// 用同一个回退逻辑让用户先看原片，不必等后处理完成。
+const mediaUrl = (item) => localVideoUrl(item)
 const assetUrl = (asset) => asset?.local_path || asset?.url || ''
 const applySelectedAsset = (asset) => { selectedAsset.value = asset || null }
 const applyMultiAssets = (assets) => { selectedAssets.value = assets || []; if (props.media === 'video' && selectedAssets.value.length && mode.value === 'text') mode.value = 'multi' }
