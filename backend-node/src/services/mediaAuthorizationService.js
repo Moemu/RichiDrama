@@ -141,6 +141,9 @@ const DEFINITIONS = [
     { name: 'local_path', role: 'generation' }, { name: 'source_local_path', role: 'generation' },
     { name: 'upscale_local_path', role: 'generation' }, { name: 'poster_local_path', role: 'generation' },
   ], referenceFields: ['reference_image_urls'], owner: 'COALESCE(v.owner_user_id, d.owner_user_id)', project: 'v.drama_id', joins: 'LEFT JOIN dramas d ON d.id = v.drama_id', where: 'v.deleted_at IS NULL AND (v.owner_user_id > 0 OR d.id IS NULL OR d.deleted_at IS NULL)' },
+  { table: 'creative_board_deliveries', alias: 'b', pathFields: [
+    { name: 'finished_local_path', role: 'generation' }, { name: 'clean_local_path', role: 'generation' }, { name: 'srt_local_path', role: 'generation' },
+  ], owner: 'b.owner_user_id', joins: 'JOIN creative_boards board ON board.id=b.board_id', where: "b.status='completed' AND board.deleted_at IS NULL" },
   { table: 'video_merges', alias: 'm', pathFields: [{ name: 'merged_url', role: 'project' }], owner: 'CASE WHEN e.id IS NOT NULL THEN episode_drama.owner_user_id ELSE merge_drama.owner_user_id END', project: 'CASE WHEN e.id IS NOT NULL THEN e.drama_id ELSE m.drama_id END', joins: 'LEFT JOIN episodes e ON e.id = m.episode_id AND e.deleted_at IS NULL LEFT JOIN dramas episode_drama ON episode_drama.id = e.drama_id AND episode_drama.deleted_at IS NULL LEFT JOIN dramas merge_drama ON merge_drama.id = m.drama_id AND merge_drama.deleted_at IS NULL', where: 'm.deleted_at IS NULL' },
   { table: 'assets', alias: 'a', pathFields: [
     { name: 'local_path', role: 'asset' }, { name: 'thumbnail_local_path', role: 'asset' },

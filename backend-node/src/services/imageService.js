@@ -11,6 +11,10 @@ function list(db, query) {
     sql += ' AND drama_id = ?';
     params.push(query.drama_id);
   }
+  if (query.keyword) {
+    sql += ' AND prompt LIKE ?';
+    params.push(`%${String(query.keyword).trim()}%`);
+  }
   if (query.storyboard_id) {
     const ids = storyboardIdentity.historyStoryboardIds(db, query.storyboard_id);
     sql += ` AND storyboard_id IN (${ids.map(() => '?').join(', ')})`;
@@ -561,11 +565,13 @@ function create(db, log, req) {
   }
   const useFirstFrameLayoutLock = resolveUseFirstFrameLayoutLock(req, frameType);
   const info = db.prepare(
-    `INSERT INTO image_generations (storyboard_id, drama_id, scene_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, negative_prompt, model, frame_type, reference_images, use_first_frame_layout_lock, size, status, task_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+    `INSERT INTO image_generations (storyboard_id, drama_id, board_id, board_request_id, scene_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, negative_prompt, model, frame_type, reference_images, use_first_frame_layout_lock, size, draft_node_id, status, task_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
   ).run(
     req.storyboard_id ?? null,
-    Number(req.drama_id) || 0,
+    req.source_context === 'creative_board' ? null : Number(req.drama_id) || 0,
+    req.source_context === 'creative_board' ? Number(req.board_id) : null,
+    req.source_context === 'creative_board' ? String(req.idempotency_key) : null,
     sceneId,
     req.owner_user_id || null,
     req.tenant_id || null,
@@ -578,6 +584,7 @@ function create(db, log, req) {
     refImagesJson,
     useFirstFrameLayoutLock,
     reqSize,
+    req.source_context === 'creative_board' && req.draft_node_id != null ? String(req.draft_node_id).slice(0, 200) : null,
     taskId,
     now,
     now
@@ -588,6 +595,12 @@ function create(db, log, req) {
     processImageGeneration(db, log, imageGenId);
   });
   return { id: imageGenId, task_id: taskId, status: 'pending', ...getById(db, imageGenId) };
+}
+
+function resumePendingCreativeBoardImages(db, log) {
+  const rows = db.prepare("SELECT id FROM image_generations WHERE board_id IS NOT NULL AND status='pending' AND deleted_at IS NULL").all();
+  for (const row of rows) setImmediate(() => processImageGeneration(db, log, row.id));
+  return rows.length;
 }
 
 function settleImageBilling(db, log, row, result = {}) {
@@ -1724,6 +1737,7 @@ module.exports = {
   list,
   getById,
   create,
+  resumePendingCreativeBoardImages,
   deleteById,
   getBackgroundsForEpisode,
   upload,

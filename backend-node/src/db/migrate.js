@@ -415,6 +415,7 @@ function ensureAllColumns(database) {
     { name: 'width',            type: 'INTEGER' },
     { name: 'height',           type: 'INTEGER' },
     { name: 'status',           type: 'TEXT' },
+    { name: 'draft_node_id',    type: 'TEXT' },
     { name: 'task_id',          type: 'TEXT' },
     { name: 'completed_at',     type: 'TEXT' },
     { name: 'error_msg',        type: 'TEXT' },
@@ -474,6 +475,7 @@ function ensureAllColumns(database) {
     // Automatic post-process recovery is opt-in. Historical rows keep the
     // safe default zero until a new run or explicit retry marks them.
     { name: 'postprocess_recovery_version', type: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'draft_node_id',    type: 'TEXT' },
     { name: 'created_at',           type: 'TEXT' },
     { name: 'updated_at',           type: 'TEXT' },
     { name: 'deleted_at',           type: 'TEXT' },

@@ -28,6 +28,7 @@
           <div class="stage-actions">
             <el-button v-if="focusRecord" type="primary" size="large" @click="openRecord(focusRecord)">继续制作</el-button>
             <el-button size="large" @click="goNewProject"><el-icon><Plus /></el-icon>新建短剧</el-button>
+            <el-button size="large" @click="createCreativeBoard">新建纯画布</el-button>
           </div>
           <div class="hero-mode-switch" aria-label="主页背景来源"><button :class="{ active: heroMode === 'default' }" @click="switchHeroMode('default')">系统默认</button><button :class="{ active: heroMode === 'recent' }" @click="switchHeroMode('recent')">最近作品</button></div><div v-if="heroVideos.length > 1" class="hero-video-controls" aria-label="主页视频轮播">
             <button type="button" aria-label="上一段视频" @click="previousHeroVideo">←</button>
@@ -74,6 +75,16 @@
             </div>
             <div v-else class="record-no-result"><b>没有匹配的创作记录</b><span>换一个关键词或筛选类型。</span></div>
           </aside>
+        </section>
+
+        <section class="creative-board-list" aria-label="纯画布">
+          <div class="creative-board-heading"><h2>纯画布</h2><span>从素材出发，自由生成和挑选视频。</span></div>
+          <div class="creative-board-items">
+            <button v-for="board in creativeBoards" :key="board.id" type="button" @click="router.push(`/creative-boards/${board.id}`)">
+              <b>{{ board.name }}</b><small>继续创作 →</small>
+            </button>
+            <button v-if="!creativeBoards.length" type="button" @click="createCreativeBoard"><b>空白画布</b><small>开始创作 →</small></button>
+          </div>
         </section>
 
         <section v-if="!recordsOpen && heroMedia.length" class="media-showcase" aria-labelledby="media-showcase-title">
@@ -321,6 +332,7 @@ import { imagesAPI } from '@/api/images'
 import { taskAPI } from '@/api/task'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { videosAPI } from '@/api/videos'
+import { creativeBoardAPI } from '@/api/creativeBoards'
 import { readAuthUser } from '@/utils/authUser'
 
 const router = useRouter()
@@ -417,6 +429,7 @@ async function doGenerateLibImg(form, prompt, api, reloadFn) {
 const loading = ref(false)
 const dramas = ref([])
 const omniProjects = ref([])
+const creativeBoards = ref([])
 const workspaceAssets = ref([])
 const workspaceVideos = ref([])
 const defaultHeroVideos = ref([])
@@ -837,9 +850,10 @@ function loadList() {
     omniVideoAPI.assets({ page: 1, page_size: 40 }),
     videosAPI.list({ page: 1, page_size: 12, status: 'completed' }),
     videosAPI.defaultHomepageVideos(),
+    creativeBoardAPI.list(),
   ]
   Promise.allSettled(requests)
-    .then(([dramaResult, omniResult, assetResult, videoResult, defaultVideoResult]) => {
+    .then(([dramaResult, omniResult, assetResult, videoResult, defaultVideoResult, boardResult]) => {
       const failures = []
       if (dramaResult.status === 'fulfilled') {
         dramas.value = dramaResult.value?.items ?? []
@@ -856,6 +870,8 @@ function loadList() {
         defaultHeroVideos.value = Array.isArray(value) ? value : (value?.items ?? [])
         heroVideoFailed.value = false
       } else failures.push('主页背景')
+      if (boardResult.status === 'fulfilled') creativeBoards.value = boardResult.value || []
+      else failures.push('纯画布')
       if (failures.length) {
         const message = failures.length === requests.length
           ? '主页数据暂时无法加载，请稍后重试'
@@ -864,6 +880,16 @@ function loadList() {
       }
     })
     .finally(() => { loading.value = false })
+}
+
+async function createCreativeBoard() {
+  try {
+    const answer = await ElMessageBox.prompt('为新画布取个名称', '新建纯画布', { inputValue: '未命名画布', inputPattern: /\S/, inputErrorMessage: '请输入画布名称' })
+    const board = await creativeBoardAPI.create(answer.value)
+    router.push(`/creative-boards/${board.id}`)
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error.message || '画布创建失败')
+  }
 }
 
 function formatStatus(status) {
@@ -1000,6 +1026,9 @@ onBeforeUnmount(() => { stopHeroRotation(); window.clearTimeout(heroVideoRevealT
 </script>
 
 <style scoped>
+.creative-board-list{display:grid;gap:1rem;padding:1.5rem clamp(1.5rem,4vw,4.5rem);background:#0b1018;border-top:1px solid rgba(255,255,255,.1)}
+.creative-board-heading{display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap}.creative-board-heading h2{margin:0;color:#fff;font-size:1.2rem}.creative-board-heading span{color:#9ba9b8;font-size:.85rem}
+.creative-board-items{display:flex;gap:.75rem;overflow-x:auto;padding-bottom:.3rem}.creative-board-items button{display:grid;gap:.55rem;min-width:12rem;padding:1rem;border:1px solid rgba(255,255,255,.15);border-radius:12px;background:#141c29;color:#fff;text-align:left;cursor:pointer}.creative-board-items button:hover,.creative-board-items button:focus-visible{border-color:#8ba5ff}.creative-board-items small{color:#a9c1ff}
 .film-list {
   min-height: 100vh;
   background: #08080d;
@@ -2057,6 +2086,10 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 .media-canvas>.hero-video-layer.is-ready.is-current{z-index:2;opacity:1}
 .media-canvas>.hero-video-layer.is-ready.is-incoming{z-index:3;opacity:1}
 @media(prefers-reduced-motion:reduce){.media-canvas>.hero-video-layer{transition:none}}
+.film-list{height:auto;min-height:100dvh;overflow:visible}
+.film-list>.main{height:auto;min-height:calc(100dvh - var(--ui-header-height));overflow:visible}
+.projects-wrap,.projects-wrap.showing-records{height:auto;min-height:0;overflow:visible}
+.media-stage{height:calc(100dvh - var(--ui-header-height));min-height:0}
 
 /* Keep the records shortcut clear of the mobile hero title. */
 @media (max-width: 52rem) {

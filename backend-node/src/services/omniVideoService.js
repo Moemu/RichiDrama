@@ -181,7 +181,7 @@ function create(db, log, body, billingUser) {
   const authorization = waitingForSd2 ? null : billing.createAuthorization(db, payer, {
     idempotency_key: idempotencyKey,
     service_type: 'video', model: billingTarget.billing_key, provider_model: billingTarget.provider_model, usage,
-    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: !!inputValidation?.automatic_voice_url || routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || null, drama_id: body.drama_id || null, source_kind: body.source_context === 'single_video_tool' ? 'single_video_tool' : body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.storyboard_id || body.shot_id || null,
+    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: !!inputValidation?.automatic_voice_url || routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || body.board_id || null, drama_id: body.drama_id || null, source_kind: body.source_context === 'creative_board' ? 'creative_board' : body.source_context === 'single_video_tool' ? 'single_video_tool' : body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.board_id || body.storyboard_id || body.shot_id || null,
   });
   let task = null;
   let videoGenerationId = null;
@@ -194,19 +194,19 @@ function create(db, log, body, billingUser) {
   const first = routed.find((asset) => asset.usage === 'first_frame' && asset.send_to_model);
   const last = routed.find((asset) => asset.usage === 'last_frame' && asset.send_to_model);
   if (existingWaitingId) {
-    db.prepare(`UPDATE video_generations SET billing_authorization_id = ?, provider = ?, prompt = ?, model = ?, duration = ?, aspect_ratio = ?, resolution = ?, upscale_resolution = ?, target_fps = ?, seed = ?, camera_fixed = ?, watermark = ?, image_url = ?, first_frame_url = ?, last_frame_url = ?, reference_image_urls = ?, status = ?, error_msg = NULL, updated_at = ? WHERE id = ?`)
-      .run(authorization.authorization_id, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution, targetFps, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0, imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null, imageUrls.length ? JSON.stringify(imageUrls) : null, 'processing', now, videoGenerationId);
+    db.prepare(`UPDATE video_generations SET billing_authorization_id = ?, provider = ?, prompt = ?, model = ?, duration = ?, aspect_ratio = ?, resolution = ?, upscale_resolution = ?, target_fps = ?, seed = ?, camera_fixed = ?, watermark = ?, image_url = ?, first_frame_url = ?, last_frame_url = ?, reference_image_urls = ?, draft_node_id = ?, status = ?, error_msg = NULL, updated_at = ? WHERE id = ?`)
+      .run(authorization.authorization_id, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution, targetFps, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0, imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null, imageUrls.length ? JSON.stringify(imageUrls) : null, body.source_context === 'creative_board' && body.draft_node_id != null ? String(body.draft_node_id).slice(0, 200) : null, 'processing', now, videoGenerationId);
   } else {
-    const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, postprocess_recovery_version, status, task_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?)`)
-      .run(Number(body.drama_id) || null, body.storyboard_id ? Number(body.storyboard_id) : null, body.owner_user_id || payer.id, tenantId, authorization?.authorization_id || null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution,
+    const result = db.prepare(`INSERT INTO video_generations (drama_id, storyboard_id, board_id, board_request_id, owner_user_id, tenant_id, billing_authorization_id, provider, prompt, model, duration, aspect_ratio, resolution, upscale_resolution, target_fps, seed, camera_fixed, watermark, image_url, first_frame_url, last_frame_url, reference_image_urls, intermediate_cleanup_enabled, postprocess_recovery_version, draft_node_id, status, task_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?)`)
+      .run(Number(body.drama_id) || null, body.storyboard_id ? Number(body.storyboard_id) : null, body.board_id ? Number(body.board_id) : null, body.source_context === 'creative_board' ? idempotencyKey : null, body.owner_user_id || payer.id, tenantId, authorization?.authorization_id || null, body.provider || 'chatfire', modelPrompt, capability.model, Number(body.duration) || null, body.aspect_ratio || null, body.resolution || null, upscaleResolution,
         targetFps, body.seed != null ? Number(body.seed) : null, body.camera_fixed ? 1 : 0, body.watermark ? 1 : 0,
         imageUrls[0] || null, first?.model_url || first?.local_path || first?.url || null, last?.model_url || last?.local_path || last?.url || null,
-        imageUrls.length ? JSON.stringify(imageUrls) : null, waitingForSd2 ? 'sd2_waiting' : 'processing', task.id, now, now);
+        imageUrls.length ? JSON.stringify(imageUrls) : null, body.source_context === 'creative_board' && body.draft_node_id != null ? String(body.draft_node_id).slice(0, 200) : null, waitingForSd2 ? 'sd2_waiting' : 'processing', task.id, now, now);
     videoGenerationId = Number(result.lastInsertRowid);
   }
   const postProcess = { keep_original_audio: !!body.keep_original_audio, audio_volume: clamp(body.audio_volume, 0, 2, 1), audio_fade_seconds: clamp(body.audio_fade_seconds, 0, 10, 0) };
-  const requestSnapshot = { source_context: body.source_context || null, idempotency_key: idempotencyKey || String(body.idempotency_key || '').trim() || null, prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, asset_selection_policy: assetSelectionPolicy, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
+  const requestSnapshot = { source_context: body.source_context || null, board_id: body.board_id || null, idempotency_key: idempotencyKey || String(body.idempotency_key || '').trim() || null, prompt: modelPrompt, original_prompt: prompt, prompt_document: body.prompt_document || null, asset_selection_policy: assetSelectionPolicy, negative_prompt: body.negative_prompt || '', creation_mode: creationMode, model: capability.model, aspect_ratio: body.aspect_ratio || null, duration: body.duration || null, resolution: body.resolution || null, upscale_resolution: upscaleResolution, target_fps: targetFps, audio_strategy: body.audio_strategy || 'reference_only', post_process: postProcess, assets: routed.map(publicAsset) };
   if (inputValidation) requestSnapshot.input_validation = inputValidation;
   const job = !existingWaitingId ? db.prepare(`INSERT INTO omni_video_jobs (video_generation_id, owner_user_id, prompt, negative_prompt, model_requested, model_resolved, capability_snapshot_json, request_snapshot_json, preprocess_snapshot_json, input_summary_json, audio_strategy, sequence_id, shot_id, storyboard_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -994,7 +994,7 @@ function retry(db, log, id, billingUser) {
   const snapshot = parse(job.request_snapshot_json);
   if (!(snapshot?.original_prompt || snapshot?.prompt) || !Array.isArray(snapshot.assets) || !snapshot.assets.length) throw new Error('该任务没有可重试的完整请求快照');
   return create(db, log, {
-    source_context: snapshot.source_context || undefined, prompt: originalPromptFromSnapshot(snapshot), negative_prompt: snapshot.negative_prompt, model: snapshot.model,
+    source_context: snapshot.source_context || undefined, board_id: snapshot.board_id || undefined, prompt: originalPromptFromSnapshot(snapshot), negative_prompt: snapshot.negative_prompt, model: snapshot.model,
     aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
     upscale_resolution: snapshot.upscale_resolution, target_fps: snapshot.target_fps,
     creation_mode: snapshot.creation_mode, prompt_document: snapshot.prompt_document, audio_strategy: snapshot.audio_strategy, keep_original_audio: snapshot.post_process?.keep_original_audio,
@@ -1032,6 +1032,7 @@ function resumeSd2WaitingGenerations(db, log) {
     }
     try {
       create(db, log, {
+        source_context: snapshot.source_context || undefined, board_id: snapshot.board_id || undefined,
         prompt: originalPromptFromSnapshot(snapshot), negative_prompt: snapshot.negative_prompt, model: snapshot.model,
         aspect_ratio: snapshot.aspect_ratio, duration: snapshot.duration, resolution: snapshot.resolution,
         upscale_resolution: snapshot.upscale_resolution, target_fps: snapshot.target_fps,
