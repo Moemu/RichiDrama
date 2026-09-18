@@ -7,6 +7,7 @@
       @asset-command="handleAssetCommand"
       @create-command="handleCreateCommand"
       @create-omni="createOmniProject"
+      @open-boards="openBoards"
       @account-command="handleHeaderCommand"
     />
     <input ref="importFileInput" type="file" accept=".zip" style="display:none" @change="onImportFile" />
@@ -78,12 +79,15 @@
         </section>
 
         <section class="creative-board-list" aria-label="纯画布">
-          <div class="creative-board-heading"><h2>纯画布</h2><span>从素材出发，自由生成和挑选视频。</span></div>
+          <div class="creative-board-heading">
+            <h2>纯画布</h2><span>从素材出发，自由生成和挑选视频。</span>
+            <button type="button" class="creative-board-new" @click="createCreativeBoard"><el-icon><Plus /></el-icon>新建画布</button>
+          </div>
           <div class="creative-board-items">
-            <button v-for="board in creativeBoards" :key="board.id" type="button" @click="router.push(`/creative-boards/${board.id}`)">
-              <b>{{ board.name }}</b><small>继续创作 →</small>
+            <button v-for="board in creativeBoards" :key="board.id" type="button" :title="board.name" @click="router.push(`/creative-boards/${board.id}`)">
+              <b>{{ board.name }}</b><small><span class="board-cta-label">继续创作 </span><i aria-hidden="true">→</i></small>
             </button>
-            <button v-if="!creativeBoards.length" type="button" @click="createCreativeBoard"><b>空白画布</b><small>开始创作 →</small></button>
+            <button v-if="!creativeBoards.length" type="button" @click="createCreativeBoard"><b>空白画布</b><small><span class="board-cta-label">开始创作 </span><i aria-hidden="true">→</i></small></button>
           </div>
         </section>
 
@@ -366,6 +370,7 @@ function handleHeaderCommand(command) {
 
 function handleCreateCommand(command) {
   if (command === 'project') goNewProject()
+  else if (command === 'board') createCreativeBoard()
   else if (command === 'import') triggerImport()
 }
 
@@ -892,6 +897,13 @@ async function createCreativeBoard() {
   }
 }
 
+// 主导航「画布」：列表按更新时间倒序，直接续最近的画布；一张都没有时走新建。
+function openBoards() {
+  const recent = creativeBoards.value[0]
+  if (recent) router.push(`/creative-boards/${recent.id}`)
+  else createCreativeBoard()
+}
+
 function formatStatus(status) {
   const map = { draft: '草稿', published: '已发布', archived: '已归档', generating: '生成中' }
   return map[status] || status || '草稿'
@@ -1028,6 +1040,7 @@ onBeforeUnmount(() => { stopHeroRotation(); window.clearTimeout(heroVideoRevealT
 <style scoped>
 .creative-board-list{display:grid;gap:1rem;padding:1.5rem clamp(1.5rem,4vw,4.5rem);background:#0b1018;border-top:1px solid rgba(255,255,255,.1)}
 .creative-board-heading{display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap}.creative-board-heading h2{margin:0;color:#fff;font-size:1.2rem}.creative-board-heading span{color:#9ba9b8;font-size:.85rem}
+.creative-board-new{display:inline-flex;flex:0 0 auto;align-items:center;gap:.3rem;margin-left:auto;padding:.42rem .9rem;border:1px solid rgba(139,165,255,.5);border-radius:999px;background:rgba(101,86,199,.24);color:#c9d6ff;font-size:.75rem;cursor:pointer;transition:border-color .15s,background .15s,color .15s}.creative-board-new:hover,.creative-board-new:focus-visible{border-color:#a9bcff;background:rgba(101,86,199,.4);color:#fff}
 .creative-board-items{display:flex;gap:.75rem;overflow-x:auto;padding-bottom:.3rem}.creative-board-items button{display:grid;gap:.55rem;min-width:12rem;padding:1rem;border:1px solid rgba(255,255,255,.15);border-radius:12px;background:#141c29;color:#fff;text-align:left;cursor:pointer}.creative-board-items button:hover,.creative-board-items button:focus-visible{border-color:#8ba5ff}.creative-board-items small{color:#a9c1ff}
 .film-list {
   min-height: 100vh;
@@ -2094,5 +2107,19 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 /* Keep the records shortcut clear of the mobile hero title. */
 @media (max-width: 52rem) {
   .media-stage-content { padding-top: 7.5rem; }
+}
+
+/* 画布是独立产品线，桌面首屏必须给出常驻入口：舞台让出画布条的高度，新建与续作都在第一屏内。 */
+@media (min-width: 70.01rem) {
+  .media-stage { height: calc(100dvh - var(--ui-header-height) - 8.5rem); }
+  .media-stage-content { padding-bottom: clamp(1.6rem, 3vh, 2.4rem); }
+  .creative-board-list { align-content: center; gap: .55rem; height: 8.5rem; padding: .9rem clamp(1.5rem, 4vw, 4.5rem); }
+  .creative-board-heading { align-items: center; flex-wrap: nowrap; gap: .75rem; }
+  .creative-board-heading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .creative-board-items { gap: .6rem; padding-bottom: 0; }
+  .creative-board-items button { grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: .7rem; min-width: 13rem; max-width: 19rem; padding: .6rem .85rem; }
+  .creative-board-items button b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .creative-board-items .board-cta-label { display: none; }
+  .creative-board-items button small { white-space: nowrap; font-size: .8rem; }
 }
 </style>

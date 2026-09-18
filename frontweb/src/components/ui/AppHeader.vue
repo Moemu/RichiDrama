@@ -8,6 +8,7 @@
 
       <nav class="app-header__nav" aria-label="主导航">
         <button type="button" :class="{ active: active === 'projects' }" :aria-current="active === 'projects' ? 'page' : undefined" @click="router.push('/')">项目</button>
+        <button type="button" title="打开最近的纯画布，没有则新建" @click="emit('open-boards')">画布</button>
         <el-dropdown ref="assetDropdown" trigger="click" placement="bottom-start" @command="emit('asset-command', $event)">
           <button type="button" :class="{ active: active === 'assets' }" :aria-current="active === 'assets' ? 'page' : undefined" @keydown.esc.prevent="closeMenus">素材</button>
           <template #dropdown>
@@ -31,6 +32,7 @@
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="project"><el-icon><Plus /></el-icon>新建短剧项目</el-dropdown-item>
+              <el-dropdown-item command="board"><el-icon><Grid /></el-icon>新建纯画布</el-dropdown-item>
               <el-dropdown-item command="import" :disabled="importing"><el-icon><Upload /></el-icon>导入项目</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -57,7 +59,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Box, DataAnalysis, Delete, Files, PictureFilled, Plus, Setting, Sunny, SwitchButton, Upload, User, UserFilled } from '@element-plus/icons-vue'
+import { Box, DataAnalysis, Delete, Files, Grid, PictureFilled, Plus, Setting, Sunny, SwitchButton, Upload, User, UserFilled } from '@element-plus/icons-vue'
 import { useTheme } from '@/composables/useTheme'
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 
@@ -66,7 +68,7 @@ defineProps({
   importing: { type: Boolean, default: false },
   isAdmin: { type: Boolean, default: false },
 })
-const emit = defineEmits(['asset-command', 'create-command', 'create-omni', 'account-command'])
+const emit = defineEmits(['asset-command', 'create-command', 'create-omni', 'open-boards', 'account-command'])
 const router = useRouter()
 const { isDark } = useTheme()
 const assetDropdown = ref(null)
