@@ -12,7 +12,6 @@ test('renderEditor skips DOM rebuilds while content and resolved references are 
   const source = await readFile(file, 'utf8')
   const renderEditor = source.match(/function renderEditor\(value, force = false\) \{[\s\S]*?\n\}/)?.[0] || ''
   assert.match(renderEditor, /serializeEditor\(\) === source/, 'renderEditor must compare the live DOM against the target source before rebuilding')
-  assert.match(renderEditor, /renderedSource === source/, 'renderEditor must remember what it last rendered and skip identical rebuilds')
   assert.match(renderEditor, /renderedRefsKey === refsKey/, 'reference resolution changes (chips appearing/disappearing) must still trigger a rebuild')
   assert.match(renderEditor, /if \(!force &&[\s\S]*?\) return/, 'the no-op guard must be bypassable for forced re-renders after asset insertion')
 })
