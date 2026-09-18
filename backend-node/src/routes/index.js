@@ -111,6 +111,7 @@ function setupRouter(cfg, db, log) {
   const prop = propRoutes(db, log, cfg);
   const sceneModelMap = sceneModelMapRoutes(db, log);
   const omniVideo = require('./omniVideo')(db, log, cfg);
+  const creativeBoards = require('./creativeBoards')(db, log);
   
   const uploadService = require('../services/uploadService');
   const charLibrary = characterLibraryRoutes(db, cfg, log);
@@ -447,6 +448,14 @@ function setupRouter(cfg, db, log) {
   // ---------- upload ----------
   r.post('/upload/image', uploadModule.multerSingle, ownershipGuard(db), require('../middleware/projectOperations')(db), uploadHandlers.uploadImage);
   r.post('/media/upload', uploadHandlers.multerMediaSingle, ownershipGuard(db), require('../middleware/projectOperations')(db), uploadHandlers.uploadMedia);
+  r.get('/creative-boards', creativeBoards.list);
+  r.post('/creative-boards', creativeBoards.create);
+  r.get('/creative-boards/:id', creativeBoards.get);
+  r.put('/creative-boards/:id', creativeBoards.update);
+  r.delete('/creative-boards/:id', creativeBoards.remove);
+  r.get('/creative-boards/:id/deliveries', creativeBoards.deliveries);
+  r.post('/creative-boards/:id/deliveries', creativeBoards.createDelivery);
+  r.get('/creative-boards/:id/deliveries/:deliveryId', creativeBoards.delivery);
   r.get('/upload-limits', (req, res) => response.success(res, require('../services/mediaAssetService').limits()));
   r.get('/video-model-capabilities', omniVideo.capabilities);
   r.get('/omni-video-sequences', omniVideo.listSequences);

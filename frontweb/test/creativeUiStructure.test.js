@@ -70,19 +70,32 @@ test('自由创作报价由后端按模型的有效计量单位计算', async ()
   assert.doesNotMatch(quoteHandler, /usage:\s*\{\s*second:/)
 })
 
-test('首页委托共享头部提供新建、账户和素材入口', async () => {
-  const [source, header] = await Promise.all([
+test('共享标签栏自带跳转与创建逻辑，任何页面都能复用', async () => {
+  const [source, header, list, router] = await Promise.all([
     readSource('../src/views/FilmList.vue'),
     readSource('../src/components/ui/AppHeader.vue'),
+    readSource('../src/views/CreativeBoardList.vue'),
+    readSource('../src/router/index.js'),
   ])
 
-  assert.match(source, /<AppHeader/)
-  assert.match(source, /@create-command="handleCreateCommand"/)
-  assert.match(source, /@account-command="handleHeaderCommand"/)
-  for (const command of ['project', 'import', 'theme', 'deleted', 'config', 'account', 'logout']) {
+  assert.match(source, /<AppHeader\s+active="projects"/)
+  // 标签栏不再依赖页面级事件处理器，换成查询参数交回首页执行。
+  assert.doesNotMatch(header, /defineEmits/)
+  assert.match(source, /function applyRouteIntent\(\)/)
+  assert.match(source, /router\.replace\(\{ path: '\/' \}\)/)
+  for (const command of ['project', 'omni', 'board', 'import', 'theme', 'deleted', 'config', 'account', 'logout']) {
     assert.match(header, new RegExp(`command="${command}"`))
   }
-  assert.match(header, /emit\('create-omni'\)/)
+  // 标签栏结构：项目、画布、素材、全能创作、AI 工具、运营。
+  assert.match(header, /@click="router\.push\('\/'\)">项目<\/button>/)
+  assert.match(header, /@click="router\.push\('\/creative-boards'\)">画布<\/button>/)
+  assert.match(header, /@click="startOmniProject\(router\)">全能创作<\/button>/)
+  assert.match(header, /to: '\/ai-tools\/reverse-prompt'/)
+  assert.match(header, /:command="tool\.to"/)
+  assert.match(header, /command="\/media-library"/)
+  // 画布有独立列表页，并复用同一个标签栏。
+  assert.match(router, /path: '\/creative-boards', name: 'creative-board-list'/)
+  assert.match(list, /<AppHeader active="boards"/)
 })
 
 test('自由创作素材上传区保留可识别的大图预览', async () => {
@@ -320,7 +333,11 @@ test('主工作台使用真实媒体主舞台和可搜索创作档案而不是�
   assert.match(source, /\.media-stage::before \{ content: none; \}/)
   assert.match(source, /@click="openRecord\(record\)"/)
   assert.match(source, /class="record-actions record-actions--panel"/)
-  assert.match(source, /@click\.stop="record\.type === 'drama' \? onDelete\(record\.source\) : deleteOmniProject\(record\.source\)"/)
+  assert.match(source, /@click\.stop="deleteRecord\(record\)"/)
+  // 创作记录必须覆盖三类创作：短剧、全能视频和纯画布。
+  assert.match(source, /type: 'board'/)
+  assert.match(source, /else if \(record\?\.type === 'board'\) router\.push\(`\/creative-boards\/\$\{record\.id\}`\)/)
+  assert.match(source, /record\?\.type === 'board'\) return deleteCreativeBoard\(record\.source\)/)
   assert.doesNotMatch(source, /<div class="project-grid"/)
   assert.doesNotMatch(source, /class="command-dock"/)
   assert.match(source, /\.film-list \{ height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; \}/)

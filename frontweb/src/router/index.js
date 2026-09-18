@@ -41,6 +41,8 @@ const router = createRouter({
       component: () => import('@/views/DramaCanvas.vue'),
       meta: { title: '画布模式' }
     },
+    { path: '/creative-boards', name: 'creative-board-list', component: () => import('@/views/CreativeBoardList.vue'), meta: { title: '我的画布' } },
+    { path: '/creative-boards/:id', name: 'creative-board', component: () => import('@/views/CreativeBoard.vue'), meta: { title: '纯画布' } },
     {
       path: '/ai-config',
       name: 'ai-config',

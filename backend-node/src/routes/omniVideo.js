@@ -4,10 +4,27 @@ const capabilityService = require('../services/videoModelCapabilities');
 const sequenceService = require('../services/omniSequenceService');
 module.exports = function routes(db, log, cfg) { return {
   list(req, res) { try { response.success(res, omniVideoService.list(db, { ...(req.query || {}), owner_user_id: req.auth.id })); } catch (err) { response.internalError(res, err.message); } },
-  quote(req, res) { try { response.success(res, omniVideoService.quote(db, req.body || {}, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
+  quote(req, res) { try { if (req.body?.source_context === 'creative_board') require('../services/creativeBoardService').assertBoard(db, req.body.board_id, req.auth.id); response.success(res, omniVideoService.quote(db, req.body || {}, req.auth)); } catch (err) { response.badRequest(res, err.message); } },
   create(req, res) { try {
     const body = req.body || {};
     const standaloneTool = body.source_context === 'single_video_tool';
+    const creativeBoard = body.source_context === 'creative_board';
+    if (creativeBoard) {
+      require('../services/creativeBoardService').assertBoard(db, body.board_id, req.auth.id);
+      if (body.drama_id || body.sequence_id || body.shot_id || body.storyboard_id) return response.badRequest(res, '纯画布视频生成不能绑定旧工作流');
+      const key = String(body.idempotency_key || '').trim();
+      if (!key) return response.badRequest(res, '视频生成请求缺少幂等键');
+      const prior = db.prepare('SELECT id, board_id, status, task_id FROM video_generations WHERE owner_user_id=? AND board_request_id=?').get(req.auth.id, key);
+      if (prior) {
+        if (Number(prior.board_id) !== Number(body.board_id)) return response.badRequest(res, '幂等键已用于其他画布');
+        return response.success(res, { video_generation_id: prior.id, task_id: prior.task_id, status: prior.status });
+      }
+      if (!Array.isArray(body.assets) || body.assets.some((asset) => {
+        const id = Number(asset?.asset_id);
+        return !Number.isInteger(id) || !require('../services/creativeBoardService').ownedMedia(db, 'asset', id, req.auth.id);
+      })) return response.badRequest(res, '纯画布只能使用已授权素材作为参考');
+      if (body.draft_node_id != null && (typeof body.draft_node_id !== 'string' || body.draft_node_id.length > 200)) return response.badRequest(res, 'draft_node_id 无效');
+    } else if (body.board_id != null) return response.badRequest(res, 'board_id 仅用于纯画布生成');
     const dramaId = Number(body.drama_id);
     if (standaloneTool && ((Number.isInteger(dramaId) && dramaId > 0) || body.sequence_id || body.shot_id || body.storyboard_id)) return response.badRequest(res, '单视频工具不能绑定项目、项目镜头或多镜头序列');
     if (Number.isInteger(dramaId) && dramaId > 0 && !require('../services/projectAccessService').access(db, dramaId, req.auth.id)) return response.notFound(res, '项目不存在');

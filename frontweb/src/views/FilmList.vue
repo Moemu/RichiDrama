@@ -4,10 +4,6 @@
       active="projects"
       :importing="importing"
       :is-admin="isAdmin"
-      @asset-command="handleAssetCommand"
-      @create-command="handleCreateCommand"
-      @create-omni="createOmniProject"
-      @account-command="handleHeaderCommand"
     />
     <input ref="importFileInput" type="file" accept=".zip" style="display:none" @change="onImportFile" />
 
@@ -45,13 +41,13 @@
           </button>
           <aside v-if="allRecords.length" class="recent-stack" aria-label="最近项目">
             <p>最近项目</p>
-            <button v-for="(record, index) in allRecords.slice(0, 3)" :key="`${record.type}-${record.id}`" type="button" @click="openRecord(record)">
-              <span class="recent-thumb"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" /><video v-else-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><i v-else>{{ String(index + 1).padStart(2, '0') }}</i></span><div><small>{{ record.type === 'drama' ? '短剧' : '全能视频' }}</small><b>{{ record.title }}</b><em>{{ record.meta }}</em></div><i>→</i>
+            <button v-for="record in allRecords.slice(0, 3)" :key="`${record.type}-${record.id}`" type="button" @click="openRecord(record)">
+              <span class="recent-thumb"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" /><video v-else-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><i v-else>{{ recordBadge(record) }}</i></span><div><small>{{ recordKindLabel(record) }}</small><b>{{ record.title }}</b><em>{{ record.meta }}</em></div><i>→</i>
             </button>
           </aside>
           <aside v-if="recordsOpen" id="creation-records" class="records-panel" aria-labelledby="records-title">
             <header class="records-heading">
-              <div><p>创作记录</p><h2 id="records-title">全部项目</h2></div>
+              <div><p>创作记录</p><h2 id="records-title">全部创作</h2></div>
               <label class="record-search"><input v-model.trim="recordQuery" type="search" placeholder="搜索项目名称或描述" /></label>
               <button type="button" class="records-close" aria-label="关闭创作记录" @click="recordsOpen = false">×</button>
             </header>
@@ -63,15 +59,16 @@
               <article v-for="(record, index) in filteredRecords" :key="`${record.type}-${record.id}`" class="record-row">
                 <button type="button" class="record-open" @click="openRecord(record)">
                   <span class="record-index">{{ String(index + 1).padStart(2, '0') }}</span>
-                  <span class="record-thumb" :class="{ 'has-image': recordCover(record) || recordVideo(record) }"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" loading="lazy" decoding="async" /><video v-else-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><i v-else>{{ record.type === 'drama' ? '剧' : '片' }}</i></span>
+                  <span class="record-thumb" :class="{ 'has-image': recordCover(record) || recordVideo(record) }"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" loading="lazy" decoding="async" /><video v-else-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><i v-else>{{ recordBadge(record) }}</i></span>
                   <span class="record-title"><small>{{ record.label }}{{ record.type === 'drama' ? ' · ' + ({owner:'负责人',editor:'编辑成员',viewer:'只读成员'}[record.source.permissions?.role] || '负责人') : '' }}</small><b :title="record.title">{{ record.title }}</b><em>{{ record.description }}</em></span>
                   <span class="record-meta">{{ record.meta }}</span><span class="record-arrow">→</span>
                 </button>
                 <div class="record-actions record-actions--panel">
-                  <el-button v-if="record.type !== 'drama' || record.source.permissions?.can_manage !== false" circle type="danger" plain :icon="Delete" :title="`删除${record.title}`" :aria-label="`删除${record.title}`" @click.stop="record.type === 'drama' ? onDelete(record.source) : deleteOmniProject(record.source)" />
+                  <el-button v-if="record.type !== 'drama' || record.source.permissions?.can_manage !== false" circle type="danger" plain :icon="Delete" :title="`删除${record.title}`" :aria-label="`删除${record.title}`" @click.stop="deleteRecord(record)" />
                 </div>
               </article>
             </div>
+            <div v-else-if="recordFilter === 'board' && !recordQuery && !creativeBoards.length" class="record-no-result"><b>还没有画布</b><span>新建一张纯画布，从素材出发自由生成视频。</span><el-button type="primary" @click="createBoard">新建画布</el-button></div>
             <div v-else class="record-no-result"><b>没有匹配的创作记录</b><span>换一个关键词或筛选类型。</span></div>
           </aside>
         </section>
@@ -304,11 +301,10 @@
 
 <script setup>
 import { computed, ref, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, PictureFilled } from '@element-plus/icons-vue'
 import AppHeader from '@/components/ui/AppHeader.vue'
-import { useTheme } from '@/composables/useTheme'
 import { dramaAPI } from '@/api/drama'
 import { loadAllProjects } from '@/utils/projectList'
 import { characterLibraryAPI } from '@/api/characterLibrary'
@@ -321,40 +317,31 @@ import { imagesAPI } from '@/api/images'
 import { taskAPI } from '@/api/task'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { videosAPI } from '@/api/videos'
+import { creativeBoardAPI } from '@/api/creativeBoards'
 import { readAuthUser } from '@/utils/authUser'
+import { formatChinaDate } from '@/utils/time'
+import { promptCreateCreativeBoard, startOmniProject } from '@/utils/workspaceEntry'
 
 const router = useRouter()
-const { toggle: toggleTheme } = useTheme()
-async function logout () {
-  try { await fetch('/api/v1/auth/logout', { method: 'POST', headers: { 'X-LMD-Session': localStorage.getItem('lmd_auth_token') || '' } }) } catch (_) {}
-  localStorage.removeItem('lmd_auth_token')
-  localStorage.removeItem('lmd_auth_user')
-  router.replace('/login')
+const route = useRoute()
+
+// 共享标签栏只负责跳转：需要首页上下文的操作以查询参数落到这里再执行，
+// 这样同一个标签栏在任何页面渲染都能得到一致结果。
+function applyRouteIntent() {
+  const query = route.query
+  if (query.new === '1') showNewDialog.value = true
+  else if (query.import === '1') triggerImport()
+  else if (query.deleted === '1') manageDeletedOmniProjects()
+  else if (query.config === '1' && isAdmin) showAiConfigDialog.value = true
+  else if (query.assets === 'characters') showCharLibrary.value = true
+  else if (query.assets === 'scenes') showSceneLibrary.value = true
+  else if (query.assets === 'props') showPropLibrary.value = true
+  else return
+  router.replace({ path: '/' })
 }
 
-function handleAssetCommand(command) {
-  if (command === 'characters') showCharLibrary.value = true
-  else if (command === 'scenes') showSceneLibrary.value = true
-  else if (command === 'props') showPropLibrary.value = true
-  else if (command === 'media') router.push('/media-library')
-}
-
-function handleHeaderCommand(command) {
-  if (command === 'theme') toggleTheme()
-  else if (command === 'omni') createOmniProject()
-  else if (command === 'tools') router.push('/ai-tools')
-  else if (command === 'import') triggerImport()
-  else if (command === 'deleted') manageDeletedOmniProjects()
-  else if (command === 'config' && isAdmin) showAiConfigDialog.value = true
-  else if (command === 'group-settings' && isAdmin) router.push('/admin?tab=governance&settings=tenants')
-  else if (command === 'account') router.push('/account')
-  else if (command === 'admin') router.push('/admin')
-  else if (command === 'logout') logout()
-}
-
-function handleCreateCommand(command) {
-  if (command === 'project') goNewProject()
-  else if (command === 'import') triggerImport()
+function createBoard() {
+  return promptCreateCreativeBoard(router)
 }
 
 // 库编辑图片 – 文件输入 refs
@@ -417,6 +404,7 @@ async function doGenerateLibImg(form, prompt, api, reloadFn) {
 const loading = ref(false)
 const dramas = ref([])
 const omniProjects = ref([])
+const creativeBoards = ref([])
 const workspaceAssets = ref([])
 const workspaceVideos = ref([])
 const defaultHeroVideos = ref([])
@@ -622,13 +610,24 @@ const allRecords = computed(() => {
     video_url: project.latest_video_url || null,
     source: project,
   }))
-  return [...dramaRecords, ...omniRecords].sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+  const boardRecords = creativeBoards.value.map(board => ({
+    id: board.id,
+    type: 'board',
+    label: '纯画布',
+    title: board.name || '未命名画布',
+    description: '从素材出发，自由生成和挑选视频',
+    meta: `更新于 ${formatChinaDate(board.updated_at)}`,
+    updatedAt: board.updated_at,
+    source: board,
+  }))
+  return [...dramaRecords, ...omniRecords, ...boardRecords].sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
 })
 const focusRecord = computed(() => allRecords.value.find(record => record.type === 'drama') || allRecords.value[0] || null)
 const recordFilters = computed(() => [
   { value: 'all', label: '全部记录', count: allRecords.value.length },
   { value: 'drama', label: '短剧项目', count: dramas.value.length },
   { value: 'omni', label: '全能制作', count: omniProjects.value.length },
+  { value: 'board', label: '纯画布', count: creativeBoards.value.length },
 ])
 const filteredRecords = computed(() => {
   const keyword = recordQuery.value.toLowerCase()
@@ -642,7 +641,28 @@ const filteredRecords = computed(() => {
 
 function openRecord(record) {
   if (record?.type === 'omni') openOmniProject(record.id)
+  else if (record?.type === 'board') router.push(`/creative-boards/${record.id}`)
   else if (record?.id) openProject(record.id)
+}
+
+// 创作记录里的类别标签与缩略图占位字，三类记录共用一套映射。
+const RECORD_KINDS = { drama: { label: '短剧', badge: '剧' }, omni: { label: '全能视频', badge: '片' }, board: { label: '纯画布', badge: '画' } }
+function recordKindLabel(record) { return RECORD_KINDS[record?.type]?.label || '项目' }
+function recordBadge(record) { return RECORD_KINDS[record?.type]?.badge || '项' }
+
+function deleteRecord(record) {
+  if (record?.type === 'drama') return onDelete(record.source)
+  if (record?.type === 'board') return deleteCreativeBoard(record.source)
+  return deleteOmniProject(record.source)
+}
+
+async function deleteCreativeBoard(board) {
+  try {
+    await ElMessageBox.confirm(`删除“${board.name || '未命名画布'}”？画布会从创作记录移除，已生成的成片与素材保留，且暂不支持恢复。`, '删除纯画布', { type: 'warning' })
+    await creativeBoardAPI.remove(board.id)
+    ElMessage.success('画布已删除')
+    loadList()
+  } catch (_) {}
 }
 
 function latestDramaVideo(dramaId) {
@@ -837,9 +857,10 @@ function loadList() {
     omniVideoAPI.assets({ page: 1, page_size: 40 }),
     videosAPI.list({ page: 1, page_size: 12, status: 'completed' }),
     videosAPI.defaultHomepageVideos(),
+    creativeBoardAPI.list(),
   ]
   Promise.allSettled(requests)
-    .then(([dramaResult, omniResult, assetResult, videoResult, defaultVideoResult]) => {
+    .then(([dramaResult, omniResult, assetResult, videoResult, defaultVideoResult, boardResult]) => {
       const failures = []
       if (dramaResult.status === 'fulfilled') {
         dramas.value = dramaResult.value?.items ?? []
@@ -856,6 +877,8 @@ function loadList() {
         defaultHeroVideos.value = Array.isArray(value) ? value : (value?.items ?? [])
         heroVideoFailed.value = false
       } else failures.push('主页背景')
+      if (boardResult.status === 'fulfilled') creativeBoards.value = boardResult.value || []
+      else failures.push('纯画布')
       if (failures.length) {
         const message = failures.length === requests.length
           ? '主页数据暂时无法加载，请稍后重试'
@@ -902,15 +925,6 @@ async function submitNew() {
 
 function openProject(id) {
   router.push('/drama/' + id)
-}
-
-async function createOmniProject() {
-  try {
-    const project = await omniVideoAPI.createSequence()
-    router.push({ path: '/free-create', query: { sequence_id: project.id } })
-  } catch (e) {
-    ElMessage.error(e.message || '创建全能创作项目失败')
-  }
 }
 
 function openOmniProject(id) {
@@ -988,6 +1002,7 @@ async function onDelete(d) {
 
 onMounted(async () => {
   loadList()
+  applyRouteIntent()
   // 供应商锁仅属于运营配置；普通创作账号不应请求管理员端点。
   if (!isAdmin) return
   try {
@@ -995,6 +1010,7 @@ onMounted(async () => {
     vendorLockEnabled.value = !!lock?.enabled
   } catch (_) {}
 })
+watch(() => route.query, applyRouteIntent)
 
 onBeforeUnmount(() => { stopHeroRotation(); window.clearTimeout(heroVideoRevealTimer); window.clearTimeout(heroVideoTransitionTimer); pauseInactiveHeroVideos('') })
 </script>
@@ -1931,9 +1947,9 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 .record-row { position: relative; border-bottom: 1px solid var(--border-color); transition: background-color var(--motion-fast,140ms) ease; }.record-row:hover { background: color-mix(in srgb, var(--bg-hover) 46%, transparent); }
 .record-open { display: grid; grid-template-columns: 2.4rem 6.5rem minmax(12rem,1fr) 8.5rem 9rem 1.5rem; gap: 1rem; align-items: center; width: 100%; min-height: 7.8rem; padding: .85rem 10rem .85rem .4rem; border: 0; border-radius: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .record-index { color: var(--text-faint); font: 700 .66rem/1 ui-monospace,monospace; }.record-thumb { display: grid; width: 6.5rem; height: 4.5rem; place-items: center; overflow: hidden; background: linear-gradient(145deg, var(--bg-raised), var(--bg-page)); color: var(--text-faint); }.record-thumb img, .record-thumb video { width: 100%; height: 100%; object-fit: cover; transition: transform var(--motion-normal,220ms) var(--ease-out-premium,cubic-bezier(.22,1,.36,1)); display: block; }.record-row:hover .record-thumb img { transform: scale(1.045); }.record-thumb i { font-style: normal; font-size: 1.1rem; }
-.record-title { min-width: 0; }.record-title small, .record-title b, .record-title em { display: block; }.record-title small { color: var(--accent-teal); font-size: .58rem; font-weight: 700; letter-spacing: .08em; }.record-title b { margin: .4rem 0 .3rem; overflow: hidden; font-size: 1.05rem; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }.record-title em { overflow: hidden; color: var(--text-muted); font-size: .7rem; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }.record-meta, .record-open time { color: var(--text-faint); font-size: .67rem; }.record-arrow { color: var(--text-muted); transition: transform var(--motion-fast,140ms) ease; }.record-row:hover .record-arrow { transform: translateX(.3rem); }
+.record-title { min-width: 0; }.record-title small, .record-title b, .record-title em { display: block; }.record-title small { color: var(--accent-teal); font-size: .58rem; font-weight: 700; letter-spacing: .08em; }.record-title b { margin: .4rem 0 .3rem; overflow: hidden; font-size: 1.05rem; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }.record-title em { overflow: hidden; color: var(--text-muted); font-size: .7rem; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }.record-meta, .record-open time { overflow: hidden; color: var(--text-faint); font-size: .67rem; text-overflow: ellipsis; white-space: nowrap; }.record-arrow { color: var(--text-muted); transition: transform var(--motion-fast,140ms) ease; }.record-row:hover .record-arrow { transform: translateX(.3rem); }
 .record-actions { position: absolute; right: 2rem; top: 50%; display: flex; gap: .35rem; transform: translateY(-50%); opacity: 0; transition: opacity var(--motion-fast,140ms) ease; }.record-row:hover .record-actions, .record-actions:focus-within { opacity: 1; }.record-actions .el-button { width: 2rem; height: 2rem; min-height: 0; }
-.record-no-result { display: grid; min-height: 12rem; place-content: center; text-align: center; }.record-no-result b, .record-no-result span { display: block; }.record-no-result span { margin-top: .5rem; color: var(--text-muted); font-size: .75rem; }
+.record-no-result { display: grid; min-height: 12rem; place-content: center; text-align: center; }.record-no-result .el-button { justify-self: center; margin-top: 1.1rem; }.record-no-result b, .record-no-result span { display: block; }.record-no-result span { margin-top: .5rem; color: var(--text-muted); font-size: .75rem; }
 .media-showcase { padding: clamp(4rem,7vw,7rem) 0; overflow: hidden; }.media-showcase .section-heading { padding-inline: clamp(1.25rem,5vw,5rem); }.media-showcase .section-heading button { border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
 .media-filmstrip { display: grid; grid-template-columns: 1.35fr .8fr 1fr .72fr 1.12fr .8fr; grid-template-rows: 14rem 10rem; gap: .45rem; padding-inline: .45rem; }
 .film-frame { position: relative; min-width: 0; min-height: 0; padding: 0; overflow: hidden; border: 0; border-radius: 0; background: var(--bg-raised); color: #fff; text-align: left; cursor: pointer; }.film-frame--1 { grid-row: 1 / 3; }.film-frame--2 { grid-row: 1; }.film-frame--3 { grid-row: 1 / 3; }.film-frame--4 { grid-row: 2; }.film-frame--5 { grid-row: 1 / 3; }.film-frame--6 { grid-row: 1 / 3; }.film-frame:nth-child(n+7) { display: none; }
@@ -2057,6 +2073,10 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 .media-canvas>.hero-video-layer.is-ready.is-current{z-index:2;opacity:1}
 .media-canvas>.hero-video-layer.is-ready.is-incoming{z-index:3;opacity:1}
 @media(prefers-reduced-motion:reduce){.media-canvas>.hero-video-layer{transition:none}}
+.film-list{height:auto;min-height:100dvh;overflow:visible}
+.film-list>.main{height:auto;min-height:calc(100dvh - var(--ui-header-height));overflow:visible}
+.projects-wrap,.projects-wrap.showing-records{height:auto;min-height:0;overflow:visible}
+.media-stage{height:calc(100dvh - var(--ui-header-height));min-height:0}
 
 /* Keep the records shortcut clear of the mobile hero title. */
 @media (max-width: 52rem) {
