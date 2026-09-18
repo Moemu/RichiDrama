@@ -125,7 +125,7 @@ function nextFreePosition() {
   return origin
 }
 function attachActions(node) {
-  Object.assign(node.data, { onChange: touchEdit, onRun: submitGeneration, onReference: createFromReference, onDelivery: addToDelivery, onCancel: cancelVideo, onRemoveInput: removeInput })
+  Object.assign(node.data, { onChange: touchEdit, onRun: submitGeneration, onReference: createFromReference, onDelivery: addToDelivery, onCancel: cancelVideo, onRemoveInput: removeInput, onRunDelivery: submitDelivery, onOpenDelivery: openDeliveryDrawer })
   return node
 }
 function updateNodeState(value) {
@@ -514,20 +514,27 @@ function videoRecord(id) { return board.value?.generated_videos?.find((row) => N
 function videoName(id) { return videoRecord(id)?.name || `视频 #${id}` }
 function restoreDelivery(item) { deliveryIds.value = [...item.input.video_generation_ids]; subtitles.value = (item.input.subtitles || []).map((line) => ({ start: line.start_ms / 1000, end: line.end_ms / 1000, text: line.text })); bgmAssetId.value = item.input.bgm?.asset_id || null }
 async function loadDeliveries() { try { deliveryItems.value = await creativeBoardAPI.deliveries(boardId); syncDeliveryNodeStatus() } catch (_) {} }
+function openDeliveryDrawer() { showDelivery.value = true }
 function syncDeliveryNodeStatus() {
   const node = flowNodes.value.find((item) => item.kind === 'delivery')
-  if (node) node.data.delivery = node.data.delivery_id ? deliveryItems.value.find((item) => String(item.id) === node.data.delivery_id) || null : deliveryItems.value[0] || null
+  if (!node) return
+  node.data.delivery = node.data.delivery_id ? deliveryItems.value.find((item) => String(item.id) === node.data.delivery_id) || null : deliveryItems.value[0] || null
+  node.data.clipCount = deliveryIds.value.length
+  node.data.clipSeconds = Math.round(deliveryDurationMs.value / 1000)
+  node.data.canSubmit = canSubmitDelivery.value
 }
 async function submitDelivery() {
   deliverySubmitting.value = true
+  const node = flowNodes.value.find((item) => item.kind === 'delivery')
+  if (node) node.data.submitting = true
   try {
     const key = deliveryRequestId.value || createClientRequestId(); deliveryRequestId.value = key
     const created = await creativeBoardAPI.createDelivery(boardId, { idempotency_key: key, video_generation_ids: deliveryIds.value, subtitles: subtitles.value.filter((line) => line.text.trim()).map((line) => ({ start_ms: Math.round(line.start * 1000), end_ms: Math.round(line.end * 1000), text: line.text })), bgm_asset_id: bgmAssetId.value || null })
     deliveryRequestId.value = ''; await loadDeliveries()
-    const node = flowNodes.value.find((item) => item.kind === 'delivery'), recordId = created?.id ?? deliveryItems.value[0]?.id
+    const recordId = created?.id ?? deliveryItems.value[0]?.id
     if (node && recordId) { node.data.delivery_id = String(recordId); scheduleSave() }
-    syncDeliveryNodeStatus(); ElMessage.success('交付任务已提交')
-  } catch (error) { ElMessage.error(error.message || '合并导出失败') } finally { deliverySubmitting.value = false }
+    syncDeliveryNodeStatus(); ElMessage.success('合并导出任务已提交')
+  } catch (error) { ElMessage.error(error.message || '合并导出失败') } finally { deliverySubmitting.value = false; if (node) node.data.submitting = false }
 }
 function autoLayout() {
   const nodes = flowNodes.value, adj = new Map(nodes.map((node) => [node.id, []])), indeg = new Map(nodes.map((node) => [node.id, 0])), layer = new Map(nodes.map((node) => [node.id, 0]))
@@ -553,7 +560,7 @@ async function refresh() {
 }
 watch(showLibrary, (open) => { if (open) loadLibrary() })
 watch(showDelivery, async (open) => { if (open) { await loadDeliveries(); try { bgmAssets.value = (await omniVideoAPI.assets({ scope: 'all', type: 'audio', page: 1, page_size: 100 })).items || [] } catch (_) {} } })
-watch([deliveryIds, subtitles, bgmAssetId], () => { deliveryRequestId.value = '' }, { deep: true })
+watch([deliveryIds, subtitles, bgmAssetId], () => { deliveryRequestId.value = ''; syncDeliveryNodeStatus() }, { deep: true })
 watch(imageModels, () => { if (board.value) updateNodeState(board.value) })
 onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
