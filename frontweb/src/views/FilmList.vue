@@ -4,11 +4,6 @@
       active="projects"
       :importing="importing"
       :is-admin="isAdmin"
-      @asset-command="handleAssetCommand"
-      @create-command="handleCreateCommand"
-      @create-omni="createOmniProject"
-      @open-boards="openBoards"
-      @account-command="handleHeaderCommand"
     />
     <input ref="importFileInput" type="file" accept=".zip" style="display:none" @change="onImportFile" />
 
@@ -29,7 +24,6 @@
           <div class="stage-actions">
             <el-button v-if="focusRecord" type="primary" size="large" @click="openRecord(focusRecord)">继续制作</el-button>
             <el-button size="large" @click="goNewProject"><el-icon><Plus /></el-icon>新建短剧</el-button>
-            <el-button size="large" @click="createCreativeBoard">新建纯画布</el-button>
           </div>
           <div class="hero-mode-switch" aria-label="主页背景来源"><button :class="{ active: heroMode === 'default' }" @click="switchHeroMode('default')">系统默认</button><button :class="{ active: heroMode === 'recent' }" @click="switchHeroMode('recent')">最近作品</button></div><div v-if="heroVideos.length > 1" class="hero-video-controls" aria-label="主页视频轮播">
             <button type="button" aria-label="上一段视频" @click="previousHeroVideo">←</button>
@@ -47,13 +41,13 @@
           </button>
           <aside v-if="allRecords.length" class="recent-stack" aria-label="最近项目">
             <p>最近项目</p>
-            <button v-for="(record, index) in allRecords.slice(0, 3)" :key="`${record.type}-${record.id}`" type="button" @click="openRecord(record)">
-              <span class="recent-thumb"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" /><video v-else-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><i v-else>{{ String(index + 1).padStart(2, '0') }}</i></span><div><small>{{ record.type === 'drama' ? '短剧' : '全能视频' }}</small><b>{{ record.title }}</b><em>{{ record.meta }}</em></div><i>→</i>
+            <button v-for="record in allRecords.slice(0, 3)" :key="`${record.type}-${record.id}`" type="button" @click="openRecord(record)">
+              <span class="recent-thumb"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" /><video v-else-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><i v-else>{{ recordBadge(record) }}</i></span><div><small>{{ recordKindLabel(record) }}</small><b>{{ record.title }}</b><em>{{ record.meta }}</em></div><i>→</i>
             </button>
           </aside>
           <aside v-if="recordsOpen" id="creation-records" class="records-panel" aria-labelledby="records-title">
             <header class="records-heading">
-              <div><p>创作记录</p><h2 id="records-title">全部项目</h2></div>
+              <div><p>创作记录</p><h2 id="records-title">全部创作</h2></div>
               <label class="record-search"><input v-model.trim="recordQuery" type="search" placeholder="搜索项目名称或描述" /></label>
               <button type="button" class="records-close" aria-label="关闭创作记录" @click="recordsOpen = false">×</button>
             </header>
@@ -65,30 +59,18 @@
               <article v-for="(record, index) in filteredRecords" :key="`${record.type}-${record.id}`" class="record-row">
                 <button type="button" class="record-open" @click="openRecord(record)">
                   <span class="record-index">{{ String(index + 1).padStart(2, '0') }}</span>
-                  <span class="record-thumb" :class="{ 'has-image': recordCover(record) || recordVideo(record) }"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" loading="lazy" decoding="async" /><video v-else-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><i v-else>{{ record.type === 'drama' ? '剧' : '片' }}</i></span>
+                  <span class="record-thumb" :class="{ 'has-image': recordCover(record) || recordVideo(record) }"><img v-if="recordCover(record)" :src="recordCover(record)" alt="" loading="lazy" decoding="async" /><video v-else-if="recordVideo(record)" :src="recordVideo(record)" muted playsinline preload="metadata" /><i v-else>{{ recordBadge(record) }}</i></span>
                   <span class="record-title"><small>{{ record.label }}{{ record.type === 'drama' ? ' · ' + ({owner:'负责人',editor:'编辑成员',viewer:'只读成员'}[record.source.permissions?.role] || '负责人') : '' }}</small><b :title="record.title">{{ record.title }}</b><em>{{ record.description }}</em></span>
                   <span class="record-meta">{{ record.meta }}</span><span class="record-arrow">→</span>
                 </button>
                 <div class="record-actions record-actions--panel">
-                  <el-button v-if="record.type !== 'drama' || record.source.permissions?.can_manage !== false" circle type="danger" plain :icon="Delete" :title="`删除${record.title}`" :aria-label="`删除${record.title}`" @click.stop="record.type === 'drama' ? onDelete(record.source) : deleteOmniProject(record.source)" />
+                  <el-button v-if="record.type !== 'drama' || record.source.permissions?.can_manage !== false" circle type="danger" plain :icon="Delete" :title="`删除${record.title}`" :aria-label="`删除${record.title}`" @click.stop="deleteRecord(record)" />
                 </div>
               </article>
             </div>
+            <div v-else-if="recordFilter === 'board' && !recordQuery && !creativeBoards.length" class="record-no-result"><b>还没有画布</b><span>新建一张纯画布，从素材出发自由生成视频。</span><el-button type="primary" @click="createBoard">新建画布</el-button></div>
             <div v-else class="record-no-result"><b>没有匹配的创作记录</b><span>换一个关键词或筛选类型。</span></div>
           </aside>
-        </section>
-
-        <section class="creative-board-list" aria-label="纯画布">
-          <div class="creative-board-heading">
-            <h2>纯画布</h2><span>从素材出发，自由生成和挑选视频。</span>
-            <button type="button" class="creative-board-new" @click="createCreativeBoard"><el-icon><Plus /></el-icon>新建画布</button>
-          </div>
-          <div class="creative-board-items">
-            <button v-for="board in creativeBoards" :key="board.id" type="button" :title="board.name" @click="router.push(`/creative-boards/${board.id}`)">
-              <b>{{ board.name }}</b><small><span class="board-cta-label">继续创作 </span><i aria-hidden="true">→</i></small>
-            </button>
-            <button v-if="!creativeBoards.length" type="button" @click="createCreativeBoard"><b>空白画布</b><small><span class="board-cta-label">开始创作 </span><i aria-hidden="true">→</i></small></button>
-          </div>
         </section>
 
         <section v-if="!recordsOpen && heroMedia.length" class="media-showcase" aria-labelledby="media-showcase-title">
@@ -319,11 +301,10 @@
 
 <script setup>
 import { computed, ref, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, PictureFilled } from '@element-plus/icons-vue'
 import AppHeader from '@/components/ui/AppHeader.vue'
-import { useTheme } from '@/composables/useTheme'
 import { dramaAPI } from '@/api/drama'
 import { loadAllProjects } from '@/utils/projectList'
 import { characterLibraryAPI } from '@/api/characterLibrary'
@@ -338,40 +319,29 @@ import { omniVideoAPI } from '@/api/omniVideo'
 import { videosAPI } from '@/api/videos'
 import { creativeBoardAPI } from '@/api/creativeBoards'
 import { readAuthUser } from '@/utils/authUser'
+import { formatChinaDate } from '@/utils/time'
+import { promptCreateCreativeBoard, startOmniProject } from '@/utils/workspaceEntry'
 
 const router = useRouter()
-const { toggle: toggleTheme } = useTheme()
-async function logout () {
-  try { await fetch('/api/v1/auth/logout', { method: 'POST', headers: { 'X-LMD-Session': localStorage.getItem('lmd_auth_token') || '' } }) } catch (_) {}
-  localStorage.removeItem('lmd_auth_token')
-  localStorage.removeItem('lmd_auth_user')
-  router.replace('/login')
+const route = useRoute()
+
+// 共享标签栏只负责跳转：需要首页上下文的操作以查询参数落到这里再执行，
+// 这样同一个标签栏在任何页面渲染都能得到一致结果。
+function applyRouteIntent() {
+  const query = route.query
+  if (query.new === '1') showNewDialog.value = true
+  else if (query.import === '1') triggerImport()
+  else if (query.deleted === '1') manageDeletedOmniProjects()
+  else if (query.config === '1' && isAdmin) showAiConfigDialog.value = true
+  else if (query.assets === 'characters') showCharLibrary.value = true
+  else if (query.assets === 'scenes') showSceneLibrary.value = true
+  else if (query.assets === 'props') showPropLibrary.value = true
+  else return
+  router.replace({ path: '/' })
 }
 
-function handleAssetCommand(command) {
-  if (command === 'characters') showCharLibrary.value = true
-  else if (command === 'scenes') showSceneLibrary.value = true
-  else if (command === 'props') showPropLibrary.value = true
-  else if (command === 'media') router.push('/media-library')
-}
-
-function handleHeaderCommand(command) {
-  if (command === 'theme') toggleTheme()
-  else if (command === 'omni') createOmniProject()
-  else if (command === 'tools') router.push('/ai-tools')
-  else if (command === 'import') triggerImport()
-  else if (command === 'deleted') manageDeletedOmniProjects()
-  else if (command === 'config' && isAdmin) showAiConfigDialog.value = true
-  else if (command === 'group-settings' && isAdmin) router.push('/admin?tab=governance&settings=tenants')
-  else if (command === 'account') router.push('/account')
-  else if (command === 'admin') router.push('/admin')
-  else if (command === 'logout') logout()
-}
-
-function handleCreateCommand(command) {
-  if (command === 'project') goNewProject()
-  else if (command === 'board') createCreativeBoard()
-  else if (command === 'import') triggerImport()
+function createBoard() {
+  return promptCreateCreativeBoard(router)
 }
 
 // 库编辑图片 – 文件输入 refs
@@ -640,13 +610,24 @@ const allRecords = computed(() => {
     video_url: project.latest_video_url || null,
     source: project,
   }))
-  return [...dramaRecords, ...omniRecords].sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+  const boardRecords = creativeBoards.value.map(board => ({
+    id: board.id,
+    type: 'board',
+    label: '纯画布',
+    title: board.name || '未命名画布',
+    description: '从素材出发，自由生成和挑选视频',
+    meta: `更新于 ${formatChinaDate(board.updated_at)}`,
+    updatedAt: board.updated_at,
+    source: board,
+  }))
+  return [...dramaRecords, ...omniRecords, ...boardRecords].sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
 })
 const focusRecord = computed(() => allRecords.value.find(record => record.type === 'drama') || allRecords.value[0] || null)
 const recordFilters = computed(() => [
   { value: 'all', label: '全部记录', count: allRecords.value.length },
   { value: 'drama', label: '短剧项目', count: dramas.value.length },
   { value: 'omni', label: '全能制作', count: omniProjects.value.length },
+  { value: 'board', label: '纯画布', count: creativeBoards.value.length },
 ])
 const filteredRecords = computed(() => {
   const keyword = recordQuery.value.toLowerCase()
@@ -660,7 +641,28 @@ const filteredRecords = computed(() => {
 
 function openRecord(record) {
   if (record?.type === 'omni') openOmniProject(record.id)
+  else if (record?.type === 'board') router.push(`/creative-boards/${record.id}`)
   else if (record?.id) openProject(record.id)
+}
+
+// 创作记录里的类别标签与缩略图占位字，三类记录共用一套映射。
+const RECORD_KINDS = { drama: { label: '短剧', badge: '剧' }, omni: { label: '全能视频', badge: '片' }, board: { label: '纯画布', badge: '画' } }
+function recordKindLabel(record) { return RECORD_KINDS[record?.type]?.label || '项目' }
+function recordBadge(record) { return RECORD_KINDS[record?.type]?.badge || '项' }
+
+function deleteRecord(record) {
+  if (record?.type === 'drama') return onDelete(record.source)
+  if (record?.type === 'board') return deleteCreativeBoard(record.source)
+  return deleteOmniProject(record.source)
+}
+
+async function deleteCreativeBoard(board) {
+  try {
+    await ElMessageBox.confirm(`删除“${board.name || '未命名画布'}”？画布会从创作记录移除，已生成的成片与素材保留，且暂不支持恢复。`, '删除纯画布', { type: 'warning' })
+    await creativeBoardAPI.remove(board.id)
+    ElMessage.success('画布已删除')
+    loadList()
+  } catch (_) {}
 }
 
 function latestDramaVideo(dramaId) {
@@ -887,23 +889,6 @@ function loadList() {
     .finally(() => { loading.value = false })
 }
 
-async function createCreativeBoard() {
-  try {
-    const answer = await ElMessageBox.prompt('为新画布取个名称', '新建纯画布', { inputValue: '未命名画布', inputPattern: /\S/, inputErrorMessage: '请输入画布名称' })
-    const board = await creativeBoardAPI.create(answer.value)
-    router.push(`/creative-boards/${board.id}`)
-  } catch (error) {
-    if (error !== 'cancel' && error !== 'close') ElMessage.error(error.message || '画布创建失败')
-  }
-}
-
-// 主导航「画布」：列表按更新时间倒序，直接续最近的画布；一张都没有时走新建。
-function openBoards() {
-  const recent = creativeBoards.value[0]
-  if (recent) router.push(`/creative-boards/${recent.id}`)
-  else createCreativeBoard()
-}
-
 function formatStatus(status) {
   const map = { draft: '草稿', published: '已发布', archived: '已归档', generating: '生成中' }
   return map[status] || status || '草稿'
@@ -940,15 +925,6 @@ async function submitNew() {
 
 function openProject(id) {
   router.push('/drama/' + id)
-}
-
-async function createOmniProject() {
-  try {
-    const project = await omniVideoAPI.createSequence()
-    router.push({ path: '/free-create', query: { sequence_id: project.id } })
-  } catch (e) {
-    ElMessage.error(e.message || '创建全能创作项目失败')
-  }
 }
 
 function openOmniProject(id) {
@@ -1026,6 +1002,7 @@ async function onDelete(d) {
 
 onMounted(async () => {
   loadList()
+  applyRouteIntent()
   // 供应商锁仅属于运营配置；普通创作账号不应请求管理员端点。
   if (!isAdmin) return
   try {
@@ -1033,15 +1010,12 @@ onMounted(async () => {
     vendorLockEnabled.value = !!lock?.enabled
   } catch (_) {}
 })
+watch(() => route.query, applyRouteIntent)
 
 onBeforeUnmount(() => { stopHeroRotation(); window.clearTimeout(heroVideoRevealTimer); window.clearTimeout(heroVideoTransitionTimer); pauseInactiveHeroVideos('') })
 </script>
 
 <style scoped>
-.creative-board-list{display:grid;gap:1rem;padding:1.5rem clamp(1.5rem,4vw,4.5rem);background:#0b1018;border-top:1px solid rgba(255,255,255,.1)}
-.creative-board-heading{display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap}.creative-board-heading h2{margin:0;color:#fff;font-size:1.2rem}.creative-board-heading span{color:#9ba9b8;font-size:.85rem}
-.creative-board-new{display:inline-flex;flex:0 0 auto;align-items:center;gap:.3rem;margin-left:auto;padding:.42rem .9rem;border:1px solid rgba(139,165,255,.5);border-radius:999px;background:rgba(101,86,199,.24);color:#c9d6ff;font-size:.75rem;cursor:pointer;transition:border-color .15s,background .15s,color .15s}.creative-board-new:hover,.creative-board-new:focus-visible{border-color:#a9bcff;background:rgba(101,86,199,.4);color:#fff}
-.creative-board-items{display:flex;gap:.75rem;overflow-x:auto;padding-bottom:.3rem}.creative-board-items button{display:grid;gap:.55rem;min-width:12rem;padding:1rem;border:1px solid rgba(255,255,255,.15);border-radius:12px;background:#141c29;color:#fff;text-align:left;cursor:pointer}.creative-board-items button:hover,.creative-board-items button:focus-visible{border-color:#8ba5ff}.creative-board-items small{color:#a9c1ff}
 .film-list {
   min-height: 100vh;
   background: #08080d;
@@ -1973,9 +1947,9 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 .record-row { position: relative; border-bottom: 1px solid var(--border-color); transition: background-color var(--motion-fast,140ms) ease; }.record-row:hover { background: color-mix(in srgb, var(--bg-hover) 46%, transparent); }
 .record-open { display: grid; grid-template-columns: 2.4rem 6.5rem minmax(12rem,1fr) 8.5rem 9rem 1.5rem; gap: 1rem; align-items: center; width: 100%; min-height: 7.8rem; padding: .85rem 10rem .85rem .4rem; border: 0; border-radius: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .record-index { color: var(--text-faint); font: 700 .66rem/1 ui-monospace,monospace; }.record-thumb { display: grid; width: 6.5rem; height: 4.5rem; place-items: center; overflow: hidden; background: linear-gradient(145deg, var(--bg-raised), var(--bg-page)); color: var(--text-faint); }.record-thumb img, .record-thumb video { width: 100%; height: 100%; object-fit: cover; transition: transform var(--motion-normal,220ms) var(--ease-out-premium,cubic-bezier(.22,1,.36,1)); display: block; }.record-row:hover .record-thumb img { transform: scale(1.045); }.record-thumb i { font-style: normal; font-size: 1.1rem; }
-.record-title { min-width: 0; }.record-title small, .record-title b, .record-title em { display: block; }.record-title small { color: var(--accent-teal); font-size: .58rem; font-weight: 700; letter-spacing: .08em; }.record-title b { margin: .4rem 0 .3rem; overflow: hidden; font-size: 1.05rem; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }.record-title em { overflow: hidden; color: var(--text-muted); font-size: .7rem; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }.record-meta, .record-open time { color: var(--text-faint); font-size: .67rem; }.record-arrow { color: var(--text-muted); transition: transform var(--motion-fast,140ms) ease; }.record-row:hover .record-arrow { transform: translateX(.3rem); }
+.record-title { min-width: 0; }.record-title small, .record-title b, .record-title em { display: block; }.record-title small { color: var(--accent-teal); font-size: .58rem; font-weight: 700; letter-spacing: .08em; }.record-title b { margin: .4rem 0 .3rem; overflow: hidden; font-size: 1.05rem; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }.record-title em { overflow: hidden; color: var(--text-muted); font-size: .7rem; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }.record-meta, .record-open time { overflow: hidden; color: var(--text-faint); font-size: .67rem; text-overflow: ellipsis; white-space: nowrap; }.record-arrow { color: var(--text-muted); transition: transform var(--motion-fast,140ms) ease; }.record-row:hover .record-arrow { transform: translateX(.3rem); }
 .record-actions { position: absolute; right: 2rem; top: 50%; display: flex; gap: .35rem; transform: translateY(-50%); opacity: 0; transition: opacity var(--motion-fast,140ms) ease; }.record-row:hover .record-actions, .record-actions:focus-within { opacity: 1; }.record-actions .el-button { width: 2rem; height: 2rem; min-height: 0; }
-.record-no-result { display: grid; min-height: 12rem; place-content: center; text-align: center; }.record-no-result b, .record-no-result span { display: block; }.record-no-result span { margin-top: .5rem; color: var(--text-muted); font-size: .75rem; }
+.record-no-result { display: grid; min-height: 12rem; place-content: center; text-align: center; }.record-no-result .el-button { justify-self: center; margin-top: 1.1rem; }.record-no-result b, .record-no-result span { display: block; }.record-no-result span { margin-top: .5rem; color: var(--text-muted); font-size: .75rem; }
 .media-showcase { padding: clamp(4rem,7vw,7rem) 0; overflow: hidden; }.media-showcase .section-heading { padding-inline: clamp(1.25rem,5vw,5rem); }.media-showcase .section-heading button { border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
 .media-filmstrip { display: grid; grid-template-columns: 1.35fr .8fr 1fr .72fr 1.12fr .8fr; grid-template-rows: 14rem 10rem; gap: .45rem; padding-inline: .45rem; }
 .film-frame { position: relative; min-width: 0; min-height: 0; padding: 0; overflow: hidden; border: 0; border-radius: 0; background: var(--bg-raised); color: #fff; text-align: left; cursor: pointer; }.film-frame--1 { grid-row: 1 / 3; }.film-frame--2 { grid-row: 1; }.film-frame--3 { grid-row: 1 / 3; }.film-frame--4 { grid-row: 2; }.film-frame--5 { grid-row: 1 / 3; }.film-frame--6 { grid-row: 1 / 3; }.film-frame:nth-child(n+7) { display: none; }
@@ -2107,19 +2081,5 @@ html.light .project-card{background:rgba(255,255,255,.72)!important}
 /* Keep the records shortcut clear of the mobile hero title. */
 @media (max-width: 52rem) {
   .media-stage-content { padding-top: 7.5rem; }
-}
-
-/* 画布是独立产品线，桌面首屏必须给出常驻入口：舞台让出画布条的高度，新建与续作都在第一屏内。 */
-@media (min-width: 70.01rem) {
-  .media-stage { height: calc(100dvh - var(--ui-header-height) - 8.5rem); }
-  .media-stage-content { padding-bottom: clamp(1.6rem, 3vh, 2.4rem); }
-  .creative-board-list { align-content: center; gap: .55rem; height: 8.5rem; padding: .9rem clamp(1.5rem, 4vw, 4.5rem); }
-  .creative-board-heading { align-items: center; flex-wrap: nowrap; gap: .75rem; }
-  .creative-board-heading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .creative-board-items { gap: .6rem; padding-bottom: 0; }
-  .creative-board-items button { grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: .7rem; min-width: 13rem; max-width: 19rem; padding: .6rem .85rem; }
-  .creative-board-items button b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .creative-board-items .board-cta-label { display: none; }
-  .creative-board-items button small { white-space: nowrap; font-size: .8rem; }
 }
 </style>
