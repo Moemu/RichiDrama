@@ -66,6 +66,12 @@ export function dropPosition(base, index) {
 
 // Only editable inputs and an unresolved request survive reload. Edges own references;
 // generation rows own versions. An ambiguous submission retains the exact body/key.
+export function videoSettingsFor(data) {
+  return { video_model: data.model, duration: data.duration, resolution: data.resolution, aspect_ratio: data.aspectRatio,
+    upscale_resolution: data.upscale_resolution !== undefined ? data.upscale_resolution : data.resolution === '720p' && data.upscale1080 ? '1080p' : null,
+    target_fps: data.target_fps || null }
+}
+
 export function draftSnapshot(data) {
-  return Object.fromEntries(['draftType', 'prompt', 'model', 'duration', 'resolution', 'aspectRatio', 'upscale1080', 'pendingRequest'].filter((key) => data[key] !== undefined).map((key) => [key, data[key]]))
+  return Object.fromEntries(['draftType', 'prompt', 'model', 'duration', 'resolution', 'aspectRatio', 'upscale1080', 'upscale_resolution', 'target_fps', 'pendingRequest'].filter((key) => data[key] !== undefined).map((key) => [key, data[key]]))
 }

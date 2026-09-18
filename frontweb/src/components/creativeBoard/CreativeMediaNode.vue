@@ -9,8 +9,9 @@
     <div class="media-actions nodrag nopan" @pointerdown.stop>
       <button v-if="data.type === 'image'" @click="data.onReference?.(id, 'image')">接图片节点</button>
       <button v-if="['image', 'video'].includes(data.type)" @click="data.onReference?.(id, 'video')">接视频节点</button>
-      <button v-if="data.type === 'video' && data.source_type === 'video_generation' && data.status === 'completed'" @click="data.onDelivery?.(id)">加入交付</button>
+      <button v-if="data.type === 'video' && data.source_type === 'video_generation' && data.status === 'completed'" @click="data.onDelivery?.(id)">加入合并导出</button>
       <button v-if="data.type === 'video' && data.source_type === 'video_generation' && ['pending', 'processing', 'sd2_waiting'].includes(data.status)" @click="data.onCancel?.(id)">取消任务</button>
+      <a v-if="data.local_path && data.url && ['completed', 'ready'].includes(data.status)" :href="data.url" download @click.stop>下载成果</a>
       <a v-if="data.url" :href="data.url" target="_blank" rel="noopener">查看媒体</a>
     </div>
     <Handle type="source" :position="Position.Right" />

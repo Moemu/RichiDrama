@@ -17,7 +17,7 @@
           <el-tooltip content="文本节点：未连接是备注，连接后作为提示词输入" placement="top"><el-button link aria-label="新建文本节点" @click="startText()"><el-icon :size="18"><Memo /></el-icon></el-button></el-tooltip>
           <el-tooltip content="图片生成节点" placement="top"><el-button link aria-label="新建图片生成节点" @click="startCompose('image')"><el-icon :size="18"><Picture /></el-icon></el-button></el-tooltip>
           <el-tooltip content="视频生成节点" placement="top"><el-button link aria-label="新建视频生成节点" @click="startCompose('video')"><el-icon :size="18"><VideoCamera /></el-icon></el-button></el-tooltip>
-          <el-tooltip content="单集交付" placement="top"><el-button link aria-label="单集交付" @click="placeDeliveryNode"><el-icon :size="18"><Film /></el-icon></el-button></el-tooltip>
+          <el-tooltip content="合并导出" placement="top"><el-button link aria-label="合并导出" @click="placeDeliveryNode"><el-icon :size="18"><Film /></el-icon></el-button></el-tooltip>
         </div>
         <div class="dock-group">
           <el-tooltip content="整理连线布局" placement="top"><el-button link :disabled="!flowNodes.length" aria-label="整理连线布局" @click="autoLayout"><el-icon :size="18"><Grid /></el-icon></el-button></el-tooltip>
@@ -76,7 +76,7 @@ import { videosAPI } from '@/api/videos'
 import { accountAPI } from '@/api/account'
 import { useModelOptions } from '@/composables/useModelOptions'
 import { createClientRequestId } from '@/utils/requestId'
-import { generationVersions, referenceForNode, usageOptionsFor, draftSnapshot, textInputsFor, composePrompt, nodeLabel, pasteNodes } from '@/utils/creativeBoardWorkflow'
+import { generationVersions, referenceForNode, usageOptionsFor, draftSnapshot, textInputsFor, composePrompt, nodeLabel, pasteNodes, videoSettingsFor } from '@/utils/creativeBoardWorkflow'
 import { createHistory, editSnapshot, readStoredHistory, writeStoredHistory, clearStoredHistory } from '@/utils/creativeBoardHistory'
 import { currentDraftUserId } from '@/utils/promptDraft'
 import request from '@/utils/request'
@@ -107,7 +107,7 @@ let lastCommitted = null, historyTimer = null
 const saveLabel = computed(() => saveBlocked.value ? '保存冲突，请刷新' : ({ saving: '保存中…', error: '保存失败', saved: '已保存' }[saveState.value]))
 const libraryItems = computed(() => libraryRows.value.map((row) => mediaData(activeTab.value === 'assets' ? 'asset' : activeTab.value === 'images' ? 'image_generation' : 'video_generation', row)))
 const deliveryDurationMs = computed(() => deliveryIds.value.reduce((sum, id) => sum + Number(videoRecord(id)?.duration_ms || 0), 0))
-const canSubmitDelivery = computed(() => deliveryIds.value.length > 0 && deliveryDurationMs.value >= 60000 && deliveryDurationMs.value <= 180000 && subtitles.value.length > 0 && subtitles.value.every((line) => line.text.trim() && Number.isFinite(line.start) && Number.isFinite(line.end) && line.start >= 0 && line.end > line.start && line.end * 1000 <= deliveryDurationMs.value))
+const canSubmitDelivery = computed(() => deliveryIds.value.length > 0 && deliveryDurationMs.value > 0 && subtitles.value.every((line) => !line.text.trim() || (Number.isFinite(line.start) && Number.isFinite(line.end) && line.start >= 0 && line.end > line.start && line.end * 1000 <= deliveryDurationMs.value)))
 function isDraft(node) { return ['draft_image', 'draft_video'].includes(node?.kind) }
 function edgeLabel(usage) { return ({ reference: '参考', first_frame: '首帧', last_frame: '尾帧', continuation: '续接' }[usage] || '') }
 function nodeType(node) { return isDraft(node) ? node.data.draftType : node?.data.type }
@@ -156,7 +156,7 @@ async function loadBoard() {
     const base = { id: entry.id, position: { x: entry.x, y: entry.y }, kind: entry.kind, source_type: entry.source_type, source_id: entry.source_id }
     if (isDraft(entry)) return attachActions({ ...base, type: 'draft', data: { prompt: '', model: '', duration: 15, resolution: '720p', upscale1080: false, aspectRatio: '16:9', ...draftSnapshot(entry.draft || {}), title: entry.name || '', draftType: entry.kind === 'draft_image' ? 'image' : 'video', submitting: false } })
     if (entry.kind === 'text') return attachActions({ ...base, type: 'text', data: { title: entry.name || '', text: entry.text || '', linked: false } })
-    if (entry.kind === 'delivery') return attachActions({ ...base, type: 'delivery', data: { delivery_id: entry.delivery_id ?? null, delivery: null, title: entry.name || '', name: '单集交付' } })
+    if (entry.kind === 'delivery') return attachActions({ ...base, type: 'delivery', data: { delivery_id: entry.delivery_id ?? null, delivery: null, title: entry.name || '', name: '合并导出' } })
     return attachActions({ ...base, type: 'media', data: { ...(value.media[entry.id] || { missing: true, name: '媒体不可用' }), source_type: entry.source_type, title: entry.name || '' } })
   })
   flowEdges.value = value.graph.edges.map((edge) => ({ ...edge, label: edgeLabel(edge.usage) }))
@@ -167,7 +167,7 @@ async function loadBoard() {
 function nodeFromSnapshot(entry, liveData) {
   const base = { id: entry.id, position: { x: entry.x, y: entry.y }, kind: entry.kind, source_type: entry.source_type, source_id: entry.source_id }
   if (entry.kind === 'text') return attachActions({ ...base, type: 'text', data: { title: entry.name || '', text: entry.text || '', linked: false } })
-  if (entry.kind === 'delivery') return attachActions({ ...base, type: 'delivery', data: { ...(liveData || { delivery_id: null, delivery: null }), title: entry.name || '', name: '单集交付' } })
+  if (entry.kind === 'delivery') return attachActions({ ...base, type: 'delivery', data: { ...(liveData || { delivery_id: null, delivery: null }), title: entry.name || '', name: '合并导出' } })
   if (isDraft(entry)) return attachActions({ ...base, type: 'draft', data: { prompt: '', model: '', duration: 15, resolution: '720p', upscale1080: false, aspectRatio: '16:9', ...(entry.draft || {}), title: entry.name || '', draftType: entry.kind === 'draft_image' ? 'image' : 'video', submitting: false, inputs: [], versionCount: 0, imageModels: imageModels.value, capabilities: capabilities.value } })
   return attachActions({ ...base, type: 'media', data: { ...(liveData || board.value?.media?.[entry.id] || { missing: true, name: '媒体不可用' }), source_type: entry.source_type, title: entry.name || '' } })
 }
@@ -314,7 +314,7 @@ function startText() {
 function placeDeliveryNode() {
   if (!board.value) return
   if (flowNodes.value.some((node) => node.kind === 'delivery')) { showDelivery.value = true; return }
-  flowNodes.value.push(attachActions({ id: `delivery:${createClientRequestId()}`, type: 'delivery', kind: 'delivery', position: nextFreePosition(), data: { delivery_id: null, delivery: null, title: '', name: '单集交付' } }))
+  flowNodes.value.push(attachActions({ id: `delivery:${createClientRequestId()}`, type: 'delivery', kind: 'delivery', position: nextFreePosition(), data: { delivery_id: null, delivery: null, title: '', name: '合并导出' } }))
   commitEdit(); scheduleSave()
 }
 function graphSnapshot() {
@@ -462,10 +462,11 @@ async function submitGeneration(id) {
         const assets = []
         for (const [index, reference] of references.entries()) assets.push({ asset_id: await materializeAsset(reference), usage: reference.usage === 'continuation' ? 'motion' : reference.usage, role: 'reference', ordinal: index + 1, type: reference.type, alias: reference.name })
         const firstLast = assets.length && assets.every((item) => ['first_frame', 'last_frame'].includes(item.usage)) && assets.some((item) => item.usage === 'first_frame')
-        Object.assign(body, { duration: data.duration, resolution: data.resolution, upscale_resolution: data.resolution === '720p' && data.upscale1080 ? '1080p' : null, creation_mode: firstLast ? 'first_last_frame' : 'multi_reference', audio_strategy: 'reference_only', assets })
+        const settings = videoSettingsFor(data)
+        Object.assign(body, { duration: data.duration, resolution: data.resolution, upscale_resolution: settings.upscale_resolution, target_fps: settings.target_fps, creation_mode: firstLast ? 'first_last_frame' : 'multi_reference', audio_strategy: 'reference_only', assets })
         const quote = await omniVideoAPI.quoteBilling({ source_context: 'creative_board', board_id: boardId, model: data.model, duration: data.duration, resolution: data.resolution, has_video_input: references.some((item) => item.type === 'video'), has_audio: false })
-        const postprocess = body.upscale_resolution ? await videosAPI.postprocessQuote({ resolution: data.resolution, upscale_resolution: body.upscale_resolution, duration: data.duration, aspect_ratio: data.aspectRatio }) : null
-        await ElMessageBox.confirm(`本次视频生成预计冻结 ${quote.amount} 积分。${postprocess ? `超分另预计 ${postprocess.estimated_total_points} 积分，完成后按实际规格结算。` : ''}继续提交？`, '视频生成费用', { confirmButtonText: '提交生成', cancelButtonText: '取消' })
+        const postprocess = body.upscale_resolution || body.target_fps ? await videosAPI.postprocessQuote({ resolution: data.resolution, upscale_resolution: body.upscale_resolution, target_fps: body.target_fps, source_fps: 30, duration: data.duration, aspect_ratio: data.aspectRatio }) : null
+        await ElMessageBox.confirm(`本次视频生成预计冻结 ${quote.amount} 积分。${postprocess ? `超分／插帧另预计 ${postprocess.estimated_total_points} 积分，完成后按实际规格结算。` : ''}继续提交？`, '视频生成费用', { confirmButtonText: '提交生成', cancelButtonText: '取消' })
       }
       data.pendingRequest = body
     }
@@ -511,7 +512,7 @@ function addToDelivery(id) {
 }
 function videoRecord(id) { return board.value?.generated_videos?.find((row) => Number(row.id) === id) ? mediaData('video_generation', board.value.generated_videos.find((row) => Number(row.id) === id)) : flowNodes.value.find((node) => node.source_type === 'video_generation' && Number(node.source_id) === id)?.data }
 function videoName(id) { return videoRecord(id)?.name || `视频 #${id}` }
-function restoreDelivery(item) { deliveryIds.value = [...item.input.video_generation_ids]; subtitles.value = item.input.subtitles.map((line) => ({ start: line.start_ms / 1000, end: line.end_ms / 1000, text: line.text })); bgmAssetId.value = item.input.bgm?.asset_id || null }
+function restoreDelivery(item) { deliveryIds.value = [...item.input.video_generation_ids]; subtitles.value = (item.input.subtitles || []).map((line) => ({ start: line.start_ms / 1000, end: line.end_ms / 1000, text: line.text })); bgmAssetId.value = item.input.bgm?.asset_id || null }
 async function loadDeliveries() { try { deliveryItems.value = await creativeBoardAPI.deliveries(boardId); syncDeliveryNodeStatus() } catch (_) {} }
 function syncDeliveryNodeStatus() {
   const node = flowNodes.value.find((item) => item.kind === 'delivery')
@@ -521,12 +522,12 @@ async function submitDelivery() {
   deliverySubmitting.value = true
   try {
     const key = deliveryRequestId.value || createClientRequestId(); deliveryRequestId.value = key
-    const created = await creativeBoardAPI.createDelivery(boardId, { idempotency_key: key, video_generation_ids: deliveryIds.value, subtitles: subtitles.value.map((line) => ({ start_ms: Math.round(line.start * 1000), end_ms: Math.round(line.end * 1000), text: line.text })), bgm_asset_id: bgmAssetId.value || null })
+    const created = await creativeBoardAPI.createDelivery(boardId, { idempotency_key: key, video_generation_ids: deliveryIds.value, subtitles: subtitles.value.filter((line) => line.text.trim()).map((line) => ({ start_ms: Math.round(line.start * 1000), end_ms: Math.round(line.end * 1000), text: line.text })), bgm_asset_id: bgmAssetId.value || null })
     deliveryRequestId.value = ''; await loadDeliveries()
     const node = flowNodes.value.find((item) => item.kind === 'delivery'), recordId = created?.id ?? deliveryItems.value[0]?.id
     if (node && recordId) { node.data.delivery_id = String(recordId); scheduleSave() }
     syncDeliveryNodeStatus(); ElMessage.success('交付任务已提交')
-  } catch (error) { ElMessage.error(error.message || '单集交付失败') } finally { deliverySubmitting.value = false }
+  } catch (error) { ElMessage.error(error.message || '合并导出失败') } finally { deliverySubmitting.value = false }
 }
 function autoLayout() {
   const nodes = flowNodes.value, adj = new Map(nodes.map((node) => [node.id, []])), indeg = new Map(nodes.map((node) => [node.id, 0])), layer = new Map(nodes.map((node) => [node.id, 0]))

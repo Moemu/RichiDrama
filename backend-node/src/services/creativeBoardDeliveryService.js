@@ -32,7 +32,8 @@ async function probe(file) {
 }
 
 function validateSubtitles(subtitles, durationMs) {
-  if (!Array.isArray(subtitles) || !subtitles.length || subtitles.length > 300) throw new Error('请填写单集字幕');
+  if (subtitles == null) return [];
+  if (!Array.isArray(subtitles) || subtitles.length > 300) throw new Error('字幕格式无效');
   let lastEnd = 0;
   return subtitles.map((item) => {
     const start_ms = Number(item.start_ms);
@@ -87,11 +88,11 @@ async function validatedInput(db, boardId, ownerId, body) {
     const file = resolveStorageFile(root, row.local_path);
     if (!fs.existsSync(file)) throw new Error('片段本地文件不可读');
     const media = await probe(file);
-    if (Math.min(media.width, media.height) < 1080) throw new Error('片段低于 1080p，请先完成超分');
+    if (media.seconds <= 0) throw new Error('片段时长无效');
     videos.push({ id: row.id, local_path: row.local_path, ...media });
   }
   const totalMs = Math.round(videos.reduce((sum, video) => sum + video.seconds, 0) * 1000);
-  if (totalMs < 60000 || totalMs > 180000) throw new Error('单集交付长度须为 1–3 分钟');
+  if (!Number.isFinite(totalMs) || totalMs <= 0) throw new Error('片段总时长无效');
   const subtitles = validateSubtitles(body.subtitles, totalMs);
   let bgm = null;
   if (body.bgm_asset_id) {
@@ -150,22 +151,25 @@ async function processDelivery(db, log, id) {
     const clean = path.join(folder, 'clean.mp4');
     await run(getFfmpegPath(), ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', '-movflags', '+faststart', clean]);
     const srt = path.join(folder, 'subtitles.srt');
-    fs.writeFileSync(srt, srtText(input.subtitles), 'utf8');
+    const hasSubtitles = !!input.subtitles?.length;
+    if (hasSubtitles) fs.writeFileSync(srt, srtText(input.subtitles), 'utf8');
     const finished = path.join(folder, 'finished.mp4');
     const args = ['-y', '-i', clean];
     if (input.bgm) args.push('-stream_loop', '-1', '-i', resolveStorageFile(root, input.bgm.local_path));
-    args.push('-vf', subtitleFilter(srt), '-map', '0:v:0');
+    if (hasSubtitles) args.push('-vf', subtitleFilter(srt));
+    args.push('-map', '0:v:0');
     if (input.bgm) args.push('-filter_complex', '[0:a:0][1:a:0]amix=inputs=2:duration=first:dropout_transition=0[a]', '-map', '[a]');
     else args.push('-map', '0:a:0');
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-movflags', '+faststart', finished);
-    await run(getFfmpegPath(), args);
-    if (![clean, srt, finished].every((file) => fs.existsSync(file) && fs.statSync(file).size > 0)) throw new Error('交付文件未生成完整');
+    if (hasSubtitles || input.bgm) await run(getFfmpegPath(), args);
+    else fs.copyFileSync(clean, finished);
+    if (![clean, finished, ...(hasSubtitles ? [srt] : [])].every((file) => fs.existsSync(file) && fs.statSync(file).size > 0)) throw new Error('导出文件未生成完整');
     for (const file of [clean, finished]) {
       const media = await probe(file);
-      if (Math.min(media.width, media.height) < 1080 || Math.abs(media.seconds * 1000 - input.total_ms) > 1500) throw new Error('交付成片规格或时长无效');
+      if (media.seconds <= 0 || Math.abs(media.seconds * 1000 - input.total_ms) > 1500) throw new Error('交付成片规格或时长无效');
     }
     db.prepare("UPDATE creative_board_deliveries SET status='completed',clean_local_path=?,finished_local_path=?,srt_local_path=?,error_msg=NULL,updated_at=? WHERE id=?")
-      .run(`${relative}/clean.mp4`, `${relative}/finished.mp4`, `${relative}/subtitles.srt`, new Date().toISOString(), id);
+      .run(`${relative}/clean.mp4`, `${relative}/finished.mp4`, hasSubtitles ? `${relative}/subtitles.srt` : null, new Date().toISOString(), id);
   } catch (error) {
     db.prepare("UPDATE creative_board_deliveries SET status='failed',error_msg=?,updated_at=? WHERE id=?")
       .run(String(error.message).slice(0, 500), new Date().toISOString(), id);

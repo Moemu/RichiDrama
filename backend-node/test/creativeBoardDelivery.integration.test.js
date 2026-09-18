@@ -14,7 +14,7 @@ const { authorizeMediaPath } = require('../src/services/mediaAuthorizationServic
 const log = { info() {}, warn() {}, error() {} };
 
 function execute(bin, args) {
-  const result = spawnSync(bin, args, { encoding: 'utf8', windowsHide: true, maxBuffer: 100000 });
+  const result = spawnSync(bin, args, { encoding: 'utf8', windowsHide: true, maxBuffer: 100000, timeout: 30000 });
   assert.equal(result.status, 0, result.stderr?.slice(-1000) || result.error?.message);
   return result.stdout;
 }
@@ -38,7 +38,7 @@ test('one local episode resumes after database restart and writes distinct clean
   try {
     const sourceDir = path.join(root, 'test');
     fs.mkdirSync(sourceDir);
-    execute(getFfmpegPath(), ['-y', '-f', 'lavfi', '-i', 'color=c=blue:s=1920x1080:r=1:d=60', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=60', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', '-c:a', 'aac', '-shortest', path.join(sourceDir, 'clip.mp4')]);
+    execute(getFfmpegPath(), ['-y', '-f', 'lavfi', '-i', 'color=c=blue:s=320x240:r=10:d=5', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=5', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', '-c:a', 'aac', '-shortest', path.join(sourceDir, 'clip.mp4')]);
     const dbPath = path.join(root, 'isolated.db');
     db = new Database(dbPath);
     const originalLog = console.log, originalWarn = console.warn;
@@ -49,8 +49,8 @@ test('one local episode resumes after database restart and writes distinct clean
     const video = db.prepare("INSERT INTO video_generations(owner_user_id,prompt,status,local_path,created_at,updated_at) VALUES(1,'本地片段','completed','test/clip.mp4',?,?)").run(at, at);
     const input = {
       video_generation_ids: [Number(video.lastInsertRowid)],
-      videos: [{ id: Number(video.lastInsertRowid), local_path: 'test/clip.mp4', width: 1920, height: 1080, seconds: 60, audio: true }],
-      subtitles: [{ start_ms: 1000, end_ms: 3000, text: '本地字幕' }], bgm: null, total_ms: 60000,
+      videos: [{ id: Number(video.lastInsertRowid), local_path: 'test/clip.mp4', width: 320, height: 240, seconds: 5, audio: true }],
+      subtitles: [{ start_ms: 1000, end_ms: 3000, text: '本地字幕' }], bgm: null, total_ms: 5000,
     };
     const row = db.prepare("INSERT INTO creative_board_deliveries(board_id,owner_user_id,idempotency_key,input_json,created_at,updated_at) VALUES(?,1,'restart-test',?,?,?)")
       .run(Number(board.lastInsertRowid), JSON.stringify(input), at, at);
@@ -69,9 +69,9 @@ test('one local episode resumes after database restart and writes distinct clean
     assert.match(fs.readFileSync(path.join(root, done.srt_local_path), 'utf8'), /00:00:01,000 --> 00:00:03,000/);
     for (const file of [clean, finished]) {
       const metadata = JSON.parse(execute(getFfprobePath(), ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height', '-of', 'json', file]));
-      assert.ok(Number(metadata.format.duration) >= 59);
+      assert.ok(Math.abs(Number(metadata.format.duration) - 5) < 1);
       assert.ok(metadata.streams.some((stream) => stream.codec_type === 'audio'));
-      assert.equal(metadata.streams.find((stream) => stream.codec_type === 'video').height, 1080);
+      assert.equal(metadata.streams.find((stream) => stream.codec_type === 'video').height, 240);
     }
     db.close(); db = new Database(dbPath);
     assert.equal(delivery.ownedDelivery(db, Number(row.lastInsertRowid), 1).status, 'completed');
@@ -89,6 +89,14 @@ test('one local episode resumes after database restart and writes distinct clean
     assert.equal(mixedDone.status, 'completed', mixedDone.error_msg);
     const audioHash = (file) => execute(getFfmpegPath(), ['-v', 'error', '-i', file, '-vn', '-t', '2', '-c:a', 'pcm_s16le', '-f', 'md5', '-']).trim();
     assert.notEqual(audioHash(path.join(root, mixedDone.clean_local_path)), audioHash(path.join(root, mixedDone.finished_local_path)), 'selected BGM changes only the finished audio');
+    const plain = await delivery.create(db, log, Number(board.lastInsertRowid), 1, { idempotency_key: 'plain-test', video_generation_ids: [Number(video.lastInsertRowid)] });
+    const plainDone = await waitForCompletion(db, plain.id);
+    assert.equal(plainDone.status, 'completed', plainDone.error_msg);
+    assert.equal(plainDone.srt_local_path, null);
+    assert.equal(delivery.ownedDelivery(db, plain.id, 1).srt_url, null);
+    assert.deepEqual(fs.readFileSync(path.join(root, plainDone.clean_local_path)), fs.readFileSync(path.join(root, plainDone.finished_local_path)));
+    assert.deepEqual(delivery.validateSubtitles([], 5000), []);
+    assert.throws(() => delivery.validateSubtitles([{ start_ms: 0, end_ms: 6000, text: '超出片段' }], 5000), /字幕时间/);
     db.prepare('UPDATE creative_boards SET deleted_at=? WHERE id=?').run(new Date().toISOString(), Number(board.lastInsertRowid));
     assert.equal(authorizeMediaPath(db, done.finished_local_path, { id: 1 }, { storageRoot: root }).status, 404);
   } finally {

@@ -10,9 +10,11 @@
     <div v-if="selected" class="node-editor nodrag nopan nowheel" @pointerdown.stop @keydown.stop @wheel.stop>
       <fieldset :disabled="locked">
         <label>提示词<textarea v-model="data.prompt" rows="4" maxlength="10000" placeholder="描述要生成的内容" @input="data.onChange()" /></label>
-        <label>模型<select v-model="data.model" @change="data.onChange()"><option value="" disabled>选择模型</option><option v-for="model in models" :key="model" :value="model">{{ model }}</option></select></label>
-        <div class="parameter-row"><label>画幅<select v-model="data.aspectRatio" @change="data.onChange()"><option>16:9</option><option>9:16</option><option>1:1</option></select></label><label v-if="data.draftType === 'video'">时长（秒）<input v-model.number="data.duration" type="number" min="4" max="30" @change="data.onChange()" /></label></div>
-        <template v-if="data.draftType === 'video'"><label>分辨率<select v-model="data.resolution" @change="data.onChange()"><option>720p</option><option>1080p</option></select></label><label class="checkbox"><input v-model="data.upscale1080" type="checkbox" :disabled="data.resolution === '1080p'" @change="data.onChange()" />另付费超分至 1080p</label></template>
+        <GenerationSettings v-if="data.draftType === 'video'" :model-value="videoSettings" include-generation-quote @update:model-value="updateVideoSettings" />
+        <template v-else>
+          <label>模型<select v-model="data.model" @change="data.onChange()"><option value="" disabled>选择模型</option><option v-for="model in models" :key="model" :value="model">{{ model }}</option></select></label>
+          <label>画幅<select v-model="data.aspectRatio" @change="data.onChange()"><option>16:9</option><option>9:16</option><option>1:1</option></select></label>
+        </template>
       </fieldset>
       <div class="inputs"><span v-if="!data.inputs?.length">左侧端口连接参考输入（可选）</span><div v-for="input in data.inputs" :key="input.id" class="input-row"><span :title="input.name">{{ input.ready ? '●' : '○' }} {{ input.name }}</span><small>{{ input.usage }}</small><button :disabled="locked" :aria-label="`移除参考 ${input.name}`" @click="data.onRemoveInput(input.id)">×</button></div></div>
       <p v-if="data.upstreamText?.length" class="upstream-hint">上游文本 {{ data.upstreamText.length }} 段将拼在本节点提示词之前</p>
@@ -26,7 +28,8 @@
       <small v-if="data.versionCount">{{ data.versionCount }} 个版本 · 历史见素材库</small>
     </div>
     <div v-if="data.output" class="output-actions nodrag nopan" @pointerdown.stop>
-      <button v-if="data.draftType === 'image'" @click="data.onReference(id, 'image')">接图片节点</button><button @click="data.onReference(id, 'video')">接视频节点</button><button v-if="data.draftType === 'video'" @click="data.onDelivery(id)">加入交付</button>
+      <a v-if="data.output.local_path && data.output.url" :href="data.output.url" download @click.stop>下载成果</a>
+      <button v-if="data.draftType === 'image'" @click="data.onReference(id, 'image')">接图片节点</button><button @click="data.onReference(id, 'video')">接视频节点</button><button v-if="data.draftType === 'video'" @click="data.onDelivery(id)">加入合并导出</button>
     </div>
     <Handle type="source" :position="Position.Right" />
   </div>
@@ -35,6 +38,14 @@
 import { computed } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import NodeTitle from './NodeTitle.vue'
+import GenerationSettings from '@/components/GenerationSettings.vue'
+import { videoSettingsFor } from '@/utils/creativeBoardWorkflow'
+const videoSettings = computed(() => videoSettingsFor(props.data))
+function updateVideoSettings(value) {
+  if (locked.value) return
+  Object.assign(props.data, { model: value.video_model, duration: value.duration, resolution: value.resolution, aspectRatio: value.aspect_ratio, upscale_resolution: value.upscale_resolution, target_fps: value.target_fps })
+  props.data.onChange()
+}
 const props = defineProps({ id: { type: String, required: true }, data: { type: Object, required: true }, selected: Boolean })
 const busy = computed(() => ['pending', 'processing', 'sd2_waiting'].includes(props.data.latest?.status))
 const locked = computed(() => props.data.submitting || !!props.data.pendingRequest)

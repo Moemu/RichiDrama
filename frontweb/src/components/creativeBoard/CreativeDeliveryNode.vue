@@ -1,12 +1,12 @@
 <template>
   <div class="delivery-card" :class="{ selected }">
-    <div class="card-heading"><NodeTitle v-model="data.title" placeholder="单集交付" @update:model-value="data.onChange?.()" /><small>{{ statusLabel }}</small></div>
+    <div class="card-heading"><NodeTitle v-model="data.title" placeholder="合并导出" @update:model-value="data.onChange?.()" /><small>{{ statusLabel }}</small></div>
     <div class="delivery-body">
       <p class="delivery-id">{{ delivery ? `交付记录 #${delivery.id}` : '尚未关联交付记录' }}</p>
       <div v-if="delivery && delivery.status === 'completed'" class="delivery-links">
         <a :href="delivery.finished_url" download>成片</a>
         <a :href="delivery.clean_url" download>净片</a>
-        <a :href="delivery.srt_url" download>SRT</a>
+        <a v-if="delivery.srt_url" :href="delivery.srt_url" download>SRT</a>
       </div>
       <p v-else-if="delivery && delivery.error_msg" class="error" :title="delivery.error_msg">{{ delivery.error_msg }}</p>
       <p v-else class="hint">点击打开交付抽屉</p>

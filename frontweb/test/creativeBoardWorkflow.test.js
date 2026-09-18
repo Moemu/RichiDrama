@@ -1,7 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { generationVersions, referenceForNode, usageOptionsFor, draftSnapshot, uploadedAsset, dropPosition, textInputsFor, composePrompt, nodeLabel, pasteNodes } from '../src/utils/creativeBoardWorkflow.js'
+import { generationVersions, referenceForNode, usageOptionsFor, draftSnapshot, videoSettingsFor, uploadedAsset, dropPosition, textInputsFor, composePrompt, nodeLabel, pasteNodes } from '../src/utils/creativeBoardWorkflow.js'
+
+test('video settings map node fields to storyboard fields and bridge the legacy upscale checkbox', () => {
+  assert.deepEqual(videoSettingsFor({ model: 'm', duration: 10, resolution: '480p', aspectRatio: '9:16', upscale_resolution: '720p', target_fps: 60 }),
+    { video_model: 'm', duration: 10, resolution: '480p', aspect_ratio: '9:16', upscale_resolution: '720p', target_fps: 60 })
+  // An old board stores only upscale1080; it reads as a 1080p upscale target on 720p and nothing otherwise.
+  assert.equal(videoSettingsFor({ resolution: '720p', upscale1080: true }).upscale_resolution, '1080p')
+  assert.equal(videoSettingsFor({ resolution: '720p', upscale1080: false }).upscale_resolution, null)
+  assert.equal(videoSettingsFor({ resolution: '1080p', upscale1080: true }).upscale_resolution, null)
+  // A newer explicit value wins over the legacy checkbox and survives the persist snapshot.
+  assert.equal(videoSettingsFor({ resolution: '480p', upscale_resolution: '1080p' }).upscale_resolution, '1080p')
+  const snapshot = draftSnapshot({ prompt: 'p', resolution: '480p', upscale_resolution: '720p', target_fps: 60 })
+  assert.deepEqual(snapshot, { prompt: 'p', resolution: '480p', upscale_resolution: '720p', target_fps: 60 })
+})
 
 test('persistent generation nodes resolve latest completed local output, not a pending version', () => {
   const board = { generated_images: [{ id: 3, draft_node_id: 'draft:a', status: 'pending' }, { id: 1, draft_node_id: 'draft:a', status: 'completed', local_path: 'a.png' }, { id: 2, draft_node_id: 'draft:b' }] }

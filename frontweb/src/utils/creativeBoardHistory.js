@@ -3,7 +3,7 @@
 // Runtime state (versions, outputs, a resolved or unresolved request) is deliberately
 // excluded, so an undo can never replay a paid submission or resurrect a stale task.
 const LIMIT = 50
-const DRAFT_FIELDS = ['draftType', 'prompt', 'model', 'duration', 'resolution', 'aspectRatio', 'upscale1080']
+const DRAFT_FIELDS = ['draftType', 'prompt', 'model', 'duration', 'resolution', 'aspectRatio', 'upscale1080', 'upscale_resolution', 'target_fps']
 
 export function editSnapshot(nodes, edges) {
   return {
