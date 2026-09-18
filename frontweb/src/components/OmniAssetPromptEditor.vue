@@ -282,14 +282,27 @@ function serializeNode(node) {
   return [...node.childNodes].map(serializeNode).join('')
 }
 function serializeEditor() { return [...(editorRef.value?.childNodes || [])].map(serializeNode).join('') }
+// 记录上一次真正重建 DOM 时的内容与引用解析结果。references 事件会让父组件
+// 原样回传新的 promptDocument 对象，deep watcher 随之在每次按键后走到这里；
+// 若内容没有变化就跳过 replaceChildren——脚本改写 contenteditable 子树会清空
+// Chromium 的编辑撤销栈，不跳过的直接后果就是 Ctrl+Z 失效。
+let renderedSource = null
+let renderedRefsKey = null
+function referencesKey() {
+  return resolvedReferences.value.map((entry) => `${entry.alias}:${entry.occurrence}:${entry.asset_id}`).join('|')
+}
 function renderEditor(value, force = false) {
   if (composing) return
   const el = editorRef.value
   if (!el) return
+  const source = String(value || '')
+  const refsKey = referencesKey()
+  if (!force && serializeEditor() === source && renderedSource === source && renderedRefsKey === refsKey) return
+  renderedSource = source
+  renderedRefsKey = refsKey
   const caret = !force && document.activeElement === el ? caretOffset() : null
   const scrollPosition = { top: el.scrollTop, left: el.scrollLeft }
   el.replaceChildren()
-  const source = String(value || '')
   let last = 0; const occurrences = new Map()
   for (const mention of findAssetMentions(source, referenceAssets.value)) {
     if (mention.index > last) el.append(document.createTextNode(source.slice(last, mention.index)))
