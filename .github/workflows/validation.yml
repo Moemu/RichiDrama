@@ -120,7 +120,11 @@ jobs:
       # The preview variant is what actually runs on the server, and its build is
       # the step that outlives a slow-mirror window. Build and verify it here so a
       # broken preview Dockerfile fails in CI instead of during a deploy.
-      - name: Build preview image from the candidate runtime
+      #
+      # The base is the same public Node 24 image the production Dockerfile starts
+      # from: buildx cannot read the daemon-local candidate image, and the real
+      # base (the active production runtime ID) only exists on the server.
+      - name: Build and verify the preview image variant
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -128,7 +132,7 @@ jobs:
           load: true
           tags: local-minidrama-preview:${{ github.sha }}
           build-args: |
-            RUNTIME_BASE_IMAGE=local-minidrama:${{ github.sha }}
+            RUNTIME_BASE_IMAGE=node:24-bookworm-slim
             APP_REVISION=${{ github.sha }}
             PREVIEW_TITLE_BADGE=1
             DEBIAN_MIRROR=deb.debian.org

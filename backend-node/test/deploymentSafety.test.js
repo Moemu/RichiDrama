@@ -200,12 +200,17 @@ test('preview builder keeps a warm apt index so slow mirrors cannot repeat the t
   // Dockerfile can no longer be discovered only by a real preview deploy.
   const validation = read('.github/workflows/validation.yml');
   assert.match(validation, /file: Dockerfile\.preview/);
-  assert.match(validation, /RUNTIME_BASE_IMAGE=local-minidrama:\$\{\{ github\.sha \}\}/);
+  // buildx cannot read the daemon-local candidate image, so the CI check builds
+  // the preview variant on the same public Node 24 base the production
+  // Dockerfile starts from. The real base is the active production runtime ID,
+  // which only exists on the server.
+  assert.match(validation, /RUNTIME_BASE_IMAGE=node:24-bookworm-slim/);
+  assert.doesNotMatch(validation, /RUNTIME_BASE_IMAGE=local-minidrama:/);
   assert.match(validation, /PREVIEW_TITLE_BADGE=1/);
   assert.match(validation, /DEBIAN_MIRROR=deb\.debian\.org/);
   assert.match(validation, /local-minidrama-preview:\$\{GITHUB_SHA\}/);
   assert.match(validation, /grep -q " \(preview\)<\/title>" \/app\/frontweb\/dist\/index\.html/);
-  // The production image stays the validation candidate for the preview build.
+  // The production image is still built and verified first.
   assert.ok(validation.indexOf('local-minidrama:${{ github.sha }}') < validation.indexOf('file: Dockerfile.preview'));
 });
 
