@@ -39,7 +39,7 @@ jobs:
       - name: Check deployment shell scripts
         run: |
           shellcheck -e SC1091 \
-            deploy/lib.sh deploy/preview-deploy deploy/preview-rebuild deploy/preview-payment-smoke deploy/test-preview-ingress deploy/preview-remove deploy/preview-show deploy/preview-cleanup \
+            deploy/lib.sh deploy/preview-deploy deploy/preview-payment-smoke deploy/test-preview-ingress deploy/preview-remove deploy/preview-show deploy/preview-cleanup \
             deploy/release-deploy deploy/release-rollback deploy/install-operations
       - name: Install backend dependencies
         working-directory: backend-node
@@ -117,36 +117,3 @@ jobs:
             nginx:1.27-alpine nginx -t
       - name: Verify concurrent preview WebSocket routing
         run: bash deploy/test-preview-ingress
-      # The preview variant is what actually runs on the server, and its build is
-      # the step that outlives a slow-mirror window. Build and verify it here so a
-      # broken preview Dockerfile fails in CI instead of during a deploy.
-      #
-      # The base is the same public Node 24 image the production Dockerfile starts
-      # from: buildx cannot read the daemon-local candidate image, and the real
-      # base (the active production runtime ID) only exists on the server.
-      - name: Build and verify the preview image variant
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile.preview
-          load: true
-          tags: local-minidrama-preview:${{ github.sha }}
-          build-args: |
-            RUNTIME_BASE_IMAGE=node:24-bookworm-slim
-            APP_REVISION=${{ github.sha }}
-            PREVIEW_TITLE_BADGE=1
-            DEBIAN_MIRROR=deb.debian.org
-          cache-from: type=gha,scope=validation-container
-          cache-to: type=gha,mode=max,scope=validation-preview-container
-      - name: Verify preview image inherits the runtime and carries the badge
-        run: |
-          docker run --rm --network none --entrypoint node "local-minidrama-preview:${GITHUB_SHA}" -e '
-            const assert = require("node:assert/strict");
-            assert.equal(process.versions.node.split(".")[0], "24");
-            const db = require("better-sqlite3")(":memory:");
-            assert.equal(db.prepare("SELECT 1 AS ok").get().ok, 1);
-            db.close();
-          '
-          docker run --rm --network none --entrypoint sh "local-minidrama-preview:${GITHUB_SHA}" \
-            -c 'grep -q " (preview)</title>" /app/frontweb/dist/index.html'
-          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "local-minidrama-preview:${GITHUB_SHA}")" = "${GITHUB_SHA}"

@@ -99,50 +99,6 @@ bash deploy/configure-github-protection Moemu/RichiDrama 1
 
 `preview-show` 输出敏感地址和密码。只通过私密渠道发送这些信息。
 
-## 构建超时的手动重建
-
-上游 apt / npm 镜像在某些时段会明显变慢。镜像构建在**生产服务器**上执行，如果它还没结束就撞上
-`PR Preview` 流程的 SSH 命令上限（`command_timeout`，默认 40m），整次部署会被杀掉并在提交上记为
-`preview / smoke` 失败。失败时日志里会看到构建仍停在中转镜像的安装阶段，最后一行是
-`##[error]Process completed with exit code 1.`。
-
-两条恢复路径：
-
-**A. 重跑 GitHub 流程（构建仍然受 SSH 上限约束）**
-
-```bash
-# 重跑失败的工作流
-gh run rerun <run-id> --failed
-
-# 或按 PR 编号重新派发，并在镜像慢时显式放宽上限
-gh workflow run "PR Preview" -f pr_number=<pr-number> -f command_timeout=90m
-```
-
-**B. 在服务器上直接重建（推荐，完全不受 SSH 上限约束）**
-
-```bash
-ssh root@<production-host>
-preview-rebuild <pr-number> --detach      # 立即返回，构建在后台继续
-tail -f /var/log/minidrama-rebuild/pr-<pr-number>.log
-preview-show <pr-number>                  # 完成后读取访问地址与口令
-```
-
-- `preview-rebuild` 与 CI 走**完全相同的部署路径**：同一个 `preview-deploy`、同一把部署锁、同样先在
-  生产库快照副本上双跑迁移。它只是把"发起位置"从 runner 移到服务器，不改变任何安全检查。
-- `--detach` 用 `setsid nohup` 后台执行，关掉 SSH 会话也不会中断构建；不带该参数则前台执行并直接反馈退出码。
-- 可用 `--sha <commit>` 要求重建的必须是某个确切提交，避免 PR 头在排查期间被推进。
-- 脚本要求被部署的提交是 `origin` 某个分支的 HEAD，与被拒的分叉 PR 保持一致（CI 侧另外通过
-  `author_association` 校验）。分叉仓库的提交会被拒绝。
-- 部署锁是排他的：若 CI 部署正在运行，手动重建会立即失败并提示已有部署在进行，不会并发构建。
-
-`preview-rebuild` 在生产发布会安装到 `/usr/local/bin/preview-rebuild`（见 `deploy/install-operations`）。
-首次使用前若该命令不存在，可直接执行 `bash /data/apps/LocalMiniDrama/deploy/preview-rebuild <pr-number> --detach`。
-
-### 减少再次超时
-
-`Dockerfile.preview` 的构建阶段把 apt 索引放在缓存挂载里（不再每次部署重新下载整套索引），并启用
-`Acquire::Retries=3`。这直接消除了"镜像慢 + 每次重建都重下索引"叠加出的超时。
-
 ## 回滚规则
 
 发布脚本保留旧容器和发布前数据库快照。健康检查失败时，脚本自动恢复旧容器。

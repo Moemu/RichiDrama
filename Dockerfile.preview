@@ -5,19 +5,11 @@ ARG RUNTIME_BASE_IMAGE=local-minidrama:preview-runtime-base
 FROM node:24-bookworm-slim AS builder
 
 # Match the production builder OS and Node major for native dependencies.
-# DEBIAN_MIRROR stays overridable for the same reason as the production
-# Dockerfile: the production host needs the regional mirror, CI runners are
-# faster on the default Debian route.
-ARG DEBIAN_MIRROR=mirrors.aliyun.com
-RUN sed -i "s|deb.debian.org|${DEBIAN_MIRROR}|g; s|security.debian.org|${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.sources
-# The apt index is kept in a cache mount instead of being deleted after use, and
-# the download is retried: on the production host the mirrors degrade in some
-# time windows, and re-downloading the whole index on every preview build is
-# what pushed the deploy past the runner's SSH command timeout.
-RUN --mount=type=cache,id=richidrama-preview-apt-lists,target=/var/lib/apt/lists,sharing=locked \
-    apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-        python3 make g++ git ca-certificates
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 make g++ git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY frontweb/package.json frontweb/package-lock.json* ./frontweb/
