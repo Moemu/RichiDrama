@@ -13,6 +13,15 @@ on:
         description: Open internal PR number
         required: true
         type: string
+      command_timeout:
+        description: >-
+          Bound for the server-side deploy command. Raise it (for example 90m)
+          when the image build runs into slow upstream mirrors, or run
+          `preview-rebuild <pr> --detach` on the server to leave the SSH bound
+          entirely.
+        required: false
+        default: 40m
+        type: string
 
 permissions:
   contents: read
@@ -74,7 +83,9 @@ jobs:
           username: root
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          command_timeout: 40m
+          # A slow apt/npm mirror window can outlive the default bound; a manual
+          # dispatch may extend it without weakening the automatic path.
+          command_timeout: ${{ inputs.command_timeout || '40m' }}
           script: |
             set -euo pipefail
             sha='${{ steps.pr.outputs.sha }}'

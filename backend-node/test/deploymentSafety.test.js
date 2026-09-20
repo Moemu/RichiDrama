@@ -150,6 +150,65 @@ test('production release uses an immutable archive and rollback container', () =
   assert.doesNotMatch(source + compatibility, /git reset|git remote set-url/);
 });
 
+test('manual preview rebuild reuses the audited deploy path and keeps the gates', () => {
+  const rebuild = read('deploy/preview-rebuild');
+  const operations = read('deploy/install-operations');
+  const preview = read('.github/workflows/preview.yml');
+  assert.match(rebuild, /require_root/);
+  assert.match(rebuild, /validate_pr "\$PR_NUMBER"/);
+  assert.match(rebuild, /validate_sha "\$SHA"/);
+  // Same source resolution and same deploy entry point as the workflow.
+  assert.match(rebuild, /git -C "\$REPO" fetch --no-tags origin "refs\/pull\/\$\{PR_NUMBER\}\/head"/);
+  assert.match(rebuild, /rev-parse FETCH_HEAD/);
+  assert.match(rebuild, /bash "\$BOOTSTRAP\/deploy\/preview-deploy" "\$PR_NUMBER" "\$SHA"/);
+  // The deploy lock inside preview-deploy must stay the only concurrency control.
+  assert.doesNotMatch(rebuild, /flock|rm -f .*DEPLOY_LOCK/);
+  // Fork-only commits are refused: the CI path enforces the same rule through
+  // author_association, the server-side path through origin branch heads.
+  assert.match(rebuild, /ls-remote origin 'refs\/heads\/\*'/);
+  assert.match(rebuild, /not the head of any branch in this repository/);
+  // Detached builds must survive the SSH session that started them.
+  assert.match(rebuild, /setsid nohup bash "\$BOOTSTRAP\/deploy\/preview-deploy"/);
+  assert.match(rebuild, /Unsafe rebuild path/);
+  assert.doesNotMatch(rebuild, /git reset|git remote set-url|--force|\bmv \//);
+  // The command is installed on the server and documented for operators.
+  assert.match(operations, /FILES=\([^)]*preview-rebuild[^)]*\)/);
+  assert.match(operations, /COMMANDS=\([^)]*preview-rebuild[^)]*\)/);
+  assert.match(read('deploy/PR_PREVIEWS.md'), /preview-rebuild <pr-number> --detach/);
+  assert.match(read('.github/workflows/validation.yml'), /shellcheck -e SC1091[\s\S]*deploy\/preview-rebuild/);
+  // The SSH bound stays 40m by default and is only relaxed through an explicit
+  // manual dispatch input.
+  assert.match(preview, /command_timeout: \$\{\{ inputs\.command_timeout \|\| '40m' \}\}/);
+  assert.match(preview, /default: 40m/);
+});
+
+test('preview builder keeps a warm apt index so slow mirrors cannot repeat the timeout', () => {
+  const previewDockerfile = read('Dockerfile.preview');
+  assert.match(previewDockerfile, /--mount=type=cache,id=richidrama-preview-apt-lists,target=\/var\/lib\/apt\/lists,sharing=locked/);
+  assert.match(previewDockerfile, /Acquire::Retries=3/);
+  // Same mirror contract as the production Dockerfile: regional mirror by
+  // default on the host, overridable for CI runners.
+  assert.match(previewDockerfile, /ARG DEBIAN_MIRROR=mirrors\.aliyun\.com/);
+  assert.match(previewDockerfile, /security\.debian\.org\|\$\{DEBIAN_MIRROR\}/);
+  // Deleting the index inside the same RUN would empty the cache mount and
+  // recreate the cold-download path.
+  assert.doesNotMatch(previewDockerfile, /rm -rf \/var\/lib\/apt\/lists/);
+  // The preview runtime stage still installs nothing.
+  const previewRuntime = previewDockerfile.split('FROM ${RUNTIME_BASE_IMAGE} AS runtime')[1];
+  assert.doesNotMatch(previewRuntime, /apt-get|dnf|yum/);
+  // The preview image itself is built and verified by CI, so a broken preview
+  // Dockerfile can no longer be discovered only by a real preview deploy.
+  const validation = read('.github/workflows/validation.yml');
+  assert.match(validation, /file: Dockerfile\.preview/);
+  assert.match(validation, /RUNTIME_BASE_IMAGE=local-minidrama:\$\{\{ github\.sha \}\}/);
+  assert.match(validation, /PREVIEW_TITLE_BADGE=1/);
+  assert.match(validation, /DEBIAN_MIRROR=deb\.debian\.org/);
+  assert.match(validation, /local-minidrama-preview:\$\{GITHUB_SHA\}/);
+  assert.match(validation, /grep -q " \(preview\)<\/title>" \/app\/frontweb\/dist\/index\.html/);
+  // The production image stays the validation candidate for the preview build.
+  assert.ok(validation.indexOf('local-minidrama:${{ github.sha }}') < validation.indexOf('file: Dockerfile.preview'));
+});
+
 test('GitHub workflows gate preview and production', () => {
   const validation = read('.github/workflows/validation.yml');
   const preview = read('.github/workflows/preview.yml');
