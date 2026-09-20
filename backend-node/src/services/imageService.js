@@ -750,6 +750,11 @@ async function processImageGeneration(db, log, imageGenId) {
       api_protocol: config.api_protocol || '(auto)',
       elapsed: elapsed(),
     });
+    // 记录实际服务本次生成的配置：供应商临时地址是否必须转存本地、以及事后排障都依赖它。
+    if (Number(config.id) && Number(row.ai_config_id) !== Number(config.id)) {
+      db.prepare('UPDATE image_generations SET ai_config_id = ? WHERE id = ?').run(Number(config.id), imageGenId);
+      row.ai_config_id = Number(config.id);
+    }
 
     const refLimits = imageClient.getStoryboardReferenceLimits(config, row.model);
     log.info('[图生] Step2 参考图上限', {

@@ -24,6 +24,7 @@ import { aiAPI } from '@/api/ai'
 import { omniVideoAPI } from '@/api/omniVideo'
 import { videosAPI } from '@/api/videos'
 import UiChoiceField from '@/components/ui/UiChoiceField.vue'
+import { collectDisplayNames, modelLabel } from '@/utils/modelDisplayNames'
 
 const props = defineProps({
   modelValue: { type: Object, default: () => ({}) },
@@ -36,7 +37,7 @@ const props = defineProps({
   hasAudioInput: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue'])
-const textModels = ref([]), videoModels = ref([])
+const textModels = ref([]), videoModels = ref([]), modelNames = ref({})
 let modelOptionsCache = null
 let modelOptionsPromise = null
 const value = computed(() => props.modelValue || {})
@@ -79,7 +80,7 @@ const quote = ref(null), quoteLoading = ref(false), quoteError = ref('')
 let quoteTimer = null, quoteRevision = 0
 function formatPoints(value) { return Number(value || 0).toFixed(4).replace(/\.?(?:0+)$/, '') }
 function displayModelName(model) {
-  return String(model || '') || '未选择'
+  return modelLabel(modelNames.value, model)
 }
 function set(key, next) {
   const nextValue = { ...value.value, [key]: key === 'duration' ? Math.min(props.maxDuration, Math.max(4, Number(next) || 15)) : next }
@@ -148,14 +149,21 @@ onBeforeUnmount(() => clearTimeout(quoteTimer))
 function configModels(configs) { return [...new Set((configs || []).filter((item) => item.is_active !== false).flatMap((item) => Array.isArray(item.model) ? item.model : item.model ? [item.model] : []).filter(Boolean))] }
 onMounted(async () => {
   if (!modelOptionsPromise) {
-    modelOptionsPromise = Promise.allSettled([aiAPI.list('text', { selectable: true }), omniVideoAPI.capabilities()]).then(([text, video]) => ({
-      text: text.status === 'fulfilled' ? configModels(text.value) : [],
-      video: video.status === 'fulfilled' && Array.isArray(video.value) ? video.value : [],
-    })).then((result) => { modelOptionsCache = result; return result })
+    modelOptionsPromise = Promise.allSettled([aiAPI.list('text', { selectable: true }), omniVideoAPI.capabilities()]).then(([text, video]) => {
+      const names = text.status === 'fulfilled' ? collectDisplayNames(text.value) : {}
+      const videoList = video.status === 'fulfilled' && Array.isArray(video.value) ? video.value : []
+      for (const item of videoList) if (item?.display_name && item.display_name !== item.model) names[item.model] = item.display_name
+      return {
+        text: text.status === 'fulfilled' ? configModels(text.value) : [],
+        video: videoList,
+        names,
+      }
+    }).then((result) => { modelOptionsCache = result; return result })
   }
   const options = modelOptionsCache || await modelOptionsPromise
   textModels.value = options.text
   videoModels.value = options.video
+  modelNames.value = options.names || {}
 })
 </script>
 

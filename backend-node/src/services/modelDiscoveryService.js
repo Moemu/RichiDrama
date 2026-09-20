@@ -5,9 +5,10 @@ const billing = require('./billingService');
 const { signOpenApiRequest } = require('./volcengineOpenApiSigning');
 const capability = require('./modelCapabilityService');
 const providers = require('./providerConnectionService');
+const relayCatalog = require('./richbestProvider');
 
 const serviceTypes = new Set(['text', 'image', 'storyboard_image', 'video', 'tts']);
-const sources = new Set(['openai', 'volcengine_activations', 'volcengine_versions', 'volcengine_endpoints']);
+const sources = new Set(['openai', 'richbest_models', 'volcengine_activations', 'volcengine_versions', 'volcengine_endpoints']);
 const pageSize = 100;
 
 function settings(config) {
@@ -15,6 +16,7 @@ function settings(config) {
 }
 
 function defaultSource(config) {
+  if (require('./richbestProvider').isRichbest(config)) return 'richbest_models';
   if (/volc|volces|火山/.test(`${config.provider} ${config.api_protocol}`.toLowerCase())) return 'volcengine_endpoints';
   return 'openai';
 }
@@ -84,10 +86,12 @@ async function discover(db, actorId, configId, input = {}) {
   const foundationModel = String(input.foundation_model || '').trim();
   if (versionSource && (!validId(foundationModel) || !foundationModel.startsWith('doubao-') || /-\d{6}$/.test(foundationModel))) throw new Error('请选择有效的火山基础型号，再读取版本');
   const page = Number(input.page ?? 1);
-  if (!Number.isSafeInteger(page) || page < 1 || page > 1000 || (source === 'openai' && page !== 1)) throw new Error('无效的模型列表页码');
+  // 中转站的 /v1/models 与 OpenAI 兼容列表同样是单页 GET，不接受分页。
+  const openaiStyle = source === 'openai' || source === 'richbest_models';
+  if (!Number.isSafeInteger(page) || page < 1 || page > 1000 || (openaiStyle && page !== 1)) throw new Error('无效的模型列表页码');
   const requestId = randomUUID();
   let url; let init; let credentialId = null;
-  if (source === 'openai') {
+  if (openaiStyle) {
     const key = String(config.api_key || '').trim().replace(/^Bearer\s+/i, '');
     if (!key || ai.isMaskedApiKey(key)) throw new Error('请先保存连接的 API Key');
     url = modelsUrl(config.base_url);
@@ -127,21 +131,35 @@ async function discover(db, actorId, configId, input = {}) {
     const payload = await readJson(result);
     providerRequestId = payload.ResponseMetadata?.RequestId || providerRequestId;
     if (payload.ResponseMetadata?.Error || payload.error) throw new Error('供应商拒绝模型列表请求，请检查密钥和列表读取权限');
-    const raw = source === 'openai' ? payload.data : payload.Result?.Items;
+    const relay = source === 'richbest_models';
+    const raw = openaiStyle ? payload.data : payload.Result?.Items;
     if (!Array.isArray(raw)) throw new Error('供应商响应不包含模型列表，请检查所选接口来源');
-    if (source === 'openai' && payload.has_more) throw new Error('此兼容接口要求额外分页，当前不支持；未导入任何模型');
-    const total = source === 'openai' ? raw.length : payload.Result?.TotalCount;
+    if (openaiStyle && payload.has_more) throw new Error('此兼容接口要求额外分页，当前不支持；未导入任何模型');
+    const total = openaiStyle ? raw.length : payload.Result?.TotalCount;
     if (!Number.isSafeInteger(total) || total < 0) throw new Error('供应商响应缺少有效的模型总数');
     const models = new Map(); let ignored = 0;
     for (const item of raw) {
       const activations = source === 'volcengine_activations';
       const id = versionSource
         ? item?.FoundationModelName === foundationModel && /^\d{6}$/.test(String(item?.ModelVersion || '')) ? `${foundationModel}-${item.ModelVersion}` : null
-        : source === 'openai' ? item?.id : activations ? item?.FoundationModelName || item?.Name : item?.Id;
+        : openaiStyle ? item?.id : activations ? item?.FoundationModelName || item?.Name : item?.Id;
       if (!validId(id)) { ignored++; continue; }
-      models.set(id, { id, ...(activations && id.startsWith('doubao-') && !/-\d{6}$/.test(id) ? { importable: false, foundation_model: id } : {}), ...(versionSource ? { foundation_model: foundationModel } : {}), capability: capability.infer(id), display_name: String((source === 'openai' ? item.name : activations ? item.DisplayName : versionSource ? item.Description : item.Name) || id).slice(0, 200), provider_status: source === 'openai' ? null : String((activations ? item.State : item.Status) || ''), configured: config.model.includes(id) });
+      // 中转站以 /v1/models 的返回为唯一事实来源：提交值用 id，展示用 display_name。
+      const relayEntry = relay ? relayCatalog.parseModelCatalog({ data: [item] })[0] : null;
+      const displayName = relay ? relayEntry.display_name
+        : String((source === 'openai' ? item.name : activations ? item.DisplayName : versionSource ? item.Description : item.Name) || id).slice(0, 200);
+      models.set(id, {
+        id,
+        ...(activations && id.startsWith('doubao-') && !/-\d{6}$/.test(id) ? { importable: false, foundation_model: id } : {}),
+        ...(versionSource ? { foundation_model: foundationModel } : {}),
+        capability: capability.infer(id),
+        display_name: displayName,
+        ...(relay ? { modality: relayEntry.modality, capabilities: relayEntry.capabilities } : {}),
+        provider_status: openaiStyle ? null : String((activations ? item.State : item.Status) || ''),
+        configured: config.model.includes(id),
+      });
     }
-    const nextPage = source !== 'openai' && page * pageSize < total ? page + 1 : null;
+    const nextPage = !openaiStyle && page * pageSize < total ? page + 1 : null;
     if (nextPage && !raw.length) throw new Error('供应商分页响应不完整，请重新获取');
     billing.audit(db, actorId, 'model_catalog.discover', 'ai_config', config.id, { request_id: requestId, provider_request_id: providerRequestId, source, credential_config_id: credentialId, page, count: models.size });
     return { request_id: requestId, provider_request_id: providerRequestId, source, service_type: config.service_type, models: [...models.values()].sort((a, b) => a.id.localeCompare(b.id)), total, next_page: nextPage, ignored };
@@ -171,7 +189,7 @@ function importModels(db, actorId, configId, input, log) {
     const added = models.filter(model => !config.model.includes(model));
     if (added.length) {
       const updated = ai.updateConfig(db, log, config.id, { model: [...config.model, ...added] });
-      catalog.registerNewModels(db, updated, config.model);
+      catalog.registerNewModels(db, updated, config.model, input.display_names || {});
       billing.audit(db, actorId, 'model_catalog.import', 'ai_config', config.id, { models: added });
     }
     return { added, skipped: models.length - added.length };

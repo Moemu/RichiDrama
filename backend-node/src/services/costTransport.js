@@ -3,7 +3,7 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const ledger = require('./costLedgerService');
 const storage = new AsyncLocalStorage();
 
-function envelope(result) {
+function envelope(result, options = {}) {
   let data = result?.body ?? result?.raw ?? result;
   if (typeof data === 'string') { try { data = JSON.parse(data); } catch (_) { data = {}; } }
   const failed = Number(result?.status ?? result?.statusCode) >= 400 || !!data?.error || ['failed','error','cancelled'].includes(data?.status || data?.data?.task_status);
@@ -15,7 +15,7 @@ function envelope(result) {
   const finished = images > 0 || !!data?.video_url || ['completed','succeeded','succeed','success','done'].includes(phase);
   return {
     status: failed ? 'failed' : finished ? 'completed' : task || ['processing','pending','running','queued','submitted'].includes(phase) ? 'processing' : 'completed',
-    usage: { ...(usage || {}), ...(!failed ? { request: 1 } : {}), ...(images ? { image: images } : {}) },
+    usage: { ...(usage || {}), ...(!failed && !options.noMeterFabrication ? { request: 1 } : {}), ...(images ? { image: images } : {}) },
     provider_request_id: result?.provider_request_id || result?.headers?.['x-request-id'] || result?.headers?.['x-tt-logid'] || data?.request_id || null,
     provider_task_id: task,
   };
@@ -23,8 +23,14 @@ function envelope(result) {
 
 // Scope belongs to one business call. Only the explicitly wrapped submission
 // transports consume it; uploads and status retrieval do not create attempts.
+// 中转站明确"上游没返回 usage 就不补计量"，对它不能沿用旧供应商的 request:1 兜底，
+// 否则成本台账会把一次无法核实的调用记成已观测到 1 次请求。
+function blocksMeterFabrication(input) {
+  return require('./richbestProvider').isRichbest(input?.config);
+}
 async function run(db, input, send) {
   const scope = { db, input, calls: [] };
+  const noMeterFabrication = blocksMeterFabrication(input);
   return storage.run(scope, async () => {
     const result = await send();
     const id = scope.calls.at(-1);
@@ -32,7 +38,7 @@ async function run(db, input, send) {
       const usage = ledger.normalizeUsage(result.usage);
       ledger.record(db, id, {
         status: result.error ? (scope.latest?.status === 'unknown' ? 'unknown' : 'failed') : result.task_id ? 'processing' : 'completed',
-        usage: usage || (input.service_type === 'image' && result.image_url && !scope.latest?.usage?.image ? { image: 1, request: 1 } : null),
+        usage: usage || (!noMeterFabrication && input.service_type === 'image' && result.image_url && !scope.latest?.usage?.image ? { image: 1, request: 1 } : null),
         provider_task_id: result.task_id, provider_request_id: result.provider_request_id,
       });
     }
@@ -42,23 +48,27 @@ async function run(db, input, send) {
 async function submit(send, body) {
   const scope = storage.getStore();
   if (!scope) return send();
+  const options = { noMeterFabrication: blocksMeterFabrication(scope.input) };
   const authorization = scope.input.authorization_id && scope.input.service_type === 'image' ? require('./billingService').imageAuthorization(scope.db, scope.input.authorization_id) : null;
   const id = ledger.begin(scope.db, { ...scope.input, authorization_id: authorization?.id || scope.input.authorization_id, model: body?.model || scope.input.model });
   scope.calls.push(id);
   let result;
   try { result = await send(); }
   catch (error) {
-    scope.latest = error.cost_evidence ? envelope(error.cost_evidence) : { status: 'unknown', reason: '供应商提交未取得确定结果' };
+    scope.latest = error.cost_evidence ? envelope(error.cost_evidence, options) : { status: 'unknown', reason: '供应商提交未取得确定结果' };
     ledger.record(scope.db, id, scope.latest);
     throw error;
   }
-  scope.latest = envelope(result);
+  scope.latest = envelope(result, options);
   ledger.record(scope.db, id, scope.latest);
   return result;
 }
 function observeResponse(result) {
   const scope = storage.getStore(), id = scope?.calls.at(-1);
-  if (id) { scope.latest = envelope(result); ledger.record(scope.db, id, scope.latest); }
+  if (id) {
+    scope.latest = envelope(result, { noMeterFabrication: blocksMeterFabrication(scope.input) });
+    ledger.record(scope.db, id, scope.latest);
+  }
 }
 async function fetchSubmission(url, options) {
   if (!storage.getStore() || String(options?.method).toUpperCase() !== 'POST') return globalThis.fetch(url, options);

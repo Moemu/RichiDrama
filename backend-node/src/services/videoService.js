@@ -853,8 +853,21 @@ async function resumePollForVideoGeneration(db, log, videoGenId) {
   const providerTaskId = row.provider_task_id && String(row.provider_task_id).trim();
   if (!providerTaskId) return;
 
-  const config = videoClient.getDefaultVideoConfig(db, row.model, { tenant_id: row.tenant_id, scene_defaults: false });
+  // 提交时钉住的配置优先：中转站只认建任务的那枚业务 Key，按模型名重解析可能换到另一套
+  // base_url/Key，把在途任务查到错误的供应商上。历史行没有钉住值，行为与改造前完全一致。
+  const pinnedConfigId = Number(row.ai_config_id) || null;
+  const config = pinnedConfigId
+    ? require('./aiConfigService').getConfig(db, pinnedConfigId)
+    : videoClient.getDefaultVideoConfig(db, row.model, { tenant_id: row.tenant_id, scene_defaults: false });
   if (!config) {
+    if (pinnedConfigId) {
+      // 不能退回默认配置：那等于拿别的 Key 查这个任务。保持 processing、留住宿预授权，
+      // 交给既有对账流程，等管理员恢复该配置后即可继续轮询。
+      db.prepare('UPDATE video_generations SET error_msg = ?, updated_at = ? WHERE id = ?')
+        .run('固定配置已删除，暂停轮询以避免用错业务 Key；恢复该配置后任务会自动继续', new Date().toISOString(), Number(videoGenId));
+      log.warn('Video poll paused: pinned config missing', { videoGenId, ai_config_id: pinnedConfigId });
+      return;
+    }
     const now = new Date().toISOString();
     setVideoGenFailed(db, videoGenId, '未配置视频模型', now);
     if (row.task_id) taskService.updateTaskError(db, row.task_id, '未配置视频模型');
@@ -1119,7 +1132,6 @@ async function processVideoGeneration(db, log, videoGenId) {
   }
   const now = new Date().toISOString();
   try {
-    db.prepare('UPDATE video_generations SET status = ?, updated_at = ? WHERE id = ?').run('processing', now, videoGenId);
     const loadConfig = require('../config').loadConfig;
     const cfg = loadConfig();
     const filesBaseUrl = (cfg.storage && cfg.storage.base_url) ? String(cfg.storage.base_url).replace(/\/$/, '') : '';
@@ -1132,6 +1144,10 @@ async function processVideoGeneration(db, log, videoGenId) {
       if (row.task_id) taskService.updateTaskError(db, row.task_id, '未配置视频模型');
       return;
     }
+    // 记下真正提交本任务的配置：中转站只允许建任务的同一枚业务 Key 查询/取消任务，
+    // 重启续轮询不能按模型名重新解析到另一套配置。
+    db.prepare('UPDATE video_generations SET status = ?, ai_config_id = ?, updated_at = ? WHERE id = ?')
+      .run('processing', Number(config.id) || null, now, videoGenId);
     let reference_urls = null;
     if (row.reference_image_urls) {
       try {
@@ -1237,6 +1253,8 @@ async function processVideoGeneration(db, log, videoGenId) {
       files_base_url: filesBaseUrl,
       storage_local_path: storageLocalPath,
       video_gen_id: videoGenId,
+      // 用刚解析出的（含租户绑定的）配置提交，避免与后续轮询用的配置不一致
+      ai_config_id: Number(config.id) || null,
     });
     const now2 = new Date().toISOString();
     if (result.error) {
@@ -1410,6 +1428,7 @@ module.exports = {
   resumeMissingVideoPosters,
   startPendingVideoArchiveRetry,
   resumeProcessingVideoGenerations,
+  resumePollForVideoGeneration,
   reconcileUnarchivedCompletedVideos,
   resumePostprocessVideoGeneration,
   resumeResolvedPostprocessVideoGeneration,

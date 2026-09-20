@@ -161,7 +161,10 @@ function listConfigs(db, serviceType, options = {}) {
 
 // Creators only need model choices. Provider credentials and transport
 // configuration must stay inside the backend.
-function publicConfig(config) {
+function publicConfig(config, displayNames = null) {
+  const names = Object.fromEntries((config.model || [])
+    .filter((model) => displayNames?.[`${config.service_type}\u0000${model}`])
+    .map((model) => [model, displayNames[`${config.service_type}\u0000${model}`]]));
   return {
     id: config.id,
     service_type: config.service_type,
@@ -172,11 +175,24 @@ function publicConfig(config) {
     priority: config.priority,
     is_default: config.is_default,
     is_active: config.is_active,
+    // 模型目录里的展示名；提交值仍是 model 里的原 id，二者不得混用。
+    ...(Object.keys(names).length ? { display_names: names } : {}),
   };
 }
 
+function catalogDisplayNames(db) {
+  try {
+    return Object.fromEntries(db.prepare('SELECT service_type, model, display_name FROM ai_model_catalog')
+      .all().map((row) => [`${row.service_type}\u0000${row.model}`, row.display_name]));
+  } catch (_) {
+    return null;
+  }
+}
+
 function listPublicConfigs(db, serviceType, options = {}) {
-  return require('./modelCatalogService').filterConfigs(db, listConfigs(db, serviceType, options), options.user_id).map(publicConfig);
+  const displayNames = catalogDisplayNames(db);
+  return require('./modelCatalogService').filterConfigs(db, listConfigs(db, serviceType, options), options.user_id)
+    .map((config) => publicConfig(config, displayNames));
 }
 
 function resolveBillingTarget(db, serviceType, model, configId, options = {}) {
@@ -241,6 +257,16 @@ function createConfig(db, log, req) {
         queryEndpoint = '/contents/generations/tasks/{taskId}';
       } else if (st === 'image' || st === 'storyboard_image') {
         endpoint = '/images/generations';
+      }
+    } else if (p === 'richbest') {
+      const richbest = require('./richbestProvider');
+      if (st === 'video') {
+        endpoint = richbest.PATHS.videoTasks;
+        queryEndpoint = richbest.PATHS.videoTasks + '/{taskId}';
+      } else if (st === 'image' || st === 'storyboard_image') {
+        endpoint = '/images/generations';
+      } else if (st === 'text') {
+        endpoint = '/chat/completions';
       }
     } else if (p === 'nano_banana') {
       if (st === 'image' || st === 'storyboard_image') {
@@ -439,6 +465,21 @@ async function testConnection(opts) {
   const provider = (opts.provider || 'openai').toLowerCase();
   const serviceType = (opts.service_type || '').toLowerCase();
   let endpoint = opts.endpoint || '';
+
+  // --- 瑞池中转站：只用 GET 探测健康、Key 与模型目录，不创建任务、不产生费用 ---
+  if (provider === 'richbest') {
+    const richbest = require('./richbestProvider');
+    const result = await richbest.probe({ baseUrl: base, apiKey: opts.api_key });
+    if (!result.ok) throw new Error(result.error || '中转站连接失败');
+    if (model && result.models && !result.models.items.some((item) => item.id === model)) {
+      throw new Error(`中转站未向当前项目开放模型 ${model}，请先在「获取模型」中同步 /v1/models`);
+    }
+    return {
+      message: '连接测试成功',
+      api_key_id: result.apiKeyId || null,
+      models: result.models ? { total: result.models.total, by_modality: result.models.by_modality } : null,
+    };
+  }
 
   // --- NanoBanana ---
   if (provider === 'nano_banana') {

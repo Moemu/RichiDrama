@@ -332,6 +332,7 @@
           </template>
           <el-select v-model="form.api_protocol" style="width: 100%" placeholder="选择接口规范（自定义厂商必选）" clearable>
             <el-option label="OpenAI 兼容（大多数中转站默认）" value="openai" />
+            <el-option label="瑞池中转 API（/v1 文本图片 + /api/v3 异步视频）" value="richbest" />
             <el-option label="火山引擎（豆包 Seedream / Seedance）" value="volcengine" />
             <el-option label="火山即梦 Seedance 全能（方舟多图参考，Seedance 2.0 等）" value="volcengine_omni" />
             <el-option label="通义万象 DashScope" value="dashscope" />
@@ -1451,6 +1452,7 @@ const oneKeyAgnesSaving = ref(false)
 const providerConfigs = computed(() => {
   const providers = {
   text: [
+    { id: 'richbest', name: '瑞池中转 API（api.richbest.cn）' },
     { id: 'openai', name: 'OpenAI' },
     { id: 'volcengine', name: '火山引擎（方舟）' },
 
@@ -1460,6 +1462,7 @@ const providerConfigs = computed(() => {
     { id: 'agnes', name: 'Agnes AI' }
   ],
   image: [
+    { id: 'richbest', name: '瑞池中转 API（api.richbest.cn）' },
     { id: 'volcengine', name: '火山引擎（方舟）' },
     { id: 'kling', name: '可灵 Kling' },
     { id: 'nano_banana', name: 'NanoBanana' },
@@ -1471,6 +1474,7 @@ const providerConfigs = computed(() => {
     { id: 'agnes', name: 'Agnes AI' }
   ],
   storyboard_image: [
+    { id: 'richbest', name: '瑞池中转 API（api.richbest.cn）' },
     { id: 'dashscope', name: '通义万象' },
     { id: 'volcengine', name: '火山引擎（方舟）' },
     { id: 'kling', name: '可灵 Kling' },
@@ -1481,6 +1485,7 @@ const providerConfigs = computed(() => {
     { id: 'agnes', name: 'Agnes AI' }
   ],
   video: [
+    { id: 'richbest', name: '瑞池中转 API（api.richbest.cn）' },
     { id: 'klingai', name: '可灵官方 Omni (api-beijing.klingai.com)' },
     { id: 'ffir', name: '飞儿API / 可灵 Omni-Video (ffir.cn)' },
     { id: 'kling', name: '可灵 Kling' },
@@ -1515,6 +1520,8 @@ const providerConfigs = computed(() => {
 
 /** 厂商 id → 默认接口规范（api_protocol） */
 const providerProtocolMap = {
+  // 瑞池中转：显式写 api_protocol，避免被按模型名猜成火山/兼容接口
+  richbest: 'richbest',
   // image / storyboard_image
   volcengine: 'volcengine',
   volces: 'volcengine',
@@ -1563,6 +1570,7 @@ function getBaseUrlForProvider(provider) {
   if (p === 'ffir') return 'https://ffir.cn'
   if (p === 'jimeng_ai_api') return 'http://127.0.0.1:8000'
   if (p === 'jimeng_material_api') return 'https://silvamux.tingyutech.com'
+  if (p === 'richbest') return 'https://api.richbest.cn/v1'
   if (p === 'richbest_asset_v3') return 'https://api.richbest.cn'
   if (p === 'xai' || p === 'grok') return 'https://api.x.ai'
   if (p === 'agnes') return 'https://apihub.agnes-ai.com/v1'
@@ -1658,6 +1666,16 @@ const endpointPreviewInfo = computed(() => {
   }
 
   if (!base && !proto && !p) return null
+
+  // 瑞池中转的视频路径固定挂在站点根上，与文本/图片的 /v1 兼容路径不同源
+  if ((p === 'richbest' || proto === 'richbest') && service_type === 'video') {
+    const root = (base || 'https://api.richbest.cn').replace(/\/v\d+$/, '')
+    return {
+      submit: `${root}/api/v3/contents/generations/tasks`,
+      query: `${root}/api/v3/contents/generations/tasks/{taskId}`,
+      isAuto: true,
+    }
+  }
 
   let submitPath = '', queryPath = ''
 
@@ -2220,7 +2238,7 @@ async function openTest(row) {
   testError.value = ''
   testServiceType.value = row.service_type || 'text'
   try {
-    await aiAPI.testConnection({
+    const summary = await aiAPI.testConnection({
       config_id: row.id,
       model: Array.isArray(row.model) ? row.model[0] : row.model,
       endpoint: row.endpoint,
@@ -2228,6 +2246,11 @@ async function openTest(row) {
       settings: row.settings
     })
     testResult.value = true
+    if (summary?.models?.total != null) {
+      const byModality = Object.entries(summary.models.by_modality || {})
+        .map(([modality, count]) => `${modality} ${count}`).join('、')
+      ElMessage.success(`中转站已连接，当前项目可用模型 ${summary.models.total} 个${byModality ? `（${byModality}）` : ''}；本测试只读取模型目录，不产生费用`)
+    }
   } catch (e) {
     testResult.value = false
     testError.value = e?.message || '请求失败'

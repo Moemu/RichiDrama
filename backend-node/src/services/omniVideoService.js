@@ -1087,14 +1087,23 @@ function parse(value) { try { return value ? JSON.parse(value) : null; } catch (
 async function cancelJob(db, log, jobId, user) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(jobId));
   if (!job) throw new Error('全能视频任务不存在');
-  const generation = db.prepare('SELECT id, owner_user_id, tenant_id, model, status, provider_task_id, billing_authorization_id, task_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
+  const generation = db.prepare('SELECT id, owner_user_id, tenant_id, model, status, provider_task_id, ai_config_id, billing_authorization_id, task_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
   if (!generation) throw new Error('视频生成记录不存在');
   if (Number(generation.owner_user_id) !== Number(user.id) && user.role !== 'admin') throw new Error('只能取消自己的任务');
   if (['completed', 'failed', 'invalid'].includes(generation.status)) throw new Error('任务已结束，无需取消');
   if (generation.provider_task_id && String(generation.provider_task_id).trim()) {
     const videoClient = require('./videoClient');
-    const config = videoClient.getDefaultVideoConfig(db, generation.model, { tenant_id: generation.tenant_id, scene_defaults: false });
-    if (!config) throw new Error('找不到该任务的视频模型配置，不能安全取消');
+    // 中转站只允许建任务的那枚业务 Key 取消任务：与重启续轮询一样优先钉住的提交配置，
+    // 不能按模型名重解析到另一套 Key（会得到 404 video_task_not_found 的假象）。
+    const pinnedId = Number(generation.ai_config_id) || null;
+    const config = pinnedId
+      ? require('./aiConfigService').getConfig(db, pinnedId)
+      : videoClient.getDefaultVideoConfig(db, generation.model, { tenant_id: generation.tenant_id, scene_defaults: false });
+    if (!config) {
+      throw new Error(pinnedId
+        ? '提交该任务的 AI 配置已被删除，不能安全取消（换一枚业务 Key 无法取消别人的任务）；恢复该配置后即可取消'
+        : '找不到该任务的视频模型配置，不能安全取消');
+    }
     const upstream = await videoClient.cancelVideoTask(config, log, String(generation.provider_task_id).trim());
     if (!upstream.cancelled) {
       if (upstream.reason === 'running') throw new Error('火山任务已经开始运行，厂商不支持中途停止；任务将继续并按真实用量计费');
