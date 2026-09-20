@@ -152,6 +152,30 @@ function yuanToPointsText(yuan) {
   return fraction === 0n ? String(whole) : `${whole}.${String(fraction).padStart(4, '0').replace(/0+$/, '')}`;
 }
 
+/**
+ * 上游只给 metric + unit_size，不给火山那样的 UnitCode 文案；面板的「供应商价」列
+ * 按 `{价} CNY / {unit_code}` 渲染，留空就会显示成"未知单位"。这里按指标与计量单位补出
+ * 与火山侧同一套中文口径，让管理员看到单价到底按什么收费。
+ */
+function unitCodeFor(metric, meter, unitSize) {
+  const name = String(metric || '').toLowerCase();
+  if (name.endsWith('tokens') || name.endsWith('token')) {
+    if (unitSize === 1000) return '千tokens';
+    if (unitSize === 1000000) return '百万tokens';
+    return unitSize ? `每 ${unitSize} tokens` : 'tokens';
+  }
+  if (name === 'image' || name === 'images' || name === 'generated_images') return '张';
+  return { second: '秒', millisecond: '毫秒', character: '字符', request: '次' }[meter] || null;
+}
+
+/** 计费项列宽有限，维度去掉与 metric 重复的前缀后再拼上去，避免多条分档行看起来一模一样。 */
+function chargeTypeFor(metric, dimension) {
+  const raw = String(dimension ?? '').trim();
+  if (!raw || raw === 'null') return metric || 'unknown';
+  const brief = raw.replace(/^(?:tokens|output|input):/, '');
+  return `${metric || 'unknown'}（${brief}）`;
+}
+
 /** 单条上游价格 → 片段。解析失败或语义不支持时只带 reason，由分组阶段落成 unmapped 行。 */
 function pricePiece(entry, price, context = {}) {
   const { meter, metric, reason } = meterFor(price?.metric);
@@ -161,8 +185,8 @@ function pricePiece(entry, price, context = {}) {
     display_name: String(entry?.display_name || model).trim(),
     metric,
     meter,
-    charge_type: metric || 'unknown',
-    unit_code: null,
+    charge_type: chargeTypeFor(metric, price?.dimension),
+    unit_code: unitCodeFor(metric, meter, toNumber(price?.unit_size)),
     currency: String(price?.currency || entry?.currency || 'CNY'),
     provider_unit_price: price?.effective_price_yuan ?? price?.list_price_yuan ?? null,
     raw_item_json: JSON.stringify({ entry_id: model, modality: entry?.modality || null, price }),
@@ -233,7 +257,7 @@ function compileGroup(entry, target, pieces, context) {
     const anchor = bases[0] || orderedTiers[0];
     conditions.unit_size = anchor.unit_size;
     return { ...meta, provider_model: pieces[0].provider_model, display_name: pieces[0].display_name, currency: pieces[0].currency,
-      charge_type: `${metric}（${orderedTiers.length} 档）`, unit_code: null, provider_unit_price: anchor.provider_unit_price,
+      charge_type: `${metric}（${orderedTiers.length} 档）`, unit_code: unitCodeFor(metric, meter, anchor.unit_size), provider_unit_price: anchor.provider_unit_price,
       unit_size: anchor.unit_size, new_unit_price_micro: anchor.micro, new_conditions_json: JSON.stringify(conditions),
       conditions_changed: 0, raw_item_json: JSON.stringify(rawItem) };
   }
@@ -243,7 +267,7 @@ function compileGroup(entry, target, pieces, context) {
     const top = rates.reduce((best, piece) => (piece.micro > best.micro ? piece : best), bases[0] || rates[0]);
     conditions.unit_size = top.unit_size;
     return { ...meta, provider_model: pieces[0].provider_model, display_name: pieces[0].display_name, currency: pieces[0].currency,
-      charge_type: `${metric}（${rates.length} 条件）`, unit_code: null, provider_unit_price: top.provider_unit_price,
+      charge_type: `${metric}（${rates.length} 条件）`, unit_code: unitCodeFor(metric, meter, top.unit_size), provider_unit_price: top.provider_unit_price,
       unit_size: top.unit_size, new_unit_price_micro: top.micro, new_conditions_json: JSON.stringify(conditions),
       conditions_changed: 0, raw_item_json: JSON.stringify(rawItem) };
   }
@@ -251,7 +275,7 @@ function compileGroup(entry, target, pieces, context) {
   conditions.unit_size = piece.unit_size;
   conditions.provider_metric = metric;
   return { ...meta, provider_model: piece.provider_model, display_name: piece.display_name, currency: piece.currency,
-    charge_type: piece.charge_type, unit_code: null, provider_unit_price: piece.provider_unit_price,
+    charge_type: piece.charge_type, unit_code: piece.unit_code, provider_unit_price: piece.provider_unit_price,
     unit_size: piece.unit_size, new_unit_price_micro: piece.micro, new_conditions_json: JSON.stringify(conditions),
     conditions_changed: 0, raw_item_json: piece.raw_item_json };
 }
@@ -340,6 +364,6 @@ async function fetchPricing(db, options = {}) {
 
 module.exports = {
   PROVIDER, SOURCE, METERS, UNSUPPORTED_METERS, RESOLUTIONS,
-  parseYuan, yuanToMicroPoints, yuanToPointsText, meterFor, parseDimension, assertConsistent, pricePiece, buildCandidates,
+  parseYuan, yuanToMicroPoints, yuanToPointsText, meterFor, parseDimension, unitCodeFor, chargeTypeFor, assertConsistent, pricePiece, buildCandidates,
   fetchPricing, pricingContext,
 };

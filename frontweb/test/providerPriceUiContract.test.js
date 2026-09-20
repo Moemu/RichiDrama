@@ -32,6 +32,12 @@ test('price sync remains manual and exposes review, publish, and archive control
   assert.doesNotMatch(panel, /v-for="item in syncs"/)
   assert.doesNotMatch(panel, /join\('；'\)/)
   assert.match(panel, /class="provider-price-value"/)
+  // 供应商价格式化：无价格的提醒行不能再拼出"— CNY / 未知单位"
+  assert.match(panel, /function providerPrice\(row\) \{ return row\.provider_unit_price == null \? '—'/)
+  assert.doesNotMatch(panel, /\}\} CNY \/ \{\{ row\.unit_code/)
+  // 未映射的行不该显示成一次"未定价 → 未定价"的价格变更
+  assert.match(panel, /不生成价目条目/)
+  assert.doesNotMatch(panel, /<div>\{\{ points\(row\.current_unit_price_micro\) \}\}/)
   assert.match(panel, /overflow-wrap:anywhere/)
   assert.match(api, /admin\/provider-price-sources/)
   assert.match(api, /\/admin\/provider-prices\/\$\{encodeURIComponent\(provider\)\}\/sync/)

@@ -131,9 +131,14 @@ test('relay price sync compiles dimensions into tiers and rates instead of colla
     { id: 'tokens:128001-256000', selector_meter: 'input_token', min_inclusive: 128001, max_inclusive: 256000, unit_price_points: '960', unit_size: 1000000 },
   ], '三档价格必须完整落到 usage_tiers，不能只留一条');
   assert.equal(rowOf(rows, 'doubao-seed-2.0-code', 'output_tokens（3 档）').new_unit_price_micro, 16000000);
+  assert.equal(inputTiers.unit_code, '百万tokens');
   const cached = rows.filter((row) => row.provider_model === 'doubao-seed-2.0-code' && row.mapping_status === 'unmapped');
   assert.equal(cached.length, 3);
   assert.ok(cached.every((row) => /按 input_token 全价/.test(row.error_summary)));
+  assert.deepEqual(cached.map((row) => row.charge_type).sort(),
+    ['cached_input_tokens（0-32000）', 'cached_input_tokens（128001-256000）', 'cached_input_tokens（32001-128000）'].sort(), '同指标多档要看得出是哪一档');
+  assert.equal(new Set(cached.map((row) => row.provider_unit_price)).size, 3, '三条缓存分档价各自可见');
+  assert.ok(cached.every((row) => row.unit_code === '百万tokens'));
 
   const video = rowOf(rows, 'doubao-seedance-2.0', 'output_tokens（6 条件）');
   const videoRates = conditionsOf(video).rates;
@@ -148,7 +153,8 @@ test('relay price sync compiles dimensions into tiers and rates instead of colla
 
   const image = rowOf(rows, 'doubao-seedream-5.0-pro', 'image（2 条件）');
   assert.deepEqual(conditionsOf(image).rates.map((rate) => [rate.when.pixel_band, rate.unit_price_points]), [['small', '30'], ['large', '60']]);
-  const afterFirst = rowOf(rows, 'doubao-seedream-5.0-pro', 'image');
+  assert.equal(image.unit_code, '张', '供应商价必须带计费单位，不能显示成"未知单位"');
+  const afterFirst = rowOf(rows, 'doubao-seedream-5.0-pro', 'image（after_first）');
   assert.equal(afterFirst.mapping_status, 'unmapped');
   assert.match(afterFirst.error_summary, /首张输入图免费/);
   // 上游有、但本项目没导入的模型不进清单（与火山侧 buildCandidateRows 直接 return [] 同源）
@@ -312,7 +318,7 @@ test('the captured live /v1/pricing payload compiles every graded price without 
   assert.deepEqual(JSON.parse(videoRow.new_conditions_json).rates.map((rate) => rate.id).sort(),
     ['1080p:no_video', '1080p:video', '480p:no_video', '480p:video', '720p:no_video', '720p:video']);
   const cachedOnly = sync.candidates.filter((row) => row.mapping_status === 'unmapped' && /按 input_token 全价/.test(row.error_summary || ''));
-  assert.ok(cachedOnly.length > 0 && cachedOnly.every((row) => row.charge_type === 'cached_input_tokens'));
+  assert.ok(cachedOnly.length > 0 && cachedOnly.every((row) => row.charge_type.startsWith('cached_input_tokens') && row.unit_code === '百万tokens'));
 
   // 生成的条件价必须通过内部价目校验，否则发布后会在报价时炸开
   for (const row of grouped.values()) {

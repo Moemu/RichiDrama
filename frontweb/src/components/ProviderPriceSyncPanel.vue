@@ -20,9 +20,9 @@
         <div v-if="detail" class="candidate-table"><el-table :data="visibleCandidates" row-key="id" size="small">
           <el-table-column prop="provider_model" :label="`${sourceLabel}模型`" min-width="190" show-overflow-tooltip/>
           <el-table-column prop="charge_type" label="计费项" min-width="145"/>
-          <el-table-column label="供应商价" min-width="135"><template #default="{row}"><span class="provider-price-value">{{ row.provider_unit_price ?? '—' }} CNY / {{ row.unit_code || '未知单位' }}</span></template></el-table-column>
+          <el-table-column label="供应商价" min-width="135"><template #default="{row}"><span class="provider-price-value">{{ providerPrice(row) }}</span></template></el-table-column>
           <el-table-column label="本地映射" min-width="330"><template #default="{row}"><div class="mapping-fields"><el-input v-model="row.service_type" :disabled="row.is_unchanged" placeholder="服务"/><el-input v-model="row.billing_key" :disabled="row.is_unchanged" placeholder="billing_key"/><el-select v-model="row.meter" :disabled="row.is_unchanged" placeholder="计量器"><el-option v-for="meter in meters" :key="meter" :label="meter" :value="meter"/></el-select><el-input-number v-model="row.unit_size" :disabled="row.is_unchanged" :min="1" controls-position="right"/></div><small v-if="row.error_summary" class="error">{{ row.error_summary }}</small></template></el-table-column>
-          <el-table-column label="积分变化" min-width="280"><template #default="{row}"><div>{{ points(row.current_unit_price_micro) }} → {{ points(row.new_unit_price_micro) }}</div><div v-if="row.new_conditions" class="condition-change"><span>当前：{{ conditionSummary(row.current_conditions) }}</span><span>同步后：{{ conditionSummary(row.new_conditions) }}</span></div></template></el-table-column>
+          <el-table-column label="积分变化" min-width="280"><template #default="{row}"><div v-if="row.mapping_status === 'mapped'">{{ points(row.current_unit_price_micro) }} → {{ points(row.new_unit_price_micro) }}</div><p v-else class="no-entry">不生成价目条目</p><div v-if="row.mapping_status === 'mapped' && row.new_conditions" class="condition-change"><span>当前：{{ conditionSummary(row.current_conditions) }}</span><span>同步后：{{ conditionSummary(row.new_conditions) }}</span></div></template></el-table-column>
           <el-table-column label="审核" width="150"><template #default="{row}"><el-tag :type="reviewTone(row)">{{ reviewLabel(row) }}</el-tag><div v-if="!row.is_unchanged" class="review-actions"><el-button link type="primary" @click="accept(row)">接受</el-button><el-button link type="danger" @click="reject(row)">排除</el-button></div></template></el-table-column>
           <template #empty>没有需要处理的价格变化。可勾选“显示价格相同项”查看。</template>
         </el-table></div>
@@ -82,6 +82,8 @@ const canCreateDraft = computed(() => detail.value?.status === 'completed' && ac
 function statusLabel(value) { return ({ success: '通过', failed: '失败', completed: '已读取', unchanged: '无变化', processing: '读取中' })[value] || value || '未知' }
 function formatTime(value) { return value ? formatChinaDateTime(value) : '—' }
 function points(value) { return Number.isSafeInteger(value) ? `${value / 10000} 积分` : '未定价' }
+// 没有单价的提醒行（如上游未返回的已导入模型）不能拼成"— CNY / 未知单位"
+function providerPrice(row) { return row.provider_unit_price == null ? '—' : `${row.provider_unit_price} CNY / ${row.unit_code || '未知单位'}` }
 function conditionSummary(value) {
   if (value?.image_pricing_version === 'seedream-pro-v1') {
     if (value.free_units === 1) return '每次请求首张输入图免费，第 2 张起按张计费'
