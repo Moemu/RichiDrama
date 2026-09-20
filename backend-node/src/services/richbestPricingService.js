@@ -2,8 +2,12 @@
 
 /**
  * 瑞池中转站价目源（GET /v1/pricing）。
- * 只做「拉取 + 度量映射 + 十进制金额换算」，不写库：候选行交给 providerPriceService
+ * 只做「拉取 + 指标/维度映射 + 十进制金额换算」，不写库：候选行交给 providerPriceService
  * 的同一套 sync / 审核 / 草稿 / 发布链路，避免再造一条价目流水线。
+ *
+ * 契约以真实响应为准，不以文档为准：2026-09-20 通过鉴权 admin 路由做过一次只读拉取，
+ * 响应快照存在 test/helpers/richbestPricingLive.json。真实上游只有四种 metric，且把
+ * 分档与条件价放在 dimension 上；文档里的 video_duration / 折扣口径在这枚 key 上不存在。
  *
  * 换算沿用仓库既有的固定比例，没有毛利：1 元 = 100 积分 = 1,000,000 微积分。
  * 中转单价是 ≤6 位小数的十进制字符串，其放大 1e6 的整数恰好等于微积分金额，
@@ -11,6 +15,7 @@
  */
 
 const richbest = require('./richbestProvider');
+const seedream = require('./seedreamProPricing');
 
 const PROVIDER = richbest.PROVIDER;
 const SOURCE = 'relay_pricing';
@@ -18,18 +23,17 @@ const POINTS_PER_CNY = 100;
 const MICRO_PER_POINT = 10000;
 const YUAN_SCALE = POINTS_PER_CNY * MICRO_PER_POINT; // 1,000,000 微积分 / 元
 
-/** 中转 metric → 内部 meter；不在表内的一律 unmapped，绝不猜。 */
+/** 中转 metric → 内部 meter；不在表内的一律 unmapped，绝不猜。
+ *
+ * 2026-09-20 用真实 /v1/pricing 响应核对过（test/helpers/richbestPricingLive.json，23 模型 91 条价格）：
+ * 上游只有 input_tokens / cached_input_tokens / output_tokens / image 四种指标，
+ * 连按时长（video_duration / second）这种指标都不存在——视频同样是 output_tokens 每百万 token 计价，
+ * 再按「分辨率 × 是否带视频输入」分条。所以这里不能凭文档想象指标名。
+ */
 const METERS = {
   input_tokens: 'input_token',
   output_tokens: 'output_token',
   image: 'image',
-  generated_images: 'image',
-  images: 'image',
-  video_duration: 'second',
-  video_seconds: 'second',
-  duration_seconds: 'second',
-  character: 'character',
-  characters: 'character',
 };
 /**
  * 上游确有、但不生成价目条目的指标。
@@ -42,6 +46,42 @@ const UNSUPPORTED_METERS = {
   audio_duration: '内部价目暂无音频时长计量，未生成条目',
   embedding: '内部价目暂无向量计量，未生成条目',
 };
+
+const RESOLUTIONS = ['480p', '720p', '1080p'];
+const PIXEL_BAND_BY_OPERATOR = { le: 'small', gt: 'large' };
+
+/**
+ * dimension 是承载定价语义的字段，不是备注：真实响应用它表达 token 分档、
+ * 视频分辨率/输入条件、图像像素档位。同一 meter 的多条 dimension 必须编译成
+ * 一条带条件的价目，绝不能只留一条（那是最坏 3 倍的错价）。
+ */
+function parseDimension(meter, dimension) {
+  const raw = String(dimension ?? '').trim();
+  if (!raw || raw === 'null') return { kind: 'base' };
+  const tier = /^tokens:(\d+)-(\d+)$/.exec(raw);
+  if (tier) {
+    if (!['input_token', 'output_token'].includes(meter)) return { kind: 'unknown', reason: `计量 ${meter} 不支持 token 分档：${raw}` };
+    const min = Number(tier[1]); const max = Number(tier[2]);
+    if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min < 0 || max < min) return { kind: 'unknown', reason: `token 分档边界不是有效整数：${raw}` };
+    return { kind: 'tier', id: `tokens:${min}-${max}`, min_inclusive: min, max_inclusive: max };
+  }
+  const video = /^(\d+p):(video|no_video)$/.exec(raw);
+  if (video) {
+    if (meter !== 'output_token') return { kind: 'unknown', reason: `计量 ${meter} 不支持视频条件价：${raw}` };
+    if (!RESOLUTIONS.includes(video[1])) return { kind: 'unknown', reason: `未识别的分辨率档位 ${video[1]}（内部只支持 ${RESOLUTIONS.join('/')}）` };
+    return { kind: 'rate', id: raw, when: { resolution: video[1], has_video_input: video[2] === 'video' } };
+  }
+  const band = /^output:(le|gt)(\d+)$/.exec(raw);
+  if (band) {
+    if (meter !== 'image') return { kind: 'unknown', reason: `计量 ${meter} 不支持像素档位：${raw}` };
+    if (Number(band[2]) !== seedream.PIXEL_THRESHOLD) return { kind: 'unknown', reason: `像素档位阈值 ${band[2]} 与内部 ${seedream.PIXEL_THRESHOLD} 不一致，不能套用` };
+    return { kind: 'rate', id: raw, when: { pixel_band: PIXEL_BAND_BY_OPERATOR[band[1]] } };
+  }
+  if (raw === 'input:after_first') {
+    return { kind: 'unsupported', reason: '上游把「首张输入图免费、之后按张」写成 image 的一个维度，内部价目没有该计量语义，需人工定价' };
+  }
+  return { kind: 'unknown', reason: `未识别的计价维度 ${raw}` };
+}
 
 const MODALITY_SERVICE_TYPES = { text: 'text', image: 'image', video: 'video', embedding: null, audio: null };
 
@@ -97,80 +137,134 @@ function serviceTypeFor(modality, configuredTypes) {
 }
 
 /**
- * 一个 price 条目 → 候选行。
- * target 由调用方用「exact 匹配」解析（中转别名必须对到自己的 billing_key，
- * 不允许 family 前缀命中直连火山的带日期 SKU）。
+ * 元 → 积分的十进制字符串（1 元 = 100 积分）。价目条目的 rates/usage_tiers 用的是
+ * 「积分」口径且最多四位小数，这里只移动小数点，不经过浮点，保证零误差。
  */
-function mapPriceEntry(entry, price, context) {
-  const { target, discountBps, syncId, at } = context;
-  const model = String(entry?.id || '').trim();
-  const displayName = String(entry?.display_name || model).trim();
+function yuanToPointsText(yuan) {
+  const parsed = parseYuan(yuan);
+  if (parsed === null) return null;
+  const whole = parsed.scaled / 10000n;
+  const fraction = parsed.scaled % 10000n;
+  return fraction === 0n ? String(whole) : `${whole}.${String(fraction).padStart(4, '0').replace(/0+$/, '')}`;
+}
+
+/** 单条上游价格 → 片段。解析失败或语义不支持时只带 reason，由分组阶段落成 unmapped 行。 */
+function pricePiece(entry, price, context = {}) {
   const { meter, metric, reason } = meterFor(price?.metric);
+  const model = String(entry?.id || '').trim();
   const base = {
     provider_model: model,
-    display_name: displayName,
+    display_name: String(entry?.display_name || model).trim(),
+    metric,
+    meter,
     charge_type: metric || 'unknown',
     unit_code: null,
     currency: String(price?.currency || entry?.currency || 'CNY'),
     provider_unit_price: price?.effective_price_yuan ?? price?.list_price_yuan ?? null,
     raw_item_json: JSON.stringify({ entry_id: model, modality: entry?.modality || null, price }),
   };
-  if (!meter) {
-    return { ...base, mapping_status: 'unmapped', error_summary: reason || `未知计价指标 ${metric || '(空)'}` };
-  }
-  if (!target) {
-    return { ...base, meter, mapping_status: 'unmapped', error_summary: `找不到模型 ${model} 的中转 billing_key，请先在供应商连接中导入该模型` };
-  }
-  const serviceType = serviceTypeFor(entry?.modality, target.configuredTypes || []);
-  if (!serviceType) {
-    return { ...base, meter, mapping_status: 'unmapped', error_summary: `模型 ${model} 的服务类型无法确定` };
-  }
+  if (!meter) return { ...base, reason: reason || `未知计价指标 ${metric || '(空)'}` };
   const unitSize = toNumber(price?.unit_size) || 1;
-  const micro = yuanToMicroPoints(price?.effective_price_yuan ?? price?.list_price_yuan);
-  if (micro === null) {
-    return { ...base, meter, service_type: serviceType, billing_key: target.billing_key, mapping_status: 'unmapped', error_summary: `单价不是 ≤6 位小数的十进制字符串：${price?.effective_price_yuan ?? price?.list_price_yuan ?? '(空)'}` };
-  }
-  const mismatch = assertConsistent(price?.list_price_yuan, price?.effective_price_yuan, discountBps);
-  if (mismatch) {
-    return { ...base, meter, service_type: serviceType, billing_key: target.billing_key, mapping_status: 'unmapped', error_summary: mismatch };
-  }
-  const conditions = {
-    unit_size: unitSize,
+  const source = price?.effective_price_yuan ?? price?.list_price_yuan;
+  const micro = yuanToMicroPoints(source);
+  if (micro === null) return { ...base, meter, reason: `单价不是 ≤6 位小数的十进制字符串：${source ?? '(空)'}` };
+  const mismatch = assertConsistent(price?.list_price_yuan, price?.effective_price_yuan, context.discountBps);
+  if (mismatch) return { ...base, meter, reason: mismatch };
+  const points = yuanToPointsText(source);
+  if (points === null) return { ...base, meter, reason: `单价无法换算成四位小数以内的积分：${source}` };
+  const selector = parseDimension(meter, price?.dimension);
+  if (selector.kind === 'unsupported' || selector.kind === 'unknown') return { ...base, meter, reason: selector.reason };
+  return { ...base, unit_size: unitSize, micro, points, selector };
+}
+
+function conditionMeta(entry, target, syncId, discountBps) {
+  return {
+    unit_size: 1,
     provider: PROVIDER,
-    currency: 'CNY',
+    currency: String(entry?.currency || 'CNY'),
     tax_inclusive: entry?.tax_inclusive === true,
     source: SOURCE,
     source_sync_id: syncId || null,
-    provider_model: model,
-    provider_metric: metric,
-    provider_dimension: price?.dimension ?? null,
-    list_price_yuan: String(price?.list_price_yuan ?? ''),
-    effective_price_yuan: String(price?.effective_price_yuan ?? ''),
+    provider_model: String(entry?.id || '').trim(),
+    provider_charge_type: 'relay_pricing',
     discount_bps: Number.isSafeInteger(Number(discountBps)) ? Number(discountBps) : null,
-    pricing_note: '瑞池中转站税前价；实际结算以服务端记录的成功用量与对应账期价格为准',
-  };
-  return {
-    ...base,
-    service_type: serviceType,
-    billing_key: target.billing_key,
-    meter,
-    unit_size: unitSize,
-    new_unit_price_micro: micro,
-    new_conditions_json: JSON.stringify(conditions),
-    conditions_changed: 0,
-    mapping_status: 'mapped',
-    error_summary: null,
+    pricing_note: '瑞池中转站税前价（1 元 = 100 积分）；实际结算以服务端记录的成功用量与对应账期价格为准',
   };
 }
 
-/** 上游条目 → 候选行数组；configured:false 或空 prices 只产出 unmapped，绝不产出免费条目。 */
-function buildCandidates(entries, { resolveTarget, discountBps, syncId = null, at = null } = {}) {
+function unmappedRow(piece, reason) {
+  return { ...piece, mapping_status: 'unmapped', error_summary: reason || piece.reason, new_unit_price_micro: null, new_conditions_json: null };
+}
+
+/**
+ * 同一 (模型, meter) 的多条维度价格 → 一条候选。
+ * 分档走 usage_tiers（引擎按实际 token 用量命中，未覆盖即拒绝调用），
+ * 条件价走 rates（按 pricing_context 的 resolution / has_video_input / pixel_band 命中）。
+ */
+function compileGroup(entry, target, pieces, context) {
+  const { syncId, discountBps } = context;
+  const { meter, metric } = pieces[0];
+  const serviceType = serviceTypeFor(entry?.modality, target.configuredTypes || []);
+  if (!serviceType) return pieces.map((piece) => unmappedRow(piece, `模型 ${pieces[0].provider_model} 的服务类型无法确定`));
+  const tiers = pieces.filter((piece) => piece.selector.kind === 'tier');
+  const rates = pieces.filter((piece) => piece.selector.kind === 'rate');
+  const bases = pieces.filter((piece) => piece.selector.kind === 'base');
+  const label = `${target.billing_key}/${meter}`;
+  if (tiers.length && rates.length) return pieces.map((piece) => unmappedRow(piece, `${label} 同时带有 token 分档和条件价，内部价目不支持叠加，请人工定价`));
+  if (bases.length > 1) return pieces.map((piece) => unmappedRow(piece, `${label} 有多条无条件价格，无法判定基准价，请人工定价`));
+  const orderedTiers = tiers.slice().sort((a, b) => a.selector.min_inclusive - b.selector.min_inclusive);
+  for (let index = 1; index < orderedTiers.length; index += 1) {
+    const previous = orderedTiers[index - 1].selector; const current = orderedTiers[index].selector;
+    if (current.min_inclusive <= previous.max_inclusive) return pieces.map((piece) => unmappedRow(piece, `${label} 的 token 分档区间重叠，请人工核对上游价目`));
+    if (current.micro < previous.micro) return pieces.map((piece) => unmappedRow(piece, `${label} 的更高用量档位价格低于前一档，与内部档位规则冲突，请人工定价`));
+  }
+  const conditions = conditionMeta(entry, target, syncId, discountBps);
+  const meta = { service_type: serviceType, billing_key: target.billing_key, meter, mapping_status: 'mapped', error_summary: null };
+  const rawItem = { entry_id: pieces[0].provider_model, modality: entry?.modality || null, prices: pieces.map((piece) => piece.raw_item_json ? JSON.parse(piece.raw_item_json).price : null).filter(Boolean) };
+  if (tiers.length) {
+    conditions.usage_tiers = orderedTiers.map((piece) => ({
+      id: piece.selector.id, selector_meter: meter, min_inclusive: piece.selector.min_inclusive, max_inclusive: piece.selector.max_inclusive,
+      unit_price_points: piece.points, unit_size: piece.unit_size,
+    }));
+    const anchor = bases[0] || orderedTiers[0];
+    conditions.unit_size = anchor.unit_size;
+    return { ...meta, provider_model: pieces[0].provider_model, display_name: pieces[0].display_name, currency: pieces[0].currency,
+      charge_type: `${metric}（${orderedTiers.length} 档）`, unit_code: null, provider_unit_price: anchor.provider_unit_price,
+      unit_size: anchor.unit_size, new_unit_price_micro: anchor.micro, new_conditions_json: JSON.stringify(conditions),
+      conditions_changed: 0, raw_item_json: JSON.stringify(rawItem) };
+  }
+  if (rates.length) {
+    conditions.rates = rates.map((piece) => ({ id: piece.selector.id, when: piece.selector.when, unit_price_points: piece.points, unit_size: piece.unit_size }));
+    // 报价上下文缺少对应档位时引擎会退回基准价，这里把基准价设为最贵的一条，宁可多冻结也不漏收。
+    const top = rates.reduce((best, piece) => (piece.micro > best.micro ? piece : best), bases[0] || rates[0]);
+    conditions.unit_size = top.unit_size;
+    return { ...meta, provider_model: pieces[0].provider_model, display_name: pieces[0].display_name, currency: pieces[0].currency,
+      charge_type: `${metric}（${rates.length} 条件）`, unit_code: null, provider_unit_price: top.provider_unit_price,
+      unit_size: top.unit_size, new_unit_price_micro: top.micro, new_conditions_json: JSON.stringify(conditions),
+      conditions_changed: 0, raw_item_json: JSON.stringify(rawItem) };
+  }
+  const piece = bases[0];
+  conditions.unit_size = piece.unit_size;
+  conditions.provider_metric = metric;
+  return { ...meta, provider_model: piece.provider_model, display_name: piece.display_name, currency: piece.currency,
+    charge_type: piece.charge_type, unit_code: null, provider_unit_price: piece.provider_unit_price,
+    unit_size: piece.unit_size, new_unit_price_micro: piece.micro, new_conditions_json: JSON.stringify(conditions),
+    conditions_changed: 0, raw_item_json: piece.raw_item_json };
+}
+
+/**
+ * 上游条目 → 候选行数组。
+ * 一个 (模型, meter) 只产出一条候选：多条维度价格在 compileGroup 里编译成条件价。
+ * configured:false 或空 prices 只产出 unmapped，绝不产出免费条目。
+ */
+function buildCandidates(entries, { resolveTarget, discountBps, syncId = null } = {}) {
   const rows = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
     const model = String(entry?.id || '').trim();
     if (!model) continue;
     const target = resolveTarget ? resolveTarget(model) : null;
-    if (entry?.configured === false || !Array.isArray(entry?.prices) || !entry.prices.length) {
+    const prices = Array.isArray(entry?.prices) ? entry.prices : [];
+    if (entry?.configured === false || !prices.length) {
       rows.push({
         provider_model: model,
         display_name: String(entry?.display_name || model).trim(),
@@ -189,28 +283,24 @@ function buildCandidates(entries, { resolveTarget, discountBps, syncId = null, a
       });
       continue;
     }
-    for (const price of entry.prices) {
-      rows.push(mapPriceEntry(entry, price, { target, discountBps, syncId, at }));
+    const groups = new Map();
+    for (const price of prices) {
+      const piece = pricePiece(entry, price, { discountBps });
+      const key = piece.meter || `metric:${piece.metric}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(piece);
     }
-  }
-  return dedupeMeterCollisions(rows);
-}
-
-/**
- * 同一 (服务类型, billing_key, meter) 只能有一条价目条目；上游若给出多个映射到同一
- * meter 的指标，保留第一条，其余标 unmapped，避免 createDraft 静默覆盖成更低的价格。
- */
-function dedupeMeterCollisions(rows) {
-  const seen = new Map();
-  for (const row of rows) {
-    if (row.mapping_status !== 'mapped' || !row.meter) continue;
-    const key = `${row.service_type}\u0000${row.billing_key}\u0000${row.meter}`;
-    const first = seen.get(key);
-    if (!first) { seen.set(key, row); continue; }
-    row.mapping_status = 'unmapped';
-    row.new_unit_price_micro = null;
-    row.new_conditions_json = null;
-    row.error_summary = `与 ${first.charge_type} 映射到同一计量 ${row.meter}，仅保留单价 ${first.new_unit_price_micro} 的那条`;
+    for (const pieces of groups.values()) {
+      const meter = pieces[0].meter;
+      if (!meter || !target) {
+        rows.push(...pieces.map((piece) => unmappedRow(piece, !meter ? pieces[0].reason
+          : `找不到模型 ${model} 的中转 billing_key，请先在供应商连接中导入该模型`)));
+        continue;
+      }
+      const usable = pieces.filter((piece) => !piece.reason);
+      rows.push(...pieces.filter((piece) => piece.reason).map((piece) => unmappedRow(piece)));
+      if (usable.length) rows.push(compileGroup(entry, target, usable, { syncId, discountBps }));
+    }
   }
   return rows;
 }
@@ -243,7 +333,7 @@ async function fetchPricing(db, options = {}) {
 }
 
 module.exports = {
-  PROVIDER, SOURCE, METERS, UNSUPPORTED_METERS,
-  parseYuan, yuanToMicroPoints, meterFor, assertConsistent, mapPriceEntry, buildCandidates,
-  dedupeMeterCollisions, fetchPricing, pricingContext,
+  PROVIDER, SOURCE, METERS, UNSUPPORTED_METERS, RESOLUTIONS,
+  parseYuan, yuanToMicroPoints, yuanToPointsText, meterFor, parseDimension, assertConsistent, pricePiece, buildCandidates,
+  fetchPricing, pricingContext,
 };

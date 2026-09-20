@@ -629,6 +629,16 @@ function relayCandidateRows(db, fetched, syncId, at) {
         return Array.isArray(models) && models.map((value) => normalizeName(value)).includes(normalizeName(model));
       }).map((row) => row.service_type))] };
     },
+  }).map((row) => {
+    // 与火山同源：拿当前生效价目做基线，档位/条件价变化要能被识别成"已变化"。
+    if (row.mapping_status !== 'mapped') return row;
+    const current = activeItem(db, row.service_type, row.billing_key, row.meter);
+    if (!current) return row;
+    return { ...row,
+      current_unit_price_micro: current.unit_price_micro,
+      current_price_book_item_id: current.id,
+      conditions_changed: samePriceCore(current.conditions_json, JSON.parse(row.new_conditions_json)) ? 0 : 1,
+      change_ratio: current.unit_price_micro ? (row.new_unit_price_micro - current.unit_price_micro) / current.unit_price_micro : null };
   });
 }
 

@@ -25,21 +25,50 @@ async function withDatabase(run) {
   }
 }
 
+/**
+ * 结构与 dimension 取值全部取自 2026-09-20 的真实 /v1/pricing 响应
+ * （test/helpers/richbestPricingLive.json）：只有 input_tokens / cached_input_tokens /
+ * output_tokens / image 四种指标，list 与 effective 相等（该 key 无折扣），
+ * 分档与条件价写在 dimension 上。
+ */
 const PRICING = {
-  object: 'list', month: '2026-09', currency: 'CNY', tax_inclusive: false, billing_enabled: true, discount_bps: 8000,
-  data: [
-    { id: 'glm-5.2', display_name: 'GLM 5.2', provider: 'volcengine_ark', modality: 'text', configured: true, prices: [
-      { metric: 'input_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '8.000000', effective_price_yuan: '6.400000' },
-      { metric: 'cached_input_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '2.000000', effective_price_yuan: '1.600000' },
-      { metric: 'output_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '28.000000', effective_price_yuan: '22.400000' },
+  object: 'list', data: [
+    { id: 'glm-5.2', object: 'model_price', display_name: 'GLM 5.2', provider: 'volcengine_ark', modality: 'text', currency: 'CNY', tax_inclusive: false, configured: true, prices: [
+      { metric: 'input_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '8.000000', effective_price_yuan: '8.000000' },
+      { metric: 'cached_input_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '2.000000', effective_price_yuan: '2.000000' },
+      { metric: 'output_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '28.000000', effective_price_yuan: '28.000000' },
     ] },
-    { id: 'doubao-seedance-2.0', display_name: 'Doubao Seedance 2.0', modality: 'video', configured: true, prices: [
-      { metric: 'video_duration', dimension: '720p_no_audio', unit_size: 1, list_price_yuan: '1.000000', effective_price_yuan: '0.800000' },
+    { id: 'doubao-seed-2.0-code', object: 'model_price', display_name: 'Doubao Seed 2.0 Code', modality: 'text', currency: 'CNY', tax_inclusive: false, configured: true, prices: [
+      { metric: 'input_tokens', dimension: 'tokens:0-32000', unit_size: 1000000, list_price_yuan: '3.200000', effective_price_yuan: '3.200000' },
+      { metric: 'input_tokens', dimension: 'tokens:32001-128000', unit_size: 1000000, list_price_yuan: '4.800000', effective_price_yuan: '4.800000' },
+      { metric: 'input_tokens', dimension: 'tokens:128001-256000', unit_size: 1000000, list_price_yuan: '9.600000', effective_price_yuan: '9.600000' },
+      { metric: 'cached_input_tokens', dimension: 'tokens:0-32000', unit_size: 1000000, list_price_yuan: '0.640000', effective_price_yuan: '0.640000' },
+      { metric: 'cached_input_tokens', dimension: 'tokens:32001-128000', unit_size: 1000000, list_price_yuan: '0.960000', effective_price_yuan: '0.960000' },
+      { metric: 'cached_input_tokens', dimension: 'tokens:128001-256000', unit_size: 1000000, list_price_yuan: '1.920000', effective_price_yuan: '1.920000' },
+      { metric: 'output_tokens', dimension: 'tokens:0-32000', unit_size: 1000000, list_price_yuan: '16.000000', effective_price_yuan: '16.000000' },
+      { metric: 'output_tokens', dimension: 'tokens:32001-128000', unit_size: 1000000, list_price_yuan: '24.000000', effective_price_yuan: '24.000000' },
+      { metric: 'output_tokens', dimension: 'tokens:128001-256000', unit_size: 1000000, list_price_yuan: '48.000000', effective_price_yuan: '48.000000' },
     ] },
-    { id: 'doubao-seedance-2.0-fast', display_name: 'Doubao Seedance 2.0 Fast', modality: 'video', configured: true, prices: [
-      { metric: 'video_duration', dimension: '720p_no_audio', unit_size: 1, list_price_yuan: '0.500000', effective_price_yuan: '0.400000' },
+    { id: 'doubao-seedance-2.0', object: 'model_price', display_name: 'Doubao Seedance 2.0', modality: 'video', currency: 'CNY', tax_inclusive: false, configured: true, prices: [
+      { metric: 'output_tokens', dimension: '480p:video', unit_size: 1000000, list_price_yuan: '28.000000', effective_price_yuan: '28.000000' },
+      { metric: 'output_tokens', dimension: '480p:no_video', unit_size: 1000000, list_price_yuan: '46.000000', effective_price_yuan: '46.000000' },
+      { metric: 'output_tokens', dimension: '720p:video', unit_size: 1000000, list_price_yuan: '28.000000', effective_price_yuan: '28.000000' },
+      { metric: 'output_tokens', dimension: '720p:no_video', unit_size: 1000000, list_price_yuan: '46.000000', effective_price_yuan: '46.000000' },
+      { metric: 'output_tokens', dimension: '1080p:video', unit_size: 1000000, list_price_yuan: '31.000000', effective_price_yuan: '31.000000' },
+      { metric: 'output_tokens', dimension: '1080p:no_video', unit_size: 1000000, list_price_yuan: '51.000000', effective_price_yuan: '51.000000' },
     ] },
-    { id: 'doubao-seedasr-2.0', display_name: 'ASR', modality: 'audio', configured: false, prices: [] },
+    { id: 'doubao-seedance-2.0-fast', object: 'model_price', display_name: 'Doubao Seedance 2.0 Fast', modality: 'video', currency: 'CNY', tax_inclusive: false, configured: true, prices: [
+      { metric: 'output_tokens', dimension: '480p:video', unit_size: 1000000, list_price_yuan: '16.500000', effective_price_yuan: '16.500000' },
+      { metric: 'output_tokens', dimension: '480p:no_video', unit_size: 1000000, list_price_yuan: '27.750000', effective_price_yuan: '27.750000' },
+      { metric: 'output_tokens', dimension: '720p:video', unit_size: 1000000, list_price_yuan: '16.500000', effective_price_yuan: '16.500000' },
+      { metric: 'output_tokens', dimension: '720p:no_video', unit_size: 1000000, list_price_yuan: '27.750000', effective_price_yuan: '27.750000' },
+    ] },
+    { id: 'doubao-seedream-5.0-pro', object: 'model_price', display_name: 'Doubao Seedream 5.0 Pro', modality: 'image', currency: 'CNY', tax_inclusive: false, configured: true, prices: [
+      { metric: 'image', dimension: 'output:le2610000', unit_size: 1, list_price_yuan: '0.300000', effective_price_yuan: '0.300000' },
+      { metric: 'image', dimension: 'output:gt2610000', unit_size: 1, list_price_yuan: '0.600000', effective_price_yuan: '0.600000' },
+      { metric: 'image', dimension: 'input:after_first', unit_size: 1, list_price_yuan: '0.020000', effective_price_yuan: '0.020000' },
+    ] },
+    { id: 'doubao-seedasr-2.0', object: 'model_price', display_name: 'ASR', modality: 'audio', currency: 'CNY', tax_inclusive: false, configured: false, prices: [] },
   ],
 };
 
@@ -60,32 +89,69 @@ function relayFetch(seen) {
 
 function seedConfigs(db) {
   aiConfigs.createConfig(db, log, { service_type: 'text', provider: 'richbest', name: 'relay text', base_url: 'https://api.richbest.cn/v1',
-    api_key: 'vap_live_price', model: ['glm-5.2'], default_model: 'glm-5.2', is_default: true });
+    api_key: 'vap_live_price', model: ['glm-5.2', 'doubao-seed-2.0-code'], default_model: 'glm-5.2', is_default: true });
   // 同族别名必须在一张配置里，才能验证价格不会串到 -fast 上
   aiConfigs.createConfig(db, log, { service_type: 'video', provider: 'richbest', name: 'relay video', base_url: 'https://api.richbest.cn/v1',
     api_key: 'vap_live_price', model: ['doubao-seedance-2.0', 'doubao-seedance-2.0-fast'], default_model: 'doubao-seedance-2.0', is_default: true });
+  aiConfigs.createConfig(db, log, { service_type: 'image', provider: 'richbest', name: 'relay image', base_url: 'https://api.richbest.cn/v1',
+    api_key: 'vap_live_price', model: ['doubao-seedream-5.0-pro'], default_model: 'doubao-seedream-5.0-pro', is_default: true });
   // 直连火山的带日期 SKU：中转价目绝不能落到它的 billing_key 上
   aiConfigs.createConfig(db, log, { service_type: 'video', provider: 'volcengine', name: 'direct volc', base_url: 'https://ark.example.test/api/v3',
     api_key: 'ark-key', model: ['doubao-seedance-2-0-260128'], default_model: 'doubao-seedance-2-0-260128', billing_key: 'doubao-seedance-2-0-260128' });
 }
 
-test('relay price sync maps metrics, keeps cached input unpriced and never touches the Volcengine SKU', async () => withDatabase(async (db) => {
+const rowOf = (rows, model, chargeType) => rows.find((row) => row.provider_model === model && row.charge_type === chargeType);
+const jsonOf = (value) => (typeof value === 'string' ? JSON.parse(value) : value);
+const conditionsOf = (row) => jsonOf(row.new_conditions_json);
+
+test('relay price sync compiles dimensions into tiers and rates instead of collapsing them', async () => withDatabase(async (db) => {
   seedConfigs(db);
   const seen = [];
   const sync = await prices.sync(db, 1, { provider: 'richbest', fetchImpl: relayFetch(seen) });
   assert.deepEqual(seen, ['https://api.richbest.cn/v1/pricing']);
   assert.equal(sync.status, 'completed');
-  const byKey = new Map(sync.candidates.map((row) => [`${row.provider_model}/${row.charge_type}`, row]));
-  assert.equal(byKey.get('glm-5.2/input_tokens').new_unit_price_micro, 6400000, '¥6.4/百万 token → 6,400,000 微积分');
-  assert.equal(byKey.get('glm-5.2/output_tokens').new_unit_price_micro, 22400000);
-  assert.equal(byKey.get('glm-5.2/cached_input_tokens').mapping_status, 'unmapped');
-  assert.match(byKey.get('glm-5.2/cached_input_tokens').error_summary, /按 input_token 全价/);
-  assert.equal(byKey.get('doubao-seedasr-2.0/NotConfigured').mapping_status, 'unmapped');
-  assert.equal(byKey.get('doubao-seedasr-2.0/NotConfigured').is_free, undefined);
-  // 同族别名各自精确匹配
-  assert.equal(byKey.get('doubao-seedance-2.0/video_duration').billing_key, 'doubao-seedance-2.0');
-  assert.equal(byKey.get('doubao-seedance-2.0-fast/video_duration').billing_key, 'doubao-seedance-2.0-fast');
-  assert.equal(sync.candidates.some((row) => row.billing_key === 'doubao-seedance-2-0-260128'), false, '绝不写到直连火山的 SKU 上');
+  // 26 条上游价格 → 7 条候选：同 (模型, 计量) 的分档必须编译进条件，一条都不能丢
+  assert.equal(sync.candidate_count, 13);
+  assert.equal(sync.mapped_count, 7);
+  const rows = sync.candidates;
+
+  const plain = rowOf(rows, 'glm-5.2', 'input_tokens');
+  assert.equal(plain.new_unit_price_micro, 8000000, '¥8/百万 token → 8,000,000 微积分（1:1，无折扣）');
+  assert.equal(plain.unit_size, 1000000);
+  const plainConditions = conditionsOf(plain);
+  assert.equal(plainConditions.usage_tiers, undefined);
+  assert.equal(plainConditions.rates, undefined);
+  assert.equal(plainConditions.tax_inclusive, false);
+  assert.equal(plainConditions.currency, 'CNY');
+
+  const inputTiers = rowOf(rows, 'doubao-seed-2.0-code', 'input_tokens（3 档）');
+  assert.deepEqual(conditionsOf(inputTiers).usage_tiers, [
+    { id: 'tokens:0-32000', selector_meter: 'input_token', min_inclusive: 0, max_inclusive: 32000, unit_price_points: '320', unit_size: 1000000 },
+    { id: 'tokens:32001-128000', selector_meter: 'input_token', min_inclusive: 32001, max_inclusive: 128000, unit_price_points: '480', unit_size: 1000000 },
+    { id: 'tokens:128001-256000', selector_meter: 'input_token', min_inclusive: 128001, max_inclusive: 256000, unit_price_points: '960', unit_size: 1000000 },
+  ], '三档价格必须完整落到 usage_tiers，不能只留一条');
+  assert.equal(rowOf(rows, 'doubao-seed-2.0-code', 'output_tokens（3 档）').new_unit_price_micro, 16000000);
+  const cached = rows.filter((row) => row.provider_model === 'doubao-seed-2.0-code' && row.mapping_status === 'unmapped');
+  assert.equal(cached.length, 3);
+  assert.ok(cached.every((row) => /按 input_token 全价/.test(row.error_summary)));
+
+  const video = rowOf(rows, 'doubao-seedance-2.0', 'output_tokens（6 条件）');
+  const videoRates = conditionsOf(video).rates;
+  assert.equal(videoRates.length, 6);
+  assert.equal(video.meter, 'output_token', '中转视频按输出 token 计价，内部没有 second 这条上游指标');
+  assert.deepEqual(videoRates.find((rate) => rate.when.resolution === '1080p' && rate.when.has_video_input === false),
+    { id: '1080p:no_video', when: { resolution: '1080p', has_video_input: false }, unit_price_points: '5100', unit_size: 1000000 });
+  assert.equal(video.new_unit_price_micro, 51000000, '缺少上下文时退回最贵档位，宁可多冻结也不漏收');
+  const fast = rowOf(rows, 'doubao-seedance-2.0-fast', 'output_tokens（4 条件）');
+  assert.equal(fast.billing_key, 'doubao-seedance-2.0-fast', '同族别名各自精确匹配');
+  assert.equal(rows.some((row) => row.billing_key === 'doubao-seedance-2-0-260128'), false, '绝不写到直连火山的 SKU 上');
+
+  const image = rowOf(rows, 'doubao-seedream-5.0-pro', 'image（2 条件）');
+  assert.deepEqual(conditionsOf(image).rates.map((rate) => [rate.when.pixel_band, rate.unit_price_points]), [['small', '30'], ['large', '60']]);
+  const afterFirst = rowOf(rows, 'doubao-seedream-5.0-pro', 'image');
+  assert.equal(afterFirst.mapping_status, 'unmapped');
+  assert.match(afterFirst.error_summary, /首张输入图免费/);
+  assert.equal(rowOf(rows, 'doubao-seedasr-2.0', 'NotConfigured').mapping_status, 'unmapped');
   assert.equal(db.prepare('SELECT provider FROM provider_price_syncs WHERE id=?').get(sync.id).provider, 'richbest');
 }));
 
@@ -129,9 +195,11 @@ test('relay candidates review, draft and publish without cloning the Volcengine 
   assert.match(draft.name, /^瑞池中转同步价目 v/);
   assert.equal(draft.parent_price_book_id, null, '不能把火山书当作父版本');
   const models = draft.items.map((item) => `${item.model}/${item.meter}`).sort();
-  assert.deepEqual(models, ['doubao-seedance-2.0-fast/second', 'doubao-seedance-2.0/second', 'glm-5.2/input_token', 'glm-5.2/output_token']);
-  const inputToken = draft.items.find((item) => item.meter === 'input_token');
-  assert.equal(inputToken.unit_price_micro, 6400000, '¥6.4 按 1:1 落成 6,400,000 微积分');
+  assert.deepEqual(models, ['doubao-seed-2.0-code/input_token', 'doubao-seed-2.0-code/output_token', 'doubao-seedance-2.0-fast/output_token',
+    'doubao-seedance-2.0/output_token', 'doubao-seedream-5.0-pro/image', 'glm-5.2/input_token', 'glm-5.2/output_token']);
+  assert.equal(draft.items.find((item) => item.meter === 'input_token' && item.model === 'glm-5.2').unit_price_micro, 8000000, '¥8 按 1:1 落成 8,000,000 微积分');
+  assert.equal(jsonOf(draft.items.find((item) => item.model === 'doubao-seed-2.0-code' && item.meter === 'input_token').conditions_json).usage_tiers.length, 3, '草稿必须带上分档条件');
+  assert.equal(jsonOf(draft.items.find((item) => item.model === 'doubao-seedance-2.0').conditions_json).rates.length, 6, '草稿必须带上视频条件价');
   assert.equal(db.prepare('SELECT COUNT(*) n FROM billing_price_book_items WHERE price_book_id=?').get(volcBook).n, 1, '火山书未被改写');
 
   const published = prices.publish(db, 1, draft.id, { confirm: true, reason: '上线中转价目', idempotency_key: 'relay-publish-1' });
@@ -140,18 +208,107 @@ test('relay candidates review, draft and publish without cloning the Volcengine 
   assert.match(notice.body, /瑞池中转价格已完成审核/);
   assert.doesNotMatch(notice.body, /火山引擎账号价格/);
 
-  // 发布后中转模型才真正可报价
+  // 发布后按真实档位/条件价命中，而不是取某一条代表价
+  catalog.save(db, 1, { service_type: 'text', model: 'doubao-seed-2.0-code', display_name: 'Doubao Seed 2.0 Code', status: 'active' }, log);
   catalog.save(db, 1, { service_type: 'video', model: 'doubao-seedance-2.0', display_name: 'Doubao Seedance 2.0', status: 'active' }, log);
-  const priced = billing.quote(db, { id: 1, role: 'admin' }, { service_type: 'video', model: 'doubao-seedance-2.0', usage: { second: 5 } });
-  assert.equal(priced.usage.second, 5);
-  assert.ok(priced.amount_micro > 0);
+  catalog.save(db, 1, { service_type: 'image', model: 'doubao-seedream-5.0-pro', display_name: 'Doubao Seedream 5.0 Pro', status: 'active' }, log);
+  const tiered = billing.quote(db, { id: 1, role: 'admin' }, { service_type: 'text', model: 'doubao-seed-2.0-code', usage: { input_token: 40000, output_token: 40000 } });
+  assert.deepEqual(tiered.rates.map((rate) => rate.rate_id), ['tokens:32001-128000', 'tokens:32001-128000']);
+  assert.equal(tiered.amount_micro, 1152000, '40k 落在 32001-128000 档：输入 480 + 输出 2400 积分/百万');
+  assert.throws(() => billing.quote(db, { id: 1, role: 'admin' }, { service_type: 'text', model: 'doubao-seed-2.0-code', usage: { input_token: 300000 } }), /未覆盖/);
+  const videoOut = billing.quote(db, { id: 1, role: 'admin' }, { service_type: 'video', model: 'doubao-seedance-2.0', usage: { output_token: 100000 }, pricing_context: { resolution: '720p', has_video_input: false } });
+  assert.equal(videoOut.rates[0].rate_id, '720p:no_video');
+  assert.equal(videoOut.amount_micro, 4600000, '¥46/百万 token × 10 万');
+  const videoIn = billing.quote(db, { id: 1, role: 'admin' }, { service_type: 'video', model: 'doubao-seedance-2.0', usage: { output_token: 100000 }, pricing_context: { resolution: '480p', has_video_input: true } });
+  assert.equal(videoIn.amount_micro, 2800000);
+  const small = billing.quote(db, { id: 1, role: 'admin' }, { service_type: 'image', model: 'doubao-seedream-5.0-pro', usage: { image: 1 }, pricing_context: { pixel_band: 'small' } });
+  assert.equal(small.amount_micro, 300000);
+  const large = billing.quote(db, { id: 1, role: 'admin' }, { service_type: 'image', model: 'doubao-seedream-5.0-pro', usage: { image: 1 }, pricing_context: { pixel_band: 'large' } });
+  assert.equal(large.amount_micro, 600000);
 }));
 
-const TEXT_ONLY_PRICING = { object: 'list', month: '2026-09', currency: 'CNY', tax_inclusive: false, billing_enabled: true, discount_bps: 8000, data: [
-  { id: 'glm-5.2', display_name: 'GLM 5.2', provider: 'volcengine_ark', modality: 'text', configured: true, prices: [
-    { metric: 'input_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '8.000000', effective_price_yuan: '6.400000' },
-    { metric: 'cached_input_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '2.000000', effective_price_yuan: '1.600000' },
-    { metric: 'output_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '28.000000', effective_price_yuan: '22.400000' },
+const livePricing = () => JSON.parse(fs.readFileSync(path.join(__dirname, 'helpers', 'richbestPricingLive.json'), 'utf8'));
+
+test('a repeated relay sync compares against the published book instead of calling everything new', async () => withDatabase(async (db) => {
+  seedConfigs(db);
+  const first = await prices.sync(db, 1, { provider: 'richbest', fetchImpl: relayFetch([]) });
+  for (const row of first.candidates) {
+    prices.updateCandidate(db, 1, first.id, row.id, row.mapping_status === 'mapped'
+      ? { review_status: 'accepted', service_type: row.service_type, billing_key: row.billing_key, meter: row.meter, unit_size: row.unit_size, unit_price_micro: row.new_unit_price_micro }
+      : { review_status: 'rejected' });
+  }
+  const draft = prices.createDraft(db, 1, first.id);
+  prices.publish(db, 1, draft.id, { confirm: true, reason: '首轮上线', idempotency_key: 'relay-baseline-1' });
+
+  // 只动不生成条目的缓存价：已发布价目其实没变，不得再报成"价格变化"
+  const cachedOnly = structuredClone(PRICING);
+  cachedOnly.data[0].prices[1].effective_price_yuan = '9.900000';
+  const second = await prices.sync(db, 1, { provider: 'richbest', fetchImpl: async () => relayResponse(cachedOnly) });
+  assert.equal(second.status, 'completed');
+  assert.ok(second.candidates.filter((row) => row.mapping_status === 'mapped').every((row) => row.is_unchanged), '与已发布价目一致时必须标成价格相同');
+  assert.equal(second.changed_count, 0);
+
+  // 改掉其中一个档位价：条件差异必须被识别出来，否则旧档位会一直留在生效价目里
+  const tierChanged = structuredClone(PRICING);
+  const target = tierChanged.data[1].prices.find((price) => price.metric === 'input_tokens' && price.dimension === 'tokens:32001-128000');
+  target.effective_price_yuan = '5.000000'; target.list_price_yuan = '5.000000';
+  const third = await prices.sync(db, 1, { provider: 'richbest', fetchImpl: async () => relayResponse(tierChanged) });
+  const changed = third.candidates.find((row) => row.billing_key === 'doubao-seed-2.0-code' && row.meter === 'input_token');
+  assert.equal(changed.is_unchanged, false);
+  assert.equal(changed.conditions_changed, true, '档位价格变了，仅单价相同不能算无变化');
+  assert.equal(third.changed_count, 1);
+}));
+
+test('the captured live /v1/pricing payload compiles every graded price without collapsing any', async () => withDatabase(async (db) => {
+  const entries = livePricing();
+  const relay = require('../src/services/richbestPricingService');
+  aiConfigs.createConfig(db, log, { service_type: 'text', provider: 'richbest', name: 'live models', base_url: 'https://api.richbest.cn/v1',
+    api_key: 'vap_live_price', model: entries.map((entry) => entry.id), default_model: entries[0].id, is_default: true });
+  const sync = await prices.sync(db, 1, { provider: 'richbest', fetchImpl: async () => relayResponse({ object: 'list', data: entries }) });
+  assert.equal(sync.status, 'completed');
+  // 真实响应 91 条价格：分档/条件必须编译成候选的 conditions，而不是被折叠或被丢掉
+  assert.ok(sync.candidate_count > 0);
+  const grouped = new Map();
+  for (const row of sync.candidates.filter((item) => item.mapping_status === 'mapped')) {
+    const key = `${row.provider_model}\u0000${row.meter}`;
+    assert.equal(grouped.has(key), false, `同一 (模型, 计量) 只能有一条候选：${key}`);
+    grouped.set(key, row);
+  }
+  const usableCount = new Map();
+  for (const entry of entries) for (const price of entry.prices) {
+    const meter = relay.METERS[price.metric];
+    if (!meter || relay.parseDimension(meter, price.dimension).reason) continue;
+    const key = `${entry.id}\u0000${meter}`;
+    usableCount.set(key, (usableCount.get(key) || 0) + 1);
+  }
+  assert.deepEqual([...grouped.keys()].sort(), [...usableCount.keys()].sort(), '可编译的 (模型, 计量) 必须各自成一条候选');
+  for (const [key, row] of grouped) {
+    const conditions = JSON.parse(row.new_conditions_json);
+    const compiled = (conditions.usage_tiers?.length || 0) + (conditions.rates?.length || 0) || 1;
+    assert.equal(compiled, usableCount.get(key), `${key} 只编译进 ${compiled} 条，上游有 ${usableCount.get(key)} 条同计量价格`);
+  }
+  assert.equal([...grouped.values()].some((row) => row.meter === 'second'), false, '上游没有按时长计价的指标');
+  const videoRow = grouped.get('doubao-seedance-2.0\u0000output_token');
+  assert.deepEqual(JSON.parse(videoRow.new_conditions_json).rates.map((rate) => rate.id).sort(),
+    ['1080p:no_video', '1080p:video', '480p:no_video', '480p:video', '720p:no_video', '720p:video']);
+  const cachedOnly = sync.candidates.filter((row) => row.mapping_status === 'unmapped' && /按 input_token 全价/.test(row.error_summary || ''));
+  assert.ok(cachedOnly.length > 0 && cachedOnly.every((row) => row.charge_type === 'cached_input_tokens'));
+
+  // 生成的条件价必须通过内部价目校验，否则发布后会在报价时炸开
+  for (const row of grouped.values()) {
+    const book = billing.savePriceBook(db, 1, { name: 'live 条件校验', status: 'draft', items: [{
+      service_type: row.service_type, model: row.billing_key, meter: row.meter,
+      unit_price: row.new_unit_price_micro / 10000, conditions_json: JSON.parse(row.new_conditions_json),
+    }] });
+    assert.ok(book.id);
+  }
+}));
+
+const TEXT_ONLY_PRICING = { object: 'list', data: [
+  { id: 'glm-5.2', object: 'model_price', display_name: 'GLM 5.2', provider: 'volcengine_ark', modality: 'text', currency: 'CNY', tax_inclusive: false, configured: true, prices: [
+    { metric: 'input_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '8.000000', effective_price_yuan: '8.000000' },
+    { metric: 'cached_input_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '2.000000', effective_price_yuan: '2.000000' },
+    { metric: 'output_tokens', dimension: null, unit_size: 1000000, list_price_yuan: '28.000000', effective_price_yuan: '28.000000' },
   ] },
 ] };
 
