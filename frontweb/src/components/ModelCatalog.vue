@@ -74,7 +74,7 @@
       <template #footer><el-button @click="showPublish = false">保留草稿</el-button><el-button type="primary" :loading="saving" @click="publish">确认发布</el-button></template>
     </el-dialog>
     <ModelDiscoveryDialog v-model="showDiscovery" @imported="load(); emit('changed')" />
-    <details class="provider-sync"><summary>供应商价格同步（火山）</summary><ProviderPriceSyncPanel @published="load" @draft-created="load" /></details>
+    <details class="provider-sync"><summary>供应商价格同步（按价目来源切换）</summary><ProviderPriceSyncPanel @published="load" @draft-created="load" /></details>
   </section>
 </template>
 

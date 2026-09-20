@@ -79,7 +79,14 @@ function estimate(row, snapshots) {
     return { status: 'calculated', amount_micro: amount, source: 'mediakit_bill_202609', source_label: `2026 年 9 月账单固定费率 · ${fixed.label}`, price_day: null, stale: false,
       reason: `账单固定费率 ¥${fixed.price}/分钟`, rates: [{ meter: 'millisecond', quantity, billable_quantity: quantity, unit_price_cny: Number(fixed.price), unit_size: 60000, subtotal_micro: amount }] };
   }
-  if (row.provider && !/(?:volc|doubao|火山)/i.test(row.provider)) return { status: 'missing_price', amount_micro: null, reason: '当前仅支持火山供应商成本估算', rates: [] };
+  if (row.provider && !/(?:volc|doubao|火山)/i.test(row.provider)) {
+    // 这条估算器读的是火山账单快照（FoundationModelName/UnitCode），只适用于火山。
+    // 中转站等非火山供应商的逐笔成本由 cost_prices 账本核算，不在此处伪造。
+    const reason = String(row.provider).toLowerCase() === 'richbest'
+      ? '中转站成本按 cost_prices 供应商价目核算，不走火山每日账单快照'
+      : '当前仅支持火山供应商成本估算';
+    return { status: 'missing_price', amount_micro: null, reason, rates: [] };
+  }
   const key = modelKey(row.model);
   const day = new Date(Date.parse(row.price_at) + 28800000).toISOString().slice(0, 10);
   // Each day's first complete response is immutable. Never use a future day.

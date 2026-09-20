@@ -203,9 +203,10 @@ function setupRouter(cfg, db, log) {
   adminRouter.patch('/price-books/:id', admin.updatePriceBook);
   adminRouter.post('/price-books/:id/publish', admin.publishPriceBook);
   adminRouter.post('/price-books/:id/rollback', admin.rollbackPriceBook);
-  adminRouter.post('/provider-prices/volcengine/probe', admin.providerPriceProbe);
-  adminRouter.get('/provider-prices/volcengine/probe', admin.providerPriceProbeStatus);
-  adminRouter.post('/provider-prices/volcengine/sync', admin.providerPriceSync);
+  adminRouter.post('/provider-prices/:provider/probe', admin.providerPriceProbe);
+  adminRouter.post('/provider-prices/:provider/sync', admin.providerPriceSync);
+  adminRouter.get('/provider-prices/:provider/probe', admin.providerPriceProbeStatus);
+  adminRouter.get('/provider-price-sources', admin.providerPriceSources);
   adminRouter.get('/provider-price-syncs', admin.providerPriceSyncs);
   adminRouter.get('/provider-price-syncs/:id', admin.providerPriceSyncDetail);
   adminRouter.patch('/provider-price-syncs/:id/candidates/:candidateId', admin.updateProviderPriceCandidate);
