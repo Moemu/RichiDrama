@@ -5,10 +5,33 @@ import { collectDisplayNames, modelLabel } from '../src/utils/modelDisplayNames.
 
 const readSource = (relativePath) => readFile(new URL(relativePath, import.meta.url), 'utf8')
 
-test('瑞池中转作为可选厂商出现在文本/图片/分镜图/视频四类配置里', async () => {
+test('中转站走「供应商连接」入口，不混进专用服务页的厂商下拉', async () => {
+  const [configSource, connections] = await Promise.all([
+    readSource('../src/components/AIConfigContent.vue'),
+    readSource('../src/components/ProviderConnections.vue'),
+  ])
+  assert.equal(configSource.includes("id: 'richbest'"), false, '裸配置页不再是新厂商的入口')
+  assert.match(connections, /\{ value: 'richbest', label: '瑞池中转 API（api\.richbest\.cn）', url: 'https:\/\/api\.richbest\.cn\/v1' \}/)
+  // 新建表单默认仍是火山，不能因为 presets 顺序变化而错配地址
+  assert.match(connections, /presets\.find\(item => item\.value === 'volcengine'\)/)
+  assert.doesNotMatch(connections, /base_url: presets\[0\]\.url/)
+})
+
+test('专用服务页改名并说明与供应商连接的分工', async () => {
   const source = await readSource('../src/components/AIConfigContent.vue')
-  const entries = source.match(/\{ id: 'richbest', name: '瑞池中转 API（api\.richbest\.cn）' \}/g) || []
-  assert.equal(entries.length, 4, '文本、图片、分镜图、视频各一条')
+  assert.match(source, /canManageCatalog \? '专用服务' : '供应商连接'/)
+  assert.doesNotMatch(source, /待迁移配置与专用服务/)
+  assert.match(source, /供应商凭据与模型请在「供应商连接」中添加/)
+})
+
+test('中转站连接隐藏连接级计费键', async () => {
+  const source = await readSource('../src/components/AIConfigContent.vue')
+  assert.match(source, /const isRichbestProvider = computed\(\(\) => String\(form\.value\.provider \|\| ''\)\.trim\(\)\.toLowerCase\(\) === 'richbest'\)/)
+  assert.match(source, /v-if="form\.service_type !== 'video_postprocess' && !isRichbestProvider"/)
+})
+
+test('中转厂商的协议与地址映射仍保留，供项目组独立凭据手输使用', async () => {
+  const source = await readSource('../src/components/AIConfigContent.vue')
   assert.match(source, /richbest: 'richbest',/, '协议映射必须显式写 richbest，避免被按模型名猜成火山')
   assert.match(source, /if \(p === 'richbest'\) return 'https:\/\/api\.richbest\.cn\/v1'/)
   assert.match(source, /value="richbest"/, '接口规范下拉里要能选到中转协议')

@@ -152,7 +152,7 @@ function importModels(db, actorId, id, input, log) {
         config = ai.getConfig(db, config.id);
         require('./tenantService').bindGlobalConfigToLegacyTenants(db, config);
       }
-      require('./modelCatalogService').registerNewModels(db, config, previous);
+      require('./modelCatalogService').registerNewModels(db, config, previous, input.display_names || {});
       added.push(model);
     }
     require('./billingService').audit(db, actorId, 'provider_connection.import', 'provider_connection', id, { models: rows, added });

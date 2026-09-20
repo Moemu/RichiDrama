@@ -8,6 +8,9 @@ const { runMigrationsAndEnsure } = require('../src/db/migrate');
 const aiConfigs = require('../src/services/aiConfigService');
 const catalog = require('../src/services/modelCatalogService');
 const discovery = require('../src/services/modelDiscoveryService');
+const connections = require('../src/services/providerConnectionService');
+const videoClient = require('../src/services/videoClient');
+const imageClient = require('../src/services/imageClient');
 
 const log = { info() {}, warn() {}, error() {} };
 
@@ -122,4 +125,34 @@ test('unpriced relay models stay invisible until a price is published, and no cr
   const serialized = JSON.stringify(rows);
   assert.equal(serialized.includes('vap_live'), false, '业务 Key 绝不出现在给前端的列表里');
   assert.equal(serialized.includes('base_url'), false);
+}));
+
+test('the shared-connection path derives a dispatchable relay config and keeps display names', async () => withDatabase(async (db) => {
+  const connection = connections.save(db, 1, {
+    name: '瑞池中转', provider: 'richbest', base_url: 'https://api.richbest.cn/v1', api_key: 'vap_live_shared',
+  });
+  connections.importModels(db, 1, connection.id, {
+    models: ['doubao-seedance-2.0', 'doubao-seed-2.1-turbo'],
+    capabilities: { 'doubao-seedance-2.0': 'video', 'doubao-seed-2.1-turbo': 'text' },
+    display_names: { 'doubao-seedance-2.0': 'Doubao Seedance 2.0', 'doubao-seed-2.1-turbo': 'Doubao Seed 2.1 Turbo' },
+  }, log);
+
+  const video = connections.bindings(db, connection.id).find((config) => config.service_type === 'video');
+  const text = connections.bindings(db, connection.id).find((config) => config.service_type === 'text');
+  assert.ok(video && text, '按能力各派生一条配置');
+  assert.equal(video.provider, 'richbest');
+  // 派生行不写 api_protocol，分发必须靠 provider 命中，不能退化成按模型名猜火山
+  assert.equal(video.api_protocol, '');
+  assert.equal(videoClient.resolveVideoProtocol(video, 'doubao-seedance-2.0'), 'richbest');
+  assert.equal(imageClient.inferProtocol(video.provider, 'doubao-seedance-2.0'), 'richbest');
+  assert.equal(video.endpoint, '/api/v3/contents/generations/tasks');
+  assert.equal(video.query_endpoint, '/api/v3/contents/generations/tasks/{taskId}');
+  assert.equal(text.endpoint, '/chat/completions');
+  // 凭据只存在连接行上；派生行自身留空，读取时才解析出共享凭据
+  assert.equal(db.prepare('SELECT api_key FROM ai_service_configs WHERE id=?').get(video.id).api_key, '');
+  assert.equal(video.api_key, 'vap_live_shared');
+
+  const rows = catalog.list(db).filter((row) => ['doubao-seedance-2.0', 'doubao-seed-2.1-turbo'].includes(row.model));
+  assert.equal(rows.find((row) => row.model === 'doubao-seedance-2.0').display_name, 'Doubao Seedance 2.0');
+  assert.equal(rows.find((row) => row.model === 'doubao-seed-2.1-turbo').display_name, 'Doubao Seed 2.1 Turbo');
 }));

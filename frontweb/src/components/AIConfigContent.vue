@@ -3,8 +3,12 @@
     <el-tabs v-model="activeTab" class="config-tabs" @tab-change="onConfigTabChange">
       <el-tab-pane v-if="!tenantId && canManageCatalog" label="模型目录" name="catalog"><ModelCatalog class="tab-content" ref="catalogPanel" @connection="openConnection" @changed="loadList" /></el-tab-pane>
       <el-tab-pane v-if="!tenantId && canManageCatalog" label="供应商连接" name="connections"><ProviderConnections class="tab-content" ref="connectionsPanel" :locked="vendorLock.enabled" @changed="loadList" @binding="openConnection" @catalog="activeTab = 'catalog'" /></el-tab-pane>
-      <el-tab-pane :label="!tenantId && canManageCatalog ? '待迁移配置与专用服务' : '供应商连接'" name="configs">
+      <el-tab-pane :label="!tenantId && canManageCatalog ? '专用服务' : '供应商连接'" name="configs">
         <div class="tab-content">
+          <p v-if="!tenantId && canManageCatalog" class="tab-note">
+            供应商凭据与模型请在「供应商连接」中添加，按能力绑定后自动生成配置。
+            本页保留无法共享的专用服务，以及尚未转换为共享连接的旧配置（迁移队列与转换入口也在「供应商连接」里）。
+          </p>
           <!-- 普通模式操作栏 -->
           <div v-if="!vendorLock.enabled" class="content-actions">
             <div class="actions-left">
@@ -887,7 +891,7 @@ input_reference = (图片文件，可选)</pre>
           </el-select>
           <p v-if="form.service_type === 'video_postprocess'" class="field-tip">超分与插帧共用此连接；是否启用由镜头设置决定。</p>
         </el-form-item>
-        <el-form-item v-if="form.service_type !== 'video_postprocess'">
+        <el-form-item v-if="form.service_type !== 'video_postprocess' && !isRichbestProvider">
           <template #label><span class="form-label-tip">计费键</span></template>
           <el-input v-model="form.billing_key" placeholder="可选；自定义 API 建议填写独立 SKU，如 custom-video-pro" />
           <p class="field-tip">用于匹配价目表；同名模型走不同渠道时须填不同计费键。</p>
@@ -1282,6 +1286,8 @@ const loading = ref(false)
 const list = ref([])
 const legacyList = computed(() => !tenantId.value && canManageCatalog ? list.value.filter(row => !row.provider_connection_id) : list.value)
 const selectedRows = ref([])
+// 中转站一个项目一枚业务 Key、按模型别名分别定价，连接级计费键只会造成误用。
+const isRichbestProvider = computed(() => String(form.value.provider || '').trim().toLowerCase() === 'richbest')
 const batchDeleting = ref(false)
 const vendorLock = ref({ enabled: false, config_file: '' })
 const dialogVisible = ref(false)
@@ -1452,7 +1458,6 @@ const oneKeyAgnesSaving = ref(false)
 const providerConfigs = computed(() => {
   const providers = {
   text: [
-    { id: 'richbest', name: '瑞池中转 API（api.richbest.cn）' },
     { id: 'openai', name: 'OpenAI' },
     { id: 'volcengine', name: '火山引擎（方舟）' },
 
@@ -1462,7 +1467,6 @@ const providerConfigs = computed(() => {
     { id: 'agnes', name: 'Agnes AI' }
   ],
   image: [
-    { id: 'richbest', name: '瑞池中转 API（api.richbest.cn）' },
     { id: 'volcengine', name: '火山引擎（方舟）' },
     { id: 'kling', name: '可灵 Kling' },
     { id: 'nano_banana', name: 'NanoBanana' },
@@ -1474,7 +1478,6 @@ const providerConfigs = computed(() => {
     { id: 'agnes', name: 'Agnes AI' }
   ],
   storyboard_image: [
-    { id: 'richbest', name: '瑞池中转 API（api.richbest.cn）' },
     { id: 'dashscope', name: '通义万象' },
     { id: 'volcengine', name: '火山引擎（方舟）' },
     { id: 'kling', name: '可灵 Kling' },
@@ -1485,7 +1488,6 @@ const providerConfigs = computed(() => {
     { id: 'agnes', name: 'Agnes AI' }
   ],
   video: [
-    { id: 'richbest', name: '瑞池中转 API（api.richbest.cn）' },
     { id: 'klingai', name: '可灵官方 Omni (api-beijing.klingai.com)' },
     { id: 'ffir', name: '飞儿API / 可灵 Omni-Video (ffir.cn)' },
     { id: 'kling', name: '可灵 Kling' },
@@ -2754,6 +2756,15 @@ code {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.4;
+}
+.tab-note {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
 }
 .form-label-tip {
   display: inline-flex;
