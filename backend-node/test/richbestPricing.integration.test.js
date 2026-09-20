@@ -110,8 +110,8 @@ test('relay price sync compiles dimensions into tiers and rates instead of colla
   const sync = await prices.sync(db, 1, { provider: 'richbest', fetchImpl: relayFetch(seen) });
   assert.deepEqual(seen, ['https://api.richbest.cn/v1/pricing']);
   assert.equal(sync.status, 'completed');
-  // 26 条上游价格 → 7 条候选：同 (模型, 计量) 的分档必须编译进条件，一条都不能丢
-  assert.equal(sync.candidate_count, 13);
+  // 25 条上游价格 → 12 条候选：已导入模型的同计量价格必须编译进条件，一条都不能丢
+  assert.equal(sync.candidate_count, 12);
   assert.equal(sync.mapped_count, 7);
   const rows = sync.candidates;
 
@@ -151,8 +151,28 @@ test('relay price sync compiles dimensions into tiers and rates instead of colla
   const afterFirst = rowOf(rows, 'doubao-seedream-5.0-pro', 'image');
   assert.equal(afterFirst.mapping_status, 'unmapped');
   assert.match(afterFirst.error_summary, /首张输入图免费/);
-  assert.equal(rowOf(rows, 'doubao-seedasr-2.0', 'NotConfigured').mapping_status, 'unmapped');
+  // 上游有、但本项目没导入的模型不进清单（与火山侧 buildCandidateRows 直接 return [] 同源）
+  assert.equal(rows.some((row) => row.provider_model === 'doubao-seedasr-2.0'), false);
   assert.equal(db.prepare('SELECT provider FROM provider_price_syncs WHERE id=?').get(sync.id).provider, 'richbest');
+}));
+
+test('a relay model that is imported but missing upstream still surfaces as a warning row', async () => withDatabase(async (db) => {
+  seedConfigs(db);
+  aiConfigs.createConfig(db, log, { service_type: 'video', provider: 'richbest', name: 'relay extra', base_url: 'https://api.richbest.cn/v1',
+    api_key: 'vap_live_price', model: ['doubao-seedance-9.9'], default_model: 'doubao-seedance-9.9' });
+  const sync = await prices.sync(db, 1, { provider: 'richbest', fetchImpl: relayFetch([]) });
+  const missing = sync.candidates.filter((row) => row.charge_type === 'MissingFromProvider');
+  assert.deepEqual(missing.map((row) => row.billing_key), ['doubao-seedance-9.9']);
+  assert.equal(missing[0].mapping_status, 'unmapped');
+  assert.match(missing[0].error_summary, /不会删除或停用当前价格/);
+  // 提醒行不能被当成"已接受的价格变化"塞进草案，也不能卡住草案生成
+  for (const row of sync.candidates) {
+    prices.updateCandidate(db, 1, sync.id, row.id, row.mapping_status === 'mapped'
+      ? { review_status: 'accepted', service_type: row.service_type, billing_key: row.billing_key, meter: row.meter, unit_size: row.unit_size, unit_price_micro: row.new_unit_price_micro }
+      : { review_status: 'rejected' });
+  }
+  const draft = prices.createDraft(db, 1, sync.id);
+  assert.equal(draft.items.some((item) => item.model === 'doubao-seedance-9.9'), false);
 }));
 
 test('a relay sync is unchanged on identical upstream pricing and locks per provider', async () => withDatabase(async (db) => {

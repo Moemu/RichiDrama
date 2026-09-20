@@ -612,11 +612,33 @@ function listSyncs(db, limit = 30, provider = null) {
   return db.prepare('SELECT id,provider,status,trigger_type,response_hash,candidate_count,mapped_count,changed_count,error_summary,fetched_at,created_at FROM provider_price_syncs ORDER BY created_at DESC LIMIT ?').all(rowLimit);
 }
 
+/** 与火山同源：已导入的中转模型若上游价目里没有条目，必须显式提醒，不能静默消失。 */
+function relayMissingConfiguredModelRows(db, items) {
+  const upstream = new Set(items.map((item) => normalizeName(item?.id)).filter(Boolean));
+  const seen = new Set();
+  const warnings = [];
+  for (const row of pricingConfigurations(db, RELAY_PROVIDER)) {
+    const configured = parse(row.model, null);
+    for (const value of Array.isArray(configured) ? configured : String(row.model || '').split(',')) {
+      const model = String(value || '').trim();
+      const billingKey = String(row.billing_key || model).trim();
+      const key = `${row.service_type}\u0000${billingKey}`;
+      if (!model || upstream.has(normalizeName(model)) || seen.has(key)) continue;
+      seen.add(key);
+      warnings.push({ provider_model: model, display_name: model, charge_type: 'MissingFromProvider', unit_code: null, provider_unit_price: null,
+        service_type: row.service_type, billing_key: billingKey, meter: null, unit_size: null, new_unit_price_micro: null, new_conditions_json: null, conditions_changed: 0,
+        mapping_status: 'unmapped', error_summary: '中转站价目未返回此已导入模型。系统不会删除或停用当前价格',
+        raw_item_json: json({ configured_model: model, service_type: row.service_type, billing_key: billingKey }) });
+    }
+  }
+  return warnings;
+}
+
 /** 中转价目候选：模型必须精确对到 richbest 配置自己的 billing_key，不做同族前缀匹配。 */
 function relayCandidateRows(db, fetched, syncId, at) {
   const relay = require('./richbestPricingService');
   const configs = pricingConfigurations(db, RELAY_PROVIDER);
-  return relay.buildCandidates(fetched.items, {
+  const rows = relay.buildCandidates(fetched.items, {
     discountBps: fetched.discountBps,
     syncId,
     at,
@@ -640,6 +662,7 @@ function relayCandidateRows(db, fetched, syncId, at) {
       conditions_changed: samePriceCore(current.conditions_json, JSON.parse(row.new_conditions_json)) ? 0 : 1,
       change_ratio: current.unit_price_micro ? (row.new_unit_price_micro - current.unit_price_micro) / current.unit_price_micro : null };
   });
+  return [...rows, ...relayMissingConfiguredModelRows(db, fetched.items)];
 }
 
 async function sync(db, actorId, options = {}) {

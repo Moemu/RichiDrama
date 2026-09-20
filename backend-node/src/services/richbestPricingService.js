@@ -36,13 +36,17 @@ const METERS = {
   image: 'image',
 };
 /**
- * 上游确有、但不生成价目条目的指标。
- * cached_input_tokens 必须排除在这里：它若映射到 input_token，会和真正的 input_tokens
- * 撞同一个 (价目书, 服务类型, 模型, meter) 唯一键，createDraft 里后写入者覆盖前者，
- * 输入价会被缓存价悄悄压低。已定决策是缓存输入按 input_token 全价结算、不单独定价。
+ * 上游确有、但不生成用户价目条目的指标。
+ * cached_input_tokens 不能映射到 input_token：那会和真正的输入价撞同一个
+ * (价目书, 服务类型, 模型, meter) 唯一键，createDraft 里后写入者覆盖前者，输入价被悄悄压低。
+ * 代价要说清楚：上游把缓存输入单独计成更便宜的价（真实快照里约为主价的 20%），
+ * 而面向用户的计量白名单（billingService.normalizeUsage）里没有 cache_token，
+ * 用户侧 textUsage 也直接从 prompt_tokens 里扣不掉缓存部分，所以命中缓存的 token
+ * 目前仍按 input_token 全价向用户收费，差额留在平台。这是现状而非已确认的定价决策；
+ * 上游完成响应是否回报 prompt_tokens_details.cached_tokens 至今没有实测数据。
  */
 const UNSUPPORTED_METERS = {
-  cached_input_tokens: '缓存输入按 input_token 全价结算，不单独定价',
+  cached_input_tokens: '上游对缓存输入单独计价（更便宜）；用户价目没有 cache_token 计量，缓存命中仍按 input_token 全价向用户收费',
   audio_duration: '内部价目暂无音频时长计量，未生成条目',
   embedding: '内部价目暂无向量计量，未生成条目',
 };
@@ -263,6 +267,9 @@ function buildCandidates(entries, { resolveTarget, discountBps, syncId = null } 
     const model = String(entry?.id || '').trim();
     if (!model) continue;
     const target = resolveTarget ? resolveTarget(model) : null;
+    // 与火山同源（providerPriceService.buildCandidateRows 对未配置模型直接 return []）：
+    // 上游有、但本项目没导入的模型不进候选清单，否则整张上游价目都会变成待办噪声。
+    if (!target) continue;
     const prices = Array.isArray(entry?.prices) ? entry.prices : [];
     if (entry?.configured === false || !prices.length) {
       rows.push({
@@ -292,9 +299,8 @@ function buildCandidates(entries, { resolveTarget, discountBps, syncId = null } 
     }
     for (const pieces of groups.values()) {
       const meter = pieces[0].meter;
-      if (!meter || !target) {
-        rows.push(...pieces.map((piece) => unmappedRow(piece, !meter ? pieces[0].reason
-          : `找不到模型 ${model} 的中转 billing_key，请先在供应商连接中导入该模型`)));
+      if (!meter) {
+        rows.push(...pieces.map((piece) => unmappedRow(piece)));
         continue;
       }
       const usable = pieces.filter((piece) => !piece.reason);
