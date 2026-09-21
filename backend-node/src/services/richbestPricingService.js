@@ -335,14 +335,22 @@ function buildCandidates(entries, { resolveTarget, discountBps, syncId = null } 
   return rows;
 }
 
-/** 取一枚可用的中转凭据：任一启用的 richbest 配置都代表同一项目 Key。 */
+/**
+ * 取一枚可用的中转凭据。
+ *
+ * 注意：中转站的价目与 discount_bps 都是**按项目**返回的，而同一套部署里可能同时存在多枚
+ * 属于不同瑞池项目的 richbest Key（多租户各配各的）。同步产出的是平台级价目书，因此优先用
+ * 平台级配置（未绑定租户的那条）；只有租户级配置时退而用第一枚，并把实际使用的 config_id
+ * 落进同步批次（providerPriceService 已回填 source_config_id），便于事后核对是哪枚 Key 拉的价。
+ */
 function pricingContext(db) {
   const ai = require('./aiConfigService');
   const rows = db.prepare(`SELECT id FROM ai_service_configs WHERE deleted_at IS NULL AND provider=? AND is_active=1
-    ORDER BY is_default DESC, priority DESC, id ASC`).all(PROVIDER).map((row) => ai.getConfig(db, row.id)).filter(Boolean);
-  const withKey = rows.find((config) => String(config.api_key || '').trim());
-  if (!withKey) throw new Error('未找到可用的瑞池中转配置，请先在供应商连接中添加并启用');
-  return { config: withKey, configs: rows };
+    ORDER BY (COALESCE(owner_tenant_id, 0) = 0) DESC, is_default DESC, priority DESC, id ASC`)
+    .all(PROVIDER).map((row) => ai.getConfig(db, row.id)).filter(Boolean);
+  const withKey = rows.filter((config) => String(config.api_key || '').trim());
+  if (!withKey.length) throw new Error('未找到可用的瑞池中转配置，请先在供应商连接中添加并启用');
+  return { config: withKey[0] };
 }
 
 async function fetchPricing(db, options = {}) {

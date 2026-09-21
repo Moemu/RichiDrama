@@ -862,7 +862,16 @@ function publish(db, actorId, bookId, input = {}) {
     if (previous) db.prepare("UPDATE billing_price_books SET status='archived',effective_to=?,updated_at=? WHERE id=? AND status='published'").run(at, at, previous.id);
     db.prepare(`UPDATE billing_price_books SET status='published',effective_from=?,effective_to=NULL,published_by=?,published_at=?,publish_reason=?,publish_idempotency_key=?,reviewed_by=COALESCE(reviewed_by,?),reviewed_at=COALESCE(reviewed_at,?),updated_at=? WHERE id=? AND status='draft'`)
       .run(at, actorId, at, String(input.reason).trim(), String(input.idempotency_key).trim(), actorId, at, at, draft.id);
-    if (previous) db.prepare('UPDATE tenant_price_book_bindings SET price_book_id=?,active_at=?,updated_at=? WHERE price_book_id=?').run(draft.id, at, at, previous.id);
+    if (previous) {
+      db.prepare('UPDATE tenant_price_book_bindings SET price_book_id=?,active_at=?,updated_at=? WHERE price_book_id=?').run(draft.id, at, at, previous.id);
+      // provider 维度的绑定也必须跟着重指：tenantService.priceBookForUser 在存在 provider 行时
+      // 只读新表，且精确匹配带 status='published' 过滤。漏掉这一步，上一版一归档，
+      // 分组绑定就会静默落空并掉到平台价目。
+      if (require('./tenantService').hasTable(db, 'tenant_provider_price_book_bindings')) {
+        db.prepare('UPDATE tenant_provider_price_book_bindings SET price_book_id=?,active_at=?,updated_at=? WHERE price_book_id=?')
+          .run(draft.id, at, at, previous.id);
+      }
+    }
     if (notifyUsers) db.prepare(`INSERT INTO system_notices(id,type,title,body,status,price_book_id,effective_at,published_by,published_at,created_at,updated_at) VALUES (?,'pricing',?,?,'active',?,?,?,?,?,?)`).run(noticeId, title, body, draft.id, at, actorId, at, at, at);
     require('./billingService').audit(db, actorId, 'price_book.publish', 'price_book', draft.id, { previous_price_book_id: previous?.id ?? null, source_sync_id: draft.source_sync_id || null, reason: String(input.reason).trim(), notify_users: notifyUsers, notice_id: noticeId, diff });
   })();
@@ -875,12 +884,15 @@ function rollback(db, actorId, historicalId, input = {}) {
   const reused = db.prepare('SELECT * FROM billing_price_books WHERE publish_idempotency_key=?').get(String(input.idempotency_key).trim());
   if (reused) return { reused: true, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === reused.id) };
   const historical = db.prepare('SELECT * FROM billing_price_books WHERE id=?').get(historicalId);
-  const current = currentSystemBook(db);
+  // 回滚必须留在被回滚那本书自己的价目源上：拿火山的当前版本当父本、并在新书上留空
+  // provider，会让 provider IS NULL 的查询同时命中中转调用（等于两家供应商共用一本价目）。
+  const provider = String(historical?.provider || PROVIDER);
+  const current = currentSystemBook(db, provider);
   if (!historical || !current) throw new Error('历史价目或当前价目不存在');
   const at = now(); let draftId;
   db.transaction(() => {
-    draftId = Number(db.prepare(`INSERT INTO billing_price_books(name,owner_user_id,status,created_by,created_at,updated_at,version,parent_price_book_id,system_managed,reviewed_by,reviewed_at)
-      VALUES (?,NULL,'draft',?,?,?,?,?,1,?,?)`).run(`火山引擎回滚价目 v${Number(current.version || 1) + 1}`, actorId, at, at, Number(current.version || 1) + 1, current.id, actorId, at).lastInsertRowid);
+    draftId = Number(db.prepare(`INSERT INTO billing_price_books(name,owner_user_id,status,created_by,created_at,updated_at,version,parent_price_book_id,system_managed,provider,reviewed_by,reviewed_at)
+      VALUES (?,NULL,'draft',?,?,?,?,?,1,?,?,?)`).run(`${sourceMeta(provider).label}回滚价目 v${Number(current.version || 1) + 1}`, actorId, at, at, Number(current.version || 1) + 1, current.id, provider, actorId, at).lastInsertRowid);
     cloneItems(db, historical.id, draftId, at);
   })();
   return publish(db, actorId, draftId, { ...input, notice_title: input.notice_title || '模型调用价格已回滚', notice_body: input.notice_body || `价格配置已回滚到历史版本“${historical.name}”。新请求立即使用回滚后的价格。` });

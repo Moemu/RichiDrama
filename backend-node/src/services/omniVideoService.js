@@ -3,6 +3,7 @@ const path = require('path');
 const taskService = require('./taskService');
 const videoService = require('./videoService');
 const capabilityService = require('./videoModelCapabilities');
+const videoTokenEstimate = require('./videoTokenEstimate');
 // Seedance 2.0 publishes limits per media type. There is no separate
 // 12-item combined limit, so the combined ceiling is the sum of those limits.
 const SHOT_ASSET_LIMITS = { total: 15, image: 9, video: 3, audio: 3 };
@@ -57,7 +58,7 @@ function canRetryGeneration(generation) {
  */
 function reserveOutputTokens(billingSettings, options, duration) {
   try {
-    return require('./videoTokenEstimate').estimateOutputTokens({
+    return videoTokenEstimate.estimateOutputTokens({
       resolution: options.resolution, aspectRatio: options.aspect_ratio, duration,
     });
   } catch (_) {
@@ -101,7 +102,9 @@ function quote(db, body, payer) {
   try { billingSettings = JSON.parse(config?.settings || '{}'); } catch (_) {}
   const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key, billingTarget.provider);
   const reserveOptions = { resolution: body.resolution || '480p', aspect_ratio: body.aspect_ratio || '16:9' };
-  const usage = buildAuthorizationUsage(meters, billingSettings, body.duration, reserveOptions);
+  // 与 create 的落库口径一致：缺省时长按 15s 估算，不再按 1s 报给用户。
+  const reserveDuration = videoTokenEstimate.normalizeDurationSeconds(body.duration);
+  const usage = buildAuthorizationUsage(meters, billingSettings, reserveDuration, reserveOptions);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
   const quoted = billing.quote(db, payer, {
     service_type: 'video',
@@ -114,7 +117,7 @@ function quote(db, body, payer) {
     },
   });
   // 让用户看得到冻结是按什么估出来的（时长/分辨率/画幅/token 数）。
-  if (usage.output_token) quoted.reserve = require('./videoTokenEstimate').describeReserve({ ...reserveOptions, duration: body.duration });
+  if (usage.output_token) quoted.reserve = videoTokenEstimate.describeReserve({ ...reserveOptions, duration: reserveDuration });
   return quoted;
 }
 
@@ -179,7 +182,7 @@ function create(db, log, body, billingUser) {
   const reserveOptions = { resolution: body.resolution || '480p', aspect_ratio: body.aspect_ratio || '16:9' };
   const usage = buildAuthorizationUsage(meters, billingSettings, body.duration, reserveOptions);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
-  const reserveBasis = usage.output_token ? require('./videoTokenEstimate').describeReserve({ ...reserveOptions, duration: body.duration }) : null;
+  const reserveBasis = usage.output_token ? videoTokenEstimate.describeReserve({ ...reserveOptions, duration: body.duration }) : null;
   const existingWaitingId = Number(body.__sd2_waiting_generation_id) || null;
   const existingWaiting = existingWaitingId
     ? db.prepare('SELECT id, task_id, status, owner_user_id FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(existingWaitingId)

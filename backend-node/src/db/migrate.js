@@ -338,6 +338,26 @@ function ensureAllColumns(database) {
     { name: 'is_new_user_default', type: 'INTEGER DEFAULT 0' },
   ]);
 
+  // provider 维度的价目归属（migration 82/83）。迁移逐语句执行且没有 per-file 事务，
+  // 半迁移状态下读路径有 hasTable 保护、写路径没有，所以这里兜底补列与建表。
+  ensureColumns(database, 'billing_price_books', [
+    { name: 'provider', type: 'TEXT' },
+  ]);
+  try {
+    database.exec(`CREATE TABLE IF NOT EXISTS tenant_provider_price_book_bindings (
+      tenant_id     INTEGER NOT NULL,
+      provider      TEXT NOT NULL DEFAULT '',
+      price_book_id INTEGER NOT NULL,
+      active_at     TEXT NOT NULL,
+      created_by    INTEGER,
+      updated_at    TEXT NOT NULL,
+      PRIMARY KEY (tenant_id, provider)
+    )`);
+    database.exec('CREATE INDEX IF NOT EXISTS idx_tenant_provider_price_books ON tenant_provider_price_book_bindings(tenant_id, provider)');
+  } catch (e) {
+    console.warn('ensure provider price book bindings failed:', e.message);
+  }
+
   // --- ai_service_configs ---（兜底建表：旧版 01_init.sql 可能未包含此表）
   try {
     database.exec(`CREATE TABLE IF NOT EXISTS ai_service_configs (

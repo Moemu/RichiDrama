@@ -83,7 +83,7 @@ function estimate(row, snapshots) {
     // 这条估算器读的是火山账单快照（FoundationModelName/UnitCode），只适用于火山。
     // 中转站等非火山供应商的逐笔成本由 cost_prices 账本核算，不在此处伪造。
     const reason = String(row.provider).toLowerCase() === 'richbest'
-      ? '中转站成本按 cost_prices 供应商价目核算，不走火山每日账单快照'
+      ? '中转站成本按 cost_prices 供应商价目核算，不走火山每日账单快照；请先为该供应商账号录入并发布成本价目'
       : '当前仅支持火山供应商成本估算';
     return { status: 'missing_price', amount_micro: null, reason, rates: [] };
   }

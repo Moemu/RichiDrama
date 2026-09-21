@@ -177,3 +177,41 @@ test('historical rows without a pinned config keep the legacy failure when no mo
   assert.equal(row.status, 'failed');
   assert.equal(row.error_msg, '未配置视频模型');
 }));
+
+test('连接测试提示「生成」与「素材库」两处业务 Key 是否同一个瑞池项目', async () => await withDatabase(async (db) => {
+  // 中转站按业务 Key 隔离项目，且 /api/auth/me 不返回项目名：两处 Key 填成不同项目时
+  // 只能在生成阶段以「素材不存在 / 模型未开通」暴露，所以连接测试要主动比对。
+  aiConfigs.createConfig(db, log, {
+    service_type: 'jimeng2_character_auth', provider: 'richbest_asset_v3', name: '素材库',
+    base_url: 'https://api.richbest.cn', api_key: 'vap_live_asset_project',
+  });
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    const path = new URL(String(url)).pathname;
+    const payload = path === '/health' ? { status: 'ok' }
+      : path === '/api/auth/me' ? { authenticated: true, apiKeyId: 'key-1' }
+        : { object: 'list', data: [{ id: 'doubao-seedance-2.0', modality: 'video' }] };
+    return {
+      ok: true, status: 200,
+      headers: { get: () => null },
+      text: async () => JSON.stringify(payload),
+    };
+  };
+  try {
+    const same = await aiConfigs.testConnection({
+      db, provider: 'richbest', base_url: 'https://api.richbest.cn', api_key: 'vap_live_asset_project',
+      service_type: 'video', model: 'doubao-seedance-2.0',
+    });
+    assert.deepEqual(same.warnings, [], '同一个项目的 Key 不该报警');
+
+    const different = await aiConfigs.testConnection({
+      db, provider: 'richbest', base_url: 'https://api.richbest.cn', api_key: 'vap_live_other_project',
+      service_type: 'video', model: 'doubao-seedance-2.0',
+    });
+    assert.equal(different.warnings.length, 1);
+    assert.match(different.warnings[0], /jimeng2_character_auth/);
+    assert.match(different.warnings[0], /同一个瑞池项目的 Key/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+}));

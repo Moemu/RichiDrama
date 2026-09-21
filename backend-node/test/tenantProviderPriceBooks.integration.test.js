@@ -97,3 +97,54 @@ test('migration 83 is re-runnable after a partial failure (preview restart recov
     assert.deepEqual(rows, [{ provider: 'volcengine', price_book_id: volcBook }], 're-run must not duplicate or corrupt backfill');
   } finally { teardown(dbPath); }
 });
+
+test('发布新版价目时 provider 维度的绑定也必须跟着重指', () => {
+  const { db, dbPath } = setup();
+  try {
+    const providerPrices = require('../src/services/providerPriceService');
+    // 系统书 v1 → 分组绑定 → 再发布 v2：绑定必须留在最新一版，
+    // 否则精确匹配会因 v1 变 archived 而落空，分组静默掉到平台价目。
+    const v1 = book(db, '系统书 v1', 'richbest', [{ service_type: 'text', model: 'relay-model', meter: 'request', unit_price: 20 }]);
+    db.prepare("UPDATE billing_price_books SET system_managed=1, version=1 WHERE id=?").run(v1);
+    const group = tenants.writeTenant(db, 1, { name: '跟随发布的组' });
+    const user = auth.createUser(db, { username: 'publish-follower', password: 'user123456' }, 1);
+    tenants.setMember(db, group.id, user.id);
+    tenants.replaceBindings(db, group.id, { price_book_bindings: [{ provider: 'richbest', price_book_id: v1 }] });
+    assert.equal(billing.quote(db, user, { service_type: 'text', model: 'relay-model', provider: 'richbest', usage: { request: 1 } }).amount, 20);
+
+    // 同一 SKU 不能并存两本已发布价目，所以先建草稿（占位 SKU），再改成同一个模型。
+    const v2 = billing.savePriceBook(db, 1, { name: '系统书 v2', status: 'draft', items: [{ service_type: 'text', model: 'placeholder-model', meter: 'request', unit_price: 30 }] }).id;
+    db.prepare('UPDATE billing_price_book_items SET model=? WHERE price_book_id=?').run('relay-model', v2);
+    db.prepare("UPDATE billing_price_books SET provider='richbest', system_managed=1, version=2, parent_price_book_id=? WHERE id=?").run(v1, v2);
+    providerPrices.publish(db, 1, v2, { confirm: true, reason: '中转价目例行更新', idempotency_key: `pub-${v2}`, notify_users: false });
+
+    const rows = db.prepare('SELECT provider, price_book_id FROM tenant_provider_price_book_bindings WHERE tenant_id=?').all(group.id);
+    assert.deepEqual(rows, [{ provider: 'richbest', price_book_id: Number(v2) }], '绑定要重指到新发布的价目书');
+    const quote = billing.quote(db, user, { service_type: 'text', model: 'relay-model', provider: 'richbest', usage: { request: 1 } });
+    assert.equal(quote.amount, 30, '分组按新价目计价');
+    assert.equal(quote.rates[0].price_book_id, Number(v2));
+  } finally { teardown(dbPath); }
+});
+
+test('回滚留在被回滚价目自己的供应商上，不再接回火山系统书', () => {
+  const { db, dbPath } = setup();
+  try {
+    const providerPrices = require('../src/services/providerPriceService');
+    const relayV1 = book(db, '中转书 v1', 'richbest', [{ service_type: 'text', model: 'relay-model', meter: 'request', unit_price: 20 }]);
+    db.prepare("UPDATE billing_price_books SET system_managed=1, version=1 WHERE id=?").run(relayV1);
+    const relayV2 = billing.savePriceBook(db, 1, { name: '中转书 v2', status: 'draft', items: [{ service_type: 'text', model: 'placeholder-model', meter: 'request', unit_price: 25 }] }).id;
+    db.prepare('UPDATE billing_price_book_items SET model=? WHERE price_book_id=?').run('relay-model', relayV2);
+    db.prepare("UPDATE billing_price_books SET provider='richbest', system_managed=1, version=2, parent_price_book_id=? WHERE id=?").run(relayV1, relayV2);
+    providerPrices.publish(db, 1, relayV2, { confirm: true, reason: '中转价目更新', idempotency_key: `pub-${relayV2}`, notify_users: false });
+    // 火山系统书同时存在：修复前的回滚会拿它当父版本，并把新草稿的 provider 留成 NULL。
+    const volcBook = book(db, '火山系统书', 'volcengine', [{ service_type: 'text', model: 'volc-model', meter: 'request', unit_price: 10 }]);
+    db.prepare("UPDATE billing_price_books SET system_managed=1, version=1 WHERE id=?").run(volcBook);
+
+    const result = providerPrices.rollback(db, 1, relayV1, { confirm: true, reason: '中转价格回滚', idempotency_key: 'rb-1', notify_users: false });
+    const rolled = db.prepare('SELECT name, provider, parent_price_book_id, system_managed FROM billing_price_books WHERE id=?').get(Number(result.price_book.id));
+    assert.equal(rolled.provider, 'richbest', '回滚必须留在中转自己的价目源上');
+    assert.equal(rolled.parent_price_book_id, Number(relayV2), '父版本应是中转的当前版本，而不是火山系统书');
+    assert.equal(rolled.system_managed, 1);
+    assert.match(rolled.name, /瑞池中转回滚价目/, '名称跟着供应商走');
+  } finally { teardown(dbPath); }
+});

@@ -57,6 +57,14 @@ const SEEDANCE_PROFILE = {
   defaults: {},
 };
 
+/**
+ * 未列入此表的别名一律按 Seedance 画像处理。
+ *
+ * 待核实（不要在真机验证前擅自改口径）：文档 §10.1.1 把 wan 的取值写成 `1080P`、
+ * minimax 写成 `768P`（大写 P），而应用侧与价目 dimension 都是小写 `480p/720p/1080p`。
+ * 这里原样透传调用方的取值，只在小写缺省时补画像默认值；若中转站区分大小写，
+ * 需要在 buildVideoBody 里按画像加一层取值映射。
+ */
 const VIDEO_PROFILES = {
   'wan3.0-video': {
     key: 'wan',
@@ -133,7 +141,12 @@ function videoTaskUrl(config, taskId) {
 }
 
 function headersFor(config, options = {}) {
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${String(config?.api_key || '').trim()}` };
+  const headers = {
+    'Content-Type': 'application/json',
+    // 文档 §1 要求携带 Accept；api_key 可能带着 "Bearer " 前缀被粘贴进来，先剥掉再拼。
+    Accept: 'application/json',
+    Authorization: `Bearer ${String(config?.api_key || '').trim().replace(/^Bearer\s+/i, '')}`,
+  };
   if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
   return headers;
 }
@@ -154,6 +167,24 @@ function videoProfile(model) {
   return VIDEO_PROFILES[name] || SEEDANCE_PROFILE;
 }
 
+/**
+ * 文档 §13.1 里属于文本/图片/向量/音频的别名族。它们落到视频接口只会吃
+ * 422 model_modality_mismatch，而且会先冻结额度再失败；这里提前给出准确原因。
+ * 注意 `^doubao-seed-` 不会命中 `doubao-seedance-*`（"seedance" 后面不是连字符）。
+ * 未列出的别名仍然按 Seedance 画像兜底，那是 VideoProfile 的既有约定。
+ */
+const NON_VIDEO_ALIASES = [
+  /^doubao-seedream-/, /^gpt-image-/, /^doubao-embedding-/, /^doubao-seed-tts-/,
+  /^doubao-seedasr-/, /^doubao-seed-audio-/, /^glm-/, /^deepseek-/, /^doubao-seed-/,
+];
+
+function assertVideoModelAlias(model) {
+  const name = String(model || '').trim().toLowerCase();
+  if (NON_VIDEO_ALIASES.some((pattern) => pattern.test(name))) {
+    throw new RichbestError(`中转站模型 ${model} 不是视频模型，不能提交到视频接口`);
+  }
+}
+
 function referenceScheme(value) {
   const raw = String(value || '').trim();
   if (raw.startsWith('asset://')) return 'asset';
@@ -162,17 +193,14 @@ function referenceScheme(value) {
   return null;
 }
 
-function assertReferencesAcceptable(profile, references) {
+/**
+ * 素材形状校验（类型、角色、数量），与地址无关 —— 地址要等本地文件解析成
+ * https/data/asset 之后才能判定，那部分留在 assertReferencesAcceptable。
+ * 单独拆出来是为了让路由层能在创建预授权之前先挡掉「模型根本不支持这种素材」。
+ */
+function assertReferenceShape(profile, references) {
   const counts = { image: 0, video: 0, audio: 0 };
   for (const ref of references) {
-    const scheme = referenceScheme(ref.url);
-    if (!scheme) {
-      throw new RichbestError(`参考素材地址无效（既不是公网 URL、asset:// 也不是内联数据）：${String(ref.url || '').slice(0, 120)}`);
-    }
-    if (!profile.schemes.includes(scheme)) {
-      const wanted = profile.schemes.map((item) => ({ https: '公网 HTTP(S) 地址', asset: 'asset:// 素材', data: '内联数据' }[item] || item)).join(' 或 ');
-      throw new RichbestError(`${profile.label} 只接受${wanted}参考素材${scheme === 'data' ? '，本地文件不能内联提交' : ''}`);
-    }
     if (ref.kind === 'image' && !profile.imageRoles.includes(ref.role)) {
       throw new RichbestError(`${profile.label} 不支持图片角色 ${ref.role || '(空)'}，可用角色：${profile.imageRoles.join('、')}`);
     }
@@ -187,19 +215,44 @@ function assertReferencesAcceptable(profile, references) {
   if (counts.audio > profile.maxAudios) throw new RichbestError(`${profile.label} 不支持参考音频素材`);
 }
 
+/** 路由层提交前校验：把「模型不支持这种素材」挡在冻结额度之前，直接 400 而不是异步失败。 */
+function assertVideoRequestShape(input) {
+  assertVideoModelAlias(input?.model);
+  const profile = videoProfile(input?.model);
+  assertReferenceShape(profile, Array.isArray(input?.references) ? input.references : []);
+  return profile;
+}
+
+function assertReferencesAcceptable(profile, references) {
+  for (const ref of references) {
+    const scheme = referenceScheme(ref.url);
+    if (!scheme) {
+      throw new RichbestError(`参考素材地址无效（既不是公网 URL、asset:// 也不是内联数据）：${String(ref.url || '').slice(0, 120)}`);
+    }
+    if (!profile.schemes.includes(scheme)) {
+      const wanted = profile.schemes.map((item) => ({ https: '公网 HTTP(S) 地址', asset: 'asset:// 素材', data: '内联数据' }[item] || item)).join(' 或 ');
+      throw new RichbestError(`${profile.label} 只接受${wanted}参考素材${scheme === 'data' ? '，本地文件不能内联提交' : ''}`);
+    }
+  }
+  assertReferenceShape(profile, references);
+}
+
 /**
  * 构造视频创建请求体。只发 ratio，绝不发 aspect_ratio；profile 之外的参数在提交前
  * 丢弃并回报，避免冻结额度之后才吃到 422。model 原样使用，不得再翻成带日期的上游 ID。
  */
 function buildVideoBody(input) {
   const { model, prompt, references = [], params = {} } = input;
+  assertVideoModelAlias(model);
   const profile = videoProfile(model);
   const dropped = [];
   assertReferencesAcceptable(profile, references);
 
   const body = { model: String(model || '').trim(), content: [{ type: 'text', text: String(prompt || '') }] };
-  for (const [key, value] of Object.entries({ ...profile.defaults, ...params })) {
-    if (value == null) continue;
+  // 先剔除「未提供」的参数再合并画像默认值：调用方把 duration/resolution/seed 等显式写成
+  // undefined 时，展开会把 defaults 的同名键覆盖成 undefined，默认值等于从未生效。
+  const provided = Object.fromEntries(Object.entries(params).filter(([, value]) => value != null));
+  for (const [key, value] of Object.entries({ ...profile.defaults, ...provided })) {
     if (key === 'aspect_ratio') { dropped.push('aspect_ratio'); continue; }
     if (!profile.fields.includes(key)) { dropped.push(key); continue; }
     body[key] = value;
@@ -229,13 +282,6 @@ function buildVideoBody(input) {
   return { body, profile, dropped };
 }
 
-/** 建预授权之前的参数校验：不合法就抛错，不动额度。 */
-function assertVideoSubmission(input) {
-  const built = buildVideoBody(input);
-  if (!String(input.prompt || '').trim() && !input.references?.length) throw new RichbestError('提示词与参考素材不能同时为空');
-  return built;
-}
-
 function assertImageSubmission(body) {
   const dropped = [];
   for (const [key, reason] of Object.entries(IMAGE_REJECTED)) {
@@ -256,7 +302,8 @@ function assertImageSubmission(body) {
   return { body, dropped, reference_count: refs.length };
 }
 
-function mutateChatBody(config, body) {
+/** 中转站拒绝白名单外的顶层字段（422 text_parameter_unsupported / route_override_forbidden）。 */
+function mutateChatBody(body) {
   const next = { ...body };
   for (const key of ROUTE_OVERRIDE_KEYS) delete next[key];
   const dropped = [];
@@ -427,9 +474,9 @@ async function listPrices(input, model) {
 }
 
 module.exports = {
-  PROVIDER, DEFAULT_BASE_URL, PATHS, SEEDANCE_FIELDS, IMAGE_INEFFECTIVE, ROUTE_OVERRIDE_KEYS,
+  PROVIDER, DEFAULT_BASE_URL, PATHS,
   RichbestError, isRichbest, originOf, urlFor, videoTaskUrl, headersFor,
-  idempotencyKey, videoProfile, buildVideoBody, assertVideoSubmission,
+  idempotencyKey, videoProfile, buildVideoBody, assertVideoRequestShape, assertVideoModelAlias,
   assertImageSubmission, mutateChatBody, errorFrom, requestIdFrom,
   parseVideoTask, parseImageResult, parseModelCatalog, listModels, listPrices, probe,
 };

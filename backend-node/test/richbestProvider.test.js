@@ -131,7 +131,7 @@ test('relay image bodies drop non-forwarded fields and reject negative_prompt ou
 });
 
 test('relay text bodies strip internal routing overrides and unknown fields', () => {
-  const { body, dropped } = richbest.mutateChatBody(CONFIG, {
+  const { body, dropped } = richbest.mutateChatBody({
     model: 'glm-5.2', messages: [{ role: 'user', content: 'hi' }], temperature: 0.2,
     provider: 'volcengine', base_url: 'https://attacker.test', api_key: 'sk-x', channel: 3,
     project_name: 'p', not_in_whitelist: true,
@@ -233,4 +233,76 @@ test('relay protocol detection wins over the volcengine model-name guess', () =>
   assert.equal(imageClient.inferProtocol('richbest', 'doubao-seedream-5.0-lite'), 'richbest');
   assert.equal(videoClient.resolveVideoProtocol({ provider: 'richbest', base_url: 'https://api.richbest.cn/v1' }, 'doubao-seedance-2.0'), 'richbest');
   assert.equal(videoClient.resolveVideoProtocol({ provider: 'volcengine', base_url: 'https://ark.example.test/api/v3' }, 'doubao-seedance-2.0'), 'volcengine_omni');
+});
+
+test('画像默认值在调用方显式传 undefined 时仍然生效', () => {
+  // videoClient.callRichbestVideoApi 会把这些键显式写成 undefined，
+  // 展开顺序写反会把 defaults 覆盖成 undefined（默认值形同不存在）。
+  const params = {
+    duration: undefined, resolution: undefined, ratio: undefined,
+    watermark: false, seed: undefined, generate_audio: undefined,
+  };
+  const wan = richbest.buildVideoBody({ model: 'wan3.0-video', prompt: 'p', references: [], params });
+  assert.equal(wan.body.resolution, '1080P');
+  assert.equal(wan.body.ratio, 'adaptive');
+  assert.equal(wan.body.generate_audio, true);
+  assert.equal(wan.body.watermark, false);
+  assert.deepEqual(wan.dropped, [], 'ratio 是受支持字段，不得被报成已剥离');
+
+  const minimax = richbest.buildVideoBody({ model: 'minimax-h3', prompt: 'p', references: [], params });
+  assert.equal(minimax.body.resolution, '768P');
+  assert.equal(minimax.body.ratio, 'adaptive');
+});
+
+test('调用方给了值就覆盖画像默认值，不支持的参数才进 dropped', () => {
+  const built = richbest.buildVideoBody({
+    model: 'wan3.0-video', prompt: 'p', references: [],
+    params: { duration: 5, resolution: '720p', seed: 9, aspect_ratio: '9:16' },
+  });
+  assert.equal(built.body.resolution, '720p');
+  assert.equal(built.body.duration, 5);
+  assert.ok(!('seed' in built.body), 'wan 不支持 seed');
+  assert.ok(!('aspect_ratio' in built.body), '只发 ratio');
+  assert.deepEqual(built.dropped.sort(), ['aspect_ratio', 'seed']);
+});
+
+test('提交前的素材形状校验挡在冻结之前，且只看形状不看地址', () => {
+  assert.throws(
+    () => richbest.assertVideoRequestShape({ model: 'wan3.0-video', references: [{ kind: 'video', role: 'reference_video' }] }),
+    /不支持参考视频素材/,
+  );
+  assert.throws(
+    () => richbest.assertVideoRequestShape({ model: 'wan3.0-video', references: [{ kind: 'image', role: 'reference_image' }] }),
+    /不支持图片角色 reference_image/,
+  );
+  assert.throws(
+    () => richbest.assertVideoRequestShape({
+      model: 'wan3.0-video',
+      references: [{ kind: 'image', role: 'first_frame' }, { kind: 'image', role: 'first_frame' }],
+    }),
+    /最多接受 1 张参考图/,
+  );
+  assert.doesNotThrow(() => richbest.assertVideoRequestShape({
+    model: 'wan3.0-video', references: [{ kind: 'image', role: 'first_frame' }],
+  }));
+  assert.doesNotThrow(() => richbest.assertVideoRequestShape({
+    model: 'doubao-seedance-2.0',
+    references: [{ kind: 'image', role: 'first_frame' }, { kind: 'video', role: 'reference_video' }, { kind: 'audio', role: 'reference_audio' }],
+  }));
+});
+
+test('非视频别名在提交前就被拒绝，不会冻结额度后吃 422', () => {
+  for (const model of ['doubao-seedream-5.0-lite', 'gpt-image-2', 'glm-5.2', 'deepseek-v4-pro', 'doubao-seed-2.0-lite', 'doubao-embedding-vision', 'doubao-seedasr-2.0']) {
+    assert.throws(() => richbest.assertVideoModelAlias(model), /不是视频模型/, model);
+  }
+  for (const model of ['doubao-seedance-2.0', 'doubao-seedance-2.0-mini', 'doubao-seedance-2.5', 'wan3.0-video', 'minimax-h3']) {
+    assert.doesNotThrow(() => richbest.assertVideoModelAlias(model), model);
+  }
+});
+
+test('请求头带 Accept，且剥掉被误粘贴的 Bearer 前缀', () => {
+  const headers = richbest.headersFor({ ...CONFIG, api_key: 'Bearer vap_live_test' }, { idempotencyKey: 'k' });
+  assert.equal(headers.Authorization, 'Bearer vap_live_test');
+  assert.equal(headers.Accept, 'application/json');
+  assert.equal(headers['Idempotency-Key'], 'k');
 });

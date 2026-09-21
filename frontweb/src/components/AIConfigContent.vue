@@ -2253,6 +2253,9 @@ async function openTest(row) {
         .map(([modality, count]) => `${modality} ${count}`).join('、')
       ElMessage.success(`中转站已连接，当前项目可用模型 ${summary.models.total} 个${byModality ? `（${byModality}）` : ''}；本测试只读取模型目录，不产生费用`)
     }
+    // 中转站按业务 Key 隔离项目，而 /api/auth/me 不返回项目名：生成与素材库两处 Key
+    // 填成不同项目时只能在生成阶段暴露，所以后端比对后在这里直接提示。
+    for (const warning of summary?.warnings || []) ElMessage.warning(warning)
   } catch (e) {
     testResult.value = false
     testError.value = e?.message || '请求失败'

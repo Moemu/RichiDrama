@@ -235,3 +235,108 @@ test('relay video rejects unsupported references before any request leaves the p
     await relay.close();
   }
 });
+
+test('relay expired task is terminal instead of polling until timeout', async () => {
+  // expired 在中转站是终态，但通用的 isPollTaskFailed 里没有它 —— 漏判会让任务一直轮询到超时。
+  const relay = await startRelay([{ body: { id: 'vid_5', status: 'expired' } }]);
+  try {
+    const result = await pollVideoTask(null, log, 43, 'vid_5', relayConfig(relay.origin), 5, 1);
+    assert.match(result.error, /expired/, '过期任务必须立即终态失败');
+    assert.equal(relay.requests.length, 1, '过期任务不该继续轮询');
+  } finally {
+    await relay.close();
+  }
+});
+
+test('relay cancelled task is terminal too', async () => {
+  const relay = await startRelay([{ body: { id: 'vid_6', status: 'cancelled' } }]);
+  try {
+    const result = await pollVideoTask(null, log, 44, 'vid_6', relayConfig(relay.origin), 5, 1);
+    assert.ok(result.error, 'cancelled 必须按终态返回');
+    assert.equal(relay.requests.length, 1);
+  } finally {
+    await relay.close();
+  }
+});
+
+test('relay succeeded without a url keeps polling and names the unrecognized status', async () => {
+  const relay = await startRelay([
+    { body: { id: 'vid_7', status: 'succeeded' } },
+    { body: { id: 'vid_7', status: 'succeeded', content: { video_url: 'https://provider.invalid/late.mp4' } } },
+  ]);
+  try {
+    const result = await pollVideoTask(null, log, 45, 'vid_7', relayConfig(relay.origin), 3, 1);
+    assert.equal(result.video_url, 'https://provider.invalid/late.mp4', '地址迟到时应继续等待而不是当作失败');
+    assert.equal(relay.requests.length, 2);
+  } finally {
+    await relay.close();
+  }
+});
+
+test('relay image 5xx and transport failures are reported as ambiguous, definite 4xx is not', async () => {
+  const serverError = await startRelay([{ status: 502, body: { error: { code: 'provider_unreachable', message: '上游不可达' } } }]);
+  try {
+    const result = await callRichbestImageApi(null, relayConfig(serverError.origin), log, {
+      model: 'doubao-seedream-5.0-lite', prompt: 'p', image_gen_id: 91,
+    });
+    assert.equal(result.ambiguous, true, '5xx 不能当成「没发生」，否则会释放预授权并可能重复计费');
+    assert.match(result.error, /上游不可达/);
+  } finally {
+    await serverError.close();
+  }
+
+  const badRequest = await startRelay([{ status: 422, body: { error: { code: 'image_parameter_unsupported', message: '不支持该参数' } } }]);
+  try {
+    const result = await callRichbestImageApi(null, relayConfig(badRequest.origin), log, {
+      model: 'doubao-seedream-5.0-lite', prompt: 'p', image_gen_id: 92,
+    });
+    assert.equal(result.ambiguous, false, '4xx 是确定失败，预授权可以释放');
+  } finally {
+    await badRequest.close();
+  }
+
+  // 端口上没有服务：传输层失败同样是「写请求可能已到达」，必须标 ambiguous。
+  const dead = await startRelay([{ body: {} }]);
+  const deadOrigin = dead.origin;
+  await dead.close();
+  const result = await callRichbestImageApi(null, relayConfig(deadOrigin), log, {
+    model: 'doubao-seedream-5.0-lite', prompt: 'p', image_gen_id: 93,
+  });
+  assert.equal(result.ambiguous, true);
+  assert.match(result.error, /未能确定结果/);
+});
+
+test('relay video 5xx on create is ambiguous while a 422 is definite', async () => {
+  const serverError = await startRelay([{ status: 503, body: { error: { code: 'multi_provider_disabled', message: '未启用' } } }]);
+  try {
+    const result = await callRichbestVideoApi(null, relayConfig(serverError.origin), log, {
+      prompt: 'p', video_gen_id: 51, billing_authorization_id: 'auth-1', duration: 5, resolution: '480p',
+    });
+    assert.equal(result.ambiguous, true);
+  } finally {
+    await serverError.close();
+  }
+
+  const reject = await startRelay([{ status: 422, body: { error: { code: 'video_parameter_unsupported', message: '不支持该参数' } } }]);
+  try {
+    const result = await callRichbestVideoApi(null, relayConfig(reject.origin), log, {
+      prompt: 'p', video_gen_id: 52, billing_authorization_id: 'auth-1', duration: 5, resolution: '480p',
+    });
+    assert.equal(result.ambiguous, false);
+  } finally {
+    await reject.close();
+  }
+});
+
+test('relay video 2xx without a task id is ambiguous, not a silent non-event', async () => {
+  const relay = await startRelay([{ body: { unexpected: true } }]);
+  try {
+    const result = await callRichbestVideoApi(null, relayConfig(relay.origin), log, {
+      prompt: 'p', video_gen_id: 53, billing_authorization_id: 'auth-1', duration: 5, resolution: '480p',
+    });
+    assert.match(result.error, /未返回视频任务 ID/);
+    assert.equal(result.ambiguous, true, '中转站已受理但没有可用任务 ID：任务可能已建并计费');
+  } finally {
+    await relay.close();
+  }
+});

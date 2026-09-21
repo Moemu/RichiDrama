@@ -4,8 +4,9 @@
  * 按 output token 计费的视频：提交前「预授权用量」估算。
  *
  * 定位（不要混淆）：
- * - 结算永远以上游返回的真实 usage 为准（`billingUsageService.videoUsage` →
- *   `settleAuthorization`），本模块只决定提交前冻结多少额度，绝不参与扣费口径。
+ * - 结算永远以上游返回的真实 usage 为准（`billingUsageService.textUsage` 把
+ *   completion_tokens 映射成 output_token → `billingService.settleAuthorization`），
+ *   本模块只决定提交前冻结多少额度，绝不参与扣费口径。
  * - 上游按输出 token 计费，token 数由「画布像素 × 帧率 × 时长」驱动，**不存在**任何
  *   固定的“上限”；把配置里的数字当作上限既不准也不安全，因此这里按时长与分辨率精算。
  *
@@ -24,8 +25,24 @@ const TOKEN_DIVISOR = 1024;
 const GENERATION_FPS = 24;
 const SAFETY_FACTOR = 1.15;
 const ROUNDING_STEP = 100;
+/** 与提交/落库一致的缺省时长：video_generations 行的默认值。 */
+const DEFAULT_DURATION_SECONDS = 15;
 
-/** 精确画布来自仓库既有的画幅契约，避免自己另立一套分辨率口径。 */
+/**
+ * 时长口径只有这一处。缺省或非正数一律按落库默认 15s，绝不再隐式回落成 1s ——
+ * 「落库 15s、冻结按 1s」会让预授权从"上界"退化成远低于真实用量的估算，
+ * 结算时只能走人工对账（BILLING_ACTUAL_USAGE_EXCEEDS_AVAILABLE_BALANCE）。
+ */
+function normalizeDurationSeconds(value) {
+  const seconds = Math.round(Number(value));
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_DURATION_SECONDS;
+}
+
+/**
+ * 精确画布来自仓库既有的画幅契约，避免自己另立一套分辨率口径。
+ * 注意 targetVideoPixelsForAspect 对未识别的分辨率会回落到 720p 短边，所以下面的 throw
+ * 实际只在契约被改坏时才会触发（保留它比返回 NaN 更安全）。
+ */
 function canvasFor(resolution, aspectRatio) {
   const videoService = require('./videoService');
   const canvas = videoService.targetVideoPixelsForAspect(aspectRatio || '16:9', resolution || '720p');
@@ -36,7 +53,7 @@ function canvasFor(resolution, aspectRatio) {
 }
 
 function estimateOutputTokens(input = {}) {
-  const duration = Math.max(1, Math.ceil(Number(input.duration) || 0));
+  const duration = normalizeDurationSeconds(input.duration);
   const canvas = canvasFor(input.resolution, input.aspectRatio);
   const raw = (canvas.w * canvas.h * GENERATION_FPS * duration) / TOKEN_DIVISOR;
   return Math.ceil((raw * SAFETY_FACTOR) / ROUNDING_STEP) * ROUNDING_STEP;
@@ -47,7 +64,7 @@ function estimateOutputTokens(input = {}) {
  */
 function describeReserve(input = {}) {
   const canvas = canvasFor(input.resolution, input.aspectRatio);
-  const duration = Math.max(1, Math.ceil(Number(input.duration) || 0));
+  const duration = normalizeDurationSeconds(input.duration);
   return {
     output_tokens: estimateOutputTokens({ ...input, duration }),
     basis: `${duration}s × ${input.resolution || '720p'} × ${input.aspectRatio || '16:9'}（${canvas.w}×${canvas.h} @${GENERATION_FPS}fps，已含 15% 余量）`,
@@ -58,4 +75,4 @@ function describeReserve(input = {}) {
   };
 }
 
-module.exports = { estimateOutputTokens, describeReserve, GENERATION_FPS, SAFETY_FACTOR };
+module.exports = { estimateOutputTokens, describeReserve, normalizeDurationSeconds, GENERATION_FPS, SAFETY_FACTOR, DEFAULT_DURATION_SECONDS };

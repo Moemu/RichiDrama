@@ -621,6 +621,22 @@ function voidImageBilling(db, log, row, reason) {
 }
 
 /**
+ * 写请求已发出但终态未知（供应商 5xx / 传输中断）时的处置：保持预授权冻结并建对账，
+ * 不能释放。释放等于把"可能已经出图并计费"当成没发生，用户重试会换新幂等键，
+ * 上游可能重复计费而本地只记一笔。
+ */
+function markImageBillingReconciliation(db, log, row, reason, providerRequestId) {
+  if (!row?.billing_authorization_id || !row.owner_user_id) return;
+  try {
+    require('./billingService').markPendingReconciliation(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, {
+      reason: `供应商提交未取得确定结果，不能判定是否已计费：${String(reason || '').slice(0, 180)}`,
+      provider_request_id: providerRequestId || null,
+    });
+  }
+  catch (err) { log.error('[billing] image reconciliation case failed', { image_gen_id: row.id, error: err.message }); }
+}
+
+/**
  * 异步处理图片生成：与 Go ProcessImageGeneration 对齐，调用图生 API 并更新记录与任务
  */
 async function processImageGeneration(db, log, imageGenId) {
@@ -1441,7 +1457,8 @@ async function processImageGeneration(db, log, imageGenId) {
       if (row.storyboard_id != null) {
         try { db.prepare('UPDATE storyboards SET error_msg = ?, updated_at = ? WHERE id = ?').run(result.error, now2, row.storyboard_id); } catch (_) {}
       }
-      voidImageBilling(db, log, row, result.error);
+      if (result.ambiguous) markImageBillingReconciliation(db, log, row, result.error, result.provider_request_id);
+      else voidImageBilling(db, log, row, result.error);
       return;
     }
 

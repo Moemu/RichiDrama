@@ -495,7 +495,7 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
   body = applyDeepSeekChatOptions(config, body);
   // 中转站会拒绝白名单外的顶层字段（422），内部路由字段更不能出现在请求里。
   if (richbest.isRichbest(config)) {
-    const mutated = richbest.mutateChatBody(config, body);
+    const mutated = richbest.mutateChatBody(body);
     if (mutated.dropped.length) log.info('AI generateText: 已剥离中转站不接受的顶层字段', { model, dropped: mutated.dropped.join(',') });
     body = mutated.body;
   }
@@ -613,7 +613,7 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
   body = applyDeepSeekChatOptions(config, body);
   // 中转站会拒绝白名单外的顶层字段（422），内部路由字段更不能出现在请求里。
   if (richbest.isRichbest(config)) {
-    const mutated = richbest.mutateChatBody(config, body);
+    const mutated = richbest.mutateChatBody(body);
     if (mutated.dropped.length) log.info('AI streamGenerateText: 已剥离中转站不接受的顶层字段', { model, dropped: mutated.dropped.join(',') });
     body = mutated.body;
   }

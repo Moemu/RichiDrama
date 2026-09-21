@@ -210,6 +210,8 @@ function testConnection(db, log) {
         endpoint: input.endpoint,
         service_type: input.service_type,
         settings: input.settings,
+        // 中转站需要比对「生成 / 素材库」两处业务 Key 是否同一个项目（见 testConnection）。
+        db,
       });
       response.success(res, { message: '连接测试成功', ...(summary && typeof summary === 'object' ? summary : {}) });
     } catch (err) {

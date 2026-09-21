@@ -106,6 +106,10 @@ function activePriceItems(db, userId, serviceType, model, provider) {
         AND (pb.effective_to IS NULL OR pb.effective_to > ?) AND pbi.service_type = ? AND pbi.model = ?
       ORDER BY pbi.id DESC`).all(tenantBook.id, at, at, serviceType, model);
   }
+  // 注意：调用方必须传 provider 才能拿到按供应商区分的价目。兜底查询（下面的未过滤版本）
+  // 不区分 provider —— 火山与中转站有大量重名别名，漏传就等于「任一覆盖该模型的已发布价目书」。
+  // 目前只有 videoUpscaleService / videoInterpolationService / POST /billing/authorize 建的
+  // 预授权没有 provider 标签，它们只涉及火山后处理价目，暂不冲突。
   if (provider) {
     // Provider-aware platform lookup: books tagged for the serving provider
     // first, legacy untagged books still participate so historical data keeps

@@ -1459,14 +1459,15 @@ async function callRichbestImageApi(db, config, log, opts) {
     out = await postJSONWithTimeout(url, richbest.headersFor(config, { idempotencyKey }), prepared.body, IMAGE_HTTP_TIMEOUT_MS);
   } catch (error) {
     log.error('[中转站图生] 传输失败', { image_gen_id, error: error.message });
-    return { error: `中转站图片请求未能确定结果：${error.message}` };
+    // 请求已发出、响应没回来：中转站可能已经出图并计费，交由对账而不是释放预授权。
+    return { error: `中转站图片请求未能确定结果：${error.message}`, ambiguous: true };
   }
   let payload = {};
   try { payload = out.raw ? JSON.parse(out.raw) : {}; } catch (_) {}
   if (out.statusCode < 200 || out.statusCode >= 300) {
     const err = richbest.errorFrom(out.statusCode, payload, out.headers);
     log.error('[中转站图生] 失败', { image_gen_id, status: out.statusCode, request_id: err.requestId, error: err.message });
-    return { error: err.message };
+    return { error: err.message, ambiguous: err.ambiguous, provider_request_id: err.requestId };
   }
   const parsed = richbest.parseImageResult(payload, out.headers);
   if (!parsed.url) {

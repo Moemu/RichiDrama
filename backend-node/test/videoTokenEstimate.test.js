@@ -30,6 +30,20 @@ test('reserve estimate scales with duration and resolution instead of any fixed 
     four, '同一短边下横竖屏像素量一致，冻结量相同');
 });
 
+test('缺省时长按落库默认 15s 冻结，不再回落成 1s', () => {
+  const fifteen = estimate.estimateOutputTokens({ duration: 15, resolution: '480p', aspectRatio: '16:9' });
+  for (const missing of [undefined, null, 0, -1, '', 'abc', NaN]) {
+    assert.equal(
+      estimate.estimateOutputTokens({ duration: missing, resolution: '480p', aspectRatio: '16:9' }),
+      fifteen,
+      `duration=${String(missing)} 必须与落库默认 15s 的冻结量一致（routes/videos 用 body.duration ?? 15）`,
+    );
+  }
+  assert.equal(estimate.normalizeDurationSeconds(undefined), 15);
+  assert.equal(estimate.normalizeDurationSeconds('7'), 7);
+  assert.equal(estimate.normalizeDurationSeconds(5.6), 6);
+});
+
 test('reserve basis explains the estimate for the user', () => {
   const basis = estimate.describeReserve({ duration: 4, resolution: '480p', aspectRatio: '16:9' });
   assert.equal(basis.duration_seconds, 4);

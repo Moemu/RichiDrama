@@ -20,8 +20,15 @@ function publicVideoUrl(videoUrl, localPath) {
   return null;
 }
 
-/** 将 video_generations 标为失败；若无 error_msg 列则只更新 status/updated_at */
-function setVideoGenFailed(db, videoGenId, errorMsg, now) {
+/**
+ * 将 video_generations 标为失败；若无 error_msg 列则只更新 status/updated_at。
+ *
+ * options.unverifiedProviderResult：写请求已发出但终态未知（供应商 5xx / 传输中断）。
+ * 此时不能 void 预授权——那会把"可能已在上游执行并计费的任务"当成没发生，用户重试即新幂等键，
+ * 上游可能重复计费。改为保持冻结并建对账（管理员按供应商用量核实后处置）。
+ * 下游未执行的插帧/超分预授权与本次调用无关，仍然照常释放。
+ */
+function setVideoGenFailed(db, videoGenId, errorMsg, now, options = {}) {
   try {
     db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run(
       'failed', (errorMsg || '').slice(0, 500), now, videoGenId
@@ -34,7 +41,16 @@ function setVideoGenFailed(db, videoGenId, errorMsg, now) {
   try {
     const row = db.prepare('SELECT owner_user_id, billing_authorization_id, storyboard_id FROM video_generations WHERE id = ?').get(videoGenId);
     if (row?.owner_user_id && row?.billing_authorization_id) {
-      require('./billingService').voidAuthorization(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, errorMsg || '视频生成失败');
+      const billing = require('./billingService');
+      const owner = { id: row.owner_user_id, role: 'admin' };
+      if (options.unverifiedProviderResult) {
+        billing.markPendingReconciliation(db, owner, row.billing_authorization_id, {
+          reason: `供应商提交未取得确定结果，不能判定是否已计费：${String(errorMsg || '').slice(0, 180)}`,
+          provider_request_id: options.providerRequestId || null,
+        });
+      } else {
+        billing.voidAuthorization(db, owner, row.billing_authorization_id, errorMsg || '视频生成失败');
+      }
     }
     // Only the version explicitly selected by the storyboard can change its
     // visible state. A late failure of an old history record must not replace
@@ -1138,8 +1154,22 @@ async function processVideoGeneration(db, log, videoGenId) {
     const storageLocalPath = path.isAbsolute(cfg.storage?.local_path)
       ? cfg.storage.local_path
       : path.join(process.cwd(), cfg.storage?.local_path || './data/storage');
-    const config = videoClient.getDefaultVideoConfig(db, row.model, { tenant_id: row.tenant_id, scene_defaults: false });
+    // 已有钉住的提交配置时优先用它：与轮询/取消同源，避免重投时换一枚业务 Key。
+    // 换 Key 的代价不只是查错任务——中转站按 Key 隔离幂等键，上一次提交若「终态未知」
+    // （5xx / 传输中断），换 Key 重投会在上游建出第二个任务，等于重复计费。
+    const pinnedConfigId = Number(row.ai_config_id) || null;
+    const config = pinnedConfigId
+      ? require('./aiConfigService').getConfig(db, pinnedConfigId)
+      : videoClient.getDefaultVideoConfig(db, row.model, { tenant_id: row.tenant_id, scene_defaults: false });
     if (!config) {
+      if (pinnedConfigId) {
+        // 与断点续轮询同一处置：保持 processing、留住宿预授权，等管理员恢复配置。
+        // 这里不能落 failed，更不能换一枚 Key 提交。
+        db.prepare('UPDATE video_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?')
+          .run('processing', '固定配置已删除，暂停提交以避免用错业务 Key；恢复该配置后任务会自动继续', now, videoGenId);
+        log.warn('Video submit paused: pinned config missing', { videoGenId, ai_config_id: pinnedConfigId });
+        return;
+      }
       setVideoGenFailed(db, videoGenId, '未配置视频模型', now);
       if (row.task_id) taskService.updateTaskError(db, row.task_id, '未配置视频模型');
       return;
@@ -1258,9 +1288,12 @@ async function processVideoGeneration(db, log, videoGenId) {
     });
     const now2 = new Date().toISOString();
     if (result.error) {
-      setVideoGenFailed(db, videoGenId, result.error, now2);
+      // 写请求终态未知时不释放预授权：建对账让管理员按供应商用量核实（见 setVideoGenFailed）。
+      setVideoGenFailed(db, videoGenId, result.error, now2, result.ambiguous
+        ? { unverifiedProviderResult: true, providerRequestId: result.provider_request_id }
+        : {});
       if (row.task_id) taskService.updateTaskError(db, row.task_id, result.error);
-      log.error('Video generation failed', { id: videoGenId, error: result.error });
+      log.error('Video generation failed', { id: videoGenId, error: result.error, ambiguous: !!result.ambiguous });
       return;
     }
     const directVideo = resolveRemoteVideoUrl(result.video_url, result.error);
