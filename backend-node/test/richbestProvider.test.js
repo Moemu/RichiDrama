@@ -30,6 +30,22 @@ test('relay video body maps the internal aspect ratio onto ratio when no ratio i
   assert.equal(built.body.aspect_ratio, undefined);
 });
 
+test('relay text-to-video for Seedance 2.0 Mini omits camera_fixed instead of sending false', () => {
+  const t2v = richbest.buildVideoBody({ model: 'doubao-seedance-2.0-mini', prompt: 'p', references: [], params: { camera_fixed: false, duration: 4, ratio: '16:9' } });
+  assert.equal(t2v.body.camera_fixed, undefined, 'mini t2v 连 false 都会被中转拒绝，只能省略');
+  assert.ok(t2v.dropped.includes('camera_fixed'));
+
+  const i2v = richbest.buildVideoBody({
+    model: 'doubao-seedance-2.0-mini', prompt: 'p',
+    references: [{ kind: 'image', role: 'first_frame', url: 'https://cdn.example.test/a.png' }],
+    params: { camera_fixed: true, duration: 4, ratio: '16:9' },
+  });
+  assert.equal(i2v.body.camera_fixed, true, '图生视频保留 camera_fixed');
+
+  const full = richbest.buildVideoBody({ model: 'doubao-seedance-2.0', prompt: 'p', references: [], params: { camera_fixed: true, duration: 4, ratio: '16:9' } });
+  assert.equal(full.body.camera_fixed, true, '仅 mini 的文生视频省略');
+});
+
 test('relay video content parts use the documented roles and keep asset references verbatim', () => {
   const built = richbest.buildVideoBody({
     model: 'doubao-seedance-2.0',
