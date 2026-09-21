@@ -51,7 +51,23 @@ function canRetryGeneration(generation) {
 
 // This produces only the local billing reservation. It never changes the
 // provider request body, whose fields are built later by videoService.
-function buildAuthorizationUsage(meters, billingSettings, duration) {
+/**
+ * 视频按 output token 计费时的预授权用量：按时长/分辨率/画幅精算，不使用固定上限。
+ * 只有画布无法推导时（未知分辨率）才回落到配置里显式填写的值。
+ */
+function reserveOutputTokens(billingSettings, options, duration) {
+  try {
+    return require('./videoTokenEstimate').estimateOutputTokens({
+      resolution: options.resolution, aspectRatio: options.aspect_ratio, duration,
+    });
+  } catch (_) {
+    const cap = Number(billingSettings.billing_reserve_output_tokens ?? billingSettings.billing_reserve_input_tokens);
+    if (Number.isSafeInteger(cap) && cap > 0) return cap;
+    throw new Error('无法按分辨率与时长估算视频输出的预授权 token，请检查本次请求的分辨率与画幅');
+  }
+}
+
+function buildAuthorizationUsage(meters, billingSettings, duration, options = {}) {
   const usage = {};
   if (meters.includes('second')) usage.second = Number(duration) || 15;
   if (meters.includes('request')) usage.request = 1;
@@ -60,11 +76,7 @@ function buildAuthorizationUsage(meters, billingSettings, duration) {
     if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('视频模型按 token 计费，需在 AI 配置 settings 中设置 billing_reserve_input_tokens 作为单次预授权上限');
     usage.input_token = cap;
   }
-  if (meters.includes('output_token')) {
-    const cap = Number(billingSettings.billing_reserve_output_tokens ?? billingSettings.billing_reserve_input_tokens);
-    if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('视频模型按 token 计费，需在 AI 配置 settings 中设置 billing_reserve_output_tokens 作为单次预授权上限');
-    usage.output_token = cap;
-  }
+  if (meters.includes('output_token')) usage.output_token = reserveOutputTokens(billingSettings, options, duration);
   return usage;
 }
 
@@ -88,9 +100,10 @@ function quote(db, body, payer) {
   let billingSettings = {};
   try { billingSettings = JSON.parse(config?.settings || '{}'); } catch (_) {}
   const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key, billingTarget.provider);
-  const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
+  const reserveOptions = { resolution: body.resolution || '480p', aspect_ratio: body.aspect_ratio || '16:9' };
+  const usage = buildAuthorizationUsage(meters, billingSettings, body.duration, reserveOptions);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
-  return billing.quote(db, payer, {
+  const quoted = billing.quote(db, payer, {
     service_type: 'video',
     model: billingTarget.billing_key, provider_model: billingTarget.provider_model, provider: billingTarget.provider,
     usage,
@@ -100,6 +113,9 @@ function quote(db, body, payer) {
       has_audio: !!body.has_audio,
     },
   });
+  // 让用户看得到冻结是按什么估出来的（时长/分辨率/画幅/token 数）。
+  if (usage.output_token) quoted.reserve = require('./videoTokenEstimate').describeReserve({ ...reserveOptions, duration: body.duration });
+  return quoted;
 }
 
 function create(db, log, body, billingUser) {
@@ -160,8 +176,10 @@ function create(db, log, body, billingUser) {
   const upscaleResolution = body.upscale_resolution;
   const targetFps = body.target_fps;
   const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key, billingTarget.provider);
-  const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
+  const reserveOptions = { resolution: body.resolution || '480p', aspect_ratio: body.aspect_ratio || '16:9' };
+  const usage = buildAuthorizationUsage(meters, billingSettings, body.duration, reserveOptions);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
+  const reserveBasis = usage.output_token ? require('./videoTokenEstimate').describeReserve({ ...reserveOptions, duration: body.duration }) : null;
   const existingWaitingId = Number(body.__sd2_waiting_generation_id) || null;
   const existingWaiting = existingWaitingId
     ? db.prepare('SELECT id, task_id, status, owner_user_id FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(existingWaitingId)
@@ -181,7 +199,7 @@ function create(db, log, body, billingUser) {
   const authorization = waitingForSd2 ? null : billing.createAuthorization(db, payer, {
     idempotency_key: idempotencyKey,
     service_type: 'video', model: billingTarget.billing_key, provider_model: billingTarget.provider_model, provider: billingTarget.provider, usage,
-    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: !!inputValidation?.automatic_voice_url || routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || body.board_id || null, drama_id: body.drama_id || null, source_kind: body.source_context === 'creative_board' ? 'creative_board' : body.source_context === 'single_video_tool' ? 'single_video_tool' : body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.board_id || body.storyboard_id || body.shot_id || null,
+    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: !!inputValidation?.automatic_voice_url || routed.some((asset) => asset.type === 'audio' && asset.send_to_model), ...(reserveBasis ? { reserve: reserveBasis } : {}) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || body.board_id || null, drama_id: body.drama_id || null, source_kind: body.source_context === 'creative_board' ? 'creative_board' : body.source_context === 'single_video_tool' ? 'single_video_tool' : body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.board_id || body.storyboard_id || body.shot_id || null,
   });
   let task = null;
   let videoGenerationId = null;

@@ -910,9 +910,9 @@ input_reference = (图片文件，可选)</pre>
           <p class="field-tip">仅镜头显式选择插帧时使用；镜头指定帧率时优先使用镜头值。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video'">
-          <template #label><span class="form-label-tip">视频单次冻结上限（token）</span></template>
-          <el-input-number v-model="form.billing_reserve_output_tokens" :min="1" :step="1000" :precision="0" controls-position="right" style="width: 240px" placeholder="例如 216216" />
-          <p class="field-tip">用于生成前冻结积分（如 Fast 无视频输入场景填 216216）。</p>
+          <template #label><span class="form-label-tip">视频冻结兜底 token（通常留空）</span></template>
+          <el-input-number v-model="form.billing_reserve_output_tokens" :min="1" :step="1000" :precision="0" controls-position="right" style="width: 240px" placeholder="留空即可" />
+          <p class="field-tip">按 token 计费的视频现在按「时长 × 分辨率 × 画幅」自动估算冻结用量（含 15% 余量），不再依赖固定数字；只有画布无法推导时才使用这里的兜底值。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video'">
           <template #label><span class="form-label-tip">全能能力</span></template>

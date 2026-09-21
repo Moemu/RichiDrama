@@ -90,9 +90,11 @@ function routes(db, log) {
           usage.input_token = cap;
         }
         if (meters.includes('output_token')) {
-          const cap = Number(settings.billing_reserve_output_tokens ?? settings.billing_reserve_input_tokens);
-          if (!Number.isSafeInteger(cap) || cap <= 0) return response.badRequest(res, '视频模型按 token 计费，需在 AI 配置 settings 中设置 billing_reserve_output_tokens 作为单次预授权上限');
-          usage.output_token = cap;
+          // 上游按输出 token 计费：预授权用量按「时长 × 分辨率 × 画幅」保守估算，
+          // 不再依赖配置里的固定数字（见 videoTokenEstimate 的实测锚点）。
+          usage.output_token = require('../services/videoTokenEstimate').estimateOutputTokens({
+            resolution: body.resolution || '480p', aspectRatio: body.aspect_ratio || '16:9', duration: body.duration,
+          });
         }
         if (!Object.keys(usage).length) return response.badRequest(res, '该视频模型未配置可用计费项');
         if (!String(body.idempotency_key || '').trim()) return response.badRequest(res, '视频生成请求缺少幂等键，请刷新后重试');
