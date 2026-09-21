@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS tenant_provider_price_book_bindings (
   PRIMARY KEY (tenant_id, provider)
 );
 
-INSERT INTO tenant_provider_price_book_bindings (tenant_id, provider, price_book_id, active_at, created_by, updated_at)
+INSERT OR IGNORE INTO tenant_provider_price_book_bindings (tenant_id, provider, price_book_id, active_at, created_by, updated_at)
   SELECT b.tenant_id, COALESCE(pb.provider, ''), b.price_book_id, b.active_at, b.created_by, b.updated_at
   FROM tenant_price_book_bindings b
   JOIN billing_price_books pb ON pb.id = b.price_book_id

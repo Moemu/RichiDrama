@@ -78,3 +78,22 @@ test('provider-scoped tenant price books price each provider by the book actuall
     assert.equal(billing.quote(db, user, { service_type: 'text', model: 'volc-model', provider: 'volcengine', usage: { request: 1 } }).amount, 10, 'exact provider slot still wins over catch-all');
   } finally { teardown(dbPath); }
 });
+
+test('migration 83 is re-runnable after a partial failure (preview restart recovery)', () => {
+  const { db, dbPath } = setup();
+  try {
+    const volcBook = book(db, '火山书', 'volcengine', [{ service_type: 'text', model: 'volc-model', meter: 'request', unit_price: 10 }]);
+    const group = tenants.writeTenant(db, 1, { name: '回填组' });
+    db.prepare('INSERT INTO tenant_price_book_bindings (tenant_id,price_book_id,active_at,created_by,updated_at) VALUES (?,?,?,?,?)')
+      .run(group.id, volcBook, new Date().toISOString(), null, new Date().toISOString());
+    const raw = fs.readFileSync(path.join(__dirname, '..', 'migrations', '83_tenant_provider_price_books.sql'), 'utf8');
+    const sql = raw.split('\n').filter((line) => { const t = line.trim(); return t.length > 0 && !t.startsWith('--'); }).join('\n');
+    db.exec(sql);
+    const count1 = db.prepare('SELECT COUNT(*) AS n FROM tenant_provider_price_book_bindings WHERE tenant_id=?').get(group.id).n;
+    assert.equal(count1, 1);
+    // Simulate the second boot re-running the whole file after a partial failure.
+    db.exec(sql);
+    const rows = db.prepare('SELECT provider, price_book_id FROM tenant_provider_price_book_bindings WHERE tenant_id=?').all(group.id);
+    assert.deepEqual(rows, [{ provider: 'volcengine', price_book_id: volcBook }], 're-run must not duplicate or corrupt backfill');
+  } finally { teardown(dbPath); }
+});
