@@ -153,7 +153,7 @@ test('relay video creation posts ratio only and stores the relay task id', async
   }
 });
 
-test('relay Seedance 2.0 Mini text-to-video omits camera_fixed from the final HTTP body', async () => {
+test('relay Seedance 2.0 Mini omits camera_fixed from the final reference-image HTTP body', async () => {
   const relay = await startRelay([{ body: { id: 'vid_mini_no_camera' } }]);
   try {
     const output = await callRichbestVideoApi(null, relayConfig(relay.origin, {
@@ -162,19 +162,22 @@ test('relay Seedance 2.0 Mini text-to-video omits camera_fixed from the final HT
       default_model: 'doubao-seedance-2.0-mini',
     }), log, {
       model: 'doubao-seedance-2.0-mini',
-      prompt: '银花重生',
+      prompt: '开启铜制种盒',
       duration: 4,
       aspect_ratio: '16:9',
       resolution: '480p',
-      camera_fixed: false,
-      reference_urls: [],
-      video_gen_id: 2701,
+      camera_fixed: true,
+      reference_urls: ['asset://image-558'],
+      video_gen_id: 2706,
     }, 'doubao-seedance-2.0-mini');
 
     assert.equal(output.task_id, 'vid_mini_no_camera');
     assert.equal(relay.requests.length, 1);
-    assert.equal(relay.requests[0].body.task_type, 't2v');
+    assert.equal(relay.requests[0].body.task_type, 'i2v');
     assert.equal(relay.requests[0].body.camera_fixed, undefined);
+    assert.deepEqual(relay.requests[0].body.content[1], {
+      type: 'image_url', image_url: { url: 'asset://image-558' }, role: 'reference_image',
+    });
     assert.equal(relay.requests[0].body.ratio, '16:9');
     assert.equal(relay.requests[0].body.resolution, '480p');
   } finally {

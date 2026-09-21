@@ -257,12 +257,11 @@ function buildVideoBody(input) {
     if (!profile.fields.includes(key)) { dropped.push(key); continue; }
     body[key] = value;
   }
-  // Ark-side rule mirrored for the relay: Seedance 2.0 Mini text-to-video
-  // rejects camera_fixed entirely (video_camera_unsupported); omitting is the
-  // only accepted form, sending false still fails.
+  // The relay rejects camera_fixed for Seedance 2.0 Mini in both text-to-video
+  // and reference-image requests (video_camera_unsupported). Omission is the
+  // only accepted form; sending false still fails.
   const isSeedanceMini = /seedance[-_.]?2[-_.]?0[-_.]?mini/i.test(String(model || ''));
-  const hasImageReference = (references || []).some((ref) => ref.kind === 'image');
-  if (isSeedanceMini && !hasImageReference && body.camera_fixed !== undefined) {
+  if (isSeedanceMini && body.camera_fixed !== undefined) {
     delete body.camera_fixed;
     if (!dropped.includes('camera_fixed')) dropped.push('camera_fixed');
   }
