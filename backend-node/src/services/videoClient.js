@@ -49,6 +49,10 @@ function inferVideoProtocol(provider) {
  */
 function resolveVideoProtocol(config, modelHint) {
   const provider = (config.provider || '').toLowerCase();
+  // Provider identity is authoritative for the Richbest adapter. A stale
+  // api_protocol from a previously selected preset must not bypass its request
+  // filtering and send a different provider's payload to the relay endpoint.
+  if (provider === richbest.PROVIDER) return richbest.PROVIDER;
   const explicit = String(config.api_protocol || '').trim();
   let protocol = explicit.toLowerCase() || inferVideoProtocol(provider);
   const baseLower = String(config.base_url || '').toLowerCase();
@@ -3834,9 +3838,9 @@ async function callRichbestVideoApi(db, config, log, opts, model) {
     seed: opts.seed != null ? Number(opts.seed) : undefined,
     generate_audio: opts.generate_audio != null ? Boolean(opts.generate_audio) : undefined,
   };
-  // Seedance 2.0 Mini 的文生视频不接受 camera_fixed：省略与传 false 在方舟侧是两种结果。
-  const skipCameraFixed = /seedance[-_]?2[-_]?0[-_]?mini/i.test(model) && !references.some((ref) => ref.kind === 'image');
-  if (opts.camera_fixed != null && !skipCameraFixed) params.camera_fixed = Boolean(opts.camera_fixed);
+  // Model capability filtering belongs to richbestProvider.buildVideoBody().
+  // Keep the caller declarative so every Richbest path uses one rule source.
+  if (opts.camera_fixed != null) params.camera_fixed = Boolean(opts.camera_fixed);
 
   let built;
   try {
@@ -4361,12 +4365,15 @@ async function executePollVideoTask(db, log, videoGenId, taskId, config, maxAtte
       log.info('[poll] 发起查询', { video_gen_id: videoGenId, round: pollRound, url });
       const res = await fetch(url, { method: 'GET', headers });
       const raw = await res.text();
-      const bodyLogged =
-        pollLogBodyMax === Infinity
-          ? raw
-          : raw.length <= pollLogBodyMax
-            ? raw
-            : raw.slice(0, pollLogBodyMax) + `\n... [poll 响应已截断 前${pollLogBodyMax}字符 / 共${raw.length}字符，可设环境变量 VIDEO_POLL_LOG_MAX=0 输出全文]`;
+      const bodyLogged = (() => {
+        let safe = raw;
+        try { safe = JSON.stringify(sanitizeVideoProviderResponse(JSON.parse(raw))); } catch (_) {}
+        return pollLogBodyMax === Infinity
+          ? safe
+          : safe.length <= pollLogBodyMax
+            ? safe
+            : safe.slice(0, pollLogBodyMax) + `\n... [poll 响应已截断 前${pollLogBodyMax}字符 / 共${safe.length}字符]`;
+      })();
       log.info('[poll] 查询 HTTP 结果', {
         video_gen_id: videoGenId,
         round: pollRound,

@@ -11,9 +11,23 @@ function textUsage(raw) {
   const usage = raw && typeof raw === 'object' ? raw : {};
   const input = positiveInteger(usage.prompt_tokens ?? usage.input_tokens ?? usage.input_token_count ?? usage.input_token);
   const output = positiveInteger(usage.completion_tokens ?? usage.output_tokens ?? usage.output_token_count ?? usage.output_token);
+  const includedCache = positiveInteger(
+    usage.prompt_tokens_details?.cached_tokens
+      ?? usage.input_tokens_details?.cached_tokens
+      ?? usage.cachedContentTokenCount,
+  );
+  const disjointCache = positiveInteger(usage.cache_read_input_tokens ?? usage.cache_token);
   if (input == null && output == null) return null;
   const result = {};
-  if (input != null) result.input_token = input;
+  if (input != null) {
+    if (includedCache != null && includedCache <= input) {
+      result.input_token = input - includedCache;
+      if (includedCache) result.cache_token = includedCache;
+    } else {
+      result.input_token = input;
+      if (disjointCache) result.cache_token = disjointCache;
+    }
+  }
   if (output != null) result.output_token = output;
   return Object.keys(result).length ? result : null;
 }

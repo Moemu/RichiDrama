@@ -32,21 +32,16 @@ const YUAN_SCALE = POINTS_PER_CNY * MICRO_PER_POINT; // 1,000,000 微积分 / �
  */
 const METERS = {
   input_tokens: 'input_token',
+  cached_input_tokens: 'cache_token',
   output_tokens: 'output_token',
   image: 'image',
 };
 /**
- * 上游确有、但不生成用户价目条目的指标。
- * cached_input_tokens 不能映射到 input_token：那会和真正的输入价撞同一个
- * (价目书, 服务类型, 模型, meter) 唯一键，createDraft 里后写入者覆盖前者，输入价被悄悄压低。
- * 代价要说清楚：上游把缓存输入单独计成更便宜的价（真实快照里约为主价的 20%），
- * 而面向用户的计量白名单（billingService.normalizeUsage）里没有 cache_token，
- * 用户侧 textUsage 也直接从 prompt_tokens 里扣不掉缓存部分，所以命中缓存的 token
- * 目前仍按 input_token 全价向用户收费，差额留在平台。这是现状而非已确认的定价决策；
- * 上游完成响应是否回报 prompt_tokens_details.cached_tokens 至今没有实测数据。
+ * 上游确有、但暂时不能生成用户价目条目的指标。
+ * cached_input_tokens 已单独映射为 cache_token。最终结算只在完成响应返回可信缓存
+ * 明细时拆分；没有明细时保持普通输入用量，不估算缓存命中。
  */
 const UNSUPPORTED_METERS = {
-  cached_input_tokens: '上游对缓存输入单独计价（更便宜）；用户价目没有 cache_token 计量，缓存命中仍按 input_token 全价向用户收费',
   audio_duration: '内部价目暂无音频时长计量，未生成条目',
   embedding: '内部价目暂无向量计量，未生成条目',
 };
@@ -64,7 +59,7 @@ function parseDimension(meter, dimension) {
   if (!raw || raw === 'null') return { kind: 'base' };
   const tier = /^tokens:(\d+)-(\d+)$/.exec(raw);
   if (tier) {
-    if (!['input_token', 'output_token'].includes(meter)) return { kind: 'unknown', reason: `计量 ${meter} 不支持 token 分档：${raw}` };
+    if (!['input_token', 'cache_token', 'output_token'].includes(meter)) return { kind: 'unknown', reason: `计量 ${meter} 不支持 token 分档：${raw}` };
     const min = Number(tier[1]); const max = Number(tier[2]);
     if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min < 0 || max < min) return { kind: 'unknown', reason: `token 分档边界不是有效整数：${raw}` };
     return { kind: 'tier', id: `tokens:${min}-${max}`, min_inclusive: min, max_inclusive: max };
@@ -250,8 +245,9 @@ function compileGroup(entry, target, pieces, context) {
   const meta = { service_type: serviceType, billing_key: target.billing_key, meter, mapping_status: 'mapped', error_summary: null };
   const rawItem = { entry_id: pieces[0].provider_model, modality: entry?.modality || null, prices: pieces.map((piece) => piece.raw_item_json ? JSON.parse(piece.raw_item_json).price : null).filter(Boolean) };
   if (tiers.length) {
+    const selectorMeter = meter === 'input_token' || meter === 'cache_token' ? 'total_input_token' : meter;
     conditions.usage_tiers = orderedTiers.map((piece) => ({
-      id: piece.selector.id, selector_meter: meter, min_inclusive: piece.selector.min_inclusive, max_inclusive: piece.selector.max_inclusive,
+      id: piece.selector.id, selector_meter: selectorMeter, min_inclusive: piece.selector.min_inclusive, max_inclusive: piece.selector.max_inclusive,
       unit_price_points: piece.points, unit_size: piece.unit_size,
     }));
     const anchor = bases[0] || orderedTiers[0];
@@ -348,8 +344,8 @@ function pricingContext(db) {
   const rows = db.prepare(`SELECT id FROM ai_service_configs WHERE deleted_at IS NULL AND provider=? AND is_active=1
     ORDER BY (COALESCE(owner_tenant_id, 0) = 0) DESC, is_default DESC, priority DESC, id ASC`)
     .all(PROVIDER).map((row) => ai.getConfig(db, row.id)).filter(Boolean);
-  const withKey = rows.filter((config) => String(config.api_key || '').trim());
-  if (!withKey.length) throw new Error('未找到可用的瑞池中转配置，请先在供应商连接中添加并启用');
+  const withKey = rows.filter((config) => !config.owner_tenant_id && String(config.api_key || '').trim());
+  if (!withKey.length) throw new Error('未找到平台级瑞池中转配置；租户项目 Key 的价格不能发布为全局价目');
   return { config: withKey[0] };
 }
 

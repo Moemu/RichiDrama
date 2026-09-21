@@ -235,7 +235,7 @@ const organizationForm = reactive({ id: null, name: '', status: 'active', config
 const organizationBalance = reactive({ amount_credits: 0, reason: '' })
 const balance = reactive({ mode: 'adjust', amount_credits: 0, target_credits: 0, reason: '' })
 const balanceValue = computed({ get: () => balance.mode === 'adjust' ? balance.amount_credits : balance.target_credits, set: (value) => { if (balance.mode === 'adjust') balance.amount_credits = value; else balance.target_credits = value } })
-const price = reactive({ name: '', status: 'draft', items: [] }); const meters = ['request', 'image', 'input_image', 'second', 'millisecond', 'character', 'input_token', 'output_token']
+const price = reactive({ name: '', status: 'draft', items: [] }); const meters = ['request', 'image', 'input_image', 'second', 'millisecond', 'character', 'input_token', 'cache_token', 'output_token']
 const filters = reactive({ production: { status: route.query.status || '', model: route.query.model || '' }, archives: { status: '' }, reconciliations: { status: '' }, billing: { dates: [], role: '', user_id: null, tenant_id: null, organization_id: null, drama_id: null }, payments: { channel: '', status: '', keyword: '' }, projectUsage: { dates: [], keyword: '', tenant_id: null } })
 const pages = reactive({ production: { page: 1, page_size: 20, total: 0 }, archives: { page: 1, page_size: 20, total: 0 }, reconciliations: { page: 1, page_size: 20, total: 0 }, transactions: { page: 1, page_size: 20, total: 0 }, paymentOrders: { page: 1, page_size: 20, total: 0 }, usage: { page: 1, page_size: 20, total: 0 }, audit: { page: 1, page_size: 20, total: 0 }, projectUsage: { page: 1, page_size: 20, total: 0 } })
 // 外部入口（如告警页「去处置」）通过 ?tab=archives&status=failed 直达过滤后的列表。

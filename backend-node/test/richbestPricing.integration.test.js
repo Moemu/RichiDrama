@@ -110,9 +110,9 @@ test('relay price sync compiles dimensions into tiers and rates instead of colla
   const sync = await prices.sync(db, 1, { provider: 'richbest', fetchImpl: relayFetch(seen) });
   assert.deepEqual(seen, ['https://api.richbest.cn/v1/pricing']);
   assert.equal(sync.status, 'completed');
-  // 25 条上游价格 → 12 条候选：已导入模型的同计量价格必须编译进条件，一条都不能丢
-  assert.equal(sync.candidate_count, 12);
-  assert.equal(sync.mapped_count, 7);
+  // 25 条上游价格 → 10 条候选：同一计量的分档必须编译成一条完整价目。
+  assert.equal(sync.candidate_count, 10);
+  assert.equal(sync.mapped_count, 9);
   const rows = sync.candidates;
 
   const plain = rowOf(rows, 'glm-5.2', 'input_tokens');
@@ -126,19 +126,17 @@ test('relay price sync compiles dimensions into tiers and rates instead of colla
 
   const inputTiers = rowOf(rows, 'doubao-seed-2.0-code', 'input_tokens（3 档）');
   assert.deepEqual(conditionsOf(inputTiers).usage_tiers, [
-    { id: 'tokens:0-32000', selector_meter: 'input_token', min_inclusive: 0, max_inclusive: 32000, unit_price_points: '320', unit_size: 1000000 },
-    { id: 'tokens:32001-128000', selector_meter: 'input_token', min_inclusive: 32001, max_inclusive: 128000, unit_price_points: '480', unit_size: 1000000 },
-    { id: 'tokens:128001-256000', selector_meter: 'input_token', min_inclusive: 128001, max_inclusive: 256000, unit_price_points: '960', unit_size: 1000000 },
+    { id: 'tokens:0-32000', selector_meter: 'total_input_token', min_inclusive: 0, max_inclusive: 32000, unit_price_points: '320', unit_size: 1000000 },
+    { id: 'tokens:32001-128000', selector_meter: 'total_input_token', min_inclusive: 32001, max_inclusive: 128000, unit_price_points: '480', unit_size: 1000000 },
+    { id: 'tokens:128001-256000', selector_meter: 'total_input_token', min_inclusive: 128001, max_inclusive: 256000, unit_price_points: '960', unit_size: 1000000 },
   ], '三档价格必须完整落到 usage_tiers，不能只留一条');
   assert.equal(rowOf(rows, 'doubao-seed-2.0-code', 'output_tokens（3 档）').new_unit_price_micro, 16000000);
   assert.equal(inputTiers.unit_code, '百万tokens');
-  const cached = rows.filter((row) => row.provider_model === 'doubao-seed-2.0-code' && row.mapping_status === 'unmapped');
-  assert.equal(cached.length, 3);
-  assert.ok(cached.every((row) => /按 input_token 全价/.test(row.error_summary)));
-  assert.deepEqual(cached.map((row) => row.charge_type).sort(),
-    ['cached_input_tokens（0-32000）', 'cached_input_tokens（128001-256000）', 'cached_input_tokens（32001-128000）'].sort(), '同指标多档要看得出是哪一档');
-  assert.equal(new Set(cached.map((row) => row.provider_unit_price)).size, 3, '三条缓存分档价各自可见');
-  assert.ok(cached.every((row) => row.unit_code === '百万tokens'));
+  const cached = rowOf(rows, 'doubao-seed-2.0-code', 'cached_input_tokens（3 档）');
+  assert.equal(cached.meter, 'cache_token');
+  assert.equal(conditionsOf(cached).usage_tiers.length, 3);
+  assert.ok(conditionsOf(cached).usage_tiers.every((tier) => tier.selector_meter === 'total_input_token'));
+  assert.equal(cached.unit_code, '百万tokens');
 
   const video = rowOf(rows, 'doubao-seedance-2.0', 'output_tokens（6 条件）');
   const videoRates = conditionsOf(video).rates;
@@ -221,8 +219,8 @@ test('relay candidates review, draft and publish without cloning the Volcengine 
   assert.match(draft.name, /^瑞池中转同步价目 v/);
   assert.equal(draft.parent_price_book_id, null, '不能把火山书当作父版本');
   const models = draft.items.map((item) => `${item.model}/${item.meter}`).sort();
-  assert.deepEqual(models, ['doubao-seed-2.0-code/input_token', 'doubao-seed-2.0-code/output_token', 'doubao-seedance-2.0-fast/output_token',
-    'doubao-seedance-2.0/output_token', 'doubao-seedream-5.0-pro/image', 'glm-5.2/input_token', 'glm-5.2/output_token']);
+  assert.deepEqual(models, ['doubao-seed-2.0-code/cache_token', 'doubao-seed-2.0-code/input_token', 'doubao-seed-2.0-code/output_token', 'doubao-seedance-2.0-fast/output_token',
+    'doubao-seedance-2.0/output_token', 'doubao-seedream-5.0-pro/image', 'glm-5.2/cache_token', 'glm-5.2/input_token', 'glm-5.2/output_token']);
   assert.equal(draft.items.find((item) => item.meter === 'input_token' && item.model === 'glm-5.2').unit_price_micro, 8000000, '¥8 按 1:1 落成 8,000,000 微积分');
   assert.equal(jsonOf(draft.items.find((item) => item.model === 'doubao-seed-2.0-code' && item.meter === 'input_token').conditions_json).usage_tiers.length, 3, '草稿必须带上分档条件');
   assert.equal(jsonOf(draft.items.find((item) => item.model === 'doubao-seedance-2.0').conditions_json).rates.length, 6, '草稿必须带上视频条件价');
@@ -239,8 +237,11 @@ test('relay candidates review, draft and publish without cloning the Volcengine 
   catalog.save(db, 1, { service_type: 'video', model: 'doubao-seedance-2.0', display_name: 'Doubao Seedance 2.0', status: 'active' }, log);
   catalog.save(db, 1, { service_type: 'image', model: 'doubao-seedream-5.0-pro', display_name: 'Doubao Seedream 5.0 Pro', status: 'active' }, log);
   const tiered = billing.quote(db, { id: 1, role: 'admin' }, { service_type: 'text', model: 'doubao-seed-2.0-code', usage: { input_token: 40000, output_token: 40000 } });
-  assert.deepEqual(tiered.rates.map((rate) => rate.rate_id), ['tokens:32001-128000', 'tokens:32001-128000']);
+  assert.deepEqual(tiered.rates.map((rate) => rate.rate_id), ['tokens:32001-128000', 'tokens:32001-128000', 'tokens:32001-128000']);
   assert.equal(tiered.amount_micro, 1152000, '40k 落在 32001-128000 档：输入 480 + 输出 2400 积分/百万');
+  const cachedSettlement = billing.snapshotCalculation(tiered, { input_token: 30000, cache_token: 10000, output_token: 40000 });
+  assert.equal(cachedSettlement.amount_micro, 1113600, '总输入仍按 40k 选档，其中 10k 按缓存输入价结算');
+  assert.deepEqual(cachedSettlement.usage, { input_token: 30000, cache_token: 10000, output_token: 40000 });
   assert.throws(() => billing.quote(db, { id: 1, role: 'admin' }, { service_type: 'text', model: 'doubao-seed-2.0-code', usage: { input_token: 300000 } }), /未覆盖/);
   const videoOut = billing.quote(db, { id: 1, role: 'admin' }, { service_type: 'video', model: 'doubao-seedance-2.0', usage: { output_token: 100000 }, pricing_context: { resolution: '720p', has_video_input: false } });
   assert.equal(videoOut.rates[0].rate_id, '720p:no_video');
@@ -266,13 +267,15 @@ test('a repeated relay sync compares against the published book instead of calli
   const draft = prices.createDraft(db, 1, first.id);
   prices.publish(db, 1, draft.id, { confirm: true, reason: '首轮上线', idempotency_key: 'relay-baseline-1' });
 
-  // 只动不生成条目的缓存价：已发布价目其实没变，不得再报成"价格变化"
+  // 缓存价已是正式计费项，单价变化必须被识别。
   const cachedOnly = structuredClone(PRICING);
   cachedOnly.data[0].prices[1].effective_price_yuan = '9.900000';
   const second = await prices.sync(db, 1, { provider: 'richbest', fetchImpl: async () => relayResponse(cachedOnly) });
   assert.equal(second.status, 'completed');
-  assert.ok(second.candidates.filter((row) => row.mapping_status === 'mapped').every((row) => row.is_unchanged), '与已发布价目一致时必须标成价格相同');
-  assert.equal(second.changed_count, 0);
+  const secondMapped = second.candidates.filter((row) => row.mapping_status === 'mapped');
+  assert.equal(secondMapped.filter((row) => !row.is_unchanged).length, 1);
+  assert.equal(secondMapped.find((row) => !row.is_unchanged).meter, 'cache_token');
+  assert.equal(second.changed_count, 1);
 
   // 改掉其中一个档位价：条件差异必须被识别出来，否则旧档位会一直留在生效价目里
   const tierChanged = structuredClone(PRICING);
@@ -317,8 +320,8 @@ test('the captured live /v1/pricing payload compiles every graded price without 
   const videoRow = grouped.get('doubao-seedance-2.0\u0000output_token');
   assert.deepEqual(JSON.parse(videoRow.new_conditions_json).rates.map((rate) => rate.id).sort(),
     ['1080p:no_video', '1080p:video', '480p:no_video', '480p:video', '720p:no_video', '720p:video']);
-  const cachedOnly = sync.candidates.filter((row) => row.mapping_status === 'unmapped' && /按 input_token 全价/.test(row.error_summary || ''));
-  assert.ok(cachedOnly.length > 0 && cachedOnly.every((row) => row.charge_type.startsWith('cached_input_tokens') && row.unit_code === '百万tokens'));
+  const cachedRows = sync.candidates.filter((row) => row.mapping_status === 'mapped' && row.meter === 'cache_token');
+  assert.ok(cachedRows.length > 0 && cachedRows.every((row) => row.charge_type.startsWith('cached_input_tokens') && row.unit_code === '百万tokens'));
 
   // 生成的条件价必须通过内部价目校验，否则发布后会在报价时炸开
   for (const row of grouped.values()) {

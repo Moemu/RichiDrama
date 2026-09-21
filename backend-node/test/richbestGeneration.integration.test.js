@@ -153,6 +153,35 @@ test('relay video creation posts ratio only and stores the relay task id', async
   }
 });
 
+test('relay Seedance 2.0 Mini text-to-video omits camera_fixed from the final HTTP body', async () => {
+  const relay = await startRelay([{ body: { id: 'vid_mini_no_camera' } }]);
+  try {
+    const output = await callRichbestVideoApi(null, relayConfig(relay.origin, {
+      api_protocol: 'volcengine_omni',
+      model: ['doubao-seedance-2.0-mini'],
+      default_model: 'doubao-seedance-2.0-mini',
+    }), log, {
+      model: 'doubao-seedance-2.0-mini',
+      prompt: '银花重生',
+      duration: 4,
+      aspect_ratio: '16:9',
+      resolution: '480p',
+      camera_fixed: false,
+      reference_urls: [],
+      video_gen_id: 2701,
+    }, 'doubao-seedance-2.0-mini');
+
+    assert.equal(output.task_id, 'vid_mini_no_camera');
+    assert.equal(relay.requests.length, 1);
+    assert.equal(relay.requests[0].body.task_type, 't2v');
+    assert.equal(relay.requests[0].body.camera_fixed, undefined);
+    assert.equal(relay.requests[0].body.ratio, '16:9');
+    assert.equal(relay.requests[0].body.resolution, '480p');
+  } finally {
+    await relay.close();
+  }
+});
+
 test('relay video poll maps queued, running and succeeded without inventing usage', async () => {
   const relay = await startRelay([
     { body: { id: 'vid_1', status: 'queued' } },

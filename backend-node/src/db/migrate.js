@@ -856,10 +856,10 @@ function migrateStoryboardIdentityAndPosition(database) {
 // price tables without changing existing prices, IDs or snapshots.
 function ensureSupportedBillingMeters(database) {
   const row = database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='billing_price_book_items'").get();
-  if (!row?.sql || (row.sql.includes("'millisecond'") && row.sql.includes("'input_image'"))) return;
+  if (!row?.sql || (row.sql.includes("'millisecond'") && row.sql.includes("'input_image'") && row.sql.includes("'cache_token'"))) return;
   const schema = row.sql.replace(/CHECK\s*\(\s*meter\s+IN\s*\(([^)]+)\)\s*\)/i, (_match, values) => {
     const meters = values.split(',').map(value => value.trim());
-    for (const meter of ["'millisecond'", "'input_image'"]) if (!meters.includes(meter)) meters.push(meter);
+    for (const meter of ["'millisecond'", "'input_image'", "'cache_token'"]) if (!meters.includes(meter)) meters.push(meter);
     return `CHECK(meter IN (${meters.join(', ')}))`;
   });
   if (schema === row.sql) throw new Error('Cannot expand the billing meter constraint');
@@ -875,7 +875,7 @@ function ensureSupportedBillingMeters(database) {
     for (const object of objects) database.exec(object.sql);
     database.prepare("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='billing_price_book_items'").run(sequence);
   })();
-  console.log('Expanded billing meter schema for millisecond and input image usage.');
+  console.log('Expanded billing meter schema for millisecond, input image and cached token usage.');
 }
 
 function runMigrationsAndEnsure(database) {

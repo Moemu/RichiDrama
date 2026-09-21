@@ -62,7 +62,7 @@ import { formatChinaDateTime } from '@/utils/time'
 import { compactQuantity } from '@/utils/units'
 
 const emit = defineEmits(['published', 'draft-created'])
-const meters = ['request', 'image', 'input_image', 'second', 'millisecond', 'character', 'input_token', 'output_token']
+const meters = ['request', 'image', 'input_image', 'second', 'millisecond', 'character', 'input_token', 'cache_token', 'output_token']
 const sources = ref([]); const provider = ref('volcengine')
 const detail = ref(null); const probeResult = ref(null); const draft = ref(null); const notices = ref([])
 const probing = ref(false); const syncing = ref(false); const creatingDraft = ref(false); const publishing = ref(false); const showPublish = ref(false)
