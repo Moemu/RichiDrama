@@ -207,6 +207,7 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
     const admin = auth.createUser(db, { username: 'fixture_billing_admin', password, account_kind: 'platform_admin' });
     const billing = require('../src/services/billingService');
     const book = db.prepare("SELECT id FROM billing_price_books WHERE status='published' ORDER BY id LIMIT 1").get();
+    db.prepare('UPDATE billing_price_books SET provider=NULL WHERE id=?').run(book.id);
     const now = new Date().toISOString();
     for (const meter of ['input_token', 'output_token']) db.prepare('INSERT INTO billing_price_book_items (price_book_id,service_type,model,meter,unit_price_micro,is_free,created_at,updated_at) VALUES (?,?,?,?,?,0,?,?)').run(book.id, 'text', model, meter, 1, now, now);
     billing.adjustBalance(db, admin.id, editor.id, 10000, 'isolated collaboration test');

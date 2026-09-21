@@ -3,8 +3,12 @@
     <el-tabs v-model="activeTab" class="config-tabs" @tab-change="onConfigTabChange">
       <el-tab-pane v-if="!tenantId && canManageCatalog" label="模型目录" name="catalog"><ModelCatalog class="tab-content" ref="catalogPanel" @connection="openConnection" @changed="loadList" /></el-tab-pane>
       <el-tab-pane v-if="!tenantId && canManageCatalog" label="供应商连接" name="connections"><ProviderConnections class="tab-content" ref="connectionsPanel" :locked="vendorLock.enabled" @changed="loadList" @binding="openConnection" @catalog="activeTab = 'catalog'" /></el-tab-pane>
-      <el-tab-pane :label="!tenantId && canManageCatalog ? '待迁移配置与专用服务' : '供应商连接'" name="configs">
+      <el-tab-pane :label="!tenantId && canManageCatalog ? '专用服务' : '供应商连接'" name="configs">
         <div class="tab-content">
+          <p v-if="!tenantId && canManageCatalog" class="tab-note">
+            供应商凭据与模型请在「供应商连接」中添加，按能力绑定后自动生成配置。
+            本页保留无法共享的专用服务，以及尚未转换为共享连接的旧配置（迁移队列与转换入口也在「供应商连接」里）。
+          </p>
           <!-- 普通模式操作栏 -->
           <div v-if="!vendorLock.enabled" class="content-actions">
             <div class="actions-left">
@@ -332,6 +336,7 @@
           </template>
           <el-select v-model="form.api_protocol" style="width: 100%" placeholder="选择接口规范（自定义厂商必选）" clearable>
             <el-option label="OpenAI 兼容（大多数中转站默认）" value="openai" />
+            <el-option label="瑞池中转 API（/v1 文本图片 + /api/v3 异步视频）" value="richbest" />
             <el-option label="火山引擎（豆包 Seedream / Seedance）" value="volcengine" />
             <el-option label="火山即梦 Seedance 全能（方舟多图参考，Seedance 2.0 等）" value="volcengine_omni" />
             <el-option label="通义万象 DashScope" value="dashscope" />
@@ -886,7 +891,7 @@ input_reference = (图片文件，可选)</pre>
           </el-select>
           <p v-if="form.service_type === 'video_postprocess'" class="field-tip">超分与插帧共用此连接；是否启用由镜头设置决定。</p>
         </el-form-item>
-        <el-form-item v-if="form.service_type !== 'video_postprocess'">
+        <el-form-item v-if="form.service_type !== 'video_postprocess' && !isRichbestProvider">
           <template #label><span class="form-label-tip">计费键</span></template>
           <el-input v-model="form.billing_key" placeholder="可选；自定义 API 建议填写独立 SKU，如 custom-video-pro" />
           <p class="field-tip">用于匹配价目表；同名模型走不同渠道时须填不同计费键。</p>
@@ -905,9 +910,9 @@ input_reference = (图片文件，可选)</pre>
           <p class="field-tip">仅镜头显式选择插帧时使用；镜头指定帧率时优先使用镜头值。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video'">
-          <template #label><span class="form-label-tip">视频单次冻结上限（token）</span></template>
-          <el-input-number v-model="form.billing_reserve_output_tokens" :min="1" :step="1000" :precision="0" controls-position="right" style="width: 240px" placeholder="例如 216216" />
-          <p class="field-tip">用于生成前冻结积分（如 Fast 无视频输入场景填 216216）。</p>
+          <template #label><span class="form-label-tip">视频冻结兜底 token（通常留空）</span></template>
+          <el-input-number v-model="form.billing_reserve_output_tokens" :min="1" :step="1000" :precision="0" controls-position="right" style="width: 240px" placeholder="留空即可" />
+          <p class="field-tip">按 token 计费的视频现在按「时长 × 分辨率 × 画幅」自动估算冻结用量（含 15% 余量），不再依赖固定数字；只有画布无法推导时才使用这里的兜底值。</p>
         </el-form-item>
         <el-form-item v-if="form.service_type === 'video'">
           <template #label><span class="form-label-tip">全能能力</span></template>
@@ -1281,6 +1286,8 @@ const loading = ref(false)
 const list = ref([])
 const legacyList = computed(() => !tenantId.value && canManageCatalog ? list.value.filter(row => !row.provider_connection_id) : list.value)
 const selectedRows = ref([])
+// 中转站一个项目一枚业务 Key、按模型别名分别定价，连接级计费键只会造成误用。
+const isRichbestProvider = computed(() => String(form.value.provider || '').trim().toLowerCase() === 'richbest')
 const batchDeleting = ref(false)
 const vendorLock = ref({ enabled: false, config_file: '' })
 const dialogVisible = ref(false)
@@ -1515,6 +1522,8 @@ const providerConfigs = computed(() => {
 
 /** 厂商 id → 默认接口规范（api_protocol） */
 const providerProtocolMap = {
+  // 瑞池中转：显式写 api_protocol，避免被按模型名猜成火山/兼容接口
+  richbest: 'richbest',
   // image / storyboard_image
   volcengine: 'volcengine',
   volces: 'volcengine',
@@ -1563,6 +1572,7 @@ function getBaseUrlForProvider(provider) {
   if (p === 'ffir') return 'https://ffir.cn'
   if (p === 'jimeng_ai_api') return 'http://127.0.0.1:8000'
   if (p === 'jimeng_material_api') return 'https://silvamux.tingyutech.com'
+  if (p === 'richbest') return 'https://api.richbest.cn/v1'
   if (p === 'richbest_asset_v3') return 'https://api.richbest.cn'
   if (p === 'xai' || p === 'grok') return 'https://api.x.ai'
   if (p === 'agnes') return 'https://apihub.agnes-ai.com/v1'
@@ -1658,6 +1668,16 @@ const endpointPreviewInfo = computed(() => {
   }
 
   if (!base && !proto && !p) return null
+
+  // 瑞池中转的视频路径固定挂在站点根上，与文本/图片的 /v1 兼容路径不同源
+  if ((p === 'richbest' || proto === 'richbest') && service_type === 'video') {
+    const root = (base || 'https://api.richbest.cn').replace(/\/v\d+$/, '')
+    return {
+      submit: `${root}/api/v3/contents/generations/tasks`,
+      query: `${root}/api/v3/contents/generations/tasks/{taskId}`,
+      isAuto: true,
+    }
+  }
 
   let submitPath = '', queryPath = ''
 
@@ -2220,7 +2240,7 @@ async function openTest(row) {
   testError.value = ''
   testServiceType.value = row.service_type || 'text'
   try {
-    await aiAPI.testConnection({
+    const summary = await aiAPI.testConnection({
       config_id: row.id,
       model: Array.isArray(row.model) ? row.model[0] : row.model,
       endpoint: row.endpoint,
@@ -2228,6 +2248,14 @@ async function openTest(row) {
       settings: row.settings
     })
     testResult.value = true
+    if (summary?.models?.total != null) {
+      const byModality = Object.entries(summary.models.by_modality || {})
+        .map(([modality, count]) => `${modality} ${count}`).join('、')
+      ElMessage.success(`中转站已连接，当前项目可用模型 ${summary.models.total} 个${byModality ? `（${byModality}）` : ''}；本测试只读取模型目录，不产生费用`)
+    }
+    // 中转站按业务 Key 隔离项目，而 /api/auth/me 不返回项目名：生成与素材库两处 Key
+    // 填成不同项目时只能在生成阶段暴露，所以后端比对后在这里直接提示。
+    for (const warning of summary?.warnings || []) ElMessage.warning(warning)
   } catch (e) {
     testResult.value = false
     testError.value = e?.message || '请求失败'
@@ -2731,6 +2759,15 @@ code {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.4;
+}
+.tab-note {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
 }
 .form-label-tip {
   display: inline-flex;

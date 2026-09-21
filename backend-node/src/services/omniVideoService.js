@@ -3,6 +3,7 @@ const path = require('path');
 const taskService = require('./taskService');
 const videoService = require('./videoService');
 const capabilityService = require('./videoModelCapabilities');
+const videoTokenEstimate = require('./videoTokenEstimate');
 // Seedance 2.0 publishes limits per media type. There is no separate
 // 12-item combined limit, so the combined ceiling is the sum of those limits.
 const SHOT_ASSET_LIMITS = { total: 15, image: 9, video: 3, audio: 3 };
@@ -51,7 +52,23 @@ function canRetryGeneration(generation) {
 
 // This produces only the local billing reservation. It never changes the
 // provider request body, whose fields are built later by videoService.
-function buildAuthorizationUsage(meters, billingSettings, duration) {
+/**
+ * 视频按 output token 计费时的预授权用量：按时长/分辨率/画幅精算，不使用固定上限。
+ * 只有画布无法推导时（未知分辨率）才回落到配置里显式填写的值。
+ */
+function reserveOutputTokens(billingSettings, options, duration) {
+  try {
+    return videoTokenEstimate.estimateOutputTokens({
+      resolution: options.resolution, aspectRatio: options.aspect_ratio, duration,
+    });
+  } catch (_) {
+    const cap = Number(billingSettings.billing_reserve_output_tokens ?? billingSettings.billing_reserve_input_tokens);
+    if (Number.isSafeInteger(cap) && cap > 0) return cap;
+    throw new Error('无法按分辨率与时长估算视频输出的预授权 token，请检查本次请求的分辨率与画幅');
+  }
+}
+
+function buildAuthorizationUsage(meters, billingSettings, duration, options = {}) {
   const usage = {};
   if (meters.includes('second')) usage.second = Number(duration) || 15;
   if (meters.includes('request')) usage.request = 1;
@@ -60,11 +77,7 @@ function buildAuthorizationUsage(meters, billingSettings, duration) {
     if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('视频模型按 token 计费，需在 AI 配置 settings 中设置 billing_reserve_input_tokens 作为单次预授权上限');
     usage.input_token = cap;
   }
-  if (meters.includes('output_token')) {
-    const cap = Number(billingSettings.billing_reserve_output_tokens ?? billingSettings.billing_reserve_input_tokens);
-    if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('视频模型按 token 计费，需在 AI 配置 settings 中设置 billing_reserve_output_tokens 作为单次预授权上限');
-    usage.output_token = cap;
-  }
+  if (meters.includes('output_token')) usage.output_token = reserveOutputTokens(billingSettings, options, duration);
   return usage;
 }
 
@@ -87,12 +100,15 @@ function quote(db, body, payer) {
   const config = aiConfigs.getConfig(db, capability.config_id);
   let billingSettings = {};
   try { billingSettings = JSON.parse(config?.settings || '{}'); } catch (_) {}
-  const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key);
-  const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
+  const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key, billingTarget.provider);
+  const reserveOptions = { resolution: body.resolution || '480p', aspect_ratio: body.aspect_ratio || '16:9' };
+  // 与 create 的落库口径一致：缺省时长按 15s 估算，不再按 1s 报给用户。
+  const reserveDuration = videoTokenEstimate.normalizeDurationSeconds(body.duration);
+  const usage = buildAuthorizationUsage(meters, billingSettings, reserveDuration, reserveOptions);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
-  return billing.quote(db, payer, {
+  const quoted = billing.quote(db, payer, {
     service_type: 'video',
-    model: billingTarget.billing_key, provider_model: billingTarget.provider_model,
+    model: billingTarget.billing_key, provider_model: billingTarget.provider_model, provider: billingTarget.provider,
     usage,
     pricing_context: {
       has_video_input: !!body.has_video_input,
@@ -100,6 +116,9 @@ function quote(db, body, payer) {
       has_audio: !!body.has_audio,
     },
   });
+  // 让用户看得到冻结是按什么估出来的（时长/分辨率/画幅/token 数）。
+  if (usage.output_token) quoted.reserve = videoTokenEstimate.describeReserve({ ...reserveOptions, duration: reserveDuration });
+  return quoted;
 }
 
 function create(db, log, body, billingUser) {
@@ -159,9 +178,11 @@ function create(db, log, body, billingUser) {
   let billingSettings = {}; try { billingSettings = JSON.parse(config?.settings || '{}'); } catch (_) {}
   const upscaleResolution = body.upscale_resolution;
   const targetFps = body.target_fps;
-  const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key);
-  const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
+  const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key, billingTarget.provider);
+  const reserveOptions = { resolution: body.resolution || '480p', aspect_ratio: body.aspect_ratio || '16:9' };
+  const usage = buildAuthorizationUsage(meters, billingSettings, body.duration, reserveOptions);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
+  const reserveBasis = usage.output_token ? videoTokenEstimate.describeReserve({ ...reserveOptions, duration: body.duration }) : null;
   const existingWaitingId = Number(body.__sd2_waiting_generation_id) || null;
   const existingWaiting = existingWaitingId
     ? db.prepare('SELECT id, task_id, status, owner_user_id FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(existingWaitingId)
@@ -180,8 +201,8 @@ function create(db, log, body, billingUser) {
   if (!waitingForSd2 && !idempotencyKey) throw new Error('视频生成请求缺少幂等键，请刷新后重试');
   const authorization = waitingForSd2 ? null : billing.createAuthorization(db, payer, {
     idempotency_key: idempotencyKey,
-    service_type: 'video', model: billingTarget.billing_key, provider_model: billingTarget.provider_model, usage,
-    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: !!inputValidation?.automatic_voice_url || routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || body.board_id || null, drama_id: body.drama_id || null, source_kind: body.source_context === 'creative_board' ? 'creative_board' : body.source_context === 'single_video_tool' ? 'single_video_tool' : body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.board_id || body.storyboard_id || body.shot_id || null,
+    service_type: 'video', model: billingTarget.billing_key, provider_model: billingTarget.provider_model, provider: billingTarget.provider, usage,
+    pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: !!inputValidation?.automatic_voice_url || routed.some((asset) => asset.type === 'audio' && asset.send_to_model), ...(reserveBasis ? { reserve: reserveBasis } : {}) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || body.board_id || null, drama_id: body.drama_id || null, source_kind: body.source_context === 'creative_board' ? 'creative_board' : body.source_context === 'single_video_tool' ? 'single_video_tool' : body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.board_id || body.storyboard_id || body.shot_id || null,
   });
   let task = null;
   let videoGenerationId = null;
@@ -1087,14 +1108,23 @@ function parse(value) { try { return value ? JSON.parse(value) : null; } catch (
 async function cancelJob(db, log, jobId, user) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(jobId));
   if (!job) throw new Error('全能视频任务不存在');
-  const generation = db.prepare('SELECT id, owner_user_id, tenant_id, model, status, provider_task_id, billing_authorization_id, task_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
+  const generation = db.prepare('SELECT id, owner_user_id, tenant_id, model, status, provider_task_id, ai_config_id, billing_authorization_id, task_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
   if (!generation) throw new Error('视频生成记录不存在');
   if (Number(generation.owner_user_id) !== Number(user.id) && user.role !== 'admin') throw new Error('只能取消自己的任务');
   if (['completed', 'failed', 'invalid'].includes(generation.status)) throw new Error('任务已结束，无需取消');
   if (generation.provider_task_id && String(generation.provider_task_id).trim()) {
     const videoClient = require('./videoClient');
-    const config = videoClient.getDefaultVideoConfig(db, generation.model, { tenant_id: generation.tenant_id, scene_defaults: false });
-    if (!config) throw new Error('找不到该任务的视频模型配置，不能安全取消');
+    // 中转站只允许建任务的那枚业务 Key 取消任务：与重启续轮询一样优先钉住的提交配置，
+    // 不能按模型名重解析到另一套 Key（会得到 404 video_task_not_found 的假象）。
+    const pinnedId = Number(generation.ai_config_id) || null;
+    const config = pinnedId
+      ? require('./aiConfigService').getConfig(db, pinnedId)
+      : videoClient.getDefaultVideoConfig(db, generation.model, { tenant_id: generation.tenant_id, scene_defaults: false });
+    if (!config) {
+      throw new Error(pinnedId
+        ? '提交该任务的 AI 配置已被删除，不能安全取消（换一枚业务 Key 无法取消别人的任务）；恢复该配置后即可取消'
+        : '找不到该任务的视频模型配置，不能安全取消');
+    }
     const upstream = await videoClient.cancelVideoTask(config, log, String(generation.provider_task_id).trim());
     if (!upstream.cancelled) {
       if (upstream.reason === 'running') throw new Error('火山任务已经开始运行，厂商不支持中途停止；任务将继续并按真实用量计费');

@@ -22,6 +22,11 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
     if (!item) throw new Error('生产任务不存在');
     return item;
   }
+  /** 价目来源取自 URL 段，其次 query/body；只接受已支持的来源，未知值返回 null 由调用方拒绝。 */
+  function priceSource(req) {
+    const requested = String(req.params?.provider || req.query?.provider || req.body?.provider || providerPrices.PROVIDER).trim().toLowerCase();
+    return [providerPrices.PROVIDER, providerPrices.RELAY_PROVIDER].includes(requested) ? requested : null;
+  }
   return {
     providerConnections: guarded((_req, res) => response.success(res, require('../services/providerConnectionService').list(db))),
     providerAttachmentCandidates: guarded((req, res) => response.success(res, require('../services/providerConnectionService').attachmentCandidates(db, req.params.id))),
@@ -144,10 +149,21 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
     priceBooks: (_req, res) => response.success(res, billing.listPriceBooks(db)),
     createPriceBook: guarded((req, res) => response.created(res, billing.savePriceBook(db, req.auth.id, req.body || {}))),
     updatePriceBook: guarded((req, res) => response.success(res, billing.savePriceBook(db, req.auth.id, req.body || {}, req.params.id))),
-    providerPriceProbe: guardedAsync(async (req, res) => response.success(res, await providerPrices.probe(db, req.auth.id, { billPeriod: req.body?.bill_period }))),
-    providerPriceProbeStatus: (_req, res) => response.success(res, providerPrices.sourceCheck(db)),
+    providerPriceProbe: guardedAsync(async (req, res) => {
+      const source = priceSource(req);
+      if (!source) return response.badRequest(res, '不支持的价目来源');
+      if (source !== providerPrices.PROVIDER) return response.badRequest(res, '该价目来源无需权限诊断');
+      response.success(res, await providerPrices.probe(db, req.auth.id, { billPeriod: req.body?.bill_period }));
+    }),
+    providerPriceProbeStatus: (req, res) => {
+      const source = priceSource(req);
+      if (!source) return response.badRequest(res, '不支持的价目来源');
+      response.success(res, source === providerPrices.PROVIDER ? providerPrices.sourceCheck(db) : null);
+    },
     providerPriceSync: async (req, res) => {
-      try { response.success(res, await providerPrices.sync(db, req.auth.id, { triggerType: 'manual' })); }
+      const requested = priceSource(req);
+      if (!requested) return response.badRequest(res, '不支持的价目来源');
+      try { response.success(res, await providerPrices.sync(db, req.auth.id, { triggerType: 'manual', provider: requested })); }
       catch (error) {
         if (!error.publicCode) return response.badRequest(res, error.message);
         response.error(res, error.httpStatus, error.publicCode, error.publicMessage, {
@@ -156,7 +172,12 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
         });
       }
     },
-    providerPriceSyncs: (req, res) => response.success(res, providerPrices.listSyncs(db, req.query?.limit)),
+    providerPriceSources: (_req, res) => response.success(res, providerPrices.priceSources()),
+    providerPriceSyncs: (req, res) => {
+      const requested = String(req.query?.provider || '').trim().toLowerCase();
+      if (requested && ![providerPrices.PROVIDER, providerPrices.RELAY_PROVIDER].includes(requested)) return response.badRequest(res, '不支持的价目来源');
+      response.success(res, providerPrices.listSyncs(db, req.query?.limit, requested || null));
+    },
     providerPriceSyncDetail: (req, res) => {
       const item = providerPrices.syncView(db, req.params.id);
       return item ? response.success(res, item) : response.notFound(res, '同步批次不存在');

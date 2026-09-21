@@ -12,6 +12,7 @@ const costTransport = require('./costTransport');
 const postJSONWithTimeout = (...args) => costTransport.submit(() => postJSONRaw(...args), args[2]);
 const seedance2AssetGuards = require('../utils/seedance2AssetGuards');
 const assetSd2Service = require('./assetSd2Service');
+const richbest = require('./richbestProvider');
 
 /** 图生 POST 使用 Node http(s)，默认 10 分钟，避免 undici fetch 大包体/慢链路下模糊失败 */
 const IMAGE_HTTP_TIMEOUT_MS = 600000;
@@ -96,12 +97,20 @@ function getProxyExpireHours() {
   return Number(getAppConfig()?.image_proxy?.expire_hours ?? 23);
 }
 
+/** 每次按当前配置解析存储根目录：getAppConfig 的缓存会让运行期改配置失效。 */
+function resolveImageStorageRoot() {
+  const configured = String(require('../config').loadConfig()?.storage?.local_path || './data/storage');
+  return path.isAbsolute(configured) ? configured : path.join(process.cwd(), configured);
+}
+
 /**
  * 根据 provider 名推断接口规范（api_protocol 未设置时的兜底逻辑）
  * 已明确设置 api_protocol 的配置不会走此函数。
  */
 function inferProtocol(provider, model) {
   const p = String(provider || '').toLowerCase();
+  // 中转站的别名与火山重名，必须先于任何模型名正则判定，否则会落到 volcengine 分支。
+  if (p === richbest.PROVIDER) return richbest.PROVIDER;
   if (p === 'dashscope' || p === 'qwen_image') return 'dashscope';
   if (p === 'nano_banana') return 'nano_banana';
   if (p === 'gemini' || p === 'google') return 'gemini';
@@ -1420,6 +1429,69 @@ async function callImageApi(db, log, opts) {
     pricing_context: { ...(opts.resolution ? { resolution: opts.resolution } : {}), has_video_input: !!(opts.reference_video_urls?.length || opts.video_url) },
   }, () => executeImageApi(db, log, opts));
 }
+/**
+ * 中转站生图。供应商返回的是会过期的临时地址，所以在这里就完成本地转存，
+ * 让所有消费方拿到的 image_url 已经是 /static/... 的持久结果；存不下来就按失败释放预授权，
+ * 绝不能把供应商签名 URL 当完成结果入库。
+ */
+async function callRichbestImageApi(db, config, log, opts) {
+  const { model, size, image_gen_id, negative_prompt } = opts;
+  const rawRefs = Array.isArray(opts.reference_image_urls) ? opts.reference_image_urls.filter(Boolean) : [];
+  const refs = rawRefs.map((r) => resolveImageRef(r, opts.files_base_url, opts.storage_local_path)).filter(Boolean);
+  const prepared = richbest.assertImageSubmission({
+    model,
+    prompt: appendNegativePromptToMainPrompt(opts.prompt, negative_prompt),
+    ...(size ? { size } : {}),
+    ...(refs.length ? { image: refs } : {}),
+    watermark: false,
+    response_format: 'url',
+  });
+  if (prepared.dropped.length) {
+    log.info('[中转站图生] 已剥离上游不转发或明确拒绝的参数', { image_gen_id, dropped: prepared.dropped.join(',') });
+  }
+  const idempotencyKey = richbest.idempotencyKey('i', { id: image_gen_id, billing_authorization_id: opts.billing_authorization_id });
+  const url = richbest.urlFor(config, richbest.PATHS.image);
+  log.info('[中转站图生] 请求', {
+    image_gen_id, model, url: url.slice(0, 60), ref_count: refs.length, size: prepared.body.size || '(默认)',
+  });
+  let out;
+  try {
+    out = await postJSONWithTimeout(url, richbest.headersFor(config, { idempotencyKey }), prepared.body, IMAGE_HTTP_TIMEOUT_MS);
+  } catch (error) {
+    log.error('[中转站图生] 传输失败', { image_gen_id, error: error.message });
+    // 请求已发出、响应没回来：中转站可能已经出图并计费，交由对账而不是释放预授权。
+    return { error: `中转站图片请求未能确定结果：${error.message}`, ambiguous: true };
+  }
+  let payload = {};
+  try { payload = out.raw ? JSON.parse(out.raw) : {}; } catch (_) {}
+  if (out.statusCode < 200 || out.statusCode >= 300) {
+    const err = richbest.errorFrom(out.statusCode, payload, out.headers);
+    log.error('[中转站图生] 失败', { image_gen_id, status: out.statusCode, request_id: err.requestId, error: err.message });
+    return { error: err.message, ambiguous: err.ambiguous, provider_request_id: err.requestId };
+  }
+  const parsed = richbest.parseImageResult(payload, out.headers);
+  if (!parsed.url) {
+    log.warn('[中转站图生] 响应中没有图片', { image_gen_id, request_id: parsed.requestId, keys: Object.keys(payload) });
+    return { error: '中转站未返回图片地址' };
+  }
+  const storageRoot = opts.storage_local_path || resolveImageStorageRoot();
+  let localPath = null;
+  try {
+    localPath = await uploadService.downloadImageToLocal(
+      storageRoot, parsed.url, 'images', log, 'ig', storageLayout.getProjectStorageSubdir(db, opts.drama_id)
+    );
+  } catch (error) {
+    log.error('[中转站图生] 本地转存失败', { image_gen_id, error: error.message });
+  }
+  if (!localPath) return { error: '中转站图片未能保存到本地存储，本次不计数' };
+  log.info('[中转站图生] 完成', { image_gen_id, local_path: localPath, request_id: parsed.requestId });
+  return {
+    image_url: '/static/' + String(localPath).replace(/^\/+/, ''),
+    local_path: localPath,
+    provider_request_id: parsed.requestId,
+  };
+}
+
 async function executeImageApi(db, log, opts) {
   const {
     prompt,
@@ -1494,6 +1566,17 @@ async function executeImageApi(db, log, opts) {
   const autoNegativePrompt = (refCountForNeg > 1 || isVolcOrSeedream) ? ANTI_SPLIT_NEGATIVE_PROMPT : '';
   const userNegFragment = (user_negative_prompt && String(user_negative_prompt).trim()) || '';
   const mergedNegativePrompt = mergeNegativePromptFragments(autoNegativePrompt, userNegFragment);
+
+  if (protocol === 'richbest') {
+    return callRichbestImageApi(db, config, log, {
+      prompt: effectivePrompt, model, size, image_gen_id, drama_id,
+      reference_image_urls: opts.reference_image_urls,
+      files_base_url: opts.files_base_url,
+      storage_local_path: opts.storage_local_path,
+      negative_prompt: mergedNegativePrompt,
+      billing_authorization_id: opts.billing_authorization_id,
+    });
+  }
 
   if (protocol === 'dashscope') {
     return callDashScopeImageApi(config, log, {
@@ -2033,6 +2116,8 @@ function refListHasCanonical(list, ref) {
 module.exports = {
   getDefaultImageConfig,
   callImageApi,
+  inferProtocol,
+  callRichbestImageApi,
   createAndGenerateImage,
   resolveAssetUserNegativeForApi,
   appendNegativePromptToMainPrompt,

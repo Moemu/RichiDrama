@@ -81,7 +81,7 @@ function capabilityGroups(bindings) {
   }
   return [...groups.values()]
 }
-const presets = [{ value: 'volcengine', label: '火山方舟', url: 'https://ark.cn-beijing.volces.com/api/v3' }, { value: 'openai', label: 'OpenAI / OpenAI 兼容', url: 'https://api.openai.com/v1' }, { value: 'agnes', label: 'Agnes', url: 'https://apihub.agnes-ai.com/v1' }, { value: 'qwen', label: '通义千问', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' }, { value: 'gemini', label: 'Google Gemini', url: 'https://generativelanguage.googleapis.com' }]
+const presets = [{ value: 'richbest', label: '瑞池中转 API（api.richbest.cn）', url: 'https://api.richbest.cn/v1' }, { value: 'volcengine', label: '火山方舟', url: 'https://ark.cn-beijing.volces.com/api/v3' }, { value: 'openai', label: 'OpenAI / OpenAI 兼容', url: 'https://api.openai.com/v1' }, { value: 'agnes', label: 'Agnes', url: 'https://apihub.agnes-ai.com/v1' }, { value: 'qwen', label: '通义千问', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' }, { value: 'gemini', label: 'Google Gemini', url: 'https://generativelanguage.googleapis.com' }]
 const rows = ref([]); const legacy = ref([]); const loading = ref(false); const error = ref(''); const formError = ref('')
 const editing = ref(false); const adding = ref(false); const saving = ref(false); const converting = ref(null)
 const form = ref({}); const newModel = ref(''); const newCapability = ref(''); const selectedId = ref(null)
@@ -111,7 +111,7 @@ async function load() {
   finally { loading.value = false }
 }
 async function changed() { await load(); emit('changed') }
-function edit(row) { form.value = row ? { id: row.id, name: row.name, provider: row.provider, base_url: row.base_url, api_key: '', is_active: row.is_active } : { name: '', provider: 'volcengine', base_url: presets[0].url, api_key: '', is_active: true }; formError.value = ''; editing.value = true }
+function edit(row) { const fallback = presets.find(item => item.value === 'volcengine'); form.value = row ? { id: row.id, name: row.name, provider: row.provider, base_url: row.base_url, api_key: '', is_active: row.is_active } : { name: '', provider: 'volcengine', base_url: fallback?.url || '', api_key: '', is_active: true }; formError.value = ''; editing.value = true }
 function selectProvider(value) { const preset = presets.find(item => item.value === value); if (preset) form.value.base_url = preset.url }
 async function save() { saving.value = true; formError.value = ''; try { await api.save(form.value, form.value.id); editing.value = false; await changed(); ElMessage.success('连接已保存') } catch (e) { formError.value = e.message || '保存失败' } finally { saving.value = false } }
 async function convert(row) { converting.value = row.id; error.value = ''; try { await api.convert(row.id); await changed(); ElMessage.success('已转换，原配置与默认值已保留；现在可以按能力导入模型') } catch (e) { error.value = e.message || '转换失败' } finally { converting.value = null } }

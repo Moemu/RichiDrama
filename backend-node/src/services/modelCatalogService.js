@@ -88,14 +88,14 @@ function assertAvailable(db, type, model) {
   const row = db.prepare('SELECT status FROM ai_model_catalog WHERE service_type=? AND model=?').get(type, model);
   if (row && row.status !== 'active') throw new Error(`模型 ${model} ${row.status === 'retired' ? '已下架' : '尚未上架'}，请选择其他模型`);
 }
-function registerNewModels(db, config, previousModels = []) {
+function registerNewModels(db, config, previousModels = [], displayNames = {}) {
   if (!serviceTypes.includes(config.service_type)) return;
   const others = connections(db).filter(item => item.id !== config.id && item.service_type === config.service_type);
   const at = now();
   const insert = db.prepare("INSERT OR IGNORE INTO ai_model_catalog(service_type,model,display_name,status,created_at,updated_at) VALUES (?,?,?,'draft',?,?)");
   for (const model of config.model) {
     if (previousModels.includes(model) || others.some(item => item.model.includes(model))) continue;
-    insert.run(config.service_type, model, model, at, at);
+    insert.run(config.service_type, model, String(displayNames[model] || model).slice(0, 200), at, at);
   }
 }
 function filterConfigs(db, configs, userId) {
@@ -106,7 +106,7 @@ function filterConfigs(db, configs, userId) {
       if (!row) return true;
       if (row.status !== 'active') return false;
       if (!userId) return true;
-      const meters = billing.activeMeters(db, { id: userId }, config.service_type, config.billing_key || model);
+      const meters = billing.activeMeters(db, { id: userId }, config.service_type, config.billing_key || model, config.provider);
       return priceReady(config.service_type, meters.map((meter) => ({ meter })));
     });
     return { ...config, model, default_model: model.includes(config.default_model) ? config.default_model : model[0] || null };

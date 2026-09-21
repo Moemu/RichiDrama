@@ -6,6 +6,7 @@ const aiConfigService = require('./aiConfigService');
 let sharp; try { sharp = require('sharp'); } catch (_) { sharp = null; }
 const { uploadLocalImageToProxy, uploadToImageProxy } = require('./uploadService');
 const imageClient = require('./imageClient');
+const richbest = require('./richbestProvider');
 const { postJSONWithTimeout: postJSONRaw } = require('./aiClient');
 const costTransport = require('./costTransport');
 const postJSONWithTimeout = (...args) => costTransport.submit(() => postJSONRaw(...args), args[2]);
@@ -28,6 +29,8 @@ const {
  */
 function inferVideoProtocol(provider) {
   const p = String(provider || '').toLowerCase();
+  // 中转站的模型别名与火山重名，必须先于任何推断判定，否则会落进 volcengine / 兜底分支。
+  if (p === 'richbest') return 'richbest';
   if (p === 'dashscope') return 'dashscope';
   if (p === 'gemini' || p === 'google') return 'gemini';
   if (p === 'volces' || p === 'volcengine' || p === 'volc') return 'volcengine';
@@ -46,6 +49,10 @@ function inferVideoProtocol(provider) {
  */
 function resolveVideoProtocol(config, modelHint) {
   const provider = (config.provider || '').toLowerCase();
+  // Provider identity is authoritative for the Richbest adapter. A stale
+  // api_protocol from a previously selected preset must not bypass its request
+  // filtering and send a different provider's payload to the relay endpoint.
+  if (provider === richbest.PROVIDER) return richbest.PROVIDER;
   const explicit = String(config.api_protocol || '').trim();
   let protocol = explicit.toLowerCase() || inferVideoProtocol(provider);
   const baseLower = String(config.base_url || '').toLowerCase();
@@ -1101,6 +1108,10 @@ function getVolcVideoBase(config) {
  */
 function buildVideoUrl(config, options = {}) {
   const p = (config.provider || '').toLowerCase();
+  // 中转站的视频路径由本模块固定决定：base_url 常被填成 .../v1，且不能沿用方舟默认域。
+  if (richbest.isRichbest(config) || (config.api_protocol || '').toLowerCase() === richbest.PROVIDER) {
+    return richbest.urlFor(config, richbest.PATHS.videoTasks);
+  }
   const isVolc = p === 'volces' || p === 'volcengine' || p === 'volc';
   if (isVolc) return getVolcVideoBase(config) + VOLC_VIDEO_CREATE_PATH;
   const base = (config.base_url || '').replace(/\/$/, '');
@@ -1190,6 +1201,7 @@ function extractAgnesVideoUrl(data) {
 function buildQueryUrl(config, taskId) {
   const p = (config.provider || '').toLowerCase();
   const proto = resolveVideoProtocol(config);
+  if (proto === richbest.PROVIDER || p === richbest.PROVIDER) return richbest.videoTaskUrl(config, taskId);
   const isDashScope = proto === 'dashscope' || p === 'dashscope';
   const isVolc = p === 'volces' || p === 'volcengine' || p === 'volc';
   const isSora = proto === 'sora';
@@ -1215,6 +1227,7 @@ function buildQueryUrl(config, taskId) {
  */
 async function cancelVideoTask(config, log, taskId) {
   const provider = String(config?.provider || '').toLowerCase();
+  if (richbest.isRichbest(config)) return cancelRichbestVideoTask(config, log, taskId);
   if (!['volces', 'volcengine', 'volc'].includes(provider)) {
     return { cancelled: false, reason: 'unsupported_provider' };
   }
@@ -1238,6 +1251,40 @@ async function cancelVideoTask(config, log, taskId) {
   const deleteRaw = await deleteResponse.text();
   if (!deleteResponse.ok) throw new Error(`取消火山排队任务失败: ${deleteResponse.status}${deleteRaw ? ` - ${deleteRaw.slice(0, 200)}` : ''}`);
   log.info('Volcengine queued video task cancelled', { task_id: taskId });
+  return { cancelled: true, provider_status: 'cancelled' };
+}
+
+/**
+ * 中转站取消：先查实时状态，只有 queued/running 才值得发 DELETE；
+ * 阿里/MiniMax 未开放经过验证的取消适配（422 video_cancel_unsupported），
+ * 此时如实报告未取消，绝不把仍可能在上游执行的任务伪装成已取消。
+ */
+async function cancelRichbestVideoTask(config, log, taskId) {
+  const url = richbest.videoTaskUrl(config, taskId);
+  const headers = richbest.headersFor(config);
+  let query;
+  try { query = await fetch(url, { method: 'GET', headers }); }
+  catch (error) { throw new Error(`查询中转站任务状态失败: ${error.message || error}`); }
+  const queryRaw = await query.text();
+  const queryPayload = (() => { try { return queryRaw ? JSON.parse(queryRaw) : {}; } catch (_) { return {}; } })();
+  if (!query.ok) throw new Error(`查询中转站任务状态失败: ${query.status}${queryRaw ? ` - ${queryRaw.slice(0, 200)}` : ''}`);
+  const parsed = richbest.parseVideoTask(queryPayload, query.headers);
+  if (parsed.failed) return { cancelled: false, reason: 'terminal', provider_status: parsed.status };
+  if (parsed.video_url) return { cancelled: false, reason: 'terminal', provider_status: parsed.status };
+  if (!['queued', 'running'].includes(String(parsed.status || ''))) {
+    return { cancelled: false, reason: parsed.status ? 'unknown_status' : 'terminal', provider_status: parsed.status };
+  }
+  let del;
+  try { del = await fetch(url, { method: 'DELETE', headers }); }
+  catch (error) { throw new Error(`取消中转站任务失败: ${error.message || error}`); }
+  const delRaw = await del.text();
+  const delPayload = (() => { try { return delRaw ? JSON.parse(delRaw) : {}; } catch (_) { return {}; } })();
+  if (!del.ok) {
+    const error = richbest.errorFrom(del.status, delPayload, del.headers);
+    if (error.code === 'video_cancel_unsupported') return { cancelled: false, reason: 'unsupported_provider', provider_status: parsed.status };
+    throw new Error(error.message);
+  }
+  log.info('中转站视频任务已取消', { task_id: taskId, request_id: richbest.requestIdFrom(delPayload, del.headers) });
   return { cancelled: true, provider_status: 'cancelled' };
 }
 
@@ -3447,6 +3494,7 @@ const VIDEO_PROTOCOLS_SUPPORT_SD2_ASSET_SCHEME = new Set([
   'dashscope',
   'kling_omni',
   'kling',
+  'richbest',
 ]);
 
 function parseJsonColumnForVideo(v) {
@@ -3719,11 +3767,22 @@ function resolveLocalAudioToBase64(rawUrl, filesBaseUrl, storageLocalPath, log, 
 }
 
 /**
+ * 提交用的配置解析：调用方带了 ai_config_id 就用它（已含租户绑定的那次解析结果），
+ * 否则保持按模型名解析的原行为。中转站只认建任务的那枚 Key，提交与轮询必须同源；
+ * 钉住的配置取不到时返回 null——宁可在上层报错，也不静默换一枚 Key 提交。
+ */
+function resolveVideoConfigForSubmit(db, opts) {
+  const pinned = Number(opts?.ai_config_id) || null;
+  if (pinned) return aiConfigService.getConfig(db, pinned);
+  return getDefaultVideoConfig(db, opts?.model);
+}
+
+/**
  * ?????? API?ChatFire/?? ? ?????
  * @returns {Promise<{ task_id?: string, video_url?: string, error?: string }>}
  */
 async function callVideoApi(db, log, opts) {
-  const config = getDefaultVideoConfig(db, opts.model);
+  const config = resolveVideoConfigForSubmit(db, opts);
   const row = opts.video_gen_id ? db.prepare('SELECT * FROM video_generations WHERE id=?').get(opts.video_gen_id) : null;
   return costTransport.run(db, { config, model: config ? getModelFromConfig(config, opts.model) : opts.model,
     service_type: 'video', authorization_id: opts.billing_authorization_id || row?.billing_authorization_id,
@@ -3731,6 +3790,104 @@ async function callVideoApi(db, log, opts) {
     pricing_context: { ...(opts.resolution ? { resolution: opts.resolution } : {}), has_video_input: !!(opts.reference_video_urls?.length || opts.video_url) },
   }, () => executeVideoApi(db, log, opts));
 }
+/**
+ * 中转站异步视频：火山兼容的 content 数组、只发 ratio（发 aspect_ratio 会被 422 拒绝）、
+ * model 原样使用中转别名（绝不经过 VOLC_MODEL_ALIASES），任务 ID 用响应里的 vid_*。
+ */
+async function callRichbestVideoApi(db, config, log, opts, model) {
+  const profile = richbest.videoProfile(model);
+  const references = [];
+  const filesBaseUrl = opts.files_base_url;
+  const storageLocalPath = opts.storage_local_path;
+  const genId = opts.video_gen_id;
+
+  const rawFirst = String(opts.first_frame_url || opts.first_frame_local_path || opts.image_url || '').trim();
+  const rawLast = String(opts.last_frame_url || opts.last_frame_local_path || '').trim();
+  if (rawFirst) {
+    const url = resolveVolcClassicImage(rawFirst, filesBaseUrl, storageLocalPath, log, genId, 'first_frame');
+    if (url) references.push({ kind: 'image', role: 'first_frame', url });
+  }
+  if (rawLast) {
+    const url = resolveVolcClassicImage(rawLast, filesBaseUrl, storageLocalPath, log, genId, 'last_frame');
+    if (url && url !== references[0]?.url) references.push({ kind: 'image', role: 'last_frame', url });
+  }
+  const refList = Array.isArray(opts.reference_urls) ? opts.reference_urls.filter(Boolean) : [];
+  const imageInputs = Array.isArray(opts.reference_image_inputs) ? opts.reference_image_inputs : [];
+  for (let i = 0; i < refList.length; i++) {
+    let url = await resolveVolcOmniImageAsync(refList[i], filesBaseUrl, storageLocalPath, log, genId, i);
+    if (!url) continue;
+    url = await normalizeSeedanceImageForModel(url, imageInputs[i], storageLocalPath, log, genId, i);
+    references.push({ kind: 'image', role: 'reference_image', url });
+  }
+  for (const value of (Array.isArray(opts.reference_video_urls) ? opts.reference_video_urls : [])) {
+    const url = String(value || '').trim();
+    if (url) references.push({ kind: 'video', role: 'reference_video', url });
+  }
+  const audioValues = Array.isArray(opts.reference_audio_urls) && opts.reference_audio_urls.length
+    ? opts.reference_audio_urls : (opts.voice_reference_url ? [opts.voice_reference_url] : []);
+  for (const value of audioValues) {
+    const url = resolveLocalAudioToBase64(String(value || '').trim(), filesBaseUrl, storageLocalPath, log, genId);
+    if (url) references.push({ kind: 'audio', role: 'reference_audio', url });
+  }
+
+  const params = {
+    duration: opts.duration != null ? Math.round(Number(opts.duration)) : undefined,
+    resolution: opts.resolution || undefined,
+    ratio: opts.aspect_ratio || undefined,
+    watermark: opts.watermark != null ? Boolean(opts.watermark) : false,
+    seed: opts.seed != null ? Number(opts.seed) : undefined,
+    generate_audio: opts.generate_audio != null ? Boolean(opts.generate_audio) : undefined,
+  };
+  // Model capability filtering belongs to richbestProvider.buildVideoBody().
+  // Keep the caller declarative so every Richbest path uses one rule source.
+  if (opts.camera_fixed != null) params.camera_fixed = Boolean(opts.camera_fixed);
+
+  let built;
+  try {
+    built = richbest.buildVideoBody({ model, prompt: opts.prompt, references, params });
+  } catch (error) {
+    log.warn('[中转站视频] 提交前参数校验未通过', { video_gen_id: genId, model, error: error.message });
+    return { error: error.message };
+  }
+  if (built.dropped.length) {
+    log.info('[中转站视频] 已剥离该模型不支持的参数', { video_gen_id: genId, model, dropped: built.dropped.join(',') });
+  }
+  if (opts.input_validation_version) require('./seedanceInputValidation').assertRequestSize(built.body);
+
+  const url = buildVideoUrl(config);
+  const idempotencyKey = richbest.idempotencyKey('v', { id: genId, billing_authorization_id: opts.billing_authorization_id });
+  logVideoPostRequest(log, '中转站 Video', url, built.body, genId, {
+    model, profile: profile.key, idempotency_key: idempotencyKey || '(无)',
+    reference_count: references.length,
+  });
+  let response;
+  try {
+    response = await postJSONWithTimeout(url, richbest.headersFor(config, { idempotencyKey }), built.body, 600000);
+  } catch (error) {
+    const detail = [error?.code, error?.message, error?.cause?.code, error?.cause?.message].filter(Boolean).join(': ') || String(error);
+    log.error('[中转站视频] 传输失败', { video_gen_id: genId, error: detail });
+    // 请求已发出、响应没回来：任务可能已经在中转站建好并计费，交给对账而不是当没发生。
+    return { error: `中转站视频请求未能确定结果: ${detail}`, ambiguous: true };
+  }
+  let payload = {};
+  try { payload = response.raw ? JSON.parse(response.raw) : {}; } catch (_) {}
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    const err = richbest.errorFrom(response.statusCode, payload, response.headers);
+    log.error('[中转站视频] 创建失败', { video_gen_id: genId, status: response.statusCode, request_id: err.requestId, error: err.message });
+    return { error: err.message, ambiguous: err.ambiguous, provider_request_id: err.requestId };
+  }
+  const created = richbest.parseVideoTask(payload, response.headers);
+  if (created.video_url) return { video_url: created.video_url };
+  const taskId = payload.id || payload.task_id;
+  if (!taskId) {
+    log.error('[中转站视频] 响应中没有任务 ID', { video_gen_id: genId, data: JSON.stringify(payload).slice(0, 400) });
+    // 2xx 但没有可用任务 ID：中转站已受理，任务可能已建并计费，同样不能当没发生。
+    return { error: '中转站未返回视频任务 ID', ambiguous: true, provider_request_id: created.requestId };
+  }
+  log.info('[中转站视频] 任务已创建', { video_gen_id: genId, task_id: taskId, request_id: created.requestId });
+  return { task_id: taskId, status: 'processing', provider_request_id: created.requestId };
+}
+
 async function executeVideoApi(db, log, opts) {
   const {
     prompt,
@@ -3750,7 +3907,7 @@ async function executeVideoApi(db, log, opts) {
     storage_local_path,
     video_gen_id
   } = opts;
-  const config = getDefaultVideoConfig(db, preferredModel);
+  const config = resolveVideoConfigForSubmit(db, opts);
   if (!config) {
     throw new Error('???????????AI ?????? video ?????????');
   }
@@ -3938,6 +4095,10 @@ async function executeVideoApi(db, log, opts) {
       storage_local_path: opts.storage_local_path,
       video_gen_id: opts.video_gen_id,
     });
+  }
+
+  if (protocol === 'richbest') {
+    return callRichbestVideoApi(db, config, log, opts, model);
   }
 
   const url = buildVideoUrl(config);
@@ -4132,6 +4293,7 @@ async function executePollVideoTask(db, log, videoGenId, taskId, config, maxAtte
     provider === 'volc' ||
     protocol === 'volcengine' ||
     protocol === 'volcengine_omni';
+  const isRelayPoll = protocol === richbest.PROVIDER || provider === richbest.PROVIDER;
   if (protocol === 'jimeng_ai_api') {
     log.warn('[poll] Jimeng AI API 不应进入轮询', { video_gen_id: videoGenId, task_id: taskId });
     return { error: 'Jimeng AI API 为同步返回视频地址，不应进入轮询' };
@@ -4203,12 +4365,15 @@ async function executePollVideoTask(db, log, videoGenId, taskId, config, maxAtte
       log.info('[poll] 发起查询', { video_gen_id: videoGenId, round: pollRound, url });
       const res = await fetch(url, { method: 'GET', headers });
       const raw = await res.text();
-      const bodyLogged =
-        pollLogBodyMax === Infinity
-          ? raw
-          : raw.length <= pollLogBodyMax
-            ? raw
-            : raw.slice(0, pollLogBodyMax) + `\n... [poll 响应已截断 前${pollLogBodyMax}字符 / 共${raw.length}字符，可设环境变量 VIDEO_POLL_LOG_MAX=0 输出全文]`;
+      const bodyLogged = (() => {
+        let safe = raw;
+        try { safe = JSON.stringify(sanitizeVideoProviderResponse(JSON.parse(raw))); } catch (_) {}
+        return pollLogBodyMax === Infinity
+          ? safe
+          : safe.length <= pollLogBodyMax
+            ? safe
+            : safe.slice(0, pollLogBodyMax) + `\n... [poll 响应已截断 前${pollLogBodyMax}字符 / 共${safe.length}字符]`;
+      })();
       log.info('[poll] 查询 HTTP 结果', {
         video_gen_id: videoGenId,
         round: pollRound,
@@ -4238,10 +4403,15 @@ async function executePollVideoTask(db, log, videoGenId, taskId, config, maxAtte
         continue;
       }
 
+      // 中转站的状态机由 richbestProvider 定义（expired / cancelled 都是终态），不能沿用通用启发式：
+      // isPollTaskFailed 里没有 expired，会让已过期任务一直轮询到超时。
+      const relayTask = isRelayPoll ? richbest.parseVideoTask(data, res.headers) : null;
       require('./costLedgerService').byTask(db, taskId, {
-        status: isPollTaskFailed(extractPollTaskStatus(data)) ? 'failed' : 'processing',
-        usage: extractVideoProviderUsage(data).usage,
-        provider_request_id: data.request_id || data.data?.request_id,
+        status: relayTask
+          ? (relayTask.failed ? 'failed' : relayTask.video_url ? 'completed' : 'processing')
+          : isPollTaskFailed(extractPollTaskStatus(data)) ? 'failed' : 'processing',
+        usage: relayTask ? relayTask.usage : extractVideoProviderUsage(data).usage,
+        provider_request_id: relayTask?.requestId || data.request_id || data.data?.request_id,
       }, config?.id);
       if (typeof onProgress === 'function') {
         const observedStatus = extractPollTaskStatus(data)
@@ -4465,6 +4635,31 @@ async function executePollVideoTask(db, log, videoGenId, taskId, config, maxAtte
           parsed_json: sum,
         });
       }
+      if (relayTask) {
+        if (relayTask.failed) {
+          const msg = relayTask.error_message || relayTask.status || '中转站视频任务失败';
+          log.warn('[poll] 中转站任务失败', { video_gen_id: videoGenId, round: pollRound, status: relayTask.status, msg });
+          return { error: String(msg).slice(0, 500) };
+        }
+        if (relayTask.video_url) {
+          log.info('[poll] 中转站任务完成', {
+            video_gen_id: videoGenId, round: pollRound, has_usage: !!relayTask.usage,
+          });
+          return {
+            video_url: relayTask.video_url,
+            usage: relayTask.usage,
+            provider_request_id: relayTask.requestId || taskId,
+            provider_response_snapshot: sanitizeVideoProviderResponse(data),
+          };
+        }
+        if (!relayTask.pending) {
+          log.warn('[poll] 中转站任务状态未识别，继续轮询', {
+            video_gen_id: videoGenId, round: pollRound, status: relayTask.status,
+            body: raw.slice(0, 400),
+          });
+        }
+        continue;
+      }
       if (isPollTaskFailed(status) || errMsg) {
         const msg = failMsg || errMsg || status || '任务失败';
         log.warn('[poll] 任务失败', { video_gen_id: videoGenId, round: pollRound, status, msg });
@@ -4494,11 +4689,13 @@ async function executePollVideoTask(db, log, videoGenId, taskId, config, maxAtte
       log.warn('Video poll request failed', { attempt, error: e.message });
     }
   }
-  return { error: '??????' };
+  return { error: '轮询供应商任务超时，未能确认视频结果；请稍后在历史记录中查看或重试' };
 }
 
 module.exports = {
   getDefaultVideoConfig,
+  resolveVideoProtocol,
+  resolveVideoConfigForSubmit,
   selectCharacterVoiceReference,
   callVideoApi,
   pollVideoTask,
@@ -4518,6 +4715,7 @@ module.exports = {
   buildSd2ActiveAssetUrlLookup,
   applySeedance2CertifiedAssetUrlsToVideoOpts,
   callVolcengineOmniVideoApi,
+  callRichbestVideoApi,
   seedanceImageNeedsNormalization,
   normalizeSeedanceImageForModel,
 };

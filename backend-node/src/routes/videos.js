@@ -3,6 +3,7 @@ const videoService = require('../services/videoService');
 const taskService = require('../services/taskService');
 const { normalizeAspectRatioForApi } = require('../services/videoClient');
 const postprocessPolicy = require('../services/videoPostprocessPolicy');
+const videoTokenEstimate = require('../services/videoTokenEstimate');
 
 function routes(db, log) {
   return {
@@ -80,9 +81,30 @@ function routes(db, log) {
         const billingTarget = require('../services/aiConfigService').resolveBillingTarget(db, body.service_type || 'video', modelForBilling, body.ai_config_id, aiOptions);
         const configForBilling = require('../services/aiConfigService').getConfig(db, billingTarget.config_id) || videoConfig;
         let settings = {}; try { settings = JSON.parse(configForBilling?.settings || '{}'); } catch (_) {}
-        const meters = billing.activeMeters(db, req.auth, body.service_type || 'video', billingTarget.billing_key);
+        const richbest = require('../services/richbestProvider');
+        // 中转站的模型画像差异很大（wan 只收一张首帧图、不收参考视频/音频）。素材形状要在这里
+        // 先挡掉，否则会先建预授权、再异步失败；地址本身的校验仍留在提交侧，因为本地文件
+        // 要先解析成 https/data/asset 才能判定。字段来源与 videoClient.callRichbestVideoApi 保持一致。
+        if (richbest.isRichbest({ provider: billingTarget.provider })) {
+          const firstFrame = body.first_frame_url || body.first_frame_local_path || body.image_url;
+          const lastFrame = body.last_frame_url || body.last_frame_local_path;
+          const shape = [
+            ...(firstFrame ? [{ kind: 'image', role: 'first_frame' }] : []),
+            ...(lastFrame ? [{ kind: 'image', role: 'last_frame' }] : []),
+            ...(Array.isArray(body.reference_image_urls) ? body.reference_image_urls.filter(Boolean).map(() => ({ kind: 'image', role: 'reference_image' })) : []),
+            ...(Array.isArray(body.reference_video_urls) ? body.reference_video_urls.filter(Boolean).map(() => ({ kind: 'video', role: 'reference_video' })) : []),
+            ...((Array.isArray(body.reference_audio_urls) && body.reference_audio_urls.length ? body.reference_audio_urls : [body.voice_reference_url]).filter(Boolean).map(() => ({ kind: 'audio', role: 'reference_audio' }))),
+          ];
+          try { richbest.assertVideoRequestShape({ model: modelForBilling, references: shape }); }
+          catch (error) { return response.badRequest(res, error.message); }
+        }
+        const meters = billing.activeMeters(db, req.auth, body.service_type || 'video', billingTarget.billing_key, billingTarget.provider);
+        // 冻结与落库/提交必须共用同一组值：时长缺省按落库默认 15s（不能让估算回落成 1s），
+        // 分辨率用 postprocessPolicy 归一化后的值（那才是实际提交给供应商的值）。
+        const duration = videoTokenEstimate.normalizeDurationSeconds(body.duration);
+        const resolution = policy.resolution;
         const usage = {};
-        if (meters.includes('second')) usage.second = Number(body.duration || 15) || 15;
+        if (meters.includes('second')) usage.second = duration;
         if (meters.includes('request')) usage.request = 1;
         if (meters.includes('input_token')) {
           const cap = Number(settings.billing_reserve_input_tokens);
@@ -90,15 +112,17 @@ function routes(db, log) {
           usage.input_token = cap;
         }
         if (meters.includes('output_token')) {
-          const cap = Number(settings.billing_reserve_output_tokens ?? settings.billing_reserve_input_tokens);
-          if (!Number.isSafeInteger(cap) || cap <= 0) return response.badRequest(res, '视频模型按 token 计费，需在 AI 配置 settings 中设置 billing_reserve_output_tokens 作为单次预授权上限');
-          usage.output_token = cap;
+          // 上游按输出 token 计费：预授权用量按「时长 × 分辨率 × 画幅」保守估算，
+          // 不再依赖配置里的固定数字（见 videoTokenEstimate 的实测锚点）。
+          usage.output_token = videoTokenEstimate.estimateOutputTokens({
+            resolution: resolution || body.resolution || '480p', aspectRatio: aspectRatio || '16:9', duration,
+          });
         }
         if (!Object.keys(usage).length) return response.badRequest(res, '该视频模型未配置可用计费项');
         if (!String(body.idempotency_key || '').trim()) return response.badRequest(res, '视频生成请求缺少幂等键，请刷新后重试');
         const authorization = billing.createAuthorization(db, req.auth, {
           idempotency_key: String(body.idempotency_key).trim(),
-          service_type: body.service_type || 'video', model: billingTarget.billing_key, provider_model: billingTarget.provider_model,
+          service_type: body.service_type || 'video', model: billingTarget.billing_key, provider_model: billingTarget.provider_model, provider: billingTarget.provider,
           usage, pricing_context: { has_video_input: !!body.video_url, resolution: body.resolution || '480p', has_audio: !!body.audio_url }, reference_type: 'video_generation', reference_id: body.drama_id || null, drama_id: body.drama_id || null, source_kind: 'video_generation', source_id: body.storyboard_id || null,
         });
         const task = taskService.createTask(db, log, 'video_generation', String(body.drama_id || ''), req.auth.id, tenant?.id || null);
@@ -115,8 +139,6 @@ function routes(db, log) {
           }
         }
         const model = modelForBilling;
-        const duration = body.duration ?? 15;
-        const resolution = policy.resolution;
         const upscaleResolution = policy.upscale_resolution;
         const targetFps = policy.target_fps;
         const seed = body.seed != null ? Number(body.seed) : null;

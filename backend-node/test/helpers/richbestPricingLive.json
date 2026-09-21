@@ -1,0 +1,915 @@
+[
+  {
+    "id": "deepseek-v4-flash",
+    "object": "model_price",
+    "display_name": "DeepSeek V4 Flash",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "cached_input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "0.100000",
+        "effective_price_yuan": "0.100000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "3.000000",
+        "effective_price_yuan": "3.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "9.000000",
+        "effective_price_yuan": "9.000000"
+      }
+    ]
+  },
+  {
+    "id": "deepseek-v4-pro",
+    "object": "model_price",
+    "display_name": "DeepSeek V4 Pro",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "cached_input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "0.300000",
+        "effective_price_yuan": "0.300000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "9.000000",
+        "effective_price_yuan": "9.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "27.000000",
+        "effective_price_yuan": "27.000000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seed-2.0-code",
+    "object": "model_price",
+    "display_name": "Doubao Seed 2.0 Code",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.640000",
+        "effective_price_yuan": "0.640000"
+      },
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "1.920000",
+        "effective_price_yuan": "1.920000"
+      },
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.960000",
+        "effective_price_yuan": "0.960000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "3.200000",
+        "effective_price_yuan": "3.200000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "9.600000",
+        "effective_price_yuan": "9.600000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "4.800000",
+        "effective_price_yuan": "4.800000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "16.000000",
+        "effective_price_yuan": "16.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "48.000000",
+        "effective_price_yuan": "48.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "24.000000",
+        "effective_price_yuan": "24.000000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seed-2.0-lite",
+    "object": "model_price",
+    "display_name": "Doubao Seed 2.0 Lite",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.120000",
+        "effective_price_yuan": "0.120000"
+      },
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.360000",
+        "effective_price_yuan": "0.360000"
+      },
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.180000",
+        "effective_price_yuan": "0.180000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.600000",
+        "effective_price_yuan": "0.600000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "1.800000",
+        "effective_price_yuan": "1.800000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.900000",
+        "effective_price_yuan": "0.900000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "3.600000",
+        "effective_price_yuan": "3.600000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "10.800000",
+        "effective_price_yuan": "10.800000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "5.400000",
+        "effective_price_yuan": "5.400000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seed-2.0-mini",
+    "object": "model_price",
+    "display_name": "Doubao Seed 2.0 Mini",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.040000",
+        "effective_price_yuan": "0.040000"
+      },
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.160000",
+        "effective_price_yuan": "0.160000"
+      },
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.080000",
+        "effective_price_yuan": "0.080000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.200000",
+        "effective_price_yuan": "0.200000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.800000",
+        "effective_price_yuan": "0.800000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.400000",
+        "effective_price_yuan": "0.400000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "2.000000",
+        "effective_price_yuan": "2.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "8.000000",
+        "effective_price_yuan": "8.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "4.000000",
+        "effective_price_yuan": "4.000000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seed-2.0-pro",
+    "object": "model_price",
+    "display_name": "Doubao Seed 2.0 Pro",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.640000",
+        "effective_price_yuan": "0.640000"
+      },
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "1.920000",
+        "effective_price_yuan": "1.920000"
+      },
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.960000",
+        "effective_price_yuan": "0.960000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "3.200000",
+        "effective_price_yuan": "3.200000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "9.600000",
+        "effective_price_yuan": "9.600000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "4.800000",
+        "effective_price_yuan": "4.800000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "16.000000",
+        "effective_price_yuan": "16.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:128001-256000",
+        "unit_size": 1000000,
+        "list_price_yuan": "48.000000",
+        "effective_price_yuan": "48.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "24.000000",
+        "effective_price_yuan": "24.000000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seed-2.1-pro",
+    "object": "model_price",
+    "display_name": "Doubao Seed 2.1 Pro",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "cached_input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "1.200000",
+        "effective_price_yuan": "1.200000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "6.000000",
+        "effective_price_yuan": "6.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "30.000000",
+        "effective_price_yuan": "30.000000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seed-2.1-turbo",
+    "object": "model_price",
+    "display_name": "Doubao Seed 2.1 Turbo",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "cached_input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "0.600000",
+        "effective_price_yuan": "0.600000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "3.000000",
+        "effective_price_yuan": "3.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "15.000000",
+        "effective_price_yuan": "15.000000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seed-character",
+    "object": "model_price",
+    "display_name": "Doubao Seed Character",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.160000",
+        "effective_price_yuan": "0.160000"
+      },
+      {
+        "metric": "cached_input_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.160000",
+        "effective_price_yuan": "0.160000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "0.800000",
+        "effective_price_yuan": "0.800000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "1.200000",
+        "effective_price_yuan": "1.200000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:0-32000",
+        "unit_size": 1000000,
+        "list_price_yuan": "2.000000",
+        "effective_price_yuan": "2.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "tokens:32001-128000",
+        "unit_size": 1000000,
+        "list_price_yuan": "6.000000",
+        "effective_price_yuan": "6.000000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seed-evolving",
+    "object": "model_price",
+    "display_name": "Doubao Seed Evolving",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "cached_input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "1.200000",
+        "effective_price_yuan": "1.200000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "6.000000",
+        "effective_price_yuan": "6.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "30.000000",
+        "effective_price_yuan": "30.000000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seed-translation",
+    "object": "model_price",
+    "display_name": "Doubao Seed Translation",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "1.200000",
+        "effective_price_yuan": "1.200000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "3.600000",
+        "effective_price_yuan": "3.600000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seedance-1.0-pro",
+    "object": "model_price",
+    "display_name": "Doubao Seedance 1.0 Pro",
+    "provider": "volcengine_ark",
+    "modality": "video",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "output_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "15.000000",
+        "effective_price_yuan": "15.000000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seedance-1.0-pro-fast",
+    "object": "model_price",
+    "display_name": "Doubao Seedance 1.0 Pro Fast",
+    "provider": "volcengine_ark",
+    "modality": "video",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "output_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "4.200000",
+        "effective_price_yuan": "4.200000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seedance-2.0",
+    "object": "model_price",
+    "display_name": "Doubao Seedance 2.0",
+    "provider": "volcengine_ark",
+    "modality": "video",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "output_tokens",
+        "dimension": "1080p:no_video",
+        "unit_size": 1000000,
+        "list_price_yuan": "51.000000",
+        "effective_price_yuan": "51.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "1080p:video",
+        "unit_size": 1000000,
+        "list_price_yuan": "31.000000",
+        "effective_price_yuan": "31.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "480p:no_video",
+        "unit_size": 1000000,
+        "list_price_yuan": "46.000000",
+        "effective_price_yuan": "46.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "480p:video",
+        "unit_size": 1000000,
+        "list_price_yuan": "28.000000",
+        "effective_price_yuan": "28.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "720p:no_video",
+        "unit_size": 1000000,
+        "list_price_yuan": "46.000000",
+        "effective_price_yuan": "46.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "720p:video",
+        "unit_size": 1000000,
+        "list_price_yuan": "28.000000",
+        "effective_price_yuan": "28.000000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seedance-2.0-fast",
+    "object": "model_price",
+    "display_name": "Doubao Seedance 2.0 Fast",
+    "provider": "volcengine_ark",
+    "modality": "video",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "output_tokens",
+        "dimension": "480p:no_video",
+        "unit_size": 1000000,
+        "list_price_yuan": "27.750000",
+        "effective_price_yuan": "27.750000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "480p:video",
+        "unit_size": 1000000,
+        "list_price_yuan": "16.500000",
+        "effective_price_yuan": "16.500000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "720p:no_video",
+        "unit_size": 1000000,
+        "list_price_yuan": "27.750000",
+        "effective_price_yuan": "27.750000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "720p:video",
+        "unit_size": 1000000,
+        "list_price_yuan": "16.500000",
+        "effective_price_yuan": "16.500000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seedance-2.0-mini",
+    "object": "model_price",
+    "display_name": "Doubao Seedance 2.0 Mini",
+    "provider": "volcengine_ark",
+    "modality": "video",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "output_tokens",
+        "dimension": "480p:no_video",
+        "unit_size": 1000000,
+        "list_price_yuan": "9.200000",
+        "effective_price_yuan": "9.200000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "480p:video",
+        "unit_size": 1000000,
+        "list_price_yuan": "5.600000",
+        "effective_price_yuan": "5.600000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "720p:no_video",
+        "unit_size": 1000000,
+        "list_price_yuan": "9.200000",
+        "effective_price_yuan": "9.200000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "720p:video",
+        "unit_size": 1000000,
+        "list_price_yuan": "5.600000",
+        "effective_price_yuan": "5.600000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seedance-2.5",
+    "object": "model_price",
+    "display_name": "Doubao Seedance 2.5",
+    "provider": "volcengine_ark",
+    "modality": "video",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "output_tokens",
+        "dimension": "1080p:no_video",
+        "unit_size": 1000000,
+        "list_price_yuan": "55.440000",
+        "effective_price_yuan": "55.440000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "1080p:video",
+        "unit_size": 1000000,
+        "list_price_yuan": "33.120000",
+        "effective_price_yuan": "33.120000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "480p:no_video",
+        "unit_size": 1000000,
+        "list_price_yuan": "70.000000",
+        "effective_price_yuan": "70.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "480p:video",
+        "unit_size": 1000000,
+        "list_price_yuan": "42.000000",
+        "effective_price_yuan": "42.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "720p:no_video",
+        "unit_size": 1000000,
+        "list_price_yuan": "70.000000",
+        "effective_price_yuan": "70.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": "720p:video",
+        "unit_size": 1000000,
+        "list_price_yuan": "42.000000",
+        "effective_price_yuan": "42.000000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seedream-4.0",
+    "object": "model_price",
+    "display_name": "Doubao Seedream 4.0",
+    "provider": "volcengine_ark",
+    "modality": "image",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "image",
+        "dimension": null,
+        "unit_size": 1,
+        "list_price_yuan": "0.200000",
+        "effective_price_yuan": "0.200000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seedream-4.5",
+    "object": "model_price",
+    "display_name": "Doubao Seedream 4.5",
+    "provider": "volcengine_ark",
+    "modality": "image",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "image",
+        "dimension": null,
+        "unit_size": 1,
+        "list_price_yuan": "0.250000",
+        "effective_price_yuan": "0.250000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seedream-5.0",
+    "object": "model_price",
+    "display_name": "Doubao Seedream 5.0",
+    "provider": "volcengine_ark",
+    "modality": "image",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "image",
+        "dimension": null,
+        "unit_size": 1,
+        "list_price_yuan": "0.220000",
+        "effective_price_yuan": "0.220000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seedream-5.0-lite",
+    "object": "model_price",
+    "display_name": "Doubao Seedream 5.0 Lite",
+    "provider": "volcengine_ark",
+    "modality": "image",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "image",
+        "dimension": null,
+        "unit_size": 1,
+        "list_price_yuan": "0.220000",
+        "effective_price_yuan": "0.220000"
+      }
+    ]
+  },
+  {
+    "id": "doubao-seedream-5.0-pro",
+    "object": "model_price",
+    "display_name": "Doubao Seedream 5.0 Pro",
+    "provider": "volcengine_ark",
+    "modality": "image",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "image",
+        "dimension": "input:after_first",
+        "unit_size": 1,
+        "list_price_yuan": "0.020000",
+        "effective_price_yuan": "0.020000"
+      },
+      {
+        "metric": "image",
+        "dimension": "output:gt2610000",
+        "unit_size": 1,
+        "list_price_yuan": "0.600000",
+        "effective_price_yuan": "0.600000"
+      },
+      {
+        "metric": "image",
+        "dimension": "output:le2610000",
+        "unit_size": 1,
+        "list_price_yuan": "0.300000",
+        "effective_price_yuan": "0.300000"
+      }
+    ]
+  },
+  {
+    "id": "glm-5.2",
+    "object": "model_price",
+    "display_name": "GLM 5.2",
+    "provider": "volcengine_ark",
+    "modality": "text",
+    "currency": "CNY",
+    "tax_inclusive": false,
+    "configured": true,
+    "prices": [
+      {
+        "metric": "cached_input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "2.000000",
+        "effective_price_yuan": "2.000000"
+      },
+      {
+        "metric": "input_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "8.000000",
+        "effective_price_yuan": "8.000000"
+      },
+      {
+        "metric": "output_tokens",
+        "dimension": null,
+        "unit_size": 1000000,
+        "list_price_yuan": "28.000000",
+        "effective_price_yuan": "28.000000"
+      }
+    ]
+  }
+]

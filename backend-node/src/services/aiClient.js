@@ -2,6 +2,7 @@ const costTransport = require('./costTransport');
 // 与 Go pkg/ai + application/services/ai_service 对齐：读取 ai_service_configs，调用 OpenAI 兼容的 chat completions
 const aiConfigService = require('./aiConfigService');
 const { applyDeepSeekChatOptions } = require('./deepseekConfig');
+const richbest = require('./richbestProvider');
 const https = require('https');
 const http = require('http');
 const net = require('net');
@@ -303,6 +304,8 @@ function buildChatUrl(config) {
   const base = (config.base_url || '').replace(/\/$/, '');
   let ep = config.endpoint || '/chat/completions';
   if (!ep.startsWith('/')) ep = '/' + ep;
+  // 中转站的兼容路径挂在 /v1 下；管理员只填站点根地址时补齐，避免 404。
+  if (richbest.isRichbest(config) && !/\/v\d+$/.test(base) && !ep.startsWith('/v1')) return base + '/v1' + ep;
   return base + ep;
 }
 
@@ -318,7 +321,7 @@ function createAutomaticTextAuthorization(db, config, model, userPrompt, systemP
   if (!context?.actor?.id || context.auto_billing_disabled) return null;
   const billing = require('./billingService');
   const target = aiConfigService.resolveBillingTarget(db, billingServiceType, model, config.id, configScope());
-  const meters = billing.activeMeters(db, context.actor, billingServiceType, target.billing_key);
+  const meters = billing.activeMeters(db, context.actor, billingServiceType, target.billing_key, target.provider);
   const reserve = require('./billingUsageService').textReservation(`${systemPrompt || ''}\n${userPrompt || ''}`, maxOutputTokens);
   const usage = {};
   if (meters.includes('request')) usage.request = 1;
@@ -327,7 +330,7 @@ function createAutomaticTextAuthorization(db, config, model, userPrompt, systemP
   if (!Object.keys(usage).length) throw new Error(`文本模型 ${target.billing_key} 未配置可用计费项，已拒绝调用`);
   const authorization = billing.createAuthorization(db, context.actor, {
     idempotency_key: `text:${context.actor.id}:${require('crypto').randomUUID()}`,
-    service_type: billingServiceType, model: target.billing_key, provider_model: target.provider_model, usage, reference_type: 'text_generation',
+    service_type: billingServiceType, model: target.billing_key, provider_model: target.provider_model, provider: target.provider, usage, reference_type: 'text_generation',
     // Project-scoped text flows place this data in the request context before
     // their asynchronous work starts. The authorization snapshot is then the
     // single source used by ledger, usage logs and administrator rollups.
@@ -490,6 +493,12 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
   // instead of charging an estimate.
   if (options.include_usage !== false) body.stream_options = { include_usage: true };
   body = applyDeepSeekChatOptions(config, body);
+  // 中转站会拒绝白名单外的顶层字段（422），内部路由字段更不能出现在请求里。
+  if (richbest.isRichbest(config)) {
+    const mutated = richbest.mutateChatBody(body);
+    if (mutated.dropped.length) log.info('AI generateText: 已剥离中转站不接受的顶层字段', { model, dropped: mutated.dropped.join(',') });
+    body = mutated.body;
+  }
   const billingTicket = createAutomaticTextAuthorization(db, config, model, userPrompt, systemPrompt, finalMaxTokens, serviceType);
   const startMs = Date.now();
   log.info('AI generateText request', { url: url.slice(0, 60), model, max_tokens: finalMaxTokens ?? '(model default)', json_mode, stream: true });
@@ -602,6 +611,12 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
   };
   if (options.include_usage !== false) body.stream_options = { include_usage: true };
   body = applyDeepSeekChatOptions(config, body);
+  // 中转站会拒绝白名单外的顶层字段（422），内部路由字段更不能出现在请求里。
+  if (richbest.isRichbest(config)) {
+    const mutated = richbest.mutateChatBody(body);
+    if (mutated.dropped.length) log.info('AI streamGenerateText: 已剥离中转站不接受的顶层字段', { model, dropped: mutated.dropped.join(',') });
+    body = mutated.body;
+  }
   const billingTicket = createAutomaticTextAuthorization(db, config, model, userPrompt, systemPrompt, finalMaxTokens, serviceType);
   const silenceMs = options.silence_timeout_ms != null ? Number(options.silence_timeout_ms) : 120000;
   const startMs = Date.now();

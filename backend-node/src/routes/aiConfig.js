@@ -202,7 +202,7 @@ function testConnection(db, log) {
       return response.badRequest(res, '缺少 base_url 或 api_key');
     }
     try {
-      await aiConfigService.testConnection({
+      const summary = await aiConfigService.testConnection({
         base_url: input.base_url,
         api_key: input.api_key,
         model: input.model,
@@ -210,8 +210,10 @@ function testConnection(db, log) {
         endpoint: input.endpoint,
         service_type: input.service_type,
         settings: input.settings,
+        // 中转站需要比对「生成 / 素材库」两处业务 Key 是否同一个项目（见 testConnection）。
+        db,
       });
-      response.success(res, { message: '连接测试成功' });
+      response.success(res, { message: '连接测试成功', ...(summary && typeof summary === 'object' ? summary : {}) });
     } catch (err) {
       log.error('AI config test connection failed', { error: err.message });
       response.badRequest(res, '连接测试失败: ' + (err.message || '未知错误'));

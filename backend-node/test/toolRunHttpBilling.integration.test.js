@@ -157,6 +157,7 @@ test('setupRouter tool writing and reverse workflows settle one authorization wi
     assert.equal(config.model[0], 'fixture-model');
     const priceBook = db.prepare("SELECT id FROM billing_price_books WHERE status='published' ORDER BY id LIMIT 1").get();
     assert.ok(priceBook, 'migrations must provide a published system price book');
+    db.prepare('UPDATE billing_price_books SET provider=NULL WHERE id=?').run(priceBook.id);
     const now = new Date().toISOString();
     const addPrice = db.prepare(`INSERT INTO billing_price_book_items
       (price_book_id, service_type, model, meter, unit_price_micro, is_free, conditions_json, created_at, updated_at)

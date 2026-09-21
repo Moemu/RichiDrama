@@ -96,15 +96,36 @@ function audit(db, actorId, action, targetType, targetId, detail) {
     .run(uuid(), actorId, action, targetType, targetId == null ? null : String(targetId), json(detail), now());
 }
 
-function activePriceItems(db, userId, serviceType, model) {
+function activePriceItems(db, userId, serviceType, model, provider) {
   const at = now();
-  const tenantBook = require('./tenantService').priceBookForUser(db, userId);
+  const tenantBook = require('./tenantService').priceBookForUser(db, userId, provider || null);
   if (tenantBook) {
     return db.prepare(`SELECT pbi.*, pb.id AS price_book_id, pb.name AS price_book_name, pb.owner_user_id
       FROM billing_price_book_items pbi JOIN billing_price_books pb ON pb.id = pbi.price_book_id
       WHERE pb.id = ? AND pb.status = 'published' AND (pb.effective_from IS NULL OR pb.effective_from <= ?)
         AND (pb.effective_to IS NULL OR pb.effective_to > ?) AND pbi.service_type = ? AND pbi.model = ?
       ORDER BY pbi.id DESC`).all(tenantBook.id, at, at, serviceType, model);
+  }
+  // 注意：调用方必须传 provider 才能拿到按供应商区分的价目。兜底查询（下面的未过滤版本）
+  // 不区分 provider —— 火山与中转站有大量重名别名，漏传就等于「任一覆盖该模型的已发布价目书」。
+  // 目前只有 videoUpscaleService / videoInterpolationService / POST /billing/authorize 建的
+  // 预授权没有 provider 标签，它们只涉及火山后处理价目，暂不冲突。
+  if (provider) {
+    // Provider-aware platform lookup: books tagged for the serving provider
+    // first, legacy untagged books still participate so historical data keeps
+    // resolving exactly as before option B.
+    const scoped = db.prepare(`SELECT pbi.*, pb.id AS price_book_id, pb.name AS price_book_name, pb.owner_user_id
+      FROM billing_price_book_items pbi JOIN billing_price_books pb ON pb.id = pbi.price_book_id
+      WHERE pb.status = 'published' AND (pb.effective_from IS NULL OR pb.effective_from <= ?)
+        AND (pb.effective_to IS NULL OR pb.effective_to > ?) AND (pb.owner_user_id IS NULL OR pb.owner_user_id = ?)
+        AND (pb.provider = ? OR pb.provider IS NULL OR pb.provider = '') AND pbi.service_type = ? AND pbi.model = ?
+      ORDER BY CASE WHEN pb.owner_user_id = ? THEN 0 WHEN pb.provider = ? THEN 1 ELSE 2 END, pb.updated_at DESC, pbi.id DESC`)
+      .all(at, at, userId, provider, serviceType, model, userId, provider);
+    if (scoped.length) return scoped;
+    // A provider-scoped request must never borrow another provider's price.
+    // Missing provider pricing is safer than charging a same-named model at
+    // an unrelated supplier's rate.
+    return [];
   }
   return db.prepare(`SELECT pbi.*, pb.id AS price_book_id, pb.name AS price_book_name, pb.owner_user_id
     FROM billing_price_book_items pbi JOIN billing_price_books pb ON pb.id = pbi.price_book_id
@@ -114,12 +135,12 @@ function activePriceItems(db, userId, serviceType, model) {
     ORDER BY CASE WHEN pb.owner_user_id = ? THEN 0 ELSE 1 END, pb.updated_at DESC, pbi.id DESC`).all(at, at, userId, serviceType, model, userId);
 }
 
-function activeMeters(db, user, serviceType, model) {
-  return [...new Set(activePriceItems(db, user.id, serviceType, model).map((item) => item.meter))];
+function activeMeters(db, user, serviceType, model, provider) {
+  return [...new Set(activePriceItems(db, user.id, serviceType, model, provider).map((item) => item.meter))];
 }
 
 function normalizeUsage(usage) {
-  const allowed = ['request', 'image', 'input_image', 'second', 'millisecond', 'character', 'input_token', 'output_token'];
+  const allowed = ['request', 'image', 'input_image', 'second', 'millisecond', 'character', 'input_token', 'cache_token', 'output_token'];
   const clean = {};
   for (const meter of allowed) {
     const v = Number(usage?.[meter] || 0);
@@ -140,8 +161,10 @@ function tierFor(conditions, usage) {
   if (!tiers.length) return null;
   for (const tier of tiers) {
     const meter = String(tier.selector_meter || '').trim();
-    const quantity = usage?.[meter];
-    if (!['input_token', 'output_token'].includes(meter) || !Number.isSafeInteger(quantity) || quantity < 0) continue;
+    const quantity = meter === 'total_input_token'
+      ? Number(usage?.input_token || 0) + Number(usage?.cache_token || 0)
+      : usage?.[meter];
+    if (!['input_token', 'cache_token', 'total_input_token', 'output_token'].includes(meter) || !Number.isSafeInteger(quantity) || quantity < 0) continue;
     const min = tier.min_inclusive == null ? 0 : Number(tier.min_inclusive);
     const max = tier.max_inclusive == null ? Number.MAX_SAFE_INTEGER : Number(tier.max_inclusive);
     if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min < 0 || max < min) continue;
@@ -188,7 +211,7 @@ function quote(db, user, input) {
   if (!serviceType || !model) throw new Error('service_type 和 model 必填');
   require('./modelCatalogService').assertAvailable(db, serviceType, input.provider_model || model);
   const usage = normalizeUsage(input.usage);
-  const rows = activePriceItems(db, user.id, serviceType, model);
+  const rows = activePriceItems(db, user.id, serviceType, model, input.provider || null);
   const byMeter = new Map(); for (const row of rows) if (!byMeter.has(row.meter)) byMeter.set(row.meter, row);
   const imageConditions = parseConditions(byMeter.get('image')?.conditions_json);
   if (seedreamPricing.enabled(imageConditions)) {
@@ -207,6 +230,16 @@ function quote(db, user, input) {
     amountMicro += subtotal;
     if (!Number.isSafeInteger(amountMicro)) throw new Error('计费金额超出安全范围');
     rates.push({ meter, quantity: qty, unit_price_micro: rate.unit_price_micro, unit_size: rate.unit_size, rate_id: rate.rate_id, conditions: rate.conditions, is_free: !!price.is_free, subtotal_micro: subtotal, price_book_id: price.price_book_id, price_book_name: price.price_book_name });
+  }
+  // Cache hits are unknown before submission. Preserve the cache price in the
+  // authorization snapshot at zero quantity so final provider usage can split
+  // total input into ordinary and cached tokens without changing the frozen
+  // amount. The ordinary input reservation remains the conservative ceiling.
+  if (usage.input_token != null && !Object.prototype.hasOwnProperty.call(usage, 'cache_token') && byMeter.has('cache_token')) {
+    const price = byMeter.get('cache_token');
+    const rate = rateFor(price, input.pricing_context || {}, { ...usage, cache_token: 0 });
+    usage.cache_token = 0;
+    rates.push({ meter: 'cache_token', quantity: 0, unit_price_micro: rate.unit_price_micro, unit_size: rate.unit_size, rate_id: rate.rate_id, conditions: rate.conditions, is_free: !!price.is_free, subtotal_micro: 0, price_book_id: price.price_book_id, price_book_name: price.price_book_name });
   }
   return { user_id: user.id, service_type: serviceType, model, provider_model: input.provider_model || model, usage, pricing_context: input.pricing_context || {}, amount_micro: amountMicro, amount: microToCredits(amountMicro), rates, quoted_at: now() };
 }
@@ -931,7 +964,7 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
     throw new Error('生效结束时间必须晚于生效开始时间');
   }
   seedreamPricing.validateItems(items);
-  const supportedMeters = new Set(['request','image','input_image','second','millisecond','character','input_token','output_token']);
+  const supportedMeters = new Set(['request','image','input_image','second','millisecond','character','input_token','cache_token','output_token']);
   if (status === 'published' && !items.length) throw new Error('发布价目表至少需要一个价目');
   const seen = new Set();
   for (const item of items) {
@@ -978,12 +1011,12 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
       const key = `${selector}\u0000${min}\u0000${max}`;
       let tierPrice;
       try { tierPrice = creditsToMicro(tier.unit_price_points); } catch (_) { tierPrice = -1; }
-      if (!['input_token', 'output_token'].includes(selector) || !Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min < 0 || max < min || tierPrice < 0 || !Number.isSafeInteger(Number(tier.unit_size || conditions.unit_size || 1)) || Number(tier.unit_size || conditions.unit_size || 1) <= 0 || seenTiers.has(key)) {
+      if (!['input_token', 'cache_token', 'total_input_token', 'output_token'].includes(selector) || !Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min < 0 || max < min || tierPrice < 0 || !Number.isSafeInteger(Number(tier.unit_size || conditions.unit_size || 1)) || Number(tier.unit_size || conditions.unit_size || 1) <= 0 || seenTiers.has(key)) {
         throw new Error('token 分档必须使用已知计量器、有效的整数边界和正整数计量单位');
       }
       seenTiers.add(key);
     }
-    for (const selector of ['input_token', 'output_token']) {
+    for (const selector of ['input_token', 'cache_token', 'total_input_token', 'output_token']) {
       const ordered = tiers.filter((tier) => tier.selector_meter === selector)
         .slice().sort((a, b) => Number(a.min_inclusive || 0) - Number(b.min_inclusive || 0));
       for (let index = 1; index < ordered.length; index += 1) {
@@ -1033,7 +1066,7 @@ function savePriceBook(db, actorId, input, id) {
     const stmt = db.prepare(`INSERT INTO billing_price_book_items (price_book_id, service_type, model, meter, unit_price_micro, is_free, conditions_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const item of items) {
-      const meter = String(item.meter || '').trim(); if (!['request','image','input_image','second','millisecond','character','input_token','output_token'].includes(meter)) throw new Error('不支持的计量器');
+      const meter = String(item.meter || '').trim(); if (!['request','image','input_image','second','millisecond','character','input_token','cache_token','output_token'].includes(meter)) throw new Error('不支持的计量器');
       const serviceType = String(item.service_type || '').trim(); const model = String(item.model || '').trim(); if (!serviceType || !model) throw new Error('价目项需要 service_type 和 model');
       stmt.run(bookId, serviceType, model, meter, creditsToMicro(item.unit_price ?? microToCredits(item.unit_price_micro || 0)), item.is_free ? 1 : 0, item.conditions_json ? json(item.conditions_json) : null, at, at);
     }

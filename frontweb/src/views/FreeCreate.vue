@@ -194,7 +194,7 @@
     </ProjectAssetLibraryDialog>
     <el-dialog v-model="requestPreviewOpen" title="本次生成请求预览" width="620px" append-to-body @open="quoteCurrentRequest">
       <p class="request-preview-note">此处仅展示将要提交的内容，不会润色或改写你的原始提示词。</p>
-      <p class="request-preview-note">预估冻结：{{ quotingEstimate ? '计算中…' : estimatedPoints == null ? '当前模型尚无可用报价' : `${Number(estimatedPoints).toFixed(2)} 积分` }}（最终按供应商真实用量结算）</p>
+      <p class="request-preview-note">预估冻结：{{ quotingEstimate ? '计算中…' : estimatedPoints == null ? '当前模型尚无可用报价' : `${Number(estimatedPoints).toFixed(2)} 积分` }}<template v-if="reserveBasis">（按 {{ reserveBasis.basis }} 估算 {{ reserveBasis.output_tokens }} tokens）</template>（最终按供应商真实用量结算）</p>
       <pre class="request-preview">{{ JSON.stringify(requestPreview, null, 2) }}</pre>
       <div class="request-preview-actions"><el-button :disabled="projectSession.enabled && !projectSession.canEdit" :loading="polishingPrompt" @click="suggestPolish">AI 润色建议</el-button><el-button :disabled="projectSession.enabled && !projectSession.canEdit" v-if="polishSuggestion" type="primary" plain @click="applyPolishSuggestion">应用建议</el-button></div>
       <div v-if="polishSuggestion" class="polish-suggestion"><b>润色建议（尚未应用）</b><pre>{{ polishSuggestion }}</pre></div>
@@ -575,12 +575,12 @@ const generationStallMinutes = computed(() => {
   return Number.isFinite(elapsed) && elapsed > 8 * 60 * 1000 ? Math.floor(elapsed / 60000) : 0
 })
 const generationProgressMessage = computed(() => generationStallMinutes.value ? '任务仍在进行，可先编辑其他镜头。' : (activeJob.value?.task_message || '任务已提交，正在等待下一次状态更新'))
-const estimatedPoints = ref(null), quotingEstimate = ref(false)
+const estimatedPoints = ref(null), quotingEstimate = ref(false), reserveBasis = ref(null)
 const requestPreview = computed(() => ({ prompt: prompt.value, asset_selection_policy: 'prompt_references', creation_mode: creationMode.value, model: currentCapability.value?.model || model.value, aspect_ratio: aspectRatio.value, duration_seconds: normalizeDuration(duration.value), resolution: resolution.value, upscale_resolution: upscaleResolution.value, target_fps: targetFps.value, audio_strategy: audioStrategy.value, assets: requestAssets.value.map((asset, index) => ({ ordinal: index + 1, name: promptAssetFor(asset).alias, type: asset.type, usage: asset.usage, routing: assetRouteHint(asset) })) }))
 const requestMaterialRouting = computed(() => materialRoutingPreview(requestAssets.value, currentCapability.value, { audioStrategy: audioStrategy.value }))
 const quoteHasVideoInput = computed(() => requestMaterialRouting.value.sent.video > 0)
 const quoteHasAudioInput = computed(() => requestMaterialRouting.value.sent.audio > 0)
-async function quoteCurrentRequest() { if (!currentCapability.value?.model) return; quotingEstimate.value = true; try { const quote = await omniVideoAPI.quoteBilling({ model: currentCapability.value.model, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', has_video_input: quoteHasVideoInput.value, has_audio: quoteHasAudioInput.value }); estimatedPoints.value = quote.amount } catch (_) { estimatedPoints.value = null } finally { quotingEstimate.value = false } }
+async function quoteCurrentRequest() { if (!currentCapability.value?.model) return; quotingEstimate.value = true; try { const quote = await omniVideoAPI.quoteBilling({ model: currentCapability.value.model, duration: normalizeDuration(duration.value), resolution: resolution.value || '720p', has_video_input: quoteHasVideoInput.value, has_audio: quoteHasAudioInput.value }); estimatedPoints.value = quote.amount; reserveBasis.value = quote.reserve || null } catch (_) { estimatedPoints.value = null; reserveBasis.value = null } finally { quotingEstimate.value = false } }
 
 async function suggestPolish() {
   if (!prompt.value.trim() || polishingPrompt.value) return

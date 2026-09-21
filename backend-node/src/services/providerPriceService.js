@@ -5,6 +5,7 @@ const { randomUUID } = require('crypto');
 const { signOpenApiRequest: signedHeaders } = require('./volcengineOpenApiSigning');
 
 const PROVIDER = 'volcengine';
+const RELAY_PROVIDER = 'richbest';
 const ARK_VERSION = '2024-01-01';
 const BILLING_VERSION = '2022-01-01';
 const POINTS_PER_CNY = 100;
@@ -274,27 +275,36 @@ function releaseLock(db, token, provider = PROVIDER) {
 }
 
 function normalizeName(value) { return String(value || '').trim().toLowerCase().replace(/[._\s]+/g, '-'); }
-function pricingConfigurations(db) {
+function isRelay(provider) { return String(provider || '').toLowerCase() === RELAY_PROVIDER; }
+/** 配置行归属哪个价目源：火山沿用历史供应商名匹配，中转只认 provider='richbest'。 */
+function providerMatches(configProvider, provider) {
+  const name = String(configProvider || '').toLowerCase();
+  return isRelay(provider) ? name === RELAY_PROVIDER : /(?:volc|doubao|火山)/i.test(name);
+}
+function pricingConfigurations(db, provider = PROVIDER) {
   const ai = require('./aiConfigService');
   return db.prepare('SELECT id FROM ai_service_configs WHERE deleted_at IS NULL ORDER BY id').all()
-    .map(row => ai.getConfig(db, row.id)).filter(config => config.is_active && /(?:volc|doubao|火山)/i.test(config.provider || ''))
+    .map(row => ai.getConfig(db, row.id)).filter(config => config.is_active && providerMatches(config.provider, provider))
     .map(config => ({ id: config.id, service_type: config.service_type, provider: config.provider,
       model: JSON.stringify(config.model), billing_key: config.billing_key }));
 }
 
-function configuredTargets(db, providerModel) {
+function configuredTargets(db, providerModel, provider = PROVIDER) {
   const needle = normalizeName(providerModel);
-  const rows = pricingConfigurations(db);
+  const rows = pricingConfigurations(db, provider);
   const targets = [];
   for (const row of rows) {
-    if (!/(?:volc|doubao|火山)/i.test(String(row.provider || ''))) continue;
+    if (!providerMatches(row.provider, provider)) continue;
     const models = (() => { const parsedModels = parse(row.model, null); return Array.isArray(parsedModels) ? parsedModels : String(row.model || '').split(','); })();
     const modelKeys = models.filter(Boolean).map((item) => String(item).trim());
     const keys = [...modelKeys, row.billing_key].filter(Boolean).map((item) => String(item).trim());
     const exact = keys.some((item) => normalizeName(item) === needle);
-    const family = keys.some((item) => normalizeName(item).startsWith(`${needle}-`) || needle.startsWith(`${normalizeName(item)}-`));
+    // 中转别名必须精确对到自己的 billing_key：family 前缀会让 doubao-seedance-2.0
+    // 命中 doubao-seedance-2.0-fast 这类同族型号，把两个型号的单价串到一起。
+    const family = isRelay(provider) ? false
+      : keys.some((item) => normalizeName(item).startsWith(`${needle}-`) || needle.startsWith(`${normalizeName(item)}-`));
     const matchedModel = modelKeys.find((item) => normalizeName(item) === needle)
-      || modelKeys.find((item) => normalizeName(item).startsWith(`${needle}-`) || needle.startsWith(`${normalizeName(item)}-`));
+      || (isRelay(provider) ? undefined : modelKeys.find((item) => normalizeName(item).startsWith(`${needle}-`) || needle.startsWith(`${normalizeName(item)}-`)));
     if (exact || family) targets.push({ service_type: row.service_type, billing_key: String(row.billing_key || matchedModel || providerModel).trim(), exact });
   }
   const unique = [...new Map(targets.map((item) => [`${item.service_type}\0${item.billing_key}`, item])).values()];
@@ -591,43 +601,116 @@ function syncView(db, id) {
   const sync = db.prepare('SELECT * FROM provider_price_syncs WHERE id=?').get(id);
   if (!sync) return null;
   const currentConditions = db.prepare('SELECT conditions_json FROM billing_price_book_items WHERE id=?');
-  const reused = sync.status === 'unchanged' ? db.prepare("SELECT id FROM provider_price_syncs WHERE response_hash=? AND status='completed' AND id<>? ORDER BY created_at DESC LIMIT 1").get(sync.response_hash, id) : null;
+  const reused = sync.status === 'unchanged' ? db.prepare("SELECT id FROM provider_price_syncs WHERE provider=? AND response_hash=? AND status='completed' AND id<>? ORDER BY created_at DESC LIMIT 1").get(sync.provider, sync.response_hash, id) : null;
   return { ...sync, ...(reused ? { reused_from_sync_id: reused.id } : {}), provider_request_ids: parse(sync.provider_request_ids_json, []), candidates: db.prepare('SELECT * FROM provider_price_candidates WHERE sync_id=? ORDER BY provider_model,charge_type,id').all(id).map((row) => ({ ...row, excluded_from_sync: !!require('./supplierCostRates').fixedRate(row.provider_model), is_unchanged: candidateUnchanged(row), conditions_changed: !!row.conditions_changed, current_conditions: parse(currentConditions.get(row.current_price_book_item_id)?.conditions_json, null), new_conditions: parse(row.new_conditions_json, null), raw_item: parse(row.raw_item_json, null) })) };
 }
 
-function listSyncs(db, limit = 30) {
-  return db.prepare('SELECT id,provider,status,trigger_type,response_hash,candidate_count,mapped_count,changed_count,error_summary,fetched_at,created_at FROM provider_price_syncs ORDER BY created_at DESC LIMIT ?').all(Math.min(100, Math.max(1, Number(limit) || 30)));
+function listSyncs(db, limit = 30, provider = null) {
+  const rowLimit = Math.min(100, Math.max(1, Number(limit) || 30));
+  // 价目来源分行存放：只按 provider 过滤，缺省时保持旧行为（全部来源混排）。
+  if (provider) return db.prepare('SELECT id,provider,status,trigger_type,response_hash,candidate_count,mapped_count,changed_count,error_summary,fetched_at,created_at FROM provider_price_syncs WHERE provider=? ORDER BY created_at DESC LIMIT ?').all(provider, rowLimit);
+  return db.prepare('SELECT id,provider,status,trigger_type,response_hash,candidate_count,mapped_count,changed_count,error_summary,fetched_at,created_at FROM provider_price_syncs ORDER BY created_at DESC LIMIT ?').all(rowLimit);
+}
+
+/** 与火山同源：已导入的中转模型若上游价目里没有条目，必须显式提醒，不能静默消失。 */
+function relayMissingConfiguredModelRows(db, items) {
+  const upstream = new Set(items.map((item) => normalizeName(item?.id)).filter(Boolean));
+  const seen = new Set();
+  const warnings = [];
+  for (const row of pricingConfigurations(db, RELAY_PROVIDER)) {
+    const configured = parse(row.model, null);
+    for (const value of Array.isArray(configured) ? configured : String(row.model || '').split(',')) {
+      const model = String(value || '').trim();
+      const billingKey = String(row.billing_key || model).trim();
+      const key = `${row.service_type}\u0000${billingKey}`;
+      if (!model || upstream.has(normalizeName(model)) || seen.has(key)) continue;
+      seen.add(key);
+      warnings.push({ provider_model: model, display_name: model, charge_type: 'MissingFromProvider', unit_code: null, provider_unit_price: null,
+        service_type: row.service_type, billing_key: billingKey, meter: null, unit_size: null, new_unit_price_micro: null, new_conditions_json: null, conditions_changed: 0,
+        mapping_status: 'unmapped', error_summary: '中转站价目未返回此已导入模型。系统不会删除或停用当前价格',
+        raw_item_json: json({ configured_model: model, service_type: row.service_type, billing_key: billingKey }) });
+    }
+  }
+  return warnings;
+}
+
+/** 中转价目候选：模型必须精确对到 richbest 配置自己的 billing_key，不做同族前缀匹配。 */
+function relayCandidateRows(db, fetched, syncId, at) {
+  const relay = require('./richbestPricingService');
+  const configs = pricingConfigurations(db, RELAY_PROVIDER);
+  const rows = relay.buildCandidates(fetched.items, {
+    discountBps: fetched.discountBps,
+    syncId,
+    at,
+    resolveTarget: (model) => {
+      const targets = configuredTargets(db, model, RELAY_PROVIDER);
+      const unique = [...new Map(targets.map((item) => [item.billing_key, item])).values()];
+      if (!unique.length) return null;
+      return { billing_key: unique[0].billing_key, configuredTypes: [...new Set(configs.filter((row) => {
+        const models = parse(row.model, []);
+        return Array.isArray(models) && models.map((value) => normalizeName(value)).includes(normalizeName(model));
+      }).map((row) => row.service_type))] };
+    },
+  }).map((row) => {
+    // 与火山同源：拿当前生效价目做基线，档位/条件价变化要能被识别成"已变化"。
+    if (row.mapping_status !== 'mapped') return row;
+    const current = activeItem(db, row.service_type, row.billing_key, row.meter);
+    if (!current) return row;
+    return { ...row,
+      current_unit_price_micro: current.unit_price_micro,
+      current_price_book_item_id: current.id,
+      conditions_changed: samePriceCore(current.conditions_json, JSON.parse(row.new_conditions_json)) ? 0 : 1,
+      change_ratio: current.unit_price_micro ? (row.new_unit_price_micro - current.unit_price_micro) / current.unit_price_micro : null };
+  });
+  return [...rows, ...relayMissingConfiguredModelRows(db, fetched.items)];
 }
 
 async function sync(db, actorId, options = {}) {
-  const token = acquireLock(db);
-  if (!token) throw new Error('火山价目同步正在运行，请稍后再试');
+  const provider = String(options.provider || PROVIDER).trim().toLowerCase() || PROVIDER;
+  const relay = isRelay(provider);
+  const token = acquireLock(db, provider);
+  if (!token) throw new Error(`${relay ? '中转站' : '火山'}价目同步正在运行，请稍后再试`);
   const id = randomUUID(); const at = now(); let credential;
   try {
-    credential = credentials(db);
+    let fetched; let rows; let clean;
+    if (relay) {
+      const pricing = require('./richbestPricingService');
+      // 先解析凭据再落 processing 行：拉取失败时也必须留下可查的失败批次与 request ids。
+      pricing.pricingContext(db);
+    } else {
+      credential = credentials(db);
+    }
     db.prepare(`INSERT INTO provider_price_syncs(id,provider,source_config_id,status,trigger_type,created_by,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?)`).run(id, PROVIDER, credential.configId, 'processing', options.triggerType === 'scheduled' ? 'scheduled' : 'manual', actorId || null, at, at);
-    const fetched = await fetchAllActivations(credential, options);
-    const clean = sanitize(fetched.items);
-    const rows = [...clean.flatMap((item) => buildCandidateRows(db, item)), ...missingConfiguredModelRows(db, clean)];
+      VALUES (?,?,?,?,?,?,?,?)`).run(id, provider, credential?.configId || null, 'processing', options.triggerType === 'scheduled' ? 'scheduled' : 'manual', actorId || null, at, at);
+    if (relay) {
+      const pricing = require('./richbestPricingService');
+      fetched = await pricing.fetchPricing(db, options);
+      clean = sanitize(fetched.items);
+      rows = relayCandidateRows(db, fetched, id, at);
+    } else {
+      fetched = await fetchAllActivations(credential, options);
+      clean = sanitize(fetched.items);
+      rows = [...clean.flatMap((item) => buildCandidateRows(db, item)), ...missingConfiguredModelRows(db, clean)];
+    }
+    db.prepare('UPDATE provider_price_syncs SET source_config_id=? WHERE id=? AND source_config_id IS NULL').run(fetched.configId || null, id);
     const currentPrice = db.prepare('SELECT id,unit_price_micro,is_free,conditions_json FROM billing_price_book_items WHERE id=?');
     const baseline = rows.map(row => row.current_price_book_item_id ? currentPrice.get(row.current_price_book_item_id) : null);
-    const responseHash = sha256(`${JSON.stringify(stable(clean))}|${MAPPING_RULE_VERSION}|${JSON.stringify(pricingConfigurations(db))}|${JSON.stringify(stable(baseline))}`);
-    const existing = db.prepare(`SELECT id FROM provider_price_syncs WHERE provider=? AND response_hash=? AND status='completed' AND id<>? LIMIT 1`).get(PROVIDER, responseHash, id);
+    const responseHash = sha256(`${JSON.stringify(stable(clean))}|${relay ? 'relay-pricing-v1' : MAPPING_RULE_VERSION}|${JSON.stringify(pricingConfigurations(db, provider))}|${JSON.stringify(stable(baseline))}`);
+    const existing = db.prepare(`SELECT id FROM provider_price_syncs WHERE provider=? AND response_hash=? AND status='completed' AND id<>? LIMIT 1`).get(provider, responseHash, id);
     if (existing) {
       db.prepare(`UPDATE provider_price_syncs SET status='unchanged',response_hash=?,provider_request_ids_json=?,raw_response_json=?,fetched_at=?,updated_at=? WHERE id=?`)
-        .run(responseHash, json(fetched.requestIds), json(clean), now(), now(), id);
+        .run(responseHash, json(fetched.requestIds || []), json(clean), now(), now(), id);
       return { ...syncView(db, id), reused_from_sync_id: existing.id };
     }
     const insert = db.prepare(`INSERT INTO provider_price_candidates
       (sync_id,provider,provider_model,display_name,charge_type,unit_code,currency,provider_unit_price,service_type,billing_key,meter,unit_size,new_unit_price_micro,new_conditions_json,conditions_changed,current_unit_price_micro,current_price_book_item_id,change_ratio,mapping_status,review_status,error_summary,raw_item_json,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)`);
     db.transaction(() => {
-      for (const row of rows) insert.run(id, PROVIDER, row.provider_model, row.display_name, row.charge_type, row.unit_code, 'CNY', row.provider_unit_price, row.service_type || null, row.billing_key || null, row.meter || null, row.unit_size || null, row.new_unit_price_micro ?? null, row.new_conditions_json || null, row.conditions_changed ? 1 : 0, row.current_unit_price_micro ?? null, row.current_price_book_item_id ?? null, row.change_ratio ?? null, row.mapping_status, row.error_summary || null, row.raw_item_json, at, at);
+      for (const row of rows) insert.run(id, provider, row.provider_model, row.display_name, row.charge_type, row.unit_code, 'CNY', row.provider_unit_price, row.service_type || null, row.billing_key || null, row.meter || null, row.unit_size || null, row.new_unit_price_micro ?? null, row.new_conditions_json || null, row.conditions_changed ? 1 : 0, row.current_unit_price_micro ?? null, row.current_price_book_item_id ?? null, row.change_ratio ?? null, row.mapping_status, row.error_summary || null, row.raw_item_json, at, at);
       const mapped = rows.filter((row) => row.mapping_status === 'mapped').length;
       const changed = rows.filter((row) => row.mapping_status === 'mapped' && (row.new_unit_price_micro !== row.current_unit_price_micro || row.conditions_changed)).length;
       db.prepare(`UPDATE provider_price_syncs SET status='completed',response_hash=?,provider_request_ids_json=?,raw_response_json=?,candidate_count=?,mapped_count=?,changed_count=?,fetched_at=?,updated_at=? WHERE id=?`)
-        .run(responseHash, json(fetched.requestIds), json(clean), rows.length, mapped, changed, now(), now(), id);
+        .run(responseHash, json(fetched.requestIds || []), json(clean), rows.length, mapped, changed, now(), now(), id);
     })();
     return syncView(db, id);
   } catch (error) {
@@ -636,7 +719,7 @@ async function sync(db, actorId, options = {}) {
       .run(`${error.action || 'sync'} ${error.code || 'ERROR'}: ${error.message || error}`.slice(0, 1000), json(error.requestIds || []), now(), id);
     error.syncId = exists ? id : null;
     throw error;
-  } finally { releaseLock(db, token); }
+  } finally { releaseLock(db, token, provider); }
 }
 
 function updateCandidate(db, actorId, syncId, candidateId, input = {}) {
@@ -653,7 +736,7 @@ function updateCandidate(db, actorId, syncId, candidateId, input = {}) {
   const billingKey = String(input.billing_key || row.billing_key || '').trim();
   const meter = String(input.meter || row.meter || '').trim();
   const unitSize = Number(input.unit_size || row.unit_size);
-  if (!serviceType || !billingKey || !['request','image','input_image','second','millisecond','character','input_token','output_token'].includes(meter) || !Number.isSafeInteger(unitSize) || unitSize <= 0 || !Number.isSafeInteger(row.new_unit_price_micro)) throw new Error('请提供有效的服务、计费键、计量器和计量基数');
+  if (!serviceType || !billingKey || !['request','image','input_image','second','millisecond','character','input_token','cache_token','output_token'].includes(meter) || !Number.isSafeInteger(unitSize) || unitSize <= 0 || !Number.isSafeInteger(row.new_unit_price_micro)) throw new Error('请提供有效的服务、计费键、计量器和计量基数');
   const current = activeItem(db, serviceType, billingKey, meter);
   const conditions = { ...parse(row.new_conditions_json, parse(current?.conditions_json, {})), unit_size: unitSize };
   const conditionsChanged = !samePriceCore(current?.conditions_json, conditions);
@@ -670,17 +753,43 @@ function cloneItems(db, fromId, toId, at) {
     SELECT ?,service_type,model,meter,unit_price_micro,is_free,conditions_json,?,? FROM billing_price_book_items WHERE price_book_id=?`).run(toId, at, at, fromId);
 }
 
-function currentSystemBook(db) {
+/** 每个价目源自己的系统书命名与写入条目时附带的来源信息。 */
+function sourceMeta(provider) {
+  return isRelay(provider)
+    ? { label: '瑞池中转', bookName: '瑞池中转同步价目', source: 'relay_pricing',
+        note: '瑞池中转站税前价（含项目价格系数）；实际结算以服务端记录的成功用量与对应账期价格为准',
+        requiresSourceCheck: false }
+    : { label: '火山引擎', bookName: '火山引擎同步价目', source: 'ListModelActivations',
+        note: 'Volcengine account contract unit price; temporary credits and resource packs excluded',
+        requiresSourceCheck: true };
+}
+
+/** 前端来源选择器的文案与门槛都由这里给出，避免界面硬编码供应商名。 */
+function priceSources() {
+  return [PROVIDER, RELAY_PROVIDER].map((item) => {
+    const meta = sourceMeta(item);
+    return { provider: item, label: meta.label, requires_source_check: meta.requiresSourceCheck };
+  });
+}
+
+function currentSystemBook(db, provider = PROVIDER) {
   const at = now();
+  // provider 列上线前的系统书都是火山的；NULL 只对火山可见，避免中转草稿克隆到火山价目。
   return db.prepare(`SELECT * FROM billing_price_books WHERE status='published' AND system_managed=1
-    AND (effective_from IS NULL OR effective_from<=?) AND (effective_to IS NULL OR effective_to>?) ORDER BY version DESC,updated_at DESC,id DESC LIMIT 1`).get(at, at);
+    AND (provider=? OR (provider IS NULL AND ?='volcengine'))
+    AND (effective_from IS NULL OR effective_from<=?) AND (effective_to IS NULL OR effective_to>?)
+    ORDER BY version DESC,updated_at DESC,id DESC LIMIT 1`).get(provider, provider, at, at);
 }
 
 function createDraft(db, actorId, syncId) {
-  const check = db.prepare('SELECT * FROM provider_price_source_checks WHERE provider=?').get(PROVIDER);
-  if (!check || check.ark_status !== 'success' || check.billing_status !== 'success') throw new Error('请先完成方舟价格和费用中心账单的只读权限诊断');
   const syncRow = db.prepare("SELECT * FROM provider_price_syncs WHERE id=? AND status='completed'").get(syncId);
   if (!syncRow) throw new Error('同步批次不存在或没有可审核价格');
+  const provider = String(syncRow.provider || PROVIDER);
+  const meta = sourceMeta(provider);
+  if (meta.requiresSourceCheck) {
+    const check = db.prepare('SELECT * FROM provider_price_source_checks WHERE provider=?').get(provider);
+    if (!check || check.ark_status !== 'success' || check.billing_status !== 'success') throw new Error('请先完成方舟价格和费用中心账单的只读权限诊断');
+  }
   const priorBook = db.prepare('SELECT id,status FROM billing_price_books WHERE source_sync_id=? ORDER BY id DESC LIMIT 1').get(syncId);
   if (priorBook?.status === 'draft') return require('./billingService').listPriceBooks(db).find((book) => book.id === priorBook.id);
   if (priorBook) throw new Error('此同步批次已用于价目版本，不能重复生成草稿');
@@ -689,23 +798,25 @@ function createDraft(db, actorId, syncId) {
   if (blockers) throw new Error(`仍有 ${blockers} 条价格未完成人工审核或映射`);
   const candidates = actionable.filter(row => row.mapping_status === 'mapped' && row.review_status === 'accepted');
   if (!candidates.length) throw new Error('没有已接受的价格变化，无需生成草稿');
-  const base = currentSystemBook(db);
-  if (!base) throw new Error('没有可克隆的系统管理火山价目表');
+  const base = currentSystemBook(db, provider);
+  if (!base && meta.requiresSourceCheck) throw new Error('没有可克隆的系统管理火山价目表');
   const at = now(); let draftId;
   db.transaction(() => {
+    // 该源第一版价目书没有可克隆的基线：直接新建空书再套用已接受的候选。
+    const version = Number(base?.version || 0) + 1;
     draftId = Number(db.prepare(`INSERT INTO billing_price_books
-      (name,owner_user_id,status,effective_from,effective_to,created_by,created_at,updated_at,version,parent_price_book_id,source_sync_id,system_managed,reviewed_by,reviewed_at)
-      VALUES (?,NULL,'draft',NULL,NULL,?,?,?,?,?,?,1,?,?)`).run(`火山引擎同步价目 v${Number(base.version || 1) + 1}`, actorId, at, at, Number(base.version || 1) + 1, base.id, syncId, actorId, at).lastInsertRowid);
-    cloneItems(db, base.id, draftId, at);
+      (name,owner_user_id,status,effective_from,effective_to,created_by,created_at,updated_at,version,parent_price_book_id,source_sync_id,system_managed,reviewed_by,reviewed_at,provider)
+      VALUES (?,NULL,'draft',NULL,NULL,?,?,?,?,?,?,1,?,?,?)`).run(`${meta.bookName} v${version}`, actorId, at, at, version, base?.id || null, syncId, actorId, at, provider).lastInsertRowid);
+    if (base) cloneItems(db, base.id, draftId, at);
     for (const candidate of candidates) {
       const existing = db.prepare('SELECT * FROM billing_price_book_items WHERE price_book_id=? AND service_type=? AND model=? AND meter=?').get(draftId, candidate.service_type, candidate.billing_key, candidate.meter);
       const conditions = candidate.new_conditions_json ? parse(candidate.new_conditions_json, {}) : parse(existing?.conditions_json, {});
-      Object.assign(conditions, { provider: PROVIDER, currency: 'CNY', unit_size: candidate.unit_size, source: 'ListModelActivations', source_sync_id: syncId, verified_on: at.slice(0, 10), provider_model: candidate.provider_model, provider_charge_type: candidate.charge_type, pricing_note: 'Volcengine account contract unit price; temporary credits and resource packs excluded' });
+      Object.assign(conditions, { provider, currency: 'CNY', unit_size: candidate.unit_size, source: meta.source, source_sync_id: syncId, verified_on: at.slice(0, 10), provider_model: candidate.provider_model, provider_charge_type: candidate.charge_type, pricing_note: meta.note });
       if (existing) db.prepare('UPDATE billing_price_book_items SET unit_price_micro=?,conditions_json=?,updated_at=? WHERE id=?').run(candidate.new_unit_price_micro, json(conditions), at, existing.id);
       else db.prepare(`INSERT INTO billing_price_book_items(price_book_id,service_type,model,meter,unit_price_micro,is_free,conditions_json,created_at,updated_at) VALUES (?,?,?,?,?,0,?,?,?)`).run(draftId, candidate.service_type, candidate.billing_key, candidate.meter, candidate.new_unit_price_micro, json(conditions), at, at);
     }
   })();
-  require('./billingService').audit(db, actorId, 'provider_price.draft.create', 'price_book', draftId, { sync_id: syncId, parent_price_book_id: base.id });
+  require('./billingService').audit(db, actorId, 'provider_price.draft.create', 'price_book', draftId, { sync_id: syncId, parent_price_book_id: base?.id || null, provider });
   return require('./billingService').listPriceBooks(db).find((book) => book.id === draftId);
 }
 
@@ -720,10 +831,10 @@ function priceDiff(db, oldId, nextId) {
   }).filter((row) => row.changed);
 }
 
-function defaultNotice(diff) {
+function defaultNotice(diff, provider = PROVIDER) {
   const lines = diff.slice(0, 20).map((row) => `${row.model}（${row.meter}）：${row.old_unit_price_micro == null ? '新增' : `${row.old_unit_price_micro / MICRO_PER_POINT} 积分`} → ${row.new_unit_price_micro / MICRO_PER_POINT} 积分`);
   if (diff.length > 20) lines.push(`另有 ${diff.length - 20} 项价格变更。`);
-  return { title: '模型调用价格已更新', body: `火山引擎账号价格已完成审核并立即生效。\n${lines.join('\n')}` };
+  return { title: '模型调用价格已更新', body: `${sourceMeta(provider).label}价格已完成审核并立即生效。\n${lines.join('\n')}` };
 }
 
 function publish(db, actorId, bookId, input = {}) {
@@ -733,26 +844,36 @@ function publish(db, actorId, bookId, input = {}) {
   if (reused) return { reused: true, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === reused.id) };
   const draft = db.prepare("SELECT * FROM billing_price_books WHERE id=? AND status='draft'").get(bookId);
   if (!draft) throw new Error('只能发布草稿价目表');
-  if (draft.source_sync_id) {
-    const check = db.prepare('SELECT * FROM provider_price_source_checks WHERE provider=?').get(PROVIDER);
+  const provider = String(draft.provider || PROVIDER);
+  if (draft.source_sync_id && sourceMeta(provider).requiresSourceCheck) {
+    const check = db.prepare('SELECT * FROM provider_price_source_checks WHERE provider=?').get(provider);
     if (!check || check.ark_status !== 'success' || check.billing_status !== 'success') throw new Error('方舟价格或账单只读权限诊断未通过');
   }
-  const previous = draft.parent_price_book_id ? db.prepare("SELECT * FROM billing_price_books WHERE id=? AND status='published'").get(draft.parent_price_book_id) : currentSystemBook(db);
-  if (!previous) throw new Error('当前有效价目版本不存在，不能发布');
+  const previous = draft.parent_price_book_id ? db.prepare("SELECT * FROM billing_price_books WHERE id=? AND status='published'").get(draft.parent_price_book_id) : currentSystemBook(db, provider);
   require('./seedreamProPricing').validateItems(db.prepare('SELECT * FROM billing_price_book_items WHERE price_book_id=?').all(draft.id));
-  const diff = priceDiff(db, previous.id, draft.id);
+  // 某个价目源的第一版没有可归档的前版本：全部条目按新增计算即可。
+  const diff = priceDiff(db, previous?.id ?? null, draft.id);
   if (!diff.length) throw new Error('价目没有变化，无需发布');
   const notifyUsers = input.notify_users !== false;
-  const generated = defaultNotice(diff); const at = now(); const noticeId = notifyUsers ? randomUUID() : null;
+  const generated = defaultNotice(diff, provider); const at = now(); const noticeId = notifyUsers ? randomUUID() : null;
   const title = String(input.notice_title || generated.title).trim(); const body = String(input.notice_body || generated.body).trim();
   if (notifyUsers && (!title || !body)) throw new Error('通知标题和正文必填');
   db.transaction(() => {
-    db.prepare("UPDATE billing_price_books SET status='archived',effective_to=?,updated_at=? WHERE id=? AND status='published'").run(at, at, previous.id);
+    if (previous) db.prepare("UPDATE billing_price_books SET status='archived',effective_to=?,updated_at=? WHERE id=? AND status='published'").run(at, at, previous.id);
     db.prepare(`UPDATE billing_price_books SET status='published',effective_from=?,effective_to=NULL,published_by=?,published_at=?,publish_reason=?,publish_idempotency_key=?,reviewed_by=COALESCE(reviewed_by,?),reviewed_at=COALESCE(reviewed_at,?),updated_at=? WHERE id=? AND status='draft'`)
       .run(at, actorId, at, String(input.reason).trim(), String(input.idempotency_key).trim(), actorId, at, at, draft.id);
-    db.prepare('UPDATE tenant_price_book_bindings SET price_book_id=?,active_at=?,updated_at=? WHERE price_book_id=?').run(draft.id, at, at, previous.id);
+    if (previous) {
+      db.prepare('UPDATE tenant_price_book_bindings SET price_book_id=?,active_at=?,updated_at=? WHERE price_book_id=?').run(draft.id, at, at, previous.id);
+      // provider 维度的绑定也必须跟着重指：tenantService.priceBookForUser 在存在 provider 行时
+      // 只读新表，且精确匹配带 status='published' 过滤。漏掉这一步，上一版一归档，
+      // 分组绑定就会静默落空并掉到平台价目。
+      if (require('./tenantService').hasTable(db, 'tenant_provider_price_book_bindings')) {
+        db.prepare('UPDATE tenant_provider_price_book_bindings SET price_book_id=?,active_at=?,updated_at=? WHERE price_book_id=?')
+          .run(draft.id, at, at, previous.id);
+      }
+    }
     if (notifyUsers) db.prepare(`INSERT INTO system_notices(id,type,title,body,status,price_book_id,effective_at,published_by,published_at,created_at,updated_at) VALUES (?,'pricing',?,?,'active',?,?,?,?,?,?)`).run(noticeId, title, body, draft.id, at, actorId, at, at, at);
-    require('./billingService').audit(db, actorId, 'price_book.publish', 'price_book', draft.id, { previous_price_book_id: previous.id, source_sync_id: draft.source_sync_id || null, reason: String(input.reason).trim(), notify_users: notifyUsers, notice_id: noticeId, diff });
+    require('./billingService').audit(db, actorId, 'price_book.publish', 'price_book', draft.id, { previous_price_book_id: previous?.id ?? null, source_sync_id: draft.source_sync_id || null, reason: String(input.reason).trim(), notify_users: notifyUsers, notice_id: noticeId, diff });
   })();
   return { reused: false, notice_id: noticeId, diff, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === Number(draft.id)) };
 }
@@ -763,12 +884,15 @@ function rollback(db, actorId, historicalId, input = {}) {
   const reused = db.prepare('SELECT * FROM billing_price_books WHERE publish_idempotency_key=?').get(String(input.idempotency_key).trim());
   if (reused) return { reused: true, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === reused.id) };
   const historical = db.prepare('SELECT * FROM billing_price_books WHERE id=?').get(historicalId);
-  const current = currentSystemBook(db);
+  // 回滚必须留在被回滚那本书自己的价目源上：拿火山的当前版本当父本、并在新书上留空
+  // provider，会让 provider IS NULL 的查询同时命中中转调用（等于两家供应商共用一本价目）。
+  const provider = String(historical?.provider || PROVIDER);
+  const current = currentSystemBook(db, provider);
   if (!historical || !current) throw new Error('历史价目或当前价目不存在');
   const at = now(); let draftId;
   db.transaction(() => {
-    draftId = Number(db.prepare(`INSERT INTO billing_price_books(name,owner_user_id,status,created_by,created_at,updated_at,version,parent_price_book_id,system_managed,reviewed_by,reviewed_at)
-      VALUES (?,NULL,'draft',?,?,?,?,?,1,?,?)`).run(`火山引擎回滚价目 v${Number(current.version || 1) + 1}`, actorId, at, at, Number(current.version || 1) + 1, current.id, actorId, at).lastInsertRowid);
+    draftId = Number(db.prepare(`INSERT INTO billing_price_books(name,owner_user_id,status,created_by,created_at,updated_at,version,parent_price_book_id,system_managed,provider,reviewed_by,reviewed_at)
+      VALUES (?,NULL,'draft',?,?,?,?,?,1,?,?,?)`).run(`${sourceMeta(provider).label}回滚价目 v${Number(current.version || 1) + 1}`, actorId, at, at, Number(current.version || 1) + 1, current.id, provider, actorId, at).lastInsertRowid);
     cloneItems(db, historical.id, draftId, at);
   })();
   return publish(db, actorId, draftId, { ...input, notice_title: input.notice_title || '模型调用价格已回滚', notice_body: input.notice_body || `价格配置已回滚到历史版本“${historical.name}”。新请求立即使用回滚后的价格。` });
@@ -805,14 +929,24 @@ function archiveNotice(db, actorId, noticeId) {
 }
 
 function startHourlySync(db, log = console) {
-  const run = () => sync(db, null, { triggerType: 'scheduled' }).catch((error) => log.warn('provider price scheduled sync failed', { provider: PROVIDER, error: error.message }));
-  const timer = setInterval(run, 60 * 60 * 1000);
-  if (typeof timer.unref === 'function') timer.unref();
-  return timer;
+  const timers = [];
+  const schedule = (provider, intervalMs, enabled) => {
+    const run = () => {
+      if (!enabled()) return;
+      sync(db, null, { triggerType: 'scheduled', provider }).catch((error) => log.warn('provider price scheduled sync failed', { provider, error: error.message }));
+    };
+    const timer = setInterval(run, intervalMs);
+    if (typeof timer.unref === 'function') timer.unref();
+    timers.push(timer);
+  };
+  schedule(PROVIDER, 60 * 60 * 1000, () => true);
+  // 中转价目按账期变化，拉得更勤也不需要上游签名凭据；没有启用的中转配置时不发请求。
+  schedule(RELAY_PROVIDER, 6 * 60 * 60 * 1000, () => pricingConfigurations(db, RELAY_PROVIDER).length > 0);
+  return timers[0];
 }
 
 module.exports = {
-  PROVIDER, signedHeaders, callOpenApi, fetchAllActivations, fetchBillDetails, chargeMeter, sourceUnitSize, normalizedPriceMicro, providerBillSummary, platformUsageSummary,
+  PROVIDER, RELAY_PROVIDER, sourceMeta, priceSources, currentSystemBook, signedHeaders, callOpenApi, fetchAllActivations, fetchBillDetails, chargeMeter, sourceUnitSize, normalizedPriceMicro, providerBillSummary, platformUsageSummary,
   contractPrice, verifiedMultiChargeSpecs, verifiedMultiChargeRows, buildCandidateRows,
   probe, sourceCheck, sync, syncView, listSyncs, updateCandidate, createDraft, publish, rollback,
   activeNotices, listNotices, acknowledgeNotice, archiveNotice, startHourlySync, credentials,

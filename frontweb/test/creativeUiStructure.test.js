@@ -513,7 +513,9 @@ test('brand marks and production summaries use the current product language', as
 
 test('generation settings keep configured model identifiers unchanged', async () => {
   const source = await readSource('../src/components/GenerationSettings.vue')
-  assert.match(source, /return String\(model \|\| ''\) \|\| '未选择'/)
+  // 展示名只来自模型目录；下拉的 value 仍是配置里的模型 id，前端不得内置厂商别名。
+  assert.match(source, /return modelLabel\(modelNames\.value, model\)/)
+  assert.match(source, /label: displayModelName\(item\.model\), description: item\.is_default \? '默认模型' : '', value: item\.model/)
   assert.doesNotMatch(source, /Seedance .*标准版|可灵视频模型|万相视频模型|混元视频模型/)
 })
 

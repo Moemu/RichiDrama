@@ -17,10 +17,13 @@ function isMaskedApiKey(key) {
 }
 
 function normalizeApiKeyForService(serviceType, apiKey) {
-  if (serviceType === 'jimeng2_character_auth' && apiKey != null) {
+  if (apiKey == null) return apiKey;
+  if (serviceType === 'jimeng2_character_auth') {
     return normalizeMaterialHubToken(apiKey);
   }
-  return apiKey;
+  // 粘贴凭证时经常连 "Bearer " 一起带上：各调用方还会再拼一次前缀，结果是
+  // "Bearer Bearer xxx" → 401。这里统一剥掉，读写两侧都走同一口径。
+  return String(apiKey).replace(/^Bearer\s+/i, '').trim();
 }
 
 function parseSettings(value) {
@@ -161,7 +164,10 @@ function listConfigs(db, serviceType, options = {}) {
 
 // Creators only need model choices. Provider credentials and transport
 // configuration must stay inside the backend.
-function publicConfig(config) {
+function publicConfig(config, displayNames = null) {
+  const names = Object.fromEntries((config.model || [])
+    .filter((model) => displayNames?.[`${config.service_type}\u0000${model}`])
+    .map((model) => [model, displayNames[`${config.service_type}\u0000${model}`]]));
   return {
     id: config.id,
     service_type: config.service_type,
@@ -172,11 +178,24 @@ function publicConfig(config) {
     priority: config.priority,
     is_default: config.is_default,
     is_active: config.is_active,
+    // 模型目录里的展示名；提交值仍是 model 里的原 id，二者不得混用。
+    ...(Object.keys(names).length ? { display_names: names } : {}),
   };
 }
 
+function catalogDisplayNames(db) {
+  try {
+    return Object.fromEntries(db.prepare('SELECT service_type, model, display_name FROM ai_model_catalog')
+      .all().map((row) => [`${row.service_type}\u0000${row.model}`, row.display_name]));
+  } catch (_) {
+    return null;
+  }
+}
+
 function listPublicConfigs(db, serviceType, options = {}) {
-  return require('./modelCatalogService').filterConfigs(db, listConfigs(db, serviceType, options), options.user_id).map(publicConfig);
+  const displayNames = catalogDisplayNames(db);
+  return require('./modelCatalogService').filterConfigs(db, listConfigs(db, serviceType, options), options.user_id)
+    .map((config) => publicConfig(config, displayNames));
 }
 
 function resolveBillingTarget(db, serviceType, model, configId, options = {}) {
@@ -241,6 +260,16 @@ function createConfig(db, log, req) {
         queryEndpoint = '/contents/generations/tasks/{taskId}';
       } else if (st === 'image' || st === 'storyboard_image') {
         endpoint = '/images/generations';
+      }
+    } else if (p === 'richbest') {
+      const richbest = require('./richbestProvider');
+      if (st === 'video') {
+        endpoint = richbest.PATHS.videoTasks;
+        queryEndpoint = richbest.PATHS.videoTasks + '/{taskId}';
+      } else if (st === 'image' || st === 'storyboard_image') {
+        endpoint = '/images/generations';
+      } else if (st === 'text') {
+        endpoint = '/chat/completions';
       }
     } else if (p === 'nano_banana') {
       if (st === 'image' || st === 'storyboard_image') {
@@ -394,7 +423,8 @@ function rowToConfig(r, db) {
     api_protocol: r.api_protocol || '',
     name: r.name,
     base_url: connection?.base_url ?? r.base_url,
-    api_key: r.provider_connection_id ? connection?.api_key || '' : r.api_key,
+    // 读侧也归一化：历史行里已经存进 "Bearer xxx" 的凭证不必等管理员重存才生效。
+    api_key: normalizeApiKeyForService(r.service_type, r.provider_connection_id ? connection?.api_key || '' : r.api_key),
     model: modelFromDb(r.model),
     default_model: r.default_model ? String(r.default_model).trim() : null,
     billing_key: r.billing_key ? String(r.billing_key).trim() : null,
@@ -424,9 +454,50 @@ function rowToConfig(r, db) {
   return cfg;
 }
 
+/** 中转站的业务 Key 要填两处：生成用 provider='richbest'，素材库用 provider='richbest_asset_v3'。 */
+const RELAY_KEY_PROVIDERS = ['richbest', 'richbest_asset_v3'];
+const RELAY_KEY_SERVICE_TYPES = ['text', 'image', 'storyboard_image', 'video', 'jimeng2_character_auth'];
+
+function normalizeRelayKey(value) {
+  return String(value || '').trim().replace(/^Bearer\s+/i, '').trim();
+}
+
+/**
+ * 中转站按业务 Key 隔离「项目」，而 /api/auth/me 按设计不返回项目名（CLIENT_API §4.2），
+ * 所以「两处 Key 是否同一个瑞池项目」无法由接口自证。填成不同项目时的表现是生成阶段才报
+ * 「素材不存在 / 模型未开通」，排查成本很高，因此连接测试时把不一致直接提示出来。
+ * 只比对平台级配置（owner_tenant_id 为空）——多租户各有自己的项目 Key 是合法的。
+ */
+function relayKeyWarnings(db, apiKey, currentServiceType) {
+  if (!db || !hasTable(db, 'ai_service_configs')) return [];
+  const own = normalizeRelayKey(apiKey);
+  if (!own) return [];
+  let rows = [];
+  try {
+    rows = db.prepare(`SELECT id, service_type, provider, api_key FROM ai_service_configs
+      WHERE deleted_at IS NULL AND is_active = 1 AND COALESCE(owner_tenant_id, 0) = 0
+        AND provider IN (${RELAY_KEY_PROVIDERS.map(() => '?').join(',')})
+        AND service_type IN (${RELAY_KEY_SERVICE_TYPES.map(() => '?').join(',')})`)
+      .all(...RELAY_KEY_PROVIDERS, ...RELAY_KEY_SERVICE_TYPES);
+  } catch (_) { return []; }
+  const others = rows.filter((row) => {
+    const key = normalizeRelayKey(row.api_key);
+    return key && key !== own && String(row.service_type) !== String(currentServiceType || '');
+  });
+  if (!others.length) return [];
+  const roles = [...new Set(others.map((row) => row.service_type))];
+  return [`中转站业务 Key 与 ${roles.join('、')} 上的配置不一致。中转站按业务 Key 隔离项目，`
+    + '生成与素材库必须使用同一个瑞池项目的 Key，否则会出现「素材不存在」或「模型未开通」。'];
+}
+
+function hasTable(db, table) {
+  try { return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table); }
+  catch (_) { return false; }
+}
+
 /**
  * 测试连接：与 Go AIService.TestConnection 对齐，根据 provider 发最小请求验证 base_url + api_key
- * @param opts { base_url, api_key, model (string|string[]), provider?, endpoint?, settings? }
+ * @param opts { base_url, api_key, model (string|string[]), provider?, endpoint?, settings?, db? }
  * @returns Promise<void> 成功 resolve，失败 reject(error)
  */
 async function testConnection(opts) {
@@ -439,6 +510,22 @@ async function testConnection(opts) {
   const provider = (opts.provider || 'openai').toLowerCase();
   const serviceType = (opts.service_type || '').toLowerCase();
   let endpoint = opts.endpoint || '';
+
+  // --- 瑞池中转站：只用 GET 探测健康、Key 与模型目录，不创建任务、不产生费用 ---
+  if (provider === 'richbest') {
+    const richbest = require('./richbestProvider');
+    const result = await richbest.probe({ baseUrl: base, apiKey: opts.api_key });
+    if (!result.ok) throw new Error(result.error || '中转站连接失败');
+    if (model && result.models && !result.models.items.some((item) => item.id === model)) {
+      throw new Error(`中转站未向当前项目开放模型 ${model}，请先在「获取模型」中同步 /v1/models`);
+    }
+    return {
+      message: '连接测试成功',
+      api_key_id: result.apiKeyId || null,
+      models: result.models ? { total: result.models.total, by_modality: result.models.by_modality } : null,
+      warnings: relayKeyWarnings(opts.db, opts.api_key, opts.service_type),
+    };
+  }
 
   // --- NanoBanana ---
   if (provider === 'nano_banana') {

@@ -74,7 +74,7 @@
       <template #footer><el-button @click="showPublish = false">保留草稿</el-button><el-button type="primary" :loading="saving" @click="publish">确认发布</el-button></template>
     </el-dialog>
     <ModelDiscoveryDialog v-model="showDiscovery" @imported="load(); emit('changed')" />
-    <details class="provider-sync"><summary>供应商价格同步（火山）</summary><ProviderPriceSyncPanel @published="load" @draft-created="load" /></details>
+    <details class="provider-sync"><summary>供应商价格同步（按价目来源切换）</summary><ProviderPriceSyncPanel @published="load" @draft-created="load" /></details>
   </section>
 </template>
 
@@ -89,7 +89,7 @@ import ModelDiscoveryDialog from './ModelDiscoveryDialog.vue'
 const emit = defineEmits(['connection', 'changed'])
 const types = { text: '文本', image: '图片', storyboard_image: '分镜图片', video: '视频', video_postprocess: '视频后处理', tts: '语音' }
 const statuses = { legacy: '现有配置', draft: '待上架', active: '已上架', retired: '已下架' }
-const meterNames = { request: '请求', image: '图片', input_image: '输入图', second: '秒', millisecond: '毫秒', character: '字符', input_token: '输入 Token', output_token: '输出 Token' }
+const meterNames = { request: '请求', image: '图片', input_image: '输入图', second: '秒', millisecond: '毫秒', character: '字符', input_token: '输入 Token', cache_token: '缓存输入 Token', output_token: '输出 Token' }
 const meters = Object.keys(meterNames)
 const rows = ref([]); const configs = ref([]); const books = ref([]); const error = ref(''); const loading = ref(false); const saving = ref(false)
 const search = ref(''); const typeFilter = ref(''); const statusFilter = ref('')

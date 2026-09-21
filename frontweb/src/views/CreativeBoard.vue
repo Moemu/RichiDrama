@@ -466,7 +466,7 @@ async function submitGeneration(id) {
         Object.assign(body, { duration: data.duration, resolution: data.resolution, upscale_resolution: settings.upscale_resolution, target_fps: settings.target_fps, creation_mode: firstLast ? 'first_last_frame' : 'multi_reference', audio_strategy: 'reference_only', assets })
         const quote = await omniVideoAPI.quoteBilling({ source_context: 'creative_board', board_id: boardId, model: data.model, duration: data.duration, resolution: data.resolution, has_video_input: references.some((item) => item.type === 'video'), has_audio: false })
         const postprocess = body.upscale_resolution || body.target_fps ? await videosAPI.postprocessQuote({ resolution: data.resolution, upscale_resolution: body.upscale_resolution, target_fps: body.target_fps, source_fps: 30, duration: data.duration, aspect_ratio: data.aspectRatio }) : null
-        await ElMessageBox.confirm(`本次视频生成预计冻结 ${quote.amount} 积分。${postprocess ? `超分／插帧另预计 ${postprocess.estimated_total_points} 积分，完成后按实际规格结算。` : ''}继续提交？`, '视频生成费用', { confirmButtonText: '提交生成', cancelButtonText: '取消' })
+        await ElMessageBox.confirm(`本次视频生成预计冻结 ${quote.amount} 积分${quote.reserve ? `（按 ${quote.reserve.basis} 估算 ${quote.reserve.output_tokens} tokens）` : ''}。${postprocess ? `超分／插帧另预计 ${postprocess.estimated_total_points} 积分，完成后按实际规格结算。` : ''}继续提交？`, '视频生成费用', { confirmButtonText: '提交生成', cancelButtonText: '取消' })
       }
       data.pendingRequest = body
     }

@@ -15,19 +15,20 @@
             <el-option v-for="(label, value) in sourceNames" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="source !== 'openai'" label="ModelArk 管理凭据">
+        <el-form-item v-if="needsArkCredential" label="ModelArk 管理凭据">
           <el-select v-model="credentialId" placeholder="选择同一火山账号的 AK/SK 配置" :disabled="fetching || saving" @change="resetResults" class="discovery-full">
             <el-option v-for="config in availableCredentials" :key="config.id" :label="config.name" :value="config.id" />
           </el-select>
         </el-form-item>
       </div>
       <p class="discovery-help" v-if="source === 'openai'">使用连接中已保存的地址和 API Key 读取 /models。仅适用于支持该接口的供应商。</p>
+      <p class="discovery-help" v-else-if="source === 'richbest_models'">使用连接中已保存的瑞池业务 Key 读取 /v1/models；只返回当前项目已开通的模型，不发起任何生成调用。</p>
       <p class="discovery-help" v-else-if="source === 'volcengine_activations'">读取账户已开通的基础型号。请点击“查看版本”，再导入带日期的调用 ID。请选择与目标连接同账号、同区域的 ModelArk 配置。</p>
       <p class="discovery-help" v-else-if="source === 'volcengine_versions'">读取所选基础型号的日期版本。请确认账号权限后选择所需版本，不会自动切换已有默认模型。</p>
       <p class="discovery-help" v-else>读取已部署的 ep-… 模型 ID。请选择与目标连接同账号、同区域的 ModelArk 配置；不包含未部署的公共模型。</p>
-      <p class="discovery-help" v-if="source !== 'openai' && !availableCredentials.length">暂无可用管理凭据。请先在供应商连接中保存 ModelArk 资产库的长期 AK/SK，并授予 {{ source === 'volcengine_activations' ? 'ListModelActivations' : source === 'volcengine_versions' ? 'ListFoundationModelVersions' : 'ListEndpoints' }} 读取权限。</p>
+      <p class="discovery-help" v-if="needsArkCredential && !availableCredentials.length">暂无可用管理凭据。请先在供应商连接中保存 ModelArk 资产库的长期 AK/SK，并授予 {{ source === 'volcengine_activations' ? 'ListModelActivations' : source === 'volcengine_versions' ? 'ListFoundationModelVersions' : 'ListEndpoints' }} 读取权限。</p>
       <el-form-item v-if="source === 'volcengine_versions'" label="基础型号"><el-input v-model="foundationModel" placeholder="例如 doubao-seed-2-1-turbo" :disabled="fetching || saving" @change="resetResults" /></el-form-item>
-      <div class="discovery-fetch"><el-button type="primary" :loading="fetching" :disabled="!configId || saving || (source !== 'openai' && !credentialId)" @click="fetchModels()">{{ fetched ? '重新获取' : '获取模型列表' }}</el-button><span v-if="target">{{ target.service_type === 'provider' ? '共享连接可同时导入多种能力的模型。' : '旧配置仅接受同类能力；跨能力导入请先转换为共享连接。' }}</span></div>
+      <div class="discovery-fetch"><el-button type="primary" :loading="fetching" :disabled="!configId || saving || (needsArkCredential && !credentialId)" @click="fetchModels()">{{ fetched ? '重新获取' : '获取模型列表' }}</el-button><span v-if="target">{{ target.service_type === 'provider' ? '共享连接可同时导入多种能力的模型。' : '旧配置仅接受同类能力；跨能力导入请先转换为共享连接。' }}</span></div>
     </el-form>
 
     <section v-if="fetched" class="discovery-results" aria-label="获取结果">
@@ -60,7 +61,7 @@ import { modelDiscoveryAPI } from '@/api/modelDiscovery'
 const props = defineProps({ modelValue: Boolean, initialConnectionId: { type: [String, Number], default: null } })
 const emit = defineEmits(['update:modelValue', 'imported'])
 const types = { provider: '共享连接', text: '文本', image: '图片', storyboard_image: '分镜图片', video: '视频', tts: '语音' }
-const sourceNames = { openai: 'OpenAI / OpenAI 兼容', volcengine_activations: '火山方舟 · 账户基础型号', volcengine_versions: '火山方舟 · 模型日期版本', volcengine_endpoints: '火山方舟 · 已部署端点' }
+const sourceNames = { openai: 'OpenAI / OpenAI 兼容', richbest_models: '瑞池中转 · 项目可用模型（/v1/models）', volcengine_activations: '火山方舟 · 账户基础型号', volcengine_versions: '火山方舟 · 模型日期版本', volcengine_endpoints: '火山方舟 · 已部署端点' }
 const connections = ref([]); const credentials = ref([]); const configId = ref(null); const credentialId = ref(null); const source = ref('openai')
 const loading = ref(false); const fetching = ref(false); const saving = ref(false); const error = ref('')
 const models = ref([]); const chosen = ref([]); const fetched = ref(false); const nextPage = ref(null); const total = ref(0); const ignored = ref(0)
@@ -70,6 +71,7 @@ const foundationModel = ref('')
 function changeSource() { foundationModel.value = ''; resetResults() }
 async function viewVersions(model) { foundationModel.value = model.foundation_model; source.value = 'volcengine_versions'; await fetchModels() }
 async function backToFamilies() { source.value = 'volcengine_activations'; foundationModel.value = ''; await fetchModels() }
+const needsArkCredential = computed(() => source.value !== 'openai' && source.value !== 'richbest_models')
 const missingCapability = computed(() => chosen.value.some(id => !models.value.find(model => model.id === id)?.capability && !selectedCapabilities.value[id]))
 function incompatible(model) { return target.value?.service_type !== 'provider' && model.capability && model.capability !== (target.value?.service_type === 'storyboard_image' ? 'image' : target.value?.service_type) }
 let requestVersion = 0
@@ -104,7 +106,7 @@ function selectPage() { chosen.value = [...new Set([...chosen.value, ...visibleM
 function close(done) { if (saving.value) return; emit('update:modelValue', false); if (typeof done === 'function') done() }
 async function importModels() {
   saving.value = true; error.value = ''
-  try { const result = await modelDiscoveryAPI.import(configId.value, chosen.value, Object.fromEntries(chosen.value.map(id => [id, models.value.find(model => model.id === id)?.capability || selectedCapabilities.value[id]])), source.value); ElMessage.success(`已导入 ${result.added.length} 个模型${result.skipped ? `，跳过 ${result.skipped} 个已有型号` : ''}`); emit('imported'); emit('update:modelValue', false) }
+  try { const result = await modelDiscoveryAPI.import(configId.value, chosen.value, Object.fromEntries(chosen.value.map(id => [id, models.value.find(model => model.id === id)?.capability || selectedCapabilities.value[id]])), source.value, Object.fromEntries(chosen.value.map(id => { const found = models.value.find(model => model.id === id); return [id, found?.display_name || id] }))); ElMessage.success(`已导入 ${result.added.length} 个模型${result.skipped ? `，跳过 ${result.skipped} 个已有型号` : ''}`); emit('imported'); emit('update:modelValue', false) }
   catch (e) { error.value = e.message || '导入失败，请重试' }
   finally { saving.value = false }
 }
