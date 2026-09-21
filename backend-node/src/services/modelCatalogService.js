@@ -106,7 +106,7 @@ function filterConfigs(db, configs, userId) {
       if (!row) return true;
       if (row.status !== 'active') return false;
       if (!userId) return true;
-      const meters = billing.activeMeters(db, { id: userId }, config.service_type, config.billing_key || model);
+      const meters = billing.activeMeters(db, { id: userId }, config.service_type, config.billing_key || model, config.provider);
       return priceReady(config.service_type, meters.map((meter) => ({ meter })));
     });
     return { ...config, model, default_model: model.includes(config.default_model) ? config.default_model : model[0] || null };

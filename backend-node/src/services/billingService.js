@@ -96,15 +96,30 @@ function audit(db, actorId, action, targetType, targetId, detail) {
     .run(uuid(), actorId, action, targetType, targetId == null ? null : String(targetId), json(detail), now());
 }
 
-function activePriceItems(db, userId, serviceType, model) {
+function activePriceItems(db, userId, serviceType, model, provider) {
   const at = now();
-  const tenantBook = require('./tenantService').priceBookForUser(db, userId);
+  const tenantBook = require('./tenantService').priceBookForUser(db, userId, provider || null);
   if (tenantBook) {
     return db.prepare(`SELECT pbi.*, pb.id AS price_book_id, pb.name AS price_book_name, pb.owner_user_id
       FROM billing_price_book_items pbi JOIN billing_price_books pb ON pb.id = pbi.price_book_id
       WHERE pb.id = ? AND pb.status = 'published' AND (pb.effective_from IS NULL OR pb.effective_from <= ?)
         AND (pb.effective_to IS NULL OR pb.effective_to > ?) AND pbi.service_type = ? AND pbi.model = ?
       ORDER BY pbi.id DESC`).all(tenantBook.id, at, at, serviceType, model);
+  }
+  if (provider) {
+    // Provider-aware platform lookup: books tagged for the serving provider
+    // first, legacy untagged books still participate so historical data keeps
+    // resolving exactly as before option B.
+    const scoped = db.prepare(`SELECT pbi.*, pb.id AS price_book_id, pb.name AS price_book_name, pb.owner_user_id
+      FROM billing_price_book_items pbi JOIN billing_price_books pb ON pb.id = pbi.price_book_id
+      WHERE pb.status = 'published' AND (pb.effective_from IS NULL OR pb.effective_from <= ?)
+        AND (pb.effective_to IS NULL OR pb.effective_to > ?) AND (pb.owner_user_id IS NULL OR pb.owner_user_id = ?)
+        AND (pb.provider = ? OR pb.provider IS NULL) AND pbi.service_type = ? AND pbi.model = ?
+      ORDER BY CASE WHEN pb.owner_user_id = ? THEN 0 WHEN pb.provider = ? THEN 1 ELSE 2 END, pb.updated_at DESC, pbi.id DESC`)
+      .all(at, at, userId, provider, serviceType, model, userId, provider);
+    if (scoped.length) return scoped;
+    // No provider-tagged book covers this model — fall back to the legacy
+    // unfiltered resolution so pre-provider books keep serving every model.
   }
   return db.prepare(`SELECT pbi.*, pb.id AS price_book_id, pb.name AS price_book_name, pb.owner_user_id
     FROM billing_price_book_items pbi JOIN billing_price_books pb ON pb.id = pbi.price_book_id
@@ -114,8 +129,8 @@ function activePriceItems(db, userId, serviceType, model) {
     ORDER BY CASE WHEN pb.owner_user_id = ? THEN 0 ELSE 1 END, pb.updated_at DESC, pbi.id DESC`).all(at, at, userId, serviceType, model, userId);
 }
 
-function activeMeters(db, user, serviceType, model) {
-  return [...new Set(activePriceItems(db, user.id, serviceType, model).map((item) => item.meter))];
+function activeMeters(db, user, serviceType, model, provider) {
+  return [...new Set(activePriceItems(db, user.id, serviceType, model, provider).map((item) => item.meter))];
 }
 
 function normalizeUsage(usage) {
@@ -188,7 +203,7 @@ function quote(db, user, input) {
   if (!serviceType || !model) throw new Error('service_type 和 model 必填');
   require('./modelCatalogService').assertAvailable(db, serviceType, input.provider_model || model);
   const usage = normalizeUsage(input.usage);
-  const rows = activePriceItems(db, user.id, serviceType, model);
+  const rows = activePriceItems(db, user.id, serviceType, model, input.provider || null);
   const byMeter = new Map(); for (const row of rows) if (!byMeter.has(row.meter)) byMeter.set(row.meter, row);
   const imageConditions = parseConditions(byMeter.get('image')?.conditions_json);
   if (seedreamPricing.enabled(imageConditions)) {

@@ -36,7 +36,7 @@ function createResourceImageBilling(db, { model, dramaId, sourceId, size, image_
   const authorization = billing.createAuthorization(db, actor, {
     idempotency_key: `resource-image:${randomUUID()}`,
     service_type: 'image',
-    model: billingTarget.billing_key, provider_model: billingTarget.provider_model,
+    model: billingTarget.billing_key, provider_model: billingTarget.provider_model, provider: billingTarget.provider,
     usage: { image: 1 },
     pricing_context: imagePricingContext({ size, image_url, reference_images, reference_image_urls }),
     reference_type: 'image_generation',
@@ -85,6 +85,7 @@ function quoteResourceImages(db, user, input = {}) {
     tenantId ? { tenant_id: tenantId } : {}
   );
   if (!target.billing_key) throw new Error(`模型 ${model} 没有可用的计费标识`);
+  const provider = target.provider;
 
   const billing = require('./billingService');
   const quoteGroup = (request, quantity) => {
@@ -99,7 +100,7 @@ function quoteResourceImages(db, user, input = {}) {
   if (plainCount > 0) {
     groups.push(quoteGroup({
       service_type: 'image',
-      model: target.billing_key, provider_model: target.provider_model,
+      model: target.billing_key, provider_model: target.provider_model, provider,
       usage: { image: 1 },
       pricing_context: imagePricingContext({ size: input.size }),
     }, plainCount));
@@ -107,7 +108,7 @@ function quoteResourceImages(db, user, input = {}) {
   if (imageInputCount > 0) {
     groups.push(quoteGroup({
       service_type: 'image',
-      model: target.billing_key, provider_model: target.provider_model,
+      model: target.billing_key, provider_model: target.provider_model, provider,
       usage: { image: 1 },
       pricing_context: imagePricingContext({ size: input.size, reference_images: input.reference_images || ['reference'] }),
     }, imageInputCount));

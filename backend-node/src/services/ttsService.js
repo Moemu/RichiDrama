@@ -248,12 +248,12 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
   const billingTarget = aiConfigService.resolveBillingTarget(db, 'tts', ttsModel, ttsConfig.id);
   const billing = require('./billingService');
   if (!billingActor?.id) throw new Error('无法确定 TTS 计费账号');
-  const meters = billing.activeMeters(db, billingActor, 'tts', billingTarget.billing_key);
+  const meters = billing.activeMeters(db, billingActor, 'tts', billingTarget.billing_key, billingTarget.provider);
   if (!meters.includes('character')) throw new Error(`TTS 模型 ${billingTarget.billing_key} 未配置按字符价格，已拒绝调用`);
   const characters = require('./billingUsageService').unicodeCharacterCount(text);
   billingAuthorization = billing.createAuthorization(db, billingActor, {
     idempotency_key: `tts:${billingActor.id}:${randomUUID()}`,
-    service_type: 'tts', model: billingTarget.billing_key, provider_model: billingTarget.provider_model, usage: { character: characters },
+    service_type: 'tts', model: billingTarget.billing_key, provider_model: billingTarget.provider_model, provider: billingTarget.provider, usage: { character: characters },
     reference_type: billing_reference?.type || 'tts', reference_id: billing_reference?.id || storyboard_id || null,
     drama_id: billingDramaId, source_kind: 'storyboard_tts', source_id: storyboard_id || null,
   });

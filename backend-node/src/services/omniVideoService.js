@@ -87,12 +87,12 @@ function quote(db, body, payer) {
   const config = aiConfigs.getConfig(db, capability.config_id);
   let billingSettings = {};
   try { billingSettings = JSON.parse(config?.settings || '{}'); } catch (_) {}
-  const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key);
+  const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key, billingTarget.provider);
   const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
   return billing.quote(db, payer, {
     service_type: 'video',
-    model: billingTarget.billing_key, provider_model: billingTarget.provider_model,
+    model: billingTarget.billing_key, provider_model: billingTarget.provider_model, provider: billingTarget.provider,
     usage,
     pricing_context: {
       has_video_input: !!body.has_video_input,
@@ -159,7 +159,7 @@ function create(db, log, body, billingUser) {
   let billingSettings = {}; try { billingSettings = JSON.parse(config?.settings || '{}'); } catch (_) {}
   const upscaleResolution = body.upscale_resolution;
   const targetFps = body.target_fps;
-  const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key);
+  const meters = billing.activeMeters(db, payer, 'video', billingTarget.billing_key, billingTarget.provider);
   const usage = buildAuthorizationUsage(meters, billingSettings, body.duration);
   if (!Object.keys(usage).length) throw new Error(`视频模型 ${billingTarget.billing_key} 未配置可用计费项，已拒绝调用`);
   const existingWaitingId = Number(body.__sd2_waiting_generation_id) || null;
@@ -180,7 +180,7 @@ function create(db, log, body, billingUser) {
   if (!waitingForSd2 && !idempotencyKey) throw new Error('视频生成请求缺少幂等键，请刷新后重试');
   const authorization = waitingForSd2 ? null : billing.createAuthorization(db, payer, {
     idempotency_key: idempotencyKey,
-    service_type: 'video', model: billingTarget.billing_key, provider_model: billingTarget.provider_model, usage,
+    service_type: 'video', model: billingTarget.billing_key, provider_model: billingTarget.provider_model, provider: billingTarget.provider, usage,
     pricing_context: { has_video_input: routed.some((asset) => asset.type === 'video' && asset.send_to_model), resolution: body.resolution || '480p', has_audio: !!inputValidation?.automatic_voice_url || routed.some((asset) => asset.type === 'audio' && asset.send_to_model) }, reference_type: 'omni_video_job', reference_id: body.shot_id || body.sequence_id || body.board_id || null, drama_id: body.drama_id || null, source_kind: body.source_context === 'creative_board' ? 'creative_board' : body.source_context === 'single_video_tool' ? 'single_video_tool' : body.storyboard_id ? 'storyboard' : 'omni_sequence_shot', source_id: body.board_id || body.storyboard_id || body.shot_id || null,
   });
   let task = null;

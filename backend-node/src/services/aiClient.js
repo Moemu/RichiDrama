@@ -321,7 +321,7 @@ function createAutomaticTextAuthorization(db, config, model, userPrompt, systemP
   if (!context?.actor?.id || context.auto_billing_disabled) return null;
   const billing = require('./billingService');
   const target = aiConfigService.resolveBillingTarget(db, billingServiceType, model, config.id, configScope());
-  const meters = billing.activeMeters(db, context.actor, billingServiceType, target.billing_key);
+  const meters = billing.activeMeters(db, context.actor, billingServiceType, target.billing_key, target.provider);
   const reserve = require('./billingUsageService').textReservation(`${systemPrompt || ''}\n${userPrompt || ''}`, maxOutputTokens);
   const usage = {};
   if (meters.includes('request')) usage.request = 1;
@@ -330,7 +330,7 @@ function createAutomaticTextAuthorization(db, config, model, userPrompt, systemP
   if (!Object.keys(usage).length) throw new Error(`文本模型 ${target.billing_key} 未配置可用计费项，已拒绝调用`);
   const authorization = billing.createAuthorization(db, context.actor, {
     idempotency_key: `text:${context.actor.id}:${require('crypto').randomUUID()}`,
-    service_type: billingServiceType, model: target.billing_key, provider_model: target.provider_model, usage, reference_type: 'text_generation',
+    service_type: billingServiceType, model: target.billing_key, provider_model: target.provider_model, provider: target.provider, usage, reference_type: 'text_generation',
     // Project-scoped text flows place this data in the request context before
     // their asynchronous work starts. The authorization snapshot is then the
     // single source used by ledger, usage logs and administrator rollups.

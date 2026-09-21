@@ -28,13 +28,44 @@ function usesLegacyGlobalConfigs(db, tenantId) {
   return Number(db.prepare('SELECT uses_legacy_global_configs FROM tenants WHERE id=?').get(tenantId)?.uses_legacy_global_configs) === 1;
 }
 
-function priceBookForUser(db, userId) {
+function priceBookForUser(db, userId, provider) {
   const tenant = tenantForUser(db, userId);
-  if (!tenant || !hasTable(db, 'tenant_price_book_bindings')) return null;
+  if (!tenant) return null;
+  const published = "pb.status = 'published'";
+  if (hasTable(db, 'tenant_provider_price_book_bindings')) {
+    // Groups with no provider-scoped rows at all (e.g. bindings written
+    // directly to the legacy 1:1 table) keep their original behaviour.
+    const hasRows = db.prepare('SELECT 1 FROM tenant_provider_price_book_bindings WHERE tenant_id = ? LIMIT 1').get(tenant.id);
+    if (hasRows) {
+      if (provider) {
+        // Exact provider binding wins, then the legacy catch-all slot ('').
+        // Without either, the call falls through to platform books.
+        const exact = db.prepare(`SELECT pb.id, pb.name, pb.status FROM tenant_provider_price_book_bindings b
+          JOIN billing_price_books pb ON pb.id = b.price_book_id
+          WHERE b.tenant_id = ? AND b.provider = ? AND ${published}`).get(tenant.id, String(provider));
+        if (exact) return exact;
+        return db.prepare(`SELECT pb.id, pb.name, pb.status FROM tenant_provider_price_book_bindings b
+          JOIN billing_price_books pb ON pb.id = b.price_book_id
+          WHERE b.tenant_id = ? AND b.provider = '' AND ${published}`).get(tenant.id) || null;
+      }
+      return db.prepare(`SELECT pb.id, pb.name, pb.status FROM tenant_provider_price_book_bindings b
+        JOIN billing_price_books pb ON pb.id = b.price_book_id
+        WHERE b.tenant_id = ? AND ${published} ORDER BY (b.provider = '') DESC, b.rowid LIMIT 1`).get(tenant.id) || null;
+    }
+  }
+  if (!hasTable(db, 'tenant_price_book_bindings')) return null;
   return db.prepare(`SELECT pb.id, pb.name, pb.status FROM tenant_price_book_bindings binding
     JOIN billing_price_books pb ON pb.id = binding.price_book_id
     WHERE binding.tenant_id = ? AND pb.status = 'published'`).get(tenant.id) || null;
 }
+
+function priceBookBindingsForTenant(db, tenantId) {
+  if (!hasTable(db, 'tenant_provider_price_book_bindings')) return [];
+  return db.prepare(`SELECT b.provider, b.price_book_id, pb.name, pb.status
+    FROM tenant_provider_price_book_bindings b JOIN billing_price_books pb ON pb.id = b.price_book_id
+    WHERE b.tenant_id = ? ORDER BY b.provider`).all(Number(tenantId));
+}
+
 
 function ensureDefaultTenant(db, actorId) {
   if (!hasTable(db, 'tenants')) return null;
@@ -93,9 +124,13 @@ function bindGlobalConfigToLegacyTenants(db, config) {
 
 function listTenants(db) {
   if (!hasTable(db, 'tenants')) return [];
+  const providerBooks = hasTable(db, 'tenant_provider_price_book_bindings');
+  const bookNamesSql = providerBooks
+    ? `(SELECT group_concat(pb.name, '、') FROM tenant_provider_price_book_bindings b JOIN billing_price_books pb ON pb.id = b.price_book_id WHERE b.tenant_id = t.id) AS price_book_name`
+    : `(SELECT pb.name FROM tenant_price_book_bindings binding JOIN billing_price_books pb ON pb.id = binding.price_book_id WHERE binding.tenant_id = t.id) AS price_book_name`;
   return db.prepare(`SELECT t.*, COUNT(tm.user_id) AS member_count,
-    (SELECT pb.name FROM tenant_price_book_bindings binding JOIN billing_price_books pb ON pb.id = binding.price_book_id WHERE binding.tenant_id = t.id) AS price_book_name,
-    (SELECT binding.price_book_id FROM tenant_price_book_bindings binding WHERE binding.tenant_id = t.id) AS price_book_id
+    ${bookNamesSql},
+    (SELECT binding.price_book_id FROM ${providerBooks ? 'tenant_provider_price_book_bindings' : 'tenant_price_book_bindings'} binding WHERE binding.tenant_id = t.id LIMIT 1) AS price_book_id
     FROM tenants t LEFT JOIN tenant_memberships tm ON tm.tenant_id = t.id
     GROUP BY t.id ORDER BY t.id`).all().map((row) => ({
     ...row,
@@ -121,7 +156,8 @@ function tenantDetail(db, tenantId) {
     WHERE b.tenant_id=? AND c.deleted_at IS NULL ORDER BY c.service_type, c.id`).all(tenantId)
     .map((row) => ({ ...row, is_active: !!row.is_active }));
   const priceBook = db.prepare(`SELECT pb.id, pb.name, pb.status FROM tenant_price_book_bindings b JOIN billing_price_books pb ON pb.id=b.price_book_id WHERE b.tenant_id=?`).get(tenantId) || null;
-  return { ...tenant, members, configs, sd2_configs: sd2, price_book: priceBook };
+  const priceBooks = priceBookBindingsForTenant(db, tenantId);
+  return { ...tenant, members, configs, sd2_configs: sd2, price_book: priceBook, price_books: priceBooks };
 }
 
 function writeTenant(db, actorId, input, id) {
@@ -254,6 +290,14 @@ function replaceBindings(db, tenantId, input) {
   const aiIds = [...new Set((rawAiConfigs || input.ai_config_ids || []).map((item) => Number(typeof item === 'object' ? item.id : item)).filter(Number.isSafeInteger))];
   const sd2Ids = [...new Set((input.sd2_config_ids || []).map(Number).filter(Number.isSafeInteger))];
   const priceBookId = input.price_book_id == null || input.price_book_id === '' ? null : Number(input.price_book_id);
+  // Provider-scoped bindings (option B). The legacy single price_book_id is
+  // still accepted and becomes one binding tagged with that book's provider
+  // ('' for legacy untagged books). Old clients keep working unchanged.
+  const rawBindings = Array.isArray(input.price_book_bindings) ? input.price_book_bindings : null;
+  const providerBindings = (rawBindings || (priceBookId != null ? [{ price_book_id: priceBookId }] : []))
+    .map((item) => ({ provider: String(item?.provider ?? '').trim(), price_book_id: Number(item?.price_book_id) }))
+    .filter((item) => Number.isSafeInteger(item.price_book_id) && item.price_book_id > 0);
+  const uniqueBindings = new Map(providerBindings.map((item) => [item.provider, item]));
   const at = new Date().toISOString();
   db.transaction(() => {
     const validate = (ids, kind) => {
@@ -297,11 +341,37 @@ function replaceBindings(db, tenantId, input) {
     }
     const sd2Insert = db.prepare('INSERT INTO tenant_sd2_config_bindings (tenant_id,ai_config_id,is_active,created_at,updated_at) VALUES (?,?,1,?,?)');
     for (const configId of sd2Ids) sd2Insert.run(target.id, configId, at, at);
-    if (priceBookId) db.prepare(`INSERT INTO tenant_price_book_bindings (tenant_id,price_book_id,active_at,created_by,updated_at) VALUES (?,?,?,?,?)
-      ON CONFLICT(tenant_id) DO UPDATE SET price_book_id=excluded.price_book_id, active_at=excluded.active_at, updated_at=excluded.updated_at`).run(target.id, priceBookId, at, null, at);
-    else db.prepare('DELETE FROM tenant_price_book_bindings WHERE tenant_id=?').run(target.id);
+    const bookProvider = db.prepare('SELECT id, provider FROM billing_price_books WHERE id=?');
+    if (uniqueBindings.size) {
+      const validateBinding = db.prepare("SELECT id, provider FROM billing_price_books WHERE id=? AND status='published'");
+      db.prepare('DELETE FROM tenant_provider_price_book_bindings WHERE tenant_id=?').run(target.id);
+      const insertBinding = db.prepare(`INSERT INTO tenant_provider_price_book_bindings (tenant_id,provider,price_book_id,active_at,created_by,updated_at) VALUES (?,?,?,?,?,?)`);
+      for (const { provider, price_book_id: bookId } of uniqueBindings.values()) {
+        const book = validateBinding.get(bookId);
+        if (!book) throw new Error('请选择已发布的价目表');
+        // Legacy single-field input has no provider tag: adopt the book's own
+        // provider (or the '' catch-all for legacy untagged books).
+        insertBinding.run(target.id, provider || (book.provider || ''), bookId, at, null, at);
+      }
+      // Keep the legacy 1:1 table aligned for old readers: the catch-all
+      // binding if present, otherwise the first binding.
+      const legacyRow = uniqueBindings.get('') || uniqueBindings.values().next().value;
+      db.prepare('DELETE FROM tenant_price_book_bindings WHERE tenant_id=?').run(target.id);
+      if (legacyRow) {
+        const book = bookProvider.get(legacyRow.price_book_id);
+        if (book) db.prepare('INSERT INTO tenant_price_book_bindings (tenant_id,price_book_id,active_at,created_by,updated_at) VALUES (?,?,?,?,?)').run(target.id, book.id, at, null, at);
+      }
+    } else if (priceBookId != null) {
+      const book = db.prepare("SELECT id FROM billing_price_books WHERE id=? AND status='published'").get(priceBookId);
+      if (!book) throw new Error('请选择已发布的价目表');
+      db.prepare(`INSERT INTO tenant_price_book_bindings (tenant_id,price_book_id,active_at,created_by,updated_at) VALUES (?,?,?,?,?)
+        ON CONFLICT(tenant_id) DO UPDATE SET price_book_id=excluded.price_book_id, active_at=excluded.active_at, updated_at=excluded.updated_at`).run(target.id, priceBookId, at, null, at);
+    } else {
+      db.prepare('DELETE FROM tenant_provider_price_book_bindings WHERE tenant_id=?').run(target.id);
+      db.prepare('DELETE FROM tenant_price_book_bindings WHERE tenant_id=?').run(target.id);
+    }
   })();
   return tenantDetail(db, target.id);
 }
 
-module.exports = { hasTable, tenantForUser, configIdsForService, configIdsForTenant, usesLegacyGlobalConfigs, priceBookForUser, ensureDefaultTenant, bindGlobalConfigToLegacyTenants, listTenants, tenantDetail, writeTenant, setMember, bindOwnedConfig, replaceBindings, newUserDefaultTenant, ensureNewUserMembership };
+module.exports = { hasTable, tenantForUser, configIdsForService, configIdsForTenant, usesLegacyGlobalConfigs, priceBookForUser, priceBookBindingsForTenant, ensureDefaultTenant, bindGlobalConfigToLegacyTenants, listTenants, tenantDetail, writeTenant, setMember, bindOwnedConfig, replaceBindings, newUserDefaultTenant, ensureNewUserMembership };
