@@ -96,7 +96,7 @@
           <summary><b>本镜素材</b><small>已加入 {{ chosenAssets.length }} 个</small></summary>
           <div class="creation-secondary-body">
                 <div v-if="reproductionMode" class="materials-title"><div><small>失败任务的素材快照（只读）。</small></div></div>
-        <div v-else class="materials-title is-actions"><el-button text type="primary" size="small" @click="projectLibraryOpen = true">从素材库加入</el-button><el-button text size="small" @click="pickFiles">从本地上传</el-button></div>
+        <div v-else class="materials-title is-actions"><el-button text type="primary" size="small" @click="projectLibraryOpen = true">从素材库加入</el-button><el-button class="inherit-materials-button" text size="small" :disabled="!previousShot || (projectSession.enabled && !projectSession.canEdit)" :title="!previousShot ? '首镜没有上一镜素材' : ''" @click="inheritPreviousShotMaterials">沿用上一镜素材</el-button></div>
         <input ref="fileInput" hidden type="file" multiple accept="image/*,video/*,audio/*" @change="uploadFiles" />
         <div v-if="!reproductionMode" class="dropzone" @click="pickFiles" @dragover.prevent @drop.prevent="dropFiles"><el-icon><Upload /></el-icon>拖入图片、视频或音频</div>
         <small v-if="!reproductionMode" class="upload-limit-note">{{ limitSummary }}</small>
@@ -220,6 +220,7 @@ import { adminAPI } from '@/api/account'
 import OmniAssetPromptEditor from '@/components/OmniAssetPromptEditor.vue'
 import ProjectAssetLibraryDialog from '@/components/ProjectAssetLibraryDialog.vue'
 import { findAssetMentions, promptAliasForAsset, resolveAssetReferences } from '@/utils/assetMentions'
+import { planShotMaterialInheritance, referencedShotMaterialIds } from '@/utils/shotMaterialInheritance'
 import GenerationSettings from '@/components/GenerationSettings.vue'
 import { clearPromptDraft, currentDraftUserId, readPromptDraft, shouldRestorePromptDraft, writePromptDraft } from '@/utils/promptDraft'
 import { createShotSaveQueue, findShotById, mergeSavedShot } from '@/utils/shotSaveCoordinator'
@@ -370,6 +371,7 @@ function restorePromptDraftForShot(shot) {
 const currentShot = computed(() => shots.value.find((shot) => shot.id === activeShotId.value) || null)
 const currentGenerationMode = computed(() => generationModes.value[currentShot.value?.id] || (Number(currentShot.value?.id) === Number(masterShotId.value) ? 'master' : 'inherited'))
 const activeShotIndex = computed(() => Math.max(0, shots.value.findIndex((shot) => shot.id === activeShotId.value)))
+const previousShot = computed(() => activeShotIndex.value > 0 ? shots.value[activeShotIndex.value - 1] : null)
 const chosenAssets = computed(() => selectedOrder.value.map((id) => assets.value.find((asset) => asset.id === id)).filter(Boolean))
 function assetDisplayName(asset) { return String(asset?.name || asset?.alias || asset?.reference_alias || '').trim() }
 function assetLegacyAliases(asset) { return [...new Set([asset?.reference_alias, asset?.alias, asset?.name].map((value) => String(value || '').trim()).filter(Boolean))] }
@@ -1281,6 +1283,35 @@ function onShotListWheel(event) {
   })
 }
 
+function inheritPreviousShotMaterials() {
+  const source = previousShot.value
+  if (!source || reproductionMode.value || (projectSession.enabled && !projectSession.canEdit)) return
+  const plan = planShotMaterialInheritance(source.assets, assets.value, selectedOrder.value, shotLimits.value)
+  const sourceReferences = referencedShotMaterialIds(source, assets.value)
+  for (const { asset, usage } of plan.added) asset.usage = usage
+  selectedOrder.value = [...selectedOrder.value, ...plan.added.map(({ asset }) => asset.id)]
+
+  const alreadyReferenced = new Set(resolvedPromptDocument.value.refs.map((ref) => Number(ref.asset_id)))
+  const inheritedIds = new Set(selectedOrder.value.map(Number))
+  const references = (source.assets || [])
+    .filter((item) => !['first_frame', 'last_frame'].includes(item.usage))
+    .map((item) => Number(item.asset_id))
+    .filter((id) => sourceReferences.has(id) && inheritedIds.has(id) && !alreadyReferenced.has(id))
+    .map((id) => assets.value.find((asset) => Number(asset.id) === id))
+    .filter(Boolean)
+  if (references.length) {
+    const tokens = references.map((asset) => `@${promptAssetFor(asset).alias}`).join(' ')
+    prompt.value = `${prompt.value.trimEnd()}${prompt.value.trim() ? '\n' : ''}${tokens}`
+    promptDocument.value = resolveAssetReferences(prompt.value, promptAssets.value, promptDocument.value)
+    setPromptReferences(promptDocument.value)
+  }
+  if (plan.added.length || references.length) scheduleSave()
+  const skipped = [plan.overLimit && `${plan.overLimit} 个超出数量限制`, plan.unavailable && `${plan.unavailable} 个不可用`, plan.frames && `${plan.frames} 个首尾帧未继承`].filter(Boolean)
+  const summary = `已沿用 ${plan.added.length} 个素材，加入 ${references.length} 个提示词引用`
+  if (skipped.length) ElMessage.warning(`${summary}；${skipped.join('、')}`)
+  else ElMessage.info(plan.added.length || references.length ? summary : '上一镜的素材已在本镜中')
+}
+
 function addShotMaterial(asset) {
   if (selectedOrder.value.includes(asset.id)) return true
   const typeCount = selectionCounts.value[asset.type] || 0
@@ -1794,6 +1825,7 @@ defineExpose({ refreshProjectShots, refreshCollaboration })
 .billing-project-field{display:grid;grid-template-columns:minmax(0,1fr) minmax(156px,44%);gap:10px;align-items:center;margin:12px 0;padding:10px;border:1px solid color-mix(in srgb,var(--studio-accent) 52%,var(--border-color));border-radius:8px;background:color-mix(in srgb,var(--studio-accent) 10%,var(--bg-raised))}.billing-project-field b{display:block;color:var(--text-primary);font-size:13px}.billing-project-field small{display:block;margin-top:4px;color:var(--text-muted);line-height:1.45;font-size:11px}.billing-project-field :deep(.el-select__wrapper){min-height:34px;border-color:color-mix(in srgb,var(--studio-accent) 58%,var(--border-color))}@media(max-width:1080px){.billing-project-field{grid-template-columns:1fr}.billing-project-field :deep(.el-select){width:100%}}
 /* 素材区分为本镜工作集和项目检索库：编辑镜头时只浏览正在使用的素材。 */
 .materials-title>div:first-child{min-width:0}.materials-title>div:first-child small{display:block;max-width:210px;margin-top:2px;line-height:1.35;color:var(--text-muted)!important;font-size:11px!important}.current-shot-material-pool{min-height:72px}.current-shot-material-empty{grid-column:1 / -1;margin:0;padding:12px 4px;color:var(--text-muted);font-size:12px;line-height:1.5}
+.materials-title.is-actions :deep(.inherit-materials-button.is-disabled){opacity:.45}
 /* 项目分镜修复：舞台与成片使用同一比例，顶部信息不能被主编辑区压缩。 */
 .project-storyboard-page .player-tools{flex:0 0 44px;min-height:44px;overflow:visible}
 .project-storyboard-page .frame-actions,.project-storyboard-page .time-ruler,.project-storyboard-page .shot-tabs{flex:0 0 auto}
