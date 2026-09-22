@@ -84,5 +84,7 @@ export const adminAPI = {
   createRichbestRebind: (data) => request.post('/admin/richbest-asset-rebinds', data),
   richbestRebind: (id) => request.get(`/admin/richbest-asset-rebinds/${id}`),
   reconciliations: (params) => request.get('/admin/billing-reconciliations', { params }),
+  settleReconciliation: (id, data) => request.post(`/admin/billing-reconciliations/${id}/settle`, data),
+  waiveReconciliation: (id, data) => request.post(`/admin/billing-reconciliations/${id}/waive`, data),
   audit: (params) => request.get('/admin/audit-logs', { params }),
 }

@@ -269,6 +269,48 @@ test('expired reconciliation releases the frozen authorization and leaves an aud
   } finally { teardown(dbPath); }
 });
 
+test('the operations console settles and waives pending cases from the paged projection', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'reconcile-console', password: '1' }, admin.id);
+    const actor = { id: user.id, role: 'user' };
+    billing.savePriceBook(db, admin.id, { name: 'reconcile console price', status: 'published', items: [
+      { service_type: 'text', model: 'reconcile-console-model', meter: 'input_token', unit_price: 2 },
+    ] });
+    billing.adjustBalance(db, admin.id, user.id, 100, 'test points');
+    const authorize = (key) => billing.createAuthorization(db, actor, {
+      idempotency_key: key, service_type: 'text', model: 'reconcile-console-model', usage: { input_token: 10 },
+    });
+    const toSettle = authorize('console-settle');
+    const toWaive = authorize('console-waive');
+    billing.markPendingReconciliation(db, actor, toSettle.authorization_id);
+    billing.markPendingReconciliation(db, actor, toWaive.authorization_id);
+
+    const paged = billing.pagedReconciliationCases(db, { status: 'pending', page: 1, page_size: 10 });
+    assert.equal(paged.items.length, 2);
+    const settleRow = paged.items.find((row) => row.authorization_id === toSettle.authorization_id);
+    assert.equal(settleRow.username, 'reconcile-console');
+    assert.equal(settleRow.frozen_amount, 20);
+    // The console renders one usage input per reserved meter, so the projection
+    // has to carry them; the whole price snapshot must not travel with it.
+    assert.deepEqual(settleRow.reservation_usage, { input_token: 10 });
+    assert.equal(settleRow.authorization_snapshot_json, undefined);
+
+    billing.settleReconciliationCase(db, { id: admin.id, role: 'admin' }, settleRow.id, {
+      usage: { input_token: 4 }, reason: '按供应商控制台补录',
+    });
+    billing.waiveReconciliationCase(db, { id: admin.id, role: 'admin' },
+      paged.items.find((row) => row.authorization_id === toWaive.authorization_id).id,
+      '供应商已计费但不再向用户收取');
+
+    assert.equal(billing.account(db, user.id).frozen_micro, 0);
+    assert.equal(billing.account(db, user.id).balance_micro, 920000);
+    assert.equal(billing.pagedReconciliationCases(db, { status: 'resolved', page: 1, page_size: 10 }).items.length, 1);
+    assert.equal(billing.pagedReconciliationCases(db, { status: 'waived', page: 1, page_size: 10 }).items.length, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_audit_logs WHERE target_type = 'reconciliation_case' AND action IN ('billing.reconciliation.settled', 'billing.reconciliation.waived')").get().count, 2);
+  } finally { teardown(dbPath); }
+});
+
 test('three pending reconciliations for one model rate-limit later calls', () => {
   const { db, dbPath, admin } = setup();
   try {
