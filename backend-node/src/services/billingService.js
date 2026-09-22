@@ -378,10 +378,14 @@ function settleAuthorization(db, user, authorizationId, input = {}) {
   if (!auth || (auth.user_id !== user.id && user.role !== 'admin')) throw new Error('预授权不存在');
   const completed = db.prepare('SELECT * FROM billing_usage_logs WHERE authorization_id = ?').get(authorizationId);
   if (completed) return { transaction_id: completed.transaction_id, charged_micro: completed.charged_micro, charged: microToCredits(completed.charged_micro), reused: true };
+  if (db.prepare("SELECT 1 FROM billing_transactions WHERE authorization_id=? AND type='void'").get(authorizationId)) {
+    const error = new Error('预授权已释放，不能再次结算；请核对供应商结果');
+    error.code = 'BILLING_AUTHORIZATION_VOIDED';
+    throw error;
+  }
   const snapshot = parse(auth.snapshot_json);
-  if (snapshot.rates?.some(rate => seedreamPricing.enabled(rate.conditions))
-      && (!snapshot.image_request_finalized || db.prepare("SELECT 1 FROM billing_transactions WHERE authorization_id=? AND type='void'").get(auth.id))) {
-    throw new Error('图片请求未提交或预授权已释放，不能结算');
+  if (snapshot.rates?.some(rate => seedreamPricing.enabled(rate.conditions)) && !snapshot.image_request_finalized) {
+    throw new Error('图片请求未提交，不能结算');
   }
   const actual = calculateFromSnapshot(snapshot, input.usage); const at = now(); const id = uuid();
   // The authorization is an estimate, not a settlement cap. Once a provider
@@ -394,7 +398,11 @@ function settleAuthorization(db, user, authorizationId, input = {}) {
   const supplementalMicro = Math.max(0, chargedMicro - auth.amount_micro);
   const execute = db.transaction(() => {
     const acct = payerAccountForAuthorization(db, auth);
-    if (acct.frozen_micro < auth.amount_micro) throw new Error('预授权冻结状态异常');
+    if (acct.frozen_micro < auth.amount_micro) {
+      const error = new Error('预授权冻结状态异常，需核对账本');
+      error.code = 'BILLING_FROZEN_BALANCE_MISMATCH';
+      throw error;
+    }
     const availableAfterRelease = safeMicroAdd(acct.balance_micro, -acct.frozen_micro, auth.amount_micro);
     if (availableAfterRelease < chargedMicro) {
       const error = new Error('实际用量超出预授权且可用余额不足，等待管理员对账');

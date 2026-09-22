@@ -53,6 +53,24 @@ test('billing settles real provider usage above the authorization when the relea
   } finally { teardown(dbPath); }
 });
 
+test('a released authorization cannot settle a late provider result or reduce other frozen funds', () => {
+  const { db, dbPath, admin } = setup();
+  try {
+    const user = auth.createUser(db, { username: 'late-result', password: 'creator123' }, admin.id);
+    const actor = { id: user.id, role: 'user' };
+    billing.savePriceBook(db, admin.id, { name: 'late-result', status: 'published', items: [{ service_type: 'video', model: 'late-model', meter: 'second', unit_price: 1 }] });
+    billing.adjustBalance(db, admin.id, user.id, 100, 'test points');
+    const released = billing.createAuthorization(db, actor, { idempotency_key: 'late-one', service_type: 'video', model: 'late-model', usage: { second: 10 } });
+    billing.voidAuthorization(db, actor, released.authorization_id, 'provider first reported failure');
+    const active = billing.createAuthorization(db, actor, { idempotency_key: 'late-two', service_type: 'video', model: 'late-model', usage: { second: 10 } });
+    const before = billing.account(db, user.id);
+    assert.throws(() => billing.settleAuthorization(db, actor, released.authorization_id, { usage: { second: 10 } }), { code: 'BILLING_AUTHORIZATION_VOIDED' });
+    assert.deepEqual(billing.account(db, user.id), before);
+    assert.equal(db.prepare("SELECT COUNT(*) count FROM billing_transactions WHERE authorization_id=? AND type='settlement'").get(released.authorization_id).count, 0);
+    billing.settleAuthorization(db, actor, active.authorization_id, { usage: { second: 10 } });
+  } finally { teardown(dbPath); }
+});
+
 test('usage summary keeps project attribution as an authorization-time snapshot and separates unassigned history', () => {
   const { db, dbPath, admin, log } = setup();
   try {

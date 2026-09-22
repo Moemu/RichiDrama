@@ -156,18 +156,18 @@ async function process(db, log, videoGenerationId, storagePath) {
         usage: { millisecond: outputProbe.duration_ms }, provider_request_id: result.request_id || job.provider_request_id || job.provider_task_id,
       });
     } catch (error) {
-      if (error.code !== 'BILLING_ACTUAL_USAGE_EXCEEDS_AVAILABLE_BALANCE') throw error;
+      if (!['BILLING_ACTUAL_USAGE_EXCEEDS_AVAILABLE_BALANCE', 'BILLING_FROZEN_BALANCE_MISMATCH'].includes(error.code)) throw error;
       billing.markPendingReconciliation(db, { id: row.owner_user_id, role: 'admin' }, job.billing_authorization_id, {
         provider_request_id: result.request_id || job.provider_request_id || job.provider_task_id,
         observed_usage: { millisecond: outputProbe.duration_ms },
-        reason: '超分实际费用超过预授权且可用余额不足，等待管理员对账',
+        reason: error.code === 'BILLING_FROZEN_BALANCE_MISMATCH' ? '超分结果已保存，但账户冻结额与预授权账本不符，等待管理员核对' : '超分实际费用超过预授权且可用余额不足，等待管理员对账',
       });
       const now = new Date().toISOString();
       db.prepare(`UPDATE video_upscale_jobs SET status='reconciliation_required', output_local_path=?, output_width=?, output_height=?,
         output_duration_ms=?, output_resolution=?, output_fps=?, error_msg=?, updated_at=? WHERE id=?`)
-        .run(localPath, outputProbe.width, outputProbe.height, outputProbe.duration_ms, outputProbe.resolution, outputProbe.fps, '超分实际费用超过预授权且余额不足，已进入待对账', now, job.id);
+        .run(localPath, outputProbe.width, outputProbe.height, outputProbe.duration_ms, outputProbe.resolution, outputProbe.fps, '超分已保存，等待计费对账', now, job.id);
       db.prepare("UPDATE video_generations SET status='billing_reconciliation', upscale_status='reconciliation_required', error_msg=?, updated_at=? WHERE id=?")
-        .run('超分已完成但实际费用超过预授权且余额不足，等待管理员对账', now, row.id);
+        .run('超分已完成并保存，等待管理员核对计费', now, row.id);
       error.reconciliationRequired = true;
       throw error;
     }

@@ -498,6 +498,12 @@ function ensureAllColumns(database) {
     // safe default zero until a new run or explicit retry marks them.
     { name: 'postprocess_recovery_version', type: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'draft_node_id',    type: 'TEXT' },
+    // Set while a provider submit request is in flight. Without it an empty
+    // provider_task_id means both "never submitted" and "submitted, response
+    // still pending" — indistinguishable, and the second case must never
+    // release the reservation. Cleared on startup: after a restart no request
+    // from this process can still be outstanding.
+    { name: 'provider_submit_started_at', type: 'TEXT' },
     { name: 'created_at',           type: 'TEXT' },
     { name: 'updated_at',           type: 'TEXT' },
     { name: 'deleted_at',           type: 'TEXT' },

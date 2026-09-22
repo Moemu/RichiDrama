@@ -4269,7 +4269,7 @@ async function pollVideoTask(db, log, videoGenId, taskId, config, ...args) {
   }, config?.id);
   return result;
 }
-async function executePollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 300, intervalMs = 10000, onProgress = null) {
+async function executePollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 300, intervalMs = 10000, onProgress = null, options = {}) {
   const provider = (config.provider || '').toLowerCase();
   const protocol = resolveVideoProtocol(config);
   const isDashScope = protocol === 'dashscope';
@@ -4308,7 +4308,9 @@ async function executePollVideoTask(db, log, videoGenId, taskId, config, maxAtte
     await new Promise((r) => setTimeout(r, intervalMs));
     // A confirmed user cancellation changes the durable local status first.
     // Stop this in-memory poll before it can overwrite that terminal result.
-    if (db?.prepare) {
+    // Archive-only callers keep polling: their job is to rescue the bytes of an
+    // output the supplier already produced and billed, and they write no state.
+    if (db?.prepare && !options.archiveOnly) {
       const local = db.prepare('SELECT status FROM video_generations WHERE id = ?').get(videoGenId);
       if (local && local.status !== 'processing') return { stopped: true, local_status: local.status };
     }
