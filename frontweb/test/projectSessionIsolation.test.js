@@ -98,6 +98,72 @@ test('received text updates skip redundant reads while unseen revisions still re
   await Promise.resolve()
 })
 
+test('deleted collaborative text stops revision reads and keeps an unsaved draft', async t => {
+  const previous = { socket: globalThis.WebSocket, location: globalThis.location }
+  const sent = []
+  let socket
+  const doc = new Y.Doc()
+  const target = { kind: 'storyboards', id: 12, field: 'universal_segment_text' }
+  const snapshot = { ...target, epoch: 1, state: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'), state_vector: Buffer.from(Y.encodeStateVector(doc)).toString('base64') }
+  class TestSocket {
+    static OPEN = 1
+    readyState = 1
+    constructor() { socket = this }
+    send(raw) { sent.push(JSON.parse(raw)) }
+    close() {}
+  }
+  globalThis.WebSocket = TestSocket
+  globalThis.location = { protocol: 'http:', host: 'fixture.invalid' }
+  globalThis.sessionGet = async url => url.endsWith('/text') ? snapshot : { permissions: { collaboration_enabled: true, can_edit: true }, revision: 1 }
+  globalThis.sessionPost = async () => ({})
+  t.after(() => {
+    collaboration.closeProjectSession(); doc.destroy()
+    globalThis.WebSocket = previous.socket; globalThis.location = previous.location
+    delete globalThis.sessionGet; delete globalThis.sessionPost
+  })
+  await collaboration.openProjectSession(1)
+  socket.onopen()
+  const binding = await collaboration.bindProjectText(target, () => {})
+  binding.change('尚未保存的文本')
+  const save = sent.find(message => message.type === 'text_update')
+  socket.onmessage({ data: JSON.stringify({ type: 'error', request_id: save.request_id, code: 'ENTITY_DELETED', message: '协作内容已删除或不属于当前项目' }) })
+  await Promise.resolve()
+  assert.deepEqual(collaboration.projectSession.drafts, [{ key: 'storyboards:12:universal_segment_text', text: '尚未保存的文本' }])
+  assert.equal(collaboration.projectSession.errorCode, 'ENTITY_DELETED')
+  assert.deepEqual(collaboration.projectSession.invalidTargets, ['storyboards:12:universal_segment_text'])
+  assert.equal(collaboration.hasPendingProjectText(...Object.values(target)), false)
+  sent.length = 0
+  socket.onmessage({ data: JSON.stringify({ type: 'state', revision: 2, participants: [] }) })
+  assert.equal(sent.some(message => message.type === 'text_read'), false)
+  assert.equal(await collaboration.bindProjectText(target, () => {}), null)
+  binding.dispose()
+})
+
+test('deleted text from the initial read is not requested again in the same project session', async t => {
+  const previous = { socket: globalThis.WebSocket, location: globalThis.location }
+  let reads = 0
+  globalThis.WebSocket = class { close() {} }
+  globalThis.location = { protocol: 'http:', host: 'fixture.invalid' }
+  globalThis.sessionGet = async url => {
+    if (url.endsWith('/text')) {
+      reads++
+      throw Object.assign(new Error('协作内容已删除或不属于当前项目'), { code: 'ENTITY_DELETED' })
+    }
+    return { permissions: { collaboration_enabled: true, can_edit: true }, revision: 1 }
+  }
+  globalThis.sessionPost = async () => ({})
+  t.after(() => {
+    collaboration.closeProjectSession()
+    globalThis.WebSocket = previous.socket; globalThis.location = previous.location
+    delete globalThis.sessionGet; delete globalThis.sessionPost
+  })
+  await collaboration.openProjectSession(1)
+  const target = { kind: 'episodes', id: 9, field: 'script_content' }
+  await assert.rejects(collaboration.bindProjectText(target, () => {}), { code: 'ENTITY_DELETED' })
+  assert.equal(await collaboration.bindProjectText(target, () => {}), null)
+  assert.equal(reads, 1)
+})
+
 test('departed project callbacks cannot replace an active session, including reentry to the same project', async t => {
   const previous = { socket: globalThis.WebSocket, location: globalThis.location }
   const sockets = []

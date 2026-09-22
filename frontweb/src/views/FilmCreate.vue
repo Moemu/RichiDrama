@@ -6729,7 +6729,9 @@ html.light .sb-panel {
   .resources-stage-active .resource-media-card{flex:0 0 9.5rem;min-height:9.75rem}.resources-stage-active .resource-media-card img,.resources-stage-active .resource-media-card>span{height:72px}.resources-stage-active .resource-media-card small{padding-block:4px}
   .resources-stage-active .workflow-next-action{margin:0}
   .merge-stage-active>.main{display:grid;grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr);grid-template-rows:auto minmax(0,1fr);gap:16px;overflow:hidden;padding-top:18px;padding-bottom:18px}
-  .merge-stage-active .workflow-shell{grid-column:1/-1;margin:0;padding:15px 22px;border-radius:16px}
+  .merge-stage-active>.main:has(> .project-collaboration-bar){grid-template-rows:auto auto minmax(0,1fr)}
+  .merge-stage-active .main>.project-collaboration-bar{grid-column:1/-1}
+  .merge-stage-active .workflow-shell{grid-column:1/-1;margin:0;padding:15px 22px;border-radius:16px;overflow:clip}
   .merge-stage-active .workflow-head{align-items:center}.merge-stage-active .workflow-head h2{margin-block:2px;font-size:22px}.merge-stage-active .workflow-head p{font-size:12px}
   .merge-stage-active .workflow-steps{margin-top:12px}.merge-stage-active .workflow-step{min-height:38px}
   .merge-stage-active .main>:is(.merge-settings,.merge-output){display:flex;flex-direction:column;min-height:0;margin:0;padding:24px 26px}
