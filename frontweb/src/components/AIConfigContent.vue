@@ -7,14 +7,15 @@
         <div class="tab-content">
           <p v-if="!tenantId && canManageCatalog" class="tab-note">
             供应商凭据与模型请在「供应商连接」中添加，按能力绑定后自动生成配置。
-            本页保留无法共享的专用服务，以及尚未转换为共享连接的旧配置（迁移队列与转换入口也在「供应商连接」里）。
+            本页只新增视频后处理与素材上传服务；已有的旧配置仍可编辑，并可在「供应商连接」中转换。
+            <el-button link type="primary" @click="openConnection()">前往供应商连接</el-button>
           </p>
           <!-- 普通模式操作栏 -->
           <div v-if="!vendorLock.enabled" class="content-actions">
             <div class="actions-left">
               <el-button type="primary" @click="openAdd">
                 <el-icon><Plus /></el-icon>
-                添加配置
+                {{ platformCatalogMode ? '添加专用服务' : '添加配置' }}
               </el-button>
               <el-button plain @click="exportConfigs">
                 <el-icon><Download /></el-icon>
@@ -22,18 +23,18 @@
               </el-button>
               <el-button plain @click="triggerImport">
                 <el-icon><Upload /></el-icon>
-                导入配置
+                {{ platformCatalogMode ? '导入旧配置' : '导入配置' }}
               </el-button>
               <input ref="importFileRef" type="file" accept=".json" style="display:none" @change="importConfigs" />
-              <el-button type="success" plain @click="openOneKeyVolc">
+              <el-button v-if="!platformCatalogMode" type="success" plain @click="openOneKeyVolc">
                 <el-icon><MagicStick /></el-icon>
                 一键配置火山
               </el-button>
-              <el-button type="success" plain @click="openOneKeyAgnes">
+              <el-button v-if="!platformCatalogMode" type="success" plain @click="openOneKeyAgnes">
                 <el-icon><MagicStick /></el-icon>
                 一键配置 Agnes
               </el-button>
-              <el-button type="info" plain @click="openOneKeyTongyi">
+              <el-button v-if="!platformCatalogMode" type="info" plain @click="openOneKeyTongyi">
                 <el-icon><MagicStick /></el-icon>
                 一键配置通义
                 <span class="one-key-not-recommended">不推荐</span>
@@ -211,7 +212,7 @@
     <el-dialog
       v-model="dialogVisible"
       class="config-editor-dialog"
-      :title="form.provider_connection_id ? `${form.provider_connection_name || '供应商连接'} · ${serviceTypeLabel(form.service_type)}调用设置` : vendorLock.enabled ? '修改 API Key / 默认模型' : (editingId ? '编辑配置' : '添加配置')"
+      :title="form.provider_connection_id ? `${form.provider_connection_name || '供应商连接'} · ${serviceTypeLabel(form.service_type)}调用设置` : vendorLock.enabled ? '修改 API Key / 默认模型' : (editingId ? '编辑配置' : platformCatalogMode ? '添加专用服务' : '添加配置')"
       width="min(640px, calc(100vw - 32px))"
       append-to-body
       :close-on-click-modal="false"
@@ -270,12 +271,15 @@
               <el-tooltip placement="top" :show-arrow="true" popper-class="cfg-tip-popper">
                 <template #content>
                   <div class="cfg-tip-content">
-                    <b>文本/对话</b>：用于 AI 生成故事剧本<br>
-                    <b>文本生成图片</b>：角色、场景、道具的图片生成（不支持参考图）<br>
-                    <b>分镜图片生成</b>：生成分镜图片，支持传入角色参考图<br>
-                    <b>视频生成</b>：根据分镜图生成视频片段<br>
-                    <b>语音合成 TTS</b>：为分镜对白自动合成语音（点分镜配音按钮时使用）<br>
-                    <b>素材库上传</b>：将用户选择的图片、视频或音频上传为 Seedance 可复用素材。一个角色可使用多份独立素材
+                    <template v-if="platformCatalogMode && !editingId">模型生成与语音服务请在「供应商连接」中添加。</template>
+                    <template v-else>
+                      <b>文本/对话</b>：用于 AI 生成故事剧本<br>
+                      <b>文本生成图片</b>：角色、场景、道具的图片生成（不支持参考图）<br>
+                      <b>分镜图片生成</b>：生成分镜图片，支持传入角色参考图<br>
+                      <b>视频生成</b>：根据分镜图生成视频片段<br>
+                      <b>语音合成 TTS</b>：为分镜对白自动合成语音（点分镜配音按钮时使用）<br>
+                    </template>
+                    <b>素材库上传</b>：将图片、视频或音频上传为 Seedance 可复用素材，一个角色可使用多份独立素材
                   </div>
                 </template>
                 <el-icon class="tip-icon"><QuestionFilled /></el-icon>
@@ -283,24 +287,26 @@
             </span>
           </template>
           <el-select v-model="form.service_type" :disabled="!!form.provider_connection_id" placeholder="选择类型" style="width: 100%" @change="onServiceTypeChange">
-            <el-option label="文本/对话" value="text" />
-            <el-option label="文本生成图片" value="image" />
-            <el-option label="分镜图片生成" value="storyboard_image" />
-            <el-option label="视频生成" value="video" />
+            <el-option v-if="!platformCatalogMode || editingId" label="文本/对话" value="text" />
+            <el-option v-if="!platformCatalogMode || editingId" label="文本生成图片" value="image" />
+            <el-option v-if="!platformCatalogMode || editingId" label="分镜图片生成" value="storyboard_image" />
+            <el-option v-if="!platformCatalogMode || editingId" label="视频生成" value="video" />
             <el-option label="视频后处理（超分 / 插帧，AI MediaKit）" value="video_postprocess" />
-            <el-option label="语音合成 TTS" value="tts" />
+            <el-option v-if="!platformCatalogMode || editingId" label="语音合成 TTS" value="tts" />
             <el-option label="素材库上传" value="jimeng2_character_auth" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="!form.provider_connection_id" prop="provider">
+        <el-form-item v-if="!form.provider_connection_id && form.service_type" prop="provider">
           <template #label>
             <span class="form-label-tip">厂商
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
                 <template #content>
                   <div class="cfg-tip-content">
-                    选择厂商后填入 Base URL，模型从已保存的目录读取。<br>
-                    也可直接输入自定义厂商名（需手动填写其他字段）。<br>
-                    <b>推荐</b>：通义千问 / 火山引擎，国内访问稳定。
+                    <template v-if="platformCatalogMode && !editingId">这里只选择专用服务的厂商；模型供应商请在「供应商连接」中添加。</template>
+                    <template v-else>
+                      选择厂商后填入 Base URL，模型从已保存的目录读取。<br>
+                      也可直接输入自定义厂商名（需手动填写其他字段）。
+                    </template>
                   </div>
                 </template>
                 <el-icon class="tip-icon"><QuestionFilled /></el-icon>
@@ -1226,13 +1232,18 @@ const tenantId = computed(() => Number(props.tenantId) || null)
 const tenantBody = () => tenantId.value ? { tenant_id: tenantId.value } : {}
 
 const canManageCatalog = JSON.parse(localStorage.getItem('lmd_auth_user') || 'null')?.console_access === true
+const platformCatalogMode = computed(() => !tenantId.value && canManageCatalog)
 const activeTab = ref(!tenantId.value && canManageCatalog ? 'catalog' : 'configs')
 const catalogPanel = ref(null)
 const connectionsPanel = ref(null)
 const catalogRows = ref([])
 async function onConfigTabChange(name) { if (name === 'connections') await connectionsPanel.value?.load(); if (name === 'catalog') { await catalogPanel.value?.load(); await loadList() } }
 async function openConnection(id) { if (!id && !tenantId.value && canManageCatalog) { activeTab.value = 'connections'; return }; if (id) { const row = list.value.find(item => item.id === id) || await aiAPI.get(id); activeTab.value = row?.provider_connection_id && !tenantId.value && canManageCatalog ? 'connections' : 'configs'; if (row) openEdit(row) } }
-function catalogModels(type, provider) { return catalogRows.value.filter(row => row.service_type === type && row.status !== 'retired' && row.connections.some(c => c.provider === provider)).map(row => row.model) }
+function catalogModels(type, provider) {
+  const providerFamily = value => ['volces', 'volc'].includes(value) ? 'volcengine' : value
+  return catalogRows.value.filter(row => row.service_type === type && row.status !== 'retired'
+    && row.connections.some(connection => providerFamily(connection.provider) === providerFamily(provider))).map(row => row.model)
+}
 const importFileRef = ref(null)
 
 // ---- 生成设置 ----
@@ -1362,10 +1373,25 @@ watch(
 
 function onServiceTypeChange() {
   const st = form.value.service_type || 'text'
+  if (platformCatalogMode.value && !editingId.value) {
+    form.value.provider = ''
+    form.value.base_url = ''
+    form.value.api_key = ''
+    form.value.api_protocol = ''
+    form.value.endpoint = ''
+    form.value.query_endpoint = ''
+    form.value.name = ''
+    form.value.modelText = ''
+    form.value.default_model = ''
+  }
   if (st === 'video_postprocess') {
     form.value.interpolation_target_fps = 60
     form.value.upscale_resolution = '1080p'
     form.value.billing_key = ''
+    if (platformCatalogMode.value && !editingId.value) {
+      form.value.provider = 'volcengine_mediakit'
+      onProviderChange(form.value.provider)
+    }
   }
   if (st === 'jimeng2_character_auth') {
     if (!form.value.provider || form.value.provider === CUSTOM_PROVIDER_SENTINEL) {
@@ -1492,7 +1518,7 @@ const providerConfigs = computed(() => {
     { id: 'ffir', name: '飞儿API / 可灵 Omni-Video (ffir.cn)' },
     { id: 'kling', name: '可灵 Kling' },
     { id: 'vidu', name: 'Vidu' },
-    { id: 'volces', name: '火山引擎（方舟）' },
+    { id: 'volcengine', name: '火山引擎（方舟）' },
 
     { id: 'minimax', name: 'MiniMax 海螺' },
     { id: 'gemini', name: 'Google Gemini (Veo)' },
@@ -1864,7 +1890,7 @@ const VOLCENGINE_CONFIGS = computed(() => [
   { service_type: 'text', name: '火山引擎 文本', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: [] },
   { service_type: 'image', name: '火山引擎 即梦 文本生图', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: [] },
   { service_type: 'storyboard_image', name: '火山引擎 即梦 分镜图', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: [] },
-  { service_type: 'video', name: '火山引擎 即梦 视频', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volces', model: [] }
+  { service_type: 'video', name: '火山引擎 即梦 视频', base_url: 'https://ark.cn-beijing.volces.com/api/v3', provider: 'volcengine', model: [] }
 ].map(config => ({ ...config, model: catalogModels(config.service_type, config.provider) })).filter(config => config.model.length))
 
 /** Agnes 一键配置用 */
@@ -1963,6 +1989,10 @@ function resetForm() {
 
 function openAdd() {
   resetForm()
+  if (platformCatalogMode.value) {
+    form.value.service_type = 'video_postprocess'
+    onServiceTypeChange()
+  }
   dialogVisible.value = true
 }
 

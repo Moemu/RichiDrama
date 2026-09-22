@@ -98,7 +98,9 @@ function audit(db, actorId, action, targetType, targetId, detail) {
 
 function activePriceItems(db, userId, serviceType, model, provider) {
   const at = now();
-  const tenantBook = require('./tenantService').priceBookForUser(db, userId, provider || null);
+  const priceProvider = provider && require('./providerConnectionService').providerFamily(provider) === 'volcengine'
+    ? 'volcengine' : (provider || null);
+  const tenantBook = require('./tenantService').priceBookForUser(db, userId, priceProvider);
   if (tenantBook) {
     return db.prepare(`SELECT pbi.*, pb.id AS price_book_id, pb.name AS price_book_name, pb.owner_user_id
       FROM billing_price_book_items pbi JOIN billing_price_books pb ON pb.id = pbi.price_book_id
@@ -110,7 +112,7 @@ function activePriceItems(db, userId, serviceType, model, provider) {
   // 不区分 provider —— 火山与中转站有大量重名别名，漏传就等于「任一覆盖该模型的已发布价目书」。
   // 目前只有 videoUpscaleService / videoInterpolationService / POST /billing/authorize 建的
   // 预授权没有 provider 标签，它们只涉及火山后处理价目，暂不冲突。
-  if (provider) {
+  if (priceProvider) {
     // Provider-aware platform lookup: books tagged for the serving provider
     // first, legacy untagged books still participate so historical data keeps
     // resolving exactly as before option B.
@@ -120,7 +122,7 @@ function activePriceItems(db, userId, serviceType, model, provider) {
         AND (pb.effective_to IS NULL OR pb.effective_to > ?) AND (pb.owner_user_id IS NULL OR pb.owner_user_id = ?)
         AND (pb.provider = ? OR pb.provider IS NULL OR pb.provider = '') AND pbi.service_type = ? AND pbi.model = ?
       ORDER BY CASE WHEN pb.owner_user_id = ? THEN 0 WHEN pb.provider = ? THEN 1 ELSE 2 END, pb.updated_at DESC, pbi.id DESC`)
-      .all(at, at, userId, provider, serviceType, model, userId, provider);
+      .all(at, at, userId, priceProvider, serviceType, model, userId, priceProvider);
     if (scoped.length) return scoped;
     // A provider-scoped request must never borrow another provider's price.
     // Missing provider pricing is safer than charging a same-named model at
