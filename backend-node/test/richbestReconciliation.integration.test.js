@@ -8,6 +8,7 @@ const { runMigrationsAndEnsure } = require('../src/db/migrate');
 const aiConfigs = require('../src/services/aiConfigService');
 const videoClient = require('../src/services/videoClient');
 const videoService = require('../src/services/videoService');
+const omniVideo = require('../src/services/omniVideoService');
 
 const log = { info() {}, warn() {}, error() {} };
 
@@ -16,11 +17,19 @@ async function withDatabase(run) {
   const db = getDb({ path: path.join(root, 'test.db'), type: 'sqlite' });
   try {
     runMigrationsAndEnsure(db);
-    return await run(db);
+    return await run(db, root);
   } finally {
     closeDb();
     fs.rmSync(root, { recursive: true, force: true });
   }
+}
+
+function seedOmniJob(db, videoGenId) {
+  const now = new Date().toISOString();
+  return db.prepare(`INSERT INTO omni_video_jobs
+    (video_generation_id, owner_user_id, prompt, model_requested, model_resolved, request_snapshot_json, created_at, updated_at)
+    VALUES (?, 1, '测试镜头', 'doubao-seedance-2.0', 'doubao-seedance-2.0', '{}', ?, ?)`)
+    .run(videoGenId, now, now).lastInsertRowid;
 }
 
 function createRelayConfig(db) {
@@ -107,6 +116,76 @@ test('确定失败（4xx/参数错误）仍然释放预授权，不留对账噪�
   const state = billingState(db, authorizationId);
   assert.equal(state.voided, true, '确定没有提交成功时必须释放冻结');
   assert.equal(state.reconciliation, null, '确定失败不该占用用户的对账额度');
+}));
+
+test('提交在途时拒绝取消，不把可能已建单的调用当成没提交', async () => await withDatabase(async (db) => {
+  const config = createRelayConfig(db);
+  const authorizationId = seedAuthorization(db);
+  const videoGenId = seedGeneration(db, { authorizationId, configId: config.id });
+  const jobId = seedOmniJob(db, videoGenId);
+  // POST 已发出、响应未回：provider_task_id 必然还是空的。
+  db.prepare('UPDATE video_generations SET provider_submit_started_at = ? WHERE id = ?')
+    .run(new Date().toISOString(), videoGenId);
+
+  await assert.rejects(
+    () => omniVideo.cancelJob(db, log, jobId, { id: 1, role: 'user' }),
+    /正在提交模型/,
+  );
+
+  const state = billingState(db, authorizationId);
+  assert.equal(state.voided, false, '提交结果未知时释放预授权，等于放走一笔可能已计费的调用');
+  assert.equal(db.prepare('SELECT status FROM video_generations WHERE id = ?').get(videoGenId).status, 'processing');
+}));
+
+test('没有提交在途标记时取消仍按原路径释放', async () => await withDatabase(async (db) => {
+  const config = createRelayConfig(db);
+  const authorizationId = seedAuthorization(db);
+  const videoGenId = seedGeneration(db, { authorizationId, configId: config.id });
+  const jobId = seedOmniJob(db, videoGenId);
+
+  await omniVideo.cancelJob(db, log, jobId, { id: 1, role: 'user' });
+
+  const state = billingState(db, authorizationId);
+  assert.equal(state.voided, true, '确实没有提交过，取消要释放冻结');
+  assert.equal(db.prepare('SELECT status FROM video_generations WHERE id = ?').get(videoGenId).status, 'failed');
+}));
+
+test('提交响应晚于取消时不复活任务，只归档成片并挂对账', async () => await withDatabase(async (db, root) => {
+  const config = createRelayConfig(db);
+  const authorizationId = seedAuthorization(db);
+  const videoGenId = seedGeneration(db, { authorizationId, configId: config.id });
+
+  const originalCall = videoClient.callVideoApi;
+  const originalPoll = videoClient.pollVideoTask;
+  const originalFetch = globalThis.fetch;
+  const previousStorage = process.env.CFG_STORAGE__LOCAL_PATH;
+  process.env.CFG_STORAGE__LOCAL_PATH = root;
+  videoClient.callVideoApi = async () => {
+    // 用户在这次提交在途时按了取消：本地先落终态，随后响应才回来。
+    db.prepare("UPDATE video_generations SET status = 'failed', error_msg = '用户取消' WHERE id = ?").run(videoGenId);
+    return { task_id: 'vid_late_result' };
+  };
+  videoClient.pollVideoTask = async () => ({ video_url: 'https://cdn.example/late.mp4', provider_request_id: 'vid_late_result' });
+  globalThis.fetch = async () => ({ ok: true, arrayBuffer: async () => Buffer.from('late-video-bytes') });
+  try {
+    await videoService.processVideoGeneration(db, log, videoGenId);
+  } finally {
+    videoClient.callVideoApi = originalCall;
+    videoClient.pollVideoTask = originalPoll;
+    globalThis.fetch = originalFetch;
+    if (previousStorage === undefined) delete process.env.CFG_STORAGE__LOCAL_PATH;
+    else process.env.CFG_STORAGE__LOCAL_PATH = previousStorage;
+  }
+
+  const row = db.prepare('SELECT status, provider_task_id, source_local_path FROM video_generations WHERE id = ?').get(videoGenId);
+  assert.equal(row.status, 'failed', '已取消的终态不得被提交响应复活');
+  assert.equal(row.provider_task_id, 'vid_late_result', '上游任务号要落库，否则这笔支出无从追溯');
+  assert.ok(row.source_local_path, '供应商已经出片并计费，字节要保留');
+  const state = billingState(db, authorizationId);
+  assert.equal(state.settled, false, '不得结算；重复释放正是把冻结额和账本拆开的原因');
+  assert.equal(state.voided, false);
+  assert.ok(state.reconciliation, '要挂对账，让管理员按真实用量决定结算或豁免');
+  assert.equal(state.reconciliation.status, 'pending');
 }));
 
 test('已钉住配置被删除时暂停提交，不换一枚业务 Key 重投', async () => await withDatabase(async (db) => {

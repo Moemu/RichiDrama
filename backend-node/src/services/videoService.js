@@ -795,7 +795,53 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
   });
 }
 
-async function pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspect, providerTaskId, config) {
+/**
+ * Keep the bytes of a supplier output that arrived after the local generation
+ * reached a terminal state (typically a cancellation made while the submit
+ * request was still in flight). The supplier ran the job and will bill for it,
+ * so the file is worth keeping and the charge needs an admin decision.
+ *
+ * This path deliberately writes neither a completion state nor a billing
+ * entry: the authorization may already be released, and re-settling it here is
+ * exactly what corrupted the account's frozen total. It only archives the
+ * source file and opens a reconciliation case.
+ */
+async function archiveProviderOutputOnly(db, log, videoGenId, videoUrl, providerRequestId) {
+  const numericId = Number(videoGenId);
+  const row = db.prepare('SELECT * FROM video_generations WHERE id = ? AND deleted_at IS NULL').get(numericId);
+  if (!row) return null;
+  let localPath = null;
+  try {
+    const cfg = require('../config').loadConfig();
+    const storagePath = resolveStoragePath(cfg);
+    const projectSubdir = storageLayout.getProjectStorageSubdir(db, row.drama_id);
+    localPath = await downloadVideoToLocal(storagePath, videoUrl, numericId, log, projectSubdir);
+  } catch (error) {
+    log.error('Archiving cancelled generation output failed', { video_gen_id: numericId, error: error.message });
+  }
+  if (localPath) {
+    // Never replace an existing archived file: a retry may own the current one.
+    db.prepare(`UPDATE video_generations SET source_local_path = ?, updated_at = ?
+      WHERE id = ? AND deleted_at IS NULL AND source_local_path IS NULL`)
+      .run(localPath, new Date().toISOString(), numericId);
+  }
+  if (row.billing_authorization_id) {
+    try {
+      require('./billingService').markPendingReconciliation(db, { id: row.owner_user_id, role: 'admin' }, row.billing_authorization_id, {
+        provider_request_id: providerRequestId || null,
+        reason: '任务在提交在途时被取消，但供应商已建任务并可能计费，按真实用量核对',
+      });
+    } catch (error) {
+      log.warn('Cancelled generation reconciliation case failed', { video_gen_id: numericId, error: error.message });
+    }
+  }
+  log.warn('Archived cancelled generation output for reconciliation', {
+    video_gen_id: numericId, provider_task_id: providerRequestId || null, local_path: localPath,
+  });
+  return localPath;
+}
+
+async function pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspect, providerTaskId, config, options = {}) {
   const cfg = require('../config').loadConfig();
   const POLL_INTERVAL_MS = 10000;
   const { resolveVideoGenerationTimeoutMinutes } = require('../config/videoGeneration');
@@ -828,7 +874,8 @@ async function pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspec
           ? '模型服务正在生成视频'
           : '模型服务已接收任务，正在等待结果';
       taskService.updateTaskStatus(db, row.task_id, 'processing', 15, message);
-    }
+    },
+    options
   );
   if (pollResult.stopped) {
     log.info('Provider poll stopped after local task reached a terminal state', { video_gen_id: videoGenId, status: pollResult.local_status });
@@ -838,7 +885,7 @@ async function pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspec
   // Re-read the durable state immediately before consuming a successful
   // response; the final write below is conditional as a second guard.
   const localAfterPoll = db.prepare('SELECT status FROM video_generations WHERE id=? AND deleted_at IS NULL').get(Number(videoGenId));
-  if (!localAfterPoll || !FINALIZABLE_VIDEO_STATUSES.has(String(localAfterPoll.status || ''))) {
+  if (!options.archiveOnly && (!localAfterPoll || !FINALIZABLE_VIDEO_STATUSES.has(String(localAfterPoll.status || '')))) {
     log.info('Provider poll result ignored after local terminal state', {
       video_gen_id: videoGenId,
       local_status: localAfterPoll?.status || null,
@@ -847,7 +894,10 @@ async function pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspec
   }
   const now = new Date().toISOString();
   const polledVideo = resolveRemoteVideoUrl(pollResult.video_url, pollResult.error);
-  if (polledVideo.ok) {
+  if (options.archiveOnly) {
+    if (polledVideo.ok) await archiveProviderOutputOnly(db, log, videoGenId, polledVideo.video_url, pollResult.provider_request_id || providerTaskId);
+    else log.warn('Cancelled generation produced no archivable output', { video_gen_id: videoGenId, error: polledVideo.error });
+  } else if (polledVideo.ok) {
     await finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, polledVideo.video_url, 'after poll', pollResult.usage, pollResult.provider_request_id || providerTaskId, pollResult.provider_response_snapshot);
   } else {
     setVideoGenFailed(db, videoGenId, polledVideo.error, now);
@@ -915,6 +965,16 @@ async function resumePollForVideoGeneration(db, log, videoGenId) {
 
 /** 启动时恢复 processing 视频任务；无 provider_task_id 的保留为可显式重试。 */
 function resumeProcessingVideoGenerations(db, log) {
+  // No submit request from the previous process can still be in flight, so the
+  // in-flight markers are stale by definition. Clearing them here keeps the
+  // cancel guard from refusing cancels forever after a crash mid-submit.
+  // Legacy and hand-built schemas may lack the column entirely.
+  const markerColumns = new Set(db.prepare('PRAGMA table_info(video_generations)').all().map((c) => c.name));
+  if (markerColumns.has('provider_submit_started_at')) {
+    const clearedSubmits = db.prepare(`UPDATE video_generations SET provider_submit_started_at = NULL
+      WHERE provider_submit_started_at IS NOT NULL`).run().changes;
+    if (clearedSubmits) log.info('Cleared stale provider submit markers', { count: clearedSubmits });
+  }
   const hasOmniJobs = !!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'omni_video_jobs'").get();
   const stuck = db
     .prepare(
@@ -1259,6 +1319,14 @@ async function processVideoGeneration(db, log, videoGenId) {
         hasOmniRefs ? `正在准备 ${omniReferenceCount} 个参考素材` : '正在准备生成参数'
       );
     }
+    // Mark the submit as in flight. While it is set, provider_task_id may still
+    // be empty even though the request already reached the supplier, so the
+    // cancel path must not read that emptiness as "never submitted" and release
+    // the reservation. Cleared once the response is consumed, and again in the
+    // finally for the throwing path.
+    const submitStartedAt = new Date().toISOString();
+    db.prepare('UPDATE video_generations SET provider_submit_started_at = ?, updated_at = ? WHERE id = ?')
+      .run(submitStartedAt, submitStartedAt, videoGenId);
     const result = await videoClient.callVideoApi(db, log, {
       prompt: row.prompt,
       model: row.model,
@@ -1286,6 +1354,10 @@ async function processVideoGeneration(db, log, videoGenId) {
       // 用刚解析出的（含租户绑定的）配置提交，避免与后续轮询用的配置不一致
       ai_config_id: Number(config.id) || null,
     });
+    // The submit outcome is known from here on, so the cancel guard stands
+    // down: provider_task_id is either stored or definitively absent. The
+    // finally below repeats this for the throwing path.
+    db.prepare('UPDATE video_generations SET provider_submit_started_at = NULL WHERE id = ?').run(Number(videoGenId));
     const now2 = new Date().toISOString();
     if (result.error) {
       // 写请求终态未知时不释放预授权：建对账让管理员按供应商用量核实（见 setVideoGenFailed）。
@@ -1298,6 +1370,12 @@ async function processVideoGeneration(db, log, videoGenId) {
     }
     const directVideo = resolveRemoteVideoUrl(result.video_url, result.error);
     if (directVideo.ok) {
+      // Synchronous deliveries land here too, and they can land after a
+      // cancellation. Keep the paid bytes, never write a completion state.
+      if (!canFinalizeVideoGeneration(db, videoGenId)) {
+        await archiveProviderOutputOnly(db, log, videoGenId, directVideo.video_url, result.provider_request_id || result.task_id || null);
+        return;
+      }
       await finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, directVideo.video_url, '', result.usage, result.provider_request_id || result.task_id, result.provider_response_snapshot);
       return;
     }
@@ -1308,9 +1386,24 @@ async function processVideoGeneration(db, log, videoGenId) {
       return;
     }
     if (result.task_id) {
-      db.prepare(
-        'UPDATE video_generations SET status = ?, provider_task_id = ?, updated_at = ? WHERE id = ?'
-      ).run('processing', result.task_id, now2, videoGenId);
+      // The submit response can land after the user cancelled: the request was
+      // already accepted upstream, and the supplier task exists and will be
+      // billed. Claim the row only while it is still ours to run. Writing
+      // status unconditionally used to revive a cancelled generation, which
+      // then settled an already-released authorization and pulled the account's
+      // frozen total below its open reservations.
+      const claimed = db.prepare(
+        'UPDATE video_generations SET status = ?, provider_task_id = ?, updated_at = ? WHERE id = ? AND status = ?'
+      ).run('processing', result.task_id, now2, videoGenId, 'processing');
+      if (!claimed.changes) {
+        const localStatus = db.prepare('SELECT status FROM video_generations WHERE id = ?').get(Number(videoGenId))?.status || null;
+        db.prepare('UPDATE video_generations SET provider_task_id = ?, updated_at = ? WHERE id = ?').run(result.task_id, now2, videoGenId);
+        log.warn('Video submit resolved after local terminal state; output will be archived without billing', {
+          video_gen_id: videoGenId, provider_task_id: result.task_id, local_status: localStatus,
+        });
+        await pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspect, result.task_id, config, { archiveOnly: true });
+        return;
+      }
       await pollProviderTaskAndFinalize(db, log, videoGenId, row, rowForAspect, result.task_id, config);
       return;
     }
@@ -1322,6 +1415,7 @@ async function processVideoGeneration(db, log, videoGenId) {
     if (row && row.task_id) taskService.updateTaskError(db, row.task_id, err.message);
     log.error('Video generation error', { id: videoGenId, error: err.message });
   } finally {
+    db.prepare('UPDATE video_generations SET provider_submit_started_at = NULL WHERE id = ?').run(Number(videoGenId));
     activeVideoPolls.delete(videoGenId);
   }
 }

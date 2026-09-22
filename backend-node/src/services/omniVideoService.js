@@ -1108,10 +1108,17 @@ function parse(value) { try { return value ? JSON.parse(value) : null; } catch (
 async function cancelJob(db, log, jobId, user) {
   const job = db.prepare('SELECT * FROM omni_video_jobs WHERE id = ?').get(Number(jobId));
   if (!job) throw new Error('全能视频任务不存在');
-  const generation = db.prepare('SELECT id, owner_user_id, tenant_id, model, status, provider_task_id, ai_config_id, billing_authorization_id, task_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
+  const generation = db.prepare('SELECT id, owner_user_id, tenant_id, model, status, provider_task_id, provider_submit_started_at, ai_config_id, billing_authorization_id, task_id FROM video_generations WHERE id = ?').get(job.video_generation_id);
   if (!generation) throw new Error('视频生成记录不存在');
   if (Number(generation.owner_user_id) !== Number(user.id) && user.role !== 'admin') throw new Error('只能取消自己的任务');
   if (['completed', 'failed', 'invalid'].includes(generation.status)) throw new Error('任务已结束，无需取消');
+  // An empty provider_task_id means either "never submitted" or "submit request
+  // in flight". Treating both as the first case released the reservation for a
+  // job the supplier went on to run and bill, which left the account's frozen
+  // total below its open reservations. Refuse instead; the window is seconds.
+  if (!String(generation.provider_task_id || '').trim() && generation.provider_submit_started_at) {
+    throw new Error('任务正在提交模型，结果尚未确定，暂不能取消；请稍候几秒后重试');
+  }
   if (generation.provider_task_id && String(generation.provider_task_id).trim()) {
     const videoClient = require('./videoClient');
     // 中转站只允许建任务的那枚业务 Key 取消任务：与重启续轮询一样优先钉住的提交配置，
