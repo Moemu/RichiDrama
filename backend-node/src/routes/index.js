@@ -129,6 +129,7 @@ function setupRouter(cfg, db, log) {
   const audio = audioRoutes(db, log, cfg);
   const promptOverrides = promptOverridesRoutes.routes(db, log);
   const tools = require('./tools')(db, log);
+  const lasMediaJobs = require('./lasMediaJobs')(db, log, cfg);
 
   // ---------- billing (self-service) ----------
   r.get('/billing/me', billing.me);
@@ -478,6 +479,10 @@ function setupRouter(cfg, db, log) {
   r.post('/tool-templates', requireAdmin, tools.createTemplate);
   r.put('/tool-templates/:id', requireAdmin, tools.updateTemplate);
   r.get('/tool-runs', tools.list);
+  r.post('/las-media-jobs', lasMediaJobs.create);
+  r.get('/las-media-jobs/capabilities', lasMediaJobs.capabilities);
+  r.get('/las-media-jobs', lasMediaJobs.list);
+  r.get('/las-media-jobs/:id', lasMediaJobs.get);
   r.get('/tool-runs/:id', tools.get);
   r.delete('/tool-runs/:id', tools.remove);
   r.post('/tool-runs/:id/restore', tools.restore);

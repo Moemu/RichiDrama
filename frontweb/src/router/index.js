@@ -93,7 +93,8 @@ const router = createRouter({
       component: () => import('@/views/ToolMediaGeneration.vue'),
       props: { media: 'video' },
       meta: { title: '视频生成工作台' }
-    }
+    },
+    { path: '/ai-tools/video-localization', name: 'video-localization', component: () => import('@/views/VideoLocalization.vue'), meta: { title: '视频本地化' } }
   ]
 })
 

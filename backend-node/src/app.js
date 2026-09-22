@@ -110,6 +110,8 @@ function createApp() {
   require('./services/imageService').resumePendingCreativeBoardImages(db, log);
   try { require('./services/creativeBoardDeliveryService').resume(db, log); }
   catch (error) { log.warn('画布交付恢复失败', { error: error.message }); }
+  try { require('./services/lasMediaJobService').resume(db, log, config); }
+  catch (error) { log.warn('LAS 媒体任务恢复失败', { error: error.message }); }
   const paymentRecovery = require('./services/paymentService').createPaymentService(db, config, log);
   const reconcilePayments = () => paymentRecovery.recover(50).catch((error) => log.warn('payment recovery sweep failed', { error: error.message }));
   reconcilePayments();
