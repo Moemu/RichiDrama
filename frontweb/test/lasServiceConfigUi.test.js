@@ -33,6 +33,20 @@ test('视频本地化提交的 settings 键与后端读取口径一致，且算�
   }
 })
 
+test('平台模式下列表并入平台级配置，新增的专用服务不会消失', async () => {
+  const config = await source()
+  assert.match(config, /const platformRows = await aiAPI\.list\(null, \{ platform: true \}\)/)
+  assert.match(config, /!row\.owner_tenant_id && !row\.provider_connection_id/, '只并入平台级、且未被共享连接接管的行')
+  assert.match(config, /list\.value = \[\.\.\.rows, \.\.\.extra\]\.sort\(configOrder\)/, '并入后必须按后端口径重排，不能打乱默认优先')
+})
+
+test('视频本地化表单指明价格发布位置与单位数量', async () => {
+  const config = await source()
+  assert.match(config, /价格在哪里配/)
+  assert.match(config, /las-video-inpaint-lite/)
+  assert.match(config, /单位数量填 60000/)
+})
+
 test('视频本地化不绑定可切换模型，也不暴露连接级计费键', async () => {
   const config = await source()
   assert.match(config, /form\.value\.service_type !== 'model_ark_asset' && form\.value\.service_type !== 'video_localization' && modelList\.length === 0/)

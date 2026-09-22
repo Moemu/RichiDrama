@@ -952,6 +952,10 @@ input_reference = (图片文件，可选)</pre>
             <el-input v-model="form.tos_secret_access_key" type="password" show-password placeholder="受限子账号 SK" />
             <p class="field-tip">建议授予仅限该 Bucket 及 <code>richidrama/las/</code> 前缀的读写权限。</p>
           </el-form-item>
+          <el-form-item>
+            <template #label><span class="form-label-tip">价格在哪里配</span></template>
+            <p class="field-tip">这里只保存凭证与中转 Bucket。三个算子的单价在「运营台 → 价目表 → 新建价目草稿」发布：服务类型选<b>视频后处理</b>，模型分别填 <code>las-video-translate</code>、<code>las-video-inpaint-lite</code>、<code>las-video-inpaint-pro</code>，计量选 <code>millisecond</code>，<b>单位数量填 60000</b>（即每个输入分钟）。三项未发布前，提交会一直被拒。</p>
+          </el-form-item>
         </template>
         <el-form-item v-if="form.service_type === 'video'">
           <template #label><span class="form-label-tip">视频冻结兜底 token（通常留空）</span></template>
@@ -1992,10 +1996,25 @@ function onRowEdit(row) {
   openEdit(row)
 }
 
+// 与后端 listConfigs 的排序口径保持一致，合并两个来源后再排序才不会打乱「默认优先」。
+const configOrder = (a, b) => (Number(b.is_default || 0) - Number(a.is_default || 0))
+  || (Number(b.priority || 0) - Number(a.priority || 0))
+  || String(b.created_at || '').localeCompare(String(a.created_at || ''))
+
 async function loadList() {
   loading.value = true
   try {
-    list.value = await aiAPI.list(null, { tenantId: tenantId.value })
+    const rows = await aiAPI.list(null, { tenantId: tenantId.value })
+    // 平台模式新增的专用服务是平台级配置（owner_tenant_id 为空），而默认列表按当前分组过滤，
+    // 不补一次平台级读取就会表现为「保存成功，但列表里找不到」。
+    if (platformCatalogMode.value) {
+      const platformRows = await aiAPI.list(null, { platform: true })
+      const extra = platformRows.filter((row) => !row.owner_tenant_id && !row.provider_connection_id
+        && !rows.some((item) => item.id === row.id))
+      list.value = [...rows, ...extra].sort(configOrder)
+    } else {
+      list.value = rows
+    }
     selectedRows.value = []
     if (canManageCatalog) {
       try { catalogRows.value = await request.get('/admin/model-catalog') } catch (_) { catalogRows.value = [] }
