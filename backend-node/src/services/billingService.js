@@ -1002,6 +1002,10 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
     if (unitPrice < 0) throw new Error('单价必须是非负积分，且最多四位小数');
     if (status === 'published' && !item.is_free && unitPrice <= 0) throw new Error(`${serviceType}/${model}/${meter} 的免费价目必须显式勾选免费`);
     const conditions = item.conditions_json || {};
+    // 取值口径与 rateFor() 一致：缺失时按 1 个计量单位收费，写错会让整个模型无法计价。
+    if (conditions.unit_size != null && (!Number.isSafeInteger(Number(conditions.unit_size)) || Number(conditions.unit_size) <= 0)) {
+      throw new Error(`${serviceType}/${model}/${meter} 的计价单位数量必须是正整数`);
+    }
     seedreamPricing.validate(conditions, meter);
     const rates = Array.isArray(conditions.rates) ? conditions.rates : [];
     const rateWhen = [];
