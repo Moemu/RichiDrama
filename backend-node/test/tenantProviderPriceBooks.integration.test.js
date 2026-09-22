@@ -32,6 +32,7 @@ test('provider-scoped tenant price books price each provider by the book actuall
   try {
     const volcBook = book(db, '组内火山书', 'volcengine', [{ service_type: 'text', model: 'volc-model', meter: 'request', unit_price: 10 }]);
     const richBook = book(db, '平台中转书', 'richbest', [{ service_type: 'text', model: 'rich-model', meter: 'request', unit_price: 20 }]);
+    const customBook = book(db, '自定义供应商书', 'Acme', [{ service_type: 'text', model: 'acme-model', meter: 'request', unit_price: 3 }]);
     const group = tenants.writeTenant(db, 1, { name: '多供应商组' });
     const user = auth.createUser(db, { username: 'multi-provider-user', password: 'user123456' }, 1);
     tenants.setMember(db, group.id, user.id);
@@ -44,10 +45,24 @@ test('provider-scoped tenant price books price each provider by the book actuall
     const quoteVolc = billing.quote(db, user, { service_type: 'text', model: 'volc-model', provider: 'volcengine', usage: { request: 1 } });
     assert.equal(quoteVolc.amount, 10, 'volcengine call keeps using the group-bound volcengine book');
     assert.equal(quoteVolc.rates[0].price_book_id, volcBook);
+    for (const alias of ['volces', 'volc']) {
+      assert.deepEqual(billing.activeMeters(db, user, 'text', 'volc-model', alias), ['request']);
+      const quote = billing.quote(db, user, { service_type: 'text', model: 'volc-model', provider: alias, usage: { request: 1 } });
+      assert.equal(quote.rates[0].price_book_id, volcBook, `${alias} must use the existing volcengine binding`);
+    }
+    const unboundGroup = tenants.writeTenant(db, 1, { name: '未绑定价目组' });
+    const unboundUser = auth.createUser(db, { username: 'unbound-price-user', password: 'user123456' }, 1);
+    tenants.setMember(db, unboundGroup.id, unboundUser.id);
+    assert.equal(billing.quote(db, unboundUser, { service_type: 'text', model: 'volc-model', provider: 'volces', usage: { request: 1 } }).rates[0].price_book_id, volcBook,
+      'legacy alias must also find the platform volcengine book without a tenant binding');
+    assert.deepEqual(billing.activeMeters(db, unboundUser, 'video', 'doubao-seedance-2-0-260128', 'volces'), ['output_token']);
+    assert.equal(billing.quote(db, unboundUser, { service_type: 'video', model: 'doubao-seedance-2-0-260128', provider: 'volces', usage: { output_token: 1 } }).rates[0].meter, 'output_token');
 
     const quoteRich = billing.quote(db, user, { service_type: 'text', model: 'rich-model', provider: 'richbest', usage: { request: 1 } });
     assert.equal(quoteRich.amount, 20, 'richbest call falls through to the platform richbest book instead of being rejected');
     assert.equal(quoteRich.rates[0].price_book_id, richBook);
+    assert.equal(billing.quote(db, user, { service_type: 'text', model: 'acme-model', provider: 'Acme', usage: { request: 1 } }).rates[0].price_book_id, customBook,
+      'unrelated provider names retain their stored spelling');
 
     // A group binding for richbest now overrides only that provider. The SKU
     // conflict check only guards platform books, so create the tenant-owned
@@ -67,6 +82,7 @@ test('provider-scoped tenant price books price each provider by the book actuall
     // Unbinding richbest restores the platform fall-through.
     tenants.replaceBindings(db, group.id, { price_book_bindings: [{ provider: 'volcengine', price_book_id: volcBook }] });
     assert.equal(billing.quote(db, user, { service_type: 'text', model: 'rich-model', provider: 'richbest', usage: { request: 1 } }).amount, 20);
+    assert.deepEqual(billing.activeMeters(db, user, 'text', 'rich-model', 'volces'), [], 'volcengine aliases must not borrow relay prices');
 
     // Provider-unaware callers keep legacy single-book resolution.
     assert.doesNotThrow(() => billing.quote(db, user, { service_type: 'text', model: 'volc-model', usage: { request: 1 } }));
@@ -76,6 +92,31 @@ test('provider-scoped tenant price books price each provider by the book actuall
     tenants.replaceBindings(db, group.id, { price_book_bindings: [{ provider: 'volcengine', price_book_id: volcBook }, { provider: '', price_book_id: catchAll }] });
     assert.equal(billing.quote(db, user, { service_type: 'text', model: 'any-model', provider: 'someone-else', usage: { request: 1 } }).amount, 1, 'catch-all serves unknown providers');
     assert.equal(billing.quote(db, user, { service_type: 'text', model: 'volc-model', provider: 'volcengine', usage: { request: 1 } }).amount, 10, 'exact provider slot still wins over catch-all');
+  } finally { teardown(dbPath); }
+});
+
+test('legacy provider pricing remains readable after a database restart', () => {
+  const { db, dbPath } = setup();
+  try {
+    const priceBookId = db.prepare(`SELECT pb.id FROM billing_price_books pb
+      JOIN billing_price_book_items item ON item.price_book_id=pb.id
+      WHERE pb.provider='volcengine' AND pb.status='published'
+        AND item.service_type='video' AND item.model='doubao-seedance-2-0-260128' AND item.meter='output_token'`).get()?.id;
+    assert.ok(priceBookId, 'existing published Volcengine video pricing is present');
+    const config = db.prepare(`INSERT INTO ai_service_configs
+      (service_type, provider, name, base_url, api_key, model, default_model, created_at, updated_at)
+      VALUES ('video', 'volces', '历史视频配置', 'https://ark.cn-beijing.volces.com/api/v3', '', ?, ?, ?, ?)`)
+      .run('["doubao-seedance-2-0-260128"]', 'doubao-seedance-2-0-260128', new Date().toISOString(), new Date().toISOString());
+    closeDb();
+
+    const reopened = getDb({ path: dbPath, type: 'sqlite' });
+    runMigrationsAndEnsure(reopened);
+    const historical = reopened.prepare('SELECT provider, default_model FROM ai_service_configs WHERE id=?').get(config.lastInsertRowid);
+    assert.deepEqual(historical, { provider: 'volces', default_model: 'doubao-seedance-2-0-260128' });
+    const quote = billing.quote(reopened, 1, {
+      service_type: 'video', model: historical.default_model, provider: historical.provider, usage: { output_token: 1 },
+    });
+    assert.equal(quote.rates[0].price_book_id, priceBookId);
   } finally { teardown(dbPath); }
 });
 

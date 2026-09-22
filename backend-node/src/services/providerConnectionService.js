@@ -160,4 +160,4 @@ function importModels(db, actorId, id, input, log) {
   })();
 }
 
-module.exports = { get, list, view, bindings, save, fromLegacy, attachmentCandidates, attach, importModels };
+module.exports = { get, list, view, bindings, save, fromLegacy, attachmentCandidates, attach, importModels, providerFamily };
