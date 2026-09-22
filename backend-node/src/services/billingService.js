@@ -661,7 +661,17 @@ function recoverInterruptedTextReconciliations(db) {
 }
 
 function publicReconciliationCase(row) {
-  return { ...row, observed_usage: parse(row.observed_usage_json, null), resolution: parse(row.resolution_json, null) };
+  const { authorization_snapshot_json: snapshotJson, ...rest } = row;
+  // The operator has to enter the supplier's actual usage to settle a case, so
+  // the response carries the meters that were reserved. Without them the only
+  // possible client is one that already knows the price book by heart.
+  const snapshot = parse(snapshotJson, null);
+  return {
+    ...rest,
+    observed_usage: parse(row.observed_usage_json, null),
+    reservation_usage: snapshot?.usage && typeof snapshot.usage === 'object' ? snapshot.usage : null,
+    resolution: parse(row.resolution_json, null),
+  };
 }
 
 function recordVideoReconciliationRecovery(db, caseId, recovery) {
@@ -805,7 +815,8 @@ function pagedReconciliationCases(db, filters = {}) {
   if (filters.to) { where += ' AND c.created_at <= ?'; args.push(String(filters.to)); }
   const meta = pagination(filters);
   const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_reconciliation_cases c ${where}`).get(...args)?.total || 0);
-  const rows = db.prepare(`SELECT c.*, u.username, a.amount_micro AS frozen_amount_micro
+  const rows = db.prepare(`SELECT c.*, u.username, a.amount_micro AS frozen_amount_micro,
+      a.snapshot_json AS authorization_snapshot_json
     FROM billing_reconciliation_cases c JOIN users u ON u.id = c.user_id
     JOIN billing_transactions a ON a.id = c.authorization_id ${where}
     ORDER BY CASE WHEN c.status = 'pending' THEN 0 ELSE 1 END, c.due_at ASC LIMIT ? OFFSET ?`).all(...args, meta.page_size, meta.offset);

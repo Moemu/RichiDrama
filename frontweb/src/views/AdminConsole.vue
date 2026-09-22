@@ -80,7 +80,7 @@
 
     <section v-else-if="activeView === 'reconciliations'" class="workbench" aria-labelledby="reconciliation-heading">
       <div class="workbench-heading"><div><p class="card-kicker">计费对账</p><h2 id="reconciliation-heading">待对账队列</h2></div><div class="header-actions"><el-select v-model="filters.reconciliations.status" clearable placeholder="全部状态" aria-label="筛选对账状态" style="width:150px"><el-option label="待处理" value="pending"/><el-option label="已处理" value="resolved"/><el-option label="已豁免" value="waived"/><el-option label="已过期" value="expired"/></el-select><el-button @click="loadReconciliations">刷新案件</el-button></div></div>
-      <div class="table-scroll"><el-table :data="filteredReconciliations"><el-table-column prop="id" label="案件 ID" min-width="190" show-overflow-tooltip/><el-table-column prop="username" label="用户"/><el-table-column prop="service_type" label="服务"/><el-table-column prop="model" label="模型" min-width="180" show-overflow-tooltip/><el-table-column prop="frozen_amount" label="冻结积分"/><el-table-column prop="status" label="状态"/><el-table-column label="发现时间" min-width="170"><template #default="{row}">{{formatChinaDateTime(row.created_at)}}</template></el-table-column></el-table></div>
+      <div class="table-scroll"><el-table :data="filteredReconciliations"><el-table-column prop="id" label="案件 ID" min-width="190" show-overflow-tooltip/><el-table-column prop="username" label="用户"/><el-table-column prop="service_type" label="服务"/><el-table-column prop="model" label="模型" min-width="180" show-overflow-tooltip/><el-table-column prop="frozen_amount" label="冻结积分"/><el-table-column prop="status" label="状态"/><el-table-column label="发现时间" min-width="170"><template #default="{row}">{{formatChinaDateTime(row.created_at)}}</template></el-table-column><el-table-column label="处置" width="190" fixed="right"><template #default="{row}"><template v-if="row.status === 'pending'"><el-button link type="primary" @click="openReconcileSettle(row)">按用量结算</el-button><el-button link type="warning" @click="waiveReconciliation(row)">豁免</el-button></template><span v-else>已处理</span></template></el-table-column></el-table></div>
       <LogPagination :meta="pages.reconciliations" @change="changePage('reconciliations', $event)" />
     </section>
 
@@ -196,6 +196,19 @@
     <el-dialog v-model="showTenantConfigs" class="tenant-config-dialog" :title="`${configTenant?.name || ''} · AI 与 SD2 配置`" width="min(1180px, 96vw)" destroy-on-close><AIConfigContent v-if="configTenant" :tenant-id="configTenant.id" :tenant-name="configTenant.name" /></el-dialog>
     <el-dialog v-model="showBalance" title="调整账户积分" width="min(500px, 94vw)"><el-form label-position="top"><el-form-item label="方式"><el-radio-group v-model="balance.mode"><el-radio-button value="adjust">增减</el-radio-button><el-radio-button value="correct">校正到</el-radio-button></el-radio-group></el-form-item><el-form-item :label="balance.mode === 'adjust' ? '变动积分（可为负数）' : '目标积分余额'"><el-input-number v-model="balanceValue" :precision="2" :step="10"/></el-form-item><el-form-item label="情况说明（选填）"><el-input v-model="balance.reason" type="textarea" :rows="3" maxlength="200" show-word-limit/></el-form-item></el-form><template #footer><el-button @click="showBalance = false">取消</el-button><el-button type="primary" @click="adjustBalance">确认调整</el-button></template></el-dialog>
     <el-dialog v-model="showPrice" :title="editingPriceId ? '编辑价目草稿' : '新建价目草稿'" width="min(760px, 94vw)"><el-form label-position="top"><el-form-item label="名称"><el-input v-model="price.name"/></el-form-item><el-alert type="info" :closable="false" title="草稿需要通过人工发布操作生效。已发布版本不能原地修改。"/><div v-for="(item, index) in price.items" :key="index" class="price-item"><el-select v-model="item.service_type"><el-option label="图片" value="image"/><el-option label="分镜图片" value="storyboard_image"/><el-option label="视频" value="video"/><el-option label="视频后处理" value="video_postprocess"/><el-option label="文本" value="text"/><el-option label="语音" value="tts"/></el-select><el-input v-model="item.model" placeholder="模型"/><el-select v-model="item.meter"><el-option v-for="meter in meters" :key="meter" :label="meter" :value="meter"/></el-select><el-input-number v-model="item.unit_price" :min="0" :precision="4"/><el-button link type="danger" @click="price.items.splice(index, 1)">删除</el-button></div><el-button @click="addPriceItem">添加计价项</el-button></el-form><template #footer><el-button @click="showPrice = false">取消</el-button><el-button type="primary" @click="savePrice">保存草稿</el-button></template></el-dialog>
+    <el-dialog v-model="showReconcileSettle" title="按供应商实测用量结算" width="min(520px, 94vw)">
+      <el-form label-position="top">
+        <el-form-item label="案件"><el-input :model-value="settleCase ? `${settleCase.username} · ${settleCase.model}` : ''" disabled/></el-form-item>
+        <el-form-item v-if="settleCase?.provider_request_id" label="供应商请求 ID"><el-input :model-value="settleCase.provider_request_id" disabled/></el-form-item>
+        <el-alert v-if="!settleMeters.length" type="warning" :closable="false" title="该案件没有预授权用量快照，无法在此补录用量。请改用豁免，或联系技术处理。"/>
+        <el-form-item v-for="meter in settleMeters" :key="meter" :label="meterNames[meter] || meter">
+          <el-input-number v-model="settleUsage[meter]" :min="0" :precision="meterPrecision(meter)" :step="meterStep(meter)" style="width:100%"/>
+        </el-form-item>
+        <el-form-item label="处置原因（必填）"><el-input v-model="settleReason" type="textarea" :rows="3" maxlength="200" show-word-limit placeholder="例如：已按供应商控制台返回的用量补录"/></el-form-item>
+        <p class="tenant-help">按补录的实测用量扣费：实际用量高于预授权时，超出部分从可用余额补扣；低于预授权时多冻结的部分退回。</p>
+      </el-form>
+      <template #footer><el-button @click="showReconcileSettle = false">取消</el-button><el-button type="primary" :loading="settling" :disabled="!settleMeters.length" @click="submitReconcileSettle">确认结算</el-button></template>
+    </el-dialog>
   </main>
 </template>
 
@@ -208,6 +221,7 @@ import { adminAPI } from '@/api/account'
 import request from '@/utils/request'
 import BillingTransactionTable from '@/components/BillingTransactionTable.vue'
 import { formatCredits } from '@/utils/billingPresentation'
+import { meterNames } from '@/utils/costPresentation'
 import OperationsTrendChart from '@/components/OperationsTrendChart.vue'
 import { formatChinaDateTime } from '@/utils/time'
 import { createClientRequestId } from '@/utils/requestId'
@@ -225,6 +239,7 @@ if (governanceSettings.includes(route.query.settings)) governanceTab.value = rou
 const loading = ref(false); const overview = ref(null)
 const production = ref([]); const archives = ref([]); const reconciliations = ref([]); const users = ref([]); const books = ref([]); const tenants = ref([]); const customerOrganizations = ref([]); const availableConfigs = ref([]); const transactions = ref([]); const paymentOrders = ref([]); const usage = ref([]); const usageSummary = ref(null); const audits = ref([]); const projectUsage = ref(null); const projectUsageDetail = ref(null); const historicalUsage = ref({ items: [] }); const showHistoricalUsage = ref(false); const showProjectUsageDetail = ref(false)
 const productionDetail = ref(null); const showProduction = ref(false)
+const showReconcileSettle = ref(false); const settleCase = ref(null); const settleUsage = reactive({}); const settleReason = ref(''); const settling = ref(false)
 const outputPreviewFailed = ref(false)
 const rebindCutoff = ref(''); const rebindCandidates = ref(null); const selectedRebindBindings = ref([]); const rebindRun = ref(null); const rebindLoading = ref(false)
 const showCreate = ref(false); const showBalance = ref(false); const showPrice = ref(false); const showTenant = ref(false); const showTenantConfigs = ref(false); const showUserGroup = ref(false); const showOrganization = ref(false); const showOrganizationBalance = ref(false); const selected = ref(null); const selectedOrganization = ref(null); const configTenant = ref(null); const editingPriceId = ref(null)
@@ -282,6 +297,42 @@ async function refresh() { loading.value = true; try { overview.value = await ad
 async function loadProduction() { await refresh(); applyPage(production, 'production', await adminAPI.production({ ...pages.production, ...filters.production })) }
 async function loadArchives() { applyPage(archives, 'archives', await adminAPI.mediaArchives(pages.archives)) }
 async function loadReconciliations() { applyPage(reconciliations, 'reconciliations', await adminAPI.reconciliations(pages.reconciliations)) }
+// Token-like meters are counted in whole units; durations can be fractional.
+const INTEGER_METERS = new Set(['input_token', 'cache_token', 'output_token', 'image', 'input_image', 'request', 'millisecond', 'character'])
+const settleMeters = computed(() => Object.keys(settleCase.value?.reservation_usage || {}))
+function meterPrecision(meter) { return INTEGER_METERS.has(meter) ? 0 : 2 }
+function meterStep(meter) { return INTEGER_METERS.has(meter) ? 1 : 0.1 }
+function openReconcileSettle(row) {
+  settleCase.value = row
+  Object.keys(settleUsage).forEach((meter) => delete settleUsage[meter])
+  // Prefill with the reserved quantities: the operator corrects them to the
+  // supplier's actual usage instead of retyping every meter from scratch.
+  Object.entries(row.reservation_usage || {}).forEach(([meter, quantity]) => { settleUsage[meter] = Number(quantity) || 0 })
+  settleReason.value = ''
+  showReconcileSettle.value = true
+}
+async function submitReconcileSettle() {
+  if (!settleMeters.value.length) return ElMessage.warning('该案件没有可补录的用量项')
+  const reason = settleReason.value.trim()
+  if (!reason) return ElMessage.warning('必须填写处置原因')
+  const usage = {}
+  for (const meter of settleMeters.value) usage[meter] = Number(settleUsage[meter]) || 0
+  settling.value = true
+  try {
+    await adminAPI.settleReconciliation(settleCase.value.id, { usage, reason })
+    showReconcileSettle.value = false
+    await loadReconciliations(); await refresh()
+    ElMessage.success('已按补录用量结算')
+  } catch (error) { ElMessage.error(error?.message || '结算失败') } finally { settling.value = false }
+}
+async function waiveReconciliation(row) {
+  try {
+    const { value } = await ElMessageBox.prompt(`将释放该案件冻结的 ${formatCredits(row.frozen_amount)} 积分并记为异常损失，供应商已产生的费用不再向用户收取。请填写豁免原因。`, '二次确认', { inputPattern: /.+/, inputErrorMessage: '必须填写原因', confirmButtonText: '确认豁免', cancelButtonText: '取消', type: 'warning' })
+    await adminAPI.waiveReconciliation(row.id, { reason: value })
+    await loadReconciliations(); await refresh()
+    ElMessage.success('已豁免')
+  } catch (error) { if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.message || '豁免失败') }
+}
 const filteredArchives = computed(() => filters.archives.status ? archives.value.filter((row) => row.archive_status === filters.archives.status) : archives.value)
 const filteredReconciliations = computed(() => filters.reconciliations.status ? reconciliations.value.filter((row) => row.status === filters.reconciliations.status) : reconciliations.value)
 const filteredBillingUsers = computed(() => users.value.filter((user) => !filters.billing.role || user.role === filters.billing.role))
