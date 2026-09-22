@@ -37,7 +37,7 @@ const server = app.listen(port, host, () => {
   logger.info('Server is ready!');
 });
 
-const collaborationSockets = require('./services/projectCollaborationSocket').attach(server, db);
+const collaborationSockets = require('./services/projectCollaborationSocket').attach(server, db, logger);
 
 function shutdown() {
   for (const socket of collaborationSockets.clients) socket.close(1001, '服务重启');

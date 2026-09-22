@@ -24,7 +24,11 @@ function fail(message, status = 400, code = 'COLLABORATION_ERROR') {
 function target(db, dramaId, kind, id, field) {
   if (!TEXT_FIELDS[kind]?.includes(field)) throw fail('不支持的协作字段');
   const resource = access.resource(db, kind, Number(id));
-  if (!resource || Number(resource.drama_id) !== Number(dramaId)) throw fail('协作内容已删除或不属于当前项目', 404, 'ENTITY_DELETED');
+  if (!resource || Number(resource.drama_id) !== Number(dramaId)) {
+    const error = fail('协作内容已删除或不属于当前项目', 404, 'ENTITY_DELETED');
+    error.reason = resource ? 'project_mismatch' : 'resource_unavailable';
+    throw error;
+  }
   const columns = db.prepare(`PRAGMA table_info(${kind})`).all();
   if (!columns.some(column => column.name === field)) throw fail('不支持的协作字段');
   return db.prepare(`SELECT "${field}" value FROM "${kind}" WHERE id=? AND deleted_at IS NULL`).get(Number(id));

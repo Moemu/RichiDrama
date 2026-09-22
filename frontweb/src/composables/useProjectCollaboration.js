@@ -3,7 +3,7 @@ import * as Y from 'yjs'
 import request from '@/utils/request'
 import { createClientRequestId } from '@/utils/requestId'
 
-export const projectSession = reactive({ id: null, enabled: false, connected: false, canEdit: false, revision: 0, writeContractVersion: 0, participants: [], pending: 0, error: '', drafts: [] })
+export const projectSession = reactive({ id: null, enabled: false, connected: false, canEdit: false, revision: 0, writeContractVersion: 0, participants: [], pending: 0, error: '', errorCode: '', drafts: [], invalidTargets: [] })
 let socket
 let reconnectTimer
 let refreshCallback
@@ -11,14 +11,21 @@ let latestRevision = -1
 let textRevision = -1
 let sessionVersion = 0
 const documents = new Map()
+const invalidTargets = new Set()
 const requests = new Map()
 const textKey = input => `${input.kind}:${input.id}:${input.field}`
 const decode = value => Uint8Array.from(atob(value), char => char.charCodeAt(0))
 const encode = value => btoa(Array.from(value, byte => String.fromCharCode(byte)).join(''))
 
+function retainDraft(key, value) {
+  const draft = projectSession.drafts.find(item => item.key === key)
+  if (draft) draft.text = value
+  else projectSession.drafts.push({ key, text: value })
+}
+
 function acceptText(message) {
   const entry = documents.get(textKey(message))
-  if (!entry) return
+  if (!entry || entry.invalid) return
   if (entry.epoch !== message.epoch) {
     if (entry.dirty) projectSession.drafts.push({ key: textKey(message), text: entry.doc.getText('content').toString() })
     entry.doc.destroy()
@@ -37,16 +44,27 @@ function send(input) {
   const request_id = createClientRequestId()
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { requests.delete(request_id); reject(new Error('协作保存未确认，请保留页面等待重连')) }, 15000)
-    requests.set(request_id, { resolve, reject, timer })
+    requests.set(request_id, { resolve, reject, timer, input })
     socket.send(JSON.stringify({ ...input, request_id }))
   })
 }
 
 function flush(entry, http = false) {
   if (entry.saving) return entry.saving
-  if (entry.sessionVersion !== sessionVersion || !entry.dirty || (!http && !projectSession.connected)) return
+  if (entry.invalid || entry.sessionVersion !== sessionVersion || !entry.dirty || (!http && !projectSession.connected)) return
   entry.saving = saveText(entry, http)
   return entry.saving
+}
+
+function invalidateText(target) {
+  const key = textKey(target)
+  invalidTargets.add(key)
+  projectSession.invalidTargets = [...invalidTargets]
+  const entry = documents.get(key)
+  if (!entry || entry.invalid) return
+  if (entry.dirty) retainDraft(key, entry.doc.getText('content').toString())
+  entry.dirty = false
+  entry.invalid = true
 }
 
 async function saveText(entry, http) {
@@ -65,10 +83,8 @@ async function saveText(entry, http) {
     if (entry.sessionVersion !== sessionVersion) return
     entry.error = error
     projectSession.error = error.message
-    if (error.code === 'ENTITY_DELETED') {
-      projectSession.drafts.push({ key: textKey(entry.target), text: entry.doc.getText('content').toString() })
-      entry.dirty = false
-    }
+    projectSession.errorCode = error.code || ''
+    if (error.code === 'ENTITY_DELETED') invalidateText(entry.target)
   }
   finally {
     entry.saving = false
@@ -82,6 +98,7 @@ async function saveText(entry, http) {
 export async function savePendingProjectText() {
   const version = sessionVersion
   for (const entry of documents.values()) {
+    if (entry.invalid) continue
     if (entry.saving) await entry.saving
     while (entry.dirty && version === sessionVersion) {
       await flush(entry, true)
@@ -91,6 +108,7 @@ export async function savePendingProjectText() {
   if (version !== sessionVersion) throw new Error('项目已切换，请重新检查保存结果')
   if (projectSession.drafts.length) throw new Error('存在未确认的草稿，请先复制并处理草稿后再保存')
   projectSession.error = ''
+  projectSession.errorCode = ''
 }
 
 function connect() {
@@ -100,12 +118,13 @@ function connect() {
   socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/v1/dramas/${id}/collaboration/socket`)
   const connection = socket
   const current = () => version === sessionVersion && socket === connection
-  const showError = error => { if (current()) projectSession.error = error.message }
+  const showError = error => { if (current()) { projectSession.error = error.message; projectSession.errorCode = error.code || '' } }
   socket.onopen = () => {
     if (!current()) return
     projectSession.connected = true
     projectSession.error = ''
-    for (const entry of documents.values()) void send({ type: 'text_read', ...entry.target, epoch: entry.epoch, state_vector: encode(Y.encodeStateVector(entry.doc)) }).then(() => { if (current()) return flush(entry) }).catch(showError)
+    projectSession.errorCode = ''
+    for (const entry of documents.values()) if (!entry.invalid) void send({ type: 'text_read', ...entry.target, epoch: entry.epoch, state_vector: encode(Y.encodeStateVector(entry.doc)) }).then(() => { if (current()) return flush(entry) }).catch(showError)
   }
   socket.onmessage = event => {
     if (!current()) return
@@ -117,7 +136,7 @@ function connect() {
       if (latestRevision !== message.revision) {
         const needsTextRead = textRevision !== message.revision
         latestRevision = message.revision
-        if (needsTextRead) for (const entry of documents.values()) void send({ type: 'text_read', ...entry.target, epoch: entry.epoch, state_vector: encode(Y.encodeStateVector(entry.doc)) }).catch(showError)
+        if (needsTextRead) for (const entry of documents.values()) if (!entry.invalid) void send({ type: 'text_read', ...entry.target, epoch: entry.epoch, state_vector: encode(Y.encodeStateVector(entry.doc)) }).catch(showError)
         refreshCallback?.()
       }
     }
@@ -128,7 +147,10 @@ function connect() {
     const pending = requests.get(message.request_id)
     if (pending) {
       clearTimeout(pending.timer); requests.delete(message.request_id)
-      if (message.type === 'error') pending.reject(Object.assign(new Error(message.message), { code: message.code }))
+      if (message.type === 'error') {
+        if (message.code === 'ENTITY_DELETED' && pending.input?.kind) invalidateText(pending.input)
+        pending.reject(Object.assign(new Error(message.message), { code: message.code }))
+      }
       else pending.resolve(message)
     }
   }
@@ -172,28 +194,37 @@ export function closeProjectSession() {
   projectSession.writeContractVersion = 0
   projectSession.participants = []
   projectSession.drafts = []
+  projectSession.invalidTargets = []
   projectSession.error = ''
+  projectSession.errorCode = ''
   latestRevision = -1
   textRevision = -1
   clearTimeout(reconnectTimer)
   if (socket) { socket.onopen = null; socket.onmessage = null; socket.onclose = null; socket.close(); socket = null }
   for (const entry of documents.values()) entry.doc.destroy()
   documents.clear()
+  invalidTargets.clear()
   for (const pending of requests.values()) { clearTimeout(pending.timer); pending.reject(new Error('已离开项目')) }
   requests.clear()
 }
 
 export function hasUnsavedProjectText() {
-  return projectSession.drafts.length > 0 || [...documents.values()].some(entry => entry.dirty || entry.saving)
+  return projectSession.drafts.length > 0 || [...documents.values()].some(entry => !entry.invalid && (entry.dirty || entry.saving))
 }
 
 export async function bindProjectText(target, listener) {
   if (!projectSession.enabled || !target.id) return null
+  if (invalidTargets.has(textKey(target))) return null
   const version = sessionVersion
   const key = textKey(target)
   let entry = documents.get(key)
   if (!entry) {
-    const state = await request.get(`/dramas/${projectSession.id}/collaboration/text`, { params: target }).catch(error => { if (version === sessionVersion) throw error })
+    const state = await request.get(`/dramas/${projectSession.id}/collaboration/text`, { params: target }).catch(error => {
+      if (version === sessionVersion) {
+        if (error.code === 'ENTITY_DELETED') invalidateText(target)
+        throw error
+      }
+    })
     if (version !== sessionVersion) return null
     entry = documents.get(key)
     if (!entry) {
@@ -202,6 +233,7 @@ export async function bindProjectText(target, listener) {
       documents.set(key, entry)
     }
   }
+  if (entry.invalid) return null
   let local = new Y.Doc()
   let localEpoch = entry.epoch
   Y.applyUpdate(local, Y.encodeStateAsUpdate(entry.doc))
@@ -220,6 +252,7 @@ export async function bindProjectText(target, listener) {
     compositionEnd(value) { this.change(value); composing = false; receive(entry.doc.getText('content').toString()) },
     change(value) {
       if (version !== sessionVersion || !projectSession.canEdit) return
+      if (entry.invalid) { retainDraft(key, value); return }
       if (localEpoch !== entry.epoch) {
         projectSession.drafts.push({ key, text: value })
         projectSession.error = '内容已被替换；你的输入已保留为草稿。'
@@ -245,7 +278,8 @@ export async function bindProjectText(target, listener) {
 
 export function retryPendingProjectText() {
   projectSession.error = ''
-  for (const entry of documents.values()) void flush(entry)
+  projectSession.errorCode = ''
+  for (const entry of documents.values()) if (!entry.invalid) void flush(entry)
 }
 
 export function projectPresence(editing) {
@@ -253,7 +287,8 @@ export function projectPresence(editing) {
 }
 
 export function hasPendingProjectText(kind, id, field) {
-  return documents.has(textKey({ kind, id, field }))
+  const entry = documents.get(textKey({ kind, id, field }))
+  return !!entry && !entry.invalid
 }
 
 export function useProjectTextModel(targetGetter, model) {
@@ -275,10 +310,14 @@ export function useProjectTextModel(targetGetter, model) {
       })
       if (current !== version) next?.dispose()
       else { binding = next; ready.value = !!next }
-    } catch (error) { if (current === version) projectSession.error = error.message }
+    } catch (error) { if (current === version) { projectSession.error = error.message; projectSession.errorCode = error.code || '' } }
   }, { immediate: true, deep: true, flush: 'sync' })
   const stopModel = watch(model, value => { if (!remote && !composing) binding?.change(value || '') }, { flush: 'sync' })
-  onScopeDispose(() => { version++; binding?.dispose(); stopTarget(); stopModel() })
+  const stopInvalid = watch(() => projectSession.invalidTargets, keys => {
+    const target = targetGetter()
+    if (target && keys.includes(textKey(target))) ready.value = false
+  })
+  onScopeDispose(() => { version++; binding?.dispose(); stopTarget(); stopModel(); stopInvalid() })
   return {
     ready,
     get applyingRemote() { return remote },

@@ -9,7 +9,22 @@ module.exports = function projectRoutes(db, cfg, log) {
   const router = express.Router({ mergeParams: true });
   const handle = fn => (req, res) => {
     try { response.success(res, fn(req)); }
-    catch (error) { response.error(res, error.status || 500, error.code || 'PROJECT_ERROR', error.message); }
+    catch (error) {
+      let revision = null;
+      if (req.path === '/text') {
+        try { revision = db.prepare('SELECT revision FROM project_collaboration WHERE drama_id=?').get(Number(req.params.id))?.revision ?? null; }
+        catch (_) {}
+        log?.warn?.('project collaboration text rejected', {
+          transport: 'http', request_id: req.requestId, drama_id: Number(req.params.id), user_id: req.auth?.id, project_revision: revision,
+          operation: req.method === 'GET' ? 'text_read' : 'text_update',
+          entity_kind: String((req.method === 'GET' ? req.query : req.body)?.kind || '').slice(0, 40),
+          entity_id: Number((req.method === 'GET' ? req.query : req.body)?.id) || null,
+          field: String((req.method === 'GET' ? req.query : req.body)?.field || '').slice(0, 40),
+          error_code: error.code || 'PROJECT_ERROR', reason: error.reason || null,
+        });
+      }
+      response.error(res, error.status || 500, error.code || 'PROJECT_ERROR', error.message);
+    }
   };
   router.post('/enable', handle(req => {
     access.enable(db, req.params.id, req.auth.id);

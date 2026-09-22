@@ -10,8 +10,8 @@ function mount(el, binding) {
   const input = el.matches('textarea,input') ? el : el.querySelector('textarea,input')
   if (!input) return
   const originalReadOnly = input.readOnly
-  const stopPermission = watch(() => [projectSession.enabled, projectSession.canEdit], ([enabled, canEdit]) => {
-    input.readOnly = originalReadOnly || (enabled && !canEdit)
+  const stopPermission = watch(() => [projectSession.enabled, projectSession.canEdit, projectSession.invalidTargets], ([enabled, canEdit, invalidTargets]) => {
+    input.readOnly = originalReadOnly || (enabled && (!canEdit || (invalidTargets || []).includes(`${state.target.kind}:${state.target.id}:${state.target.field}`)))
   }, { immediate: true })
   const update = value => {
     if (state.disposed || state.composing || input.value === value) return
@@ -38,7 +38,7 @@ function mount(el, binding) {
       const result = await bindProjectText(state.target, value => { if (version === state.version) update(value) })
       if (state.disposed || version !== state.version) result?.dispose()
       else state.binding = result
-    } catch (error) { if (!state.disposed && version === state.version) projectSession.error = error.message }
+    } catch (error) { if (!state.disposed && version === state.version) { projectSession.error = error.message; projectSession.errorCode = error.code || '' } }
   }, { immediate: true, flush: 'sync' })
   const onInput = () => { if (!state.remote && !state.composing) state.binding?.change(input.value) }
   const onStart = () => { state.composing = true; state.binding?.compositionStart() }

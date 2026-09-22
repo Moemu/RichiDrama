@@ -18,17 +18,19 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'project-collaboration-'));
   const cfg = { storage: { type: 'local', local_path: path.join(root, 'storage') }, payments: { enabled: false }, image_proxy: { use_for_video: false }, vendor_lock: { enabled: false } };
   fs.mkdirSync(cfg.storage.local_path);
-  const log = { info() {}, warn() {}, error() {}, debug() {}, infow() {}, warnw() {}, errorw() {} };
+  const warnings = [];
+  const infos = [];
+  const log = { info(message, details) { infos.push({ message, details }); }, warn(message, details) { warnings.push({ message, details }); }, error() {}, debug() {}, infow() {}, warnw() {}, errorw() {} };
   let db; let server; let sockets; let base;
   async function start() {
     db = new Database(path.join(root, 'test.db'));
     runMigrationsAndEnsure(db);
-    const app = express(); app.use(express.json({ limit: '4mb' })); app.use('/api/v1', setupRouter(cfg, db, log));
+    const app = express(); app.use(express.json({ limit: '4mb' })); app.use((req, _res, next) => { req.requestId = crypto.randomUUID(); next(); }); app.use('/api/v1', setupRouter(cfg, db, log));
     app.use('/static', require('../src/middleware/auth').requireAuth(db), (req, res, next) => {
       const permission = require('../src/services/mediaAuthorizationService').authorizeMediaPath(db, '/static' + req.path, req.auth, { storageRoot: cfg.storage.local_path });
       return permission.allowed ? next() : res.sendStatus(permission.status);
     }, express.static(cfg.storage.local_path));
-    server = app.listen(0, '127.0.0.1'); sockets = attach(server, db);
+    server = app.listen(0, '127.0.0.1'); sockets = attach(server, db, log);
     await once(server, 'listening');
     base = `http://127.0.0.1:${server.address().port}/api/v1`;
   }
@@ -89,7 +91,8 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
   };
   const ownerSocket = await connect(owner.token);
   const editorSocket = await connect(editor.token);
-  const sendText = (socket, input) => new Promise((resolve, reject) => {
+  assert.equal(infos.filter(item => item.message === 'project collaboration socket connected').length, 2);
+  const sendText = (socket, input, type = 'text_update') => new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID();
     const timer = setTimeout(() => { socket.off('message', receive); reject(new Error('socket acknowledgement timeout')); }, 3000);
     const receive = bytes => {
@@ -98,7 +101,7 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
       clearTimeout(timer); socket.off('message', receive); resolve(value);
     };
     socket.on('message', receive);
-    socket.send(JSON.stringify({ type: 'text_update', request_id: requestId, ...input }));
+    socket.send(JSON.stringify({ type, request_id: requestId, ...input }));
   });
   const a = new Y.Doc(); const b = new Y.Doc();
   Y.applyUpdate(a, Buffer.from(initial.state, 'base64')); Y.applyUpdate(b, Buffer.from(initial.state, 'base64'));
@@ -146,6 +149,28 @@ test('project HTTP permissions, concurrent text, copies and restart persistence'
   const shot = await request(editor.token, 'POST', '/storyboards', { episode_id: episodeId, title: '素材引用' });
   assert.equal(shot.status, 201);
   const shotId = shot.body.data.id;
+  const discarded = await request(editor.token, 'POST', '/storyboards', { episode_id: episodeId, title: '协作诊断测试' });
+  assert.equal(discarded.status, 201);
+  const discardedId = discarded.body.data.id;
+  assert.equal((await request(editor.token, 'DELETE', `/storyboards/${discardedId}`)).status, 200);
+  const discardedTarget = { kind: 'storyboards', id: discardedId, field: 'universal_segment_text' };
+  const rejectedHttp = await request(editor.token, 'GET', `${prefix}/collaboration/text?kind=storyboards&id=${discardedId}&field=universal_segment_text`);
+  assert.equal(rejectedHttp.status, 404);
+  assert.equal(rejectedHttp.body.error.code, 'ENTITY_DELETED');
+  const rejectedSocket = await sendText(ownerSocket, discardedTarget, 'text_read');
+  assert.equal(rejectedSocket.type, 'error');
+  assert.equal(rejectedSocket.code, 'ENTITY_DELETED');
+  const diagnostics = warnings.filter(item => item.message === 'project collaboration text rejected' && item.details.entity_kind === 'storyboards' && item.details.entity_id === discardedId);
+  assert.ok(diagnostics.some(item => item.details.transport === 'http'));
+  assert.ok(diagnostics.some(item => item.details.transport === 'socket'));
+  for (const item of diagnostics) {
+    assert.equal(item.details.drama_id, id);
+    assert.equal(item.details.entity_kind, 'storyboards');
+    assert.equal(item.details.reason, 'resource_unavailable');
+    assert.ok(item.details.request_id);
+    if (item.details.transport === 'socket') assert.ok(item.details.connection_id);
+    assert.equal(JSON.stringify(item).includes('协作诊断测试'), false);
+  }
   const scopedBaseline = require('../src/services/projectCollaborationService').captureTextBaseline(db, id, { kind: 'storyboards', id: shotId });
   assert.ok(scopedBaseline.size > 0);
   assert.ok([...scopedBaseline.keys()].every(key => key.startsWith(`storyboards:${shotId}:`)));
