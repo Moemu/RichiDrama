@@ -28,8 +28,6 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   const sourceFile = path.join(storage, 'input', 'source.mp4');
   const generated = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=blue:s=640x360:r=24:d=10', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=10', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', sourceFile], { encoding: 'utf8' });
   if (generated.status !== 0) throw new Error(generated.stderr);
-  const previous = Object.fromEntries(['LAS_REGION', 'LAS_API_KEY', 'LAS_TOS_BUCKET', 'LAS_TOS_ACCESS_KEY_ID', 'LAS_TOS_SECRET_ACCESS_KEY'].map((name) => [name, process.env[name]]));
-  Object.assign(process.env, { LAS_REGION: 'cn-beijing', LAS_API_KEY: 'test-only', LAS_TOS_BUCKET: 'example-bucket', LAS_TOS_ACCESS_KEY_ID: 'test-access', LAS_TOS_SECRET_ACCESS_KEY: 'test-secret' });
   const original = { upload: tos.upload, download: tos.download, request: las.request };
   let submits = 0;
   let polls = 0;
@@ -60,6 +58,11 @@ test('authenticated LAS erase-then-translate workflow archives local results and
     { service_type: 'video_postprocess', model: 'las-video-inpaint-lite', meter: 'millisecond', unit_price: 1, conditions_json: { unit_size: 60000 } },
     { service_type: 'video_postprocess', model: 'las-video-translate', meter: 'millisecond', unit_price: 2, conditions_json: { unit_size: 60000 } },
   ] });
+  require('../src/services/aiConfigService').createConfig(db, log, {
+    service_type: 'video_localization', provider: 'las', name: 'LAS 视频本地化',
+    base_url: 'https://operator.las.cn-beijing.volces.com', api_key: 'test-only',
+    settings: JSON.stringify({ region: 'cn-beijing', tos_bucket: 'example-bucket', tos_access_key_id: 'test-access', tos_secret_access_key: 'test-secret' }),
+  });
   const project = drama.createDrama(db, log, { title: 'LAS 测试项目', owner_user_id: user.id });
   const source = assets.create(db, log, { owner_user_id: user.id, drama_id: project.id, name: '原片', type: 'video', local_path: 'input/source.mp4', duration: 10, mime_type: 'video/mp4' });
   const cfg = { storage: { type: 'local', local_path: storage }, server: {}, payments: { enabled: false }, vendor_lock: { enabled: false } };
@@ -73,7 +76,6 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   t.after(async () => {
     await new Promise((resolve) => server.close(resolve));
     tos.upload = original.upload; tos.download = original.download; las.request = original.request;
-    for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
     db.close();
     fs.rmSync(root, { recursive: true, force: true });
   });
@@ -84,6 +86,9 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   const login = await call('POST', '/auth/login', { username: user.username, password: 'test-password' });
   assert.equal(login.status, 200);
   const token = login.body.data.token;
+  const capabilities = await call('GET', '/las-media-jobs/capabilities', null, token);
+  assert.equal(capabilities.body.data.ready, true);
+  assert.equal(capabilities.body.data.region, 'cn-beijing');
   assert.equal((await call('POST', '/las-media-jobs', { drama_id: project.id, asset_id: source.id, stage: 'inpaint', model_level: 'lite', idempotency_key: 'test' })).status, 401);
   const created = await call('POST', '/las-media-jobs', { drama_id: project.id, asset_id: source.id, stage: 'inpaint', model_level: 'lite', idempotency_key: 'test' }, token);
   assert.equal(created.status, 201, JSON.stringify(created.body));

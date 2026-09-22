@@ -5,13 +5,13 @@ const OPERATORS = Object.freeze({
 
 const OUTPUT_LANGUAGES = new Set(['en-US', 'ja-JP', 'ko-KR', 'es-MX', 'pt-BR', 'id-ID', 'th-TH', 'vi-VN', 'fr-FR', 'de-DE']);
 
-function configuration(env = process.env) {
-  const region = String(env.LAS_REGION || 'cn-beijing').trim();
-  const apiKey = String(env.LAS_API_KEY || '').trim();
-  const bucket = String(env.LAS_TOS_BUCKET || '').trim();
-  if (!/^[a-z]+-[a-z]+(?:-\d+)?$/.test(region)) throw new Error('LAS 地域配置无效');
-  if (!apiKey) throw new Error('LAS_API_KEY 未配置，不能提交付费任务');
-  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) throw new Error('LAS_TOS_BUCKET 未配置或无效，不能提交付费任务');
+function configuration(source = {}) {
+  const region = String(source.region || 'cn-beijing').trim();
+  const apiKey = String(source.apiKey || '').trim();
+  const bucket = String(source.bucket || '').trim();
+  if (!/^[a-z]+-[a-z]+(?:-\d+)?$/.test(region)) throw new Error('LAS 地域格式无效');
+  if (!apiKey) throw new Error('未填写 LAS API Key，不能提交付费任务');
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) throw new Error('未填写有效的 TOS Bucket，不能提交付费任务');
   return { region, apiKey, bucket, baseUrl: `https://operator.las.${region}.volces.com` };
 }
 

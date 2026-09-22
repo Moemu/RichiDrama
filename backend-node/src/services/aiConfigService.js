@@ -49,6 +49,9 @@ function usesOfficialAccessSecret(body, existing = null) {
     && Boolean(String(settings.kling_access_key || '').trim() && String(settings.kling_secret_key || '').trim());
 }
 
+// 专用服务按固定算子工作，不绑定可切换模型；价目表按算子名单独发布。
+const MODELLESS_SERVICE_TYPES = new Set(['model_ark_asset', 'video_localization']);
+
 function modelList(value) {
   if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
   if (value == null) return [];
@@ -83,7 +86,7 @@ function validateConfigRequest(body = {}, { mode = 'create', existing = null } =
 
   const hasModel = Object.prototype.hasOwnProperty.call(body, 'model');
   const shouldValidateModel = mode === 'create' || hasModel;
-  if (shouldValidateModel && effective.service_type !== 'model_ark_asset' && !modelList(effective.model).length) {
+  if (shouldValidateModel && !MODELLESS_SERVICE_TYPES.has(effective.service_type) && !modelList(effective.model).length) {
     throw new Error('至少配置一个模型');
   }
   return true;
@@ -108,7 +111,7 @@ function modelFromDb(val) {
 
 /** 每种服务类型只保留一个默认：若有多个 is_default=1，只保留优先级最高（同优先级取 id 最小）的那条 */
 function ensureSingleDefaultPerType(db) {
-  const types = ['text', 'image', 'storyboard_image', 'video', 'video_postprocess', 'tts', 'jimeng2_character_auth', 'model_ark_asset'];
+  const types = ['text', 'image', 'storyboard_image', 'video', 'video_postprocess', 'tts', 'jimeng2_character_auth', 'model_ark_asset', 'video_localization'];
   for (const st of types) {
     const rows = db.prepare(
       'SELECT id, priority FROM ai_service_configs WHERE deleted_at IS NULL AND COALESCE(owner_tenant_id, 0) = 0 AND service_type = ? AND is_default = 1 ORDER BY priority DESC, id ASC'

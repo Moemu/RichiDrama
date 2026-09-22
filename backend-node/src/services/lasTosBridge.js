@@ -7,13 +7,13 @@ const { pipeline } = require('node:stream/promises');
 const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const hmac = (key, value) => crypto.createHmac('sha256', key).update(value).digest();
 
-function configuration(env = process.env) {
-  const region = String(env.LAS_REGION || 'cn-beijing').trim();
-  const bucket = String(env.LAS_TOS_BUCKET || '').trim();
-  const accessKeyId = String(env.LAS_TOS_ACCESS_KEY_ID || '').trim();
-  const secretAccessKey = String(env.LAS_TOS_SECRET_ACCESS_KEY || '').trim();
+function configuration(source = {}) {
+  const region = String(source.region || 'cn-beijing').trim();
+  const bucket = String(source.bucket || '').trim();
+  const accessKeyId = String(source.accessKeyId || '').trim();
+  const secretAccessKey = String(source.secretAccessKey || '').trim();
   if (!/^[a-z]+-[a-z]+(?:-\d+)?$/.test(region) || !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)
-    || !accessKeyId || !secretAccessKey) throw new Error('LAS TOS 地域、Bucket 或受限读写凭证未配置');
+    || !accessKeyId || !secretAccessKey) throw new Error('未填写有效的 TOS 地域、Bucket 或受限读写凭证');
   return { region, bucket, accessKeyId, secretAccessKey, host: `${bucket}.tos-${region}.volces.com` };
 }
 

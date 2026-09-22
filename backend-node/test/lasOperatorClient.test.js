@@ -7,9 +7,10 @@ const config = { region: 'cn-beijing', apiKey: 'test-only', bucket: 'example-buc
 const video = 'tos://example-bucket/richidrama/input.mp4';
 
 test('LAS configuration fails closed without both API key and TOS bucket', () => {
-  assert.throws(() => las.configuration({ LAS_REGION: 'cn-beijing', LAS_API_KEY: 'test-only' }), /LAS_TOS_BUCKET/);
-  assert.throws(() => las.configuration({ LAS_REGION: 'cn-beijing', LAS_TOS_BUCKET: 'example-bucket' }), /LAS_API_KEY/);
-  assert.equal(las.configuration({ LAS_REGION: 'cn-beijing', LAS_API_KEY: 'test-only', LAS_TOS_BUCKET: 'example-bucket' }).baseUrl, config.baseUrl);
+  assert.throws(() => las.configuration({ region: 'cn-beijing', apiKey: 'test-only' }), /TOS Bucket/);
+  assert.throws(() => las.configuration({ region: 'cn-beijing', bucket: 'example-bucket' }), /LAS API Key/);
+  assert.throws(() => las.configuration({ region: 'cn beijing', apiKey: 'test-only', bucket: 'example-bucket' }), /地域/);
+  assert.equal(las.configuration({ region: 'cn-beijing', apiKey: 'test-only', bucket: 'example-bucket' }).baseUrl, config.baseUrl);
 });
 
 test('translation and subtitle inpaint use isolated output prefixes and supported options', () => {

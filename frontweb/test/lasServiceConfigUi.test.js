@@ -1,0 +1,41 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+
+const source = () => readFile(new URL('../src/components/AIConfigContent.vue', import.meta.url), 'utf8')
+
+test('视频本地化作为专用服务出现，并按固定算子工作', async () => {
+  const config = await source()
+  assert.match(config, /<el-option label="[^"]*" value="video_localization" \/>/)
+  assert.match(config, /video_localization: '视频本地化（LAS）'/)
+  assert.match(config, /video_localization: \[\s*\{ id: 'las', name: '[^']+' \},\s*\]/)
+})
+
+test('视频本地化表单提供地域与 TOS 字段，并要求与 LAS 同地域同 Bucket', async () => {
+  const config = await source()
+  assert.match(config, /<template v-if="form\.service_type === 'video_localization'">/)
+  for (const field of ['las_region', 'tos_bucket', 'tos_access_key_id', 'tos_secret_access_key']) {
+    assert.match(config, new RegExp(`v-model="form\\.${field}"`), `缺少 ${field} 输入项`)
+  }
+  assert.match(config, /同账号、同地域/)
+})
+
+test('视频本地化提交的 settings 键与后端读取口径一致，且算子地址由地域推导', async () => {
+  const config = await source()
+  const backend = await readFile(new URL('../../backend-node/src/services/lasMediaJobService.js', import.meta.url), 'utf8')
+  assert.match(
+    config,
+    /settings = JSON\.stringify\(\{ region, tos_bucket: bucket, tos_access_key_id: accessKeyId, tos_secret_access_key: secretAccessKey \}\)/
+  )
+  assert.match(config, /form\.value\.base_url = `https:\/\/operator\.las\.\$\{region\}\.volces\.com`/)
+  for (const key of ['settings.region', 'settings.tos_bucket', 'settings.tos_access_key_id', 'settings.tos_secret_access_key']) {
+    assert.ok(backend.includes(key), `后端未读取 ${key}`)
+  }
+})
+
+test('视频本地化不绑定可切换模型，也不暴露连接级计费键', async () => {
+  const config = await source()
+  assert.match(config, /form\.value\.service_type !== 'model_ark_asset' && form\.value\.service_type !== 'video_localization' && modelList\.length === 0/)
+  assert.match(config, /v-if="form\.service_type !== 'video_localization'" prop="modelText"/)
+  assert.match(config, /v-if="form\.service_type !== 'video_postprocess' && form\.service_type !== 'video_localization' && !isRichbestProvider"/)
+})

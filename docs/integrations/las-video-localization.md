@@ -6,19 +6,23 @@
 
 项目最终成片继续使用现有本地／阿里云 OSS 媒体路径。LAS 中转单独使用火山引擎 TOS。不能把阿里云 OSS Bucket 当成 `output_tos_path`。
 
-在后端运行环境设置以下变量，不要把密钥写入仓库或浏览器：
+配置入口是管理端「AI 配置」→「专用服务」→ 新增「视频本地化（字幕擦除 / 翻译配音）」。不再使用后端环境变量。
 
-| 变量 | 用途 |
-| --- | --- |
-| `LAS_REGION` | LAS 与 TOS 的同一地域；当前约定 `cn-beijing` |
-| `LAS_API_KEY` | LAS 算子 API Key |
-| `LAS_TOS_BUCKET` | 与 LAS Key 同主账号、同地域的私有 TOS Bucket |
-| `LAS_TOS_ACCESS_KEY_ID` | 仅允许读写该 Bucket 下 `richidrama/las/` 前缀的受限 AK |
-| `LAS_TOS_SECRET_ACCESS_KEY` | 对应受限 SK |
+| 表单项 | 存放位置 | 说明 |
+| --- | --- | --- |
+| LAS 算子 API Key | `ai_service_configs.api_key` | 提交与查询算子任务使用；回显时脱敏 |
+| LAS 与 TOS 地域 | `settings.region` | 一处同时约束算子与 TOS，算子接入地址由它推导 |
+| TOS Bucket | `settings.tos_bucket` | 与 LAS Key 同主账号、同地域的私有 Bucket |
+| TOS AccessKey ID | `settings.tos_access_key_id` | 仅允许读写该 Bucket 下 `richidrama/las/` 前缀的受限 AK |
+| TOS Secret AccessKey | `settings.tos_secret_access_key` | 对应受限 SK |
+
+该配置行的 `service_type` 为 `video_localization`、`provider` 为 `las`，与超分／插帧使用的 `video_postprocess` 行互不选取。地域与 Bucket 只有一份来源，因此算子与 TOS 不可能被配成两个不同的桶。
 
 当前中转使用 TOS V4 签名的原生 HTTP 请求，不依赖供应商 SDK。输入文件上传到 `tos://<bucket>/richidrama/las/<job-id>/input/source.mp4`。两个算子分别写入 `translate/` 与 `inpaint/`。完成后，后端将 MP4 和可用的 SRT 下载到项目本地存储，并登记为项目素材。没有进行自动 TOS 清理。
 
-TOS Bucket、凭证或 LAS Key 缺失时，任务提交会在预授权前失败。`GET /api/v1/las-media-jobs/capabilities` 只返回配置是否齐全，不返回密钥。
+未新增该配置、取消勾选「启用」，或必填项不完整时，任务提交在预授权前失败。`GET /api/v1/las-media-jobs/capabilities` 只返回配置是否齐全与地域，不返回密钥。
+
+与既有的可灵官方 AK/SK、SD2 资产库配置一样，`settings` 以明文存放在数据库中，并在管理端回显；`api_key` 列单独做脱敏。因此授予 TOS 凭证时必须限制到该 Bucket 与 `richidrama/las/` 前缀。
 
 ## 价目与付费门槛
 

@@ -3,13 +3,11 @@ const jobs = require('../services/lasMediaJobService');
 
 module.exports = (db, log, cfg) => ({
   capabilities: (_req, res) => {
-    let ready = true;
     try {
-      const las = require('../services/lasOperatorClient').configuration();
-      const tos = require('../services/lasTosBridge').configuration();
-      ready = las.region === tos.region && las.bucket === tos.bucket;
-    } catch (_) { ready = false; }
-    response.success(res, { ready, region: String(process.env.LAS_REGION || 'cn-beijing') });
+      response.success(res, { ready: true, region: jobs.serviceConfig(db).clientConfig.region });
+    } catch (_) {
+      response.success(res, { ready: false, region: null });
+    }
   },
   create: async (req, res) => {
     try { response.created(res, await jobs.create(db, log, cfg, req.auth.id, req.body || {})); }

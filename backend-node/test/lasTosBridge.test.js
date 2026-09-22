@@ -3,12 +3,14 @@ const assert = require('node:assert/strict');
 const bridge = require('../src/services/lasTosBridge');
 
 const jobId = 'a106ecad-410b-4a0b-a250-838a047a1d8f';
-const config = bridge.configuration({ LAS_REGION: 'cn-beijing', LAS_TOS_BUCKET: 'example-bucket', LAS_TOS_ACCESS_KEY_ID: 'test-access', LAS_TOS_SECRET_ACCESS_KEY: 'test-secret' });
+const config = bridge.configuration({ region: 'cn-beijing', bucket: 'example-bucket', accessKeyId: 'test-access', secretAccessKey: 'test-secret' });
 
 test('TOS bridge uses a separate region-matched bucket and job-scoped keys', () => {
   assert.equal(config.host, 'example-bucket.tos-cn-beijing.volces.com');
   assert.equal(bridge.objectKey(jobId, 'input', 'source.mp4'), `richidrama/las/${jobId}/input/source.mp4`);
-  assert.throws(() => bridge.configuration({ LAS_REGION: 'cn-beijing', LAS_TOS_BUCKET: 'example-bucket' }), /凭证/);
+  assert.throws(() => bridge.configuration({ region: 'cn-beijing', bucket: 'example-bucket' }), /凭证/);
+  assert.throws(() => bridge.configuration({ region: 'cn beijing', bucket: 'example-bucket', accessKeyId: 'a', secretAccessKey: 'b' }), /地域/);
+  assert.throws(() => bridge.configuration({ region: 'cn-beijing', bucket: 'Bad_Bucket', accessKeyId: 'a', secretAccessKey: 'b' }), /Bucket/);
   assert.throws(() => bridge.objectKey(jobId, 'input', '../other.mp4'), /路径/);
 });
 

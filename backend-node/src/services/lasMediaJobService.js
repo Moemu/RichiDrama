@@ -15,6 +15,20 @@ const running = new Set();
 const now = () => new Date().toISOString();
 const leaseUntil = () => new Date(Date.now() + 2 * 3600_000).toISOString();
 const MODEL = { translate: 'las-video-translate', inpaint: { lite: 'las-video-inpaint-lite', pro: 'las-video-inpaint-pro' } };
+const SERVICE_TYPE = 'video_localization';
+
+// 地域与 Bucket 只有一份来源，LAS 与 TOS 不可能再配成两个不同的桶。
+function serviceConfig(db) {
+  const row = require('./aiConfigService').listConfigs(db, SERVICE_TYPE).find((item) => item.is_active);
+  if (!row) throw new Error('尚未启用「视频本地化」专用服务，不能提交付费任务');
+  let settings = {};
+  try { settings = JSON.parse(row.settings || '{}'); } catch (_) {}
+  const shared = { region: settings.region, bucket: settings.tos_bucket };
+  return {
+    clientConfig: las.configuration({ ...shared, apiKey: row.api_key }),
+    tosConfig: tos.configuration({ ...shared, accessKeyId: settings.tos_access_key_id, secretAccessKey: settings.tos_secret_access_key }),
+  };
+}
 
 function storageRoot(cfg) {
   return path.resolve(cfg.storage?.local_path || './data/storage');
@@ -107,9 +121,7 @@ async function create(db, log, cfg, ownerId, body) {
   const media = await probe(localFile);
   validateMedia(media, stage);
   const input = { stage, media, output_language: stage === 'translate' ? String(body.output_language || '') : null, model_level: stage === 'inpaint' ? String(body.model_level || '') : null };
-  const clientConfig = las.configuration();
-  const tosConfig = tos.configuration();
-  if (clientConfig.region !== tosConfig.region || clientConfig.bucket !== tosConfig.bucket) throw new Error('LAS 与 TOS 地域或 Bucket 配置不一致');
+  const { clientConfig, tosConfig } = serviceConfig(db);
   const id = randomUUID();
   las.submitPayload(clientConfig, stage, { job_id: id, video_url: `tos://${tosConfig.bucket}/${tos.objectKey(id, 'input', 'source.mp4')}`, ...input });
   const model = modelFor(input);
@@ -158,9 +170,7 @@ async function processJob(db, log, cfg, id) {
     let row = db.prepare('SELECT * FROM las_media_jobs WHERE id=?').get(id);
     if (!row || !['queued', 'processing', 'finalizing'].includes(row.status)) return;
     const input = JSON.parse(row.input_json);
-    const clientConfig = las.configuration();
-    const tosConfig = tos.configuration();
-    if (clientConfig.region !== tosConfig.region || clientConfig.bucket !== tosConfig.bucket) throw new Error('LAS 与 TOS 地域或 Bucket 配置不一致');
+    const { clientConfig, tosConfig } = serviceConfig(db);
     if (row.status === 'queued') {
       try {
         const source = assets.getById(db, row.source_asset_id);
@@ -264,4 +274,4 @@ function resume(db, log, cfg) {
   return { queued: pending.length, uncertain, stop: () => clearInterval(timer) };
 }
 
-module.exports = { create, get, list, processJob, resume, resultPaths, billedMilliseconds, validateMedia };
+module.exports = { create, get, list, processJob, resume, resultPaths, billedMilliseconds, validateMedia, serviceConfig };
