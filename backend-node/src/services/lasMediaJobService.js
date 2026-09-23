@@ -278,16 +278,18 @@ function resume(db, log, cfg) {
     return count;
   };
   const uncertain = recoverUncertain();
+  // 案件已在处置与任务同步之间中断时落下的窗口，启动/恢复时补偿对齐。
+  const caseSync = billing.recoverResolvedLasReconciliations(db);
   const pending = db.prepare("SELECT id FROM las_media_jobs WHERE status IN ('queued','processing','finalizing')").all();
   for (const row of pending) setImmediate(() => processJob(db, log, cfg, row.id).catch((error) => log.error('LAS 任务恢复失败', { id: row.id, error: error.message })));
   const timer = setInterval(() => {
-    try { recoverUncertain(); } catch (error) { log.error('LAS 提交恢复失败', { error: error.message }); }
+    try { recoverUncertain(); billing.recoverResolvedLasReconciliations(db); } catch (error) { log.error('LAS 提交恢复失败', { error: error.message }); }
     for (const row of db.prepare("SELECT id FROM las_media_jobs WHERE status IN ('queued','processing','finalizing') LIMIT 50").all()) {
       processJob(db, log, cfg, row.id).catch((error) => log.error('LAS 任务轮询失败', { id: row.id, error: error.message }));
     }
   }, 30_000);
   timer.unref?.();
-  return { queued: pending.length, uncertain, stop: () => clearInterval(timer) };
+  return { queued: pending.length, uncertain, case_synced: caseSync.synced, stop: () => clearInterval(timer) };
 }
 
 module.exports = { create, get, list, processJob, resume, resultPaths, billedMilliseconds, validateMedia, serviceConfig };

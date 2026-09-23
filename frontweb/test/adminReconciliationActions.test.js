@@ -27,3 +27,25 @@ test('settlement collects the reserved meters and requires a reason', async () =
   assert.match(view, /if \(!reason\) return ElMessage\.warning\('必须填写处置原因'\)/)
   assert.match(view, /:disabled="!settleMeters\.length"/)
 })
+
+// 运营台必须能从 LAS 待对账案件直接定位任务：没有任务定位列时，
+// 运营只能拿案件 ID 去猜是哪次提交、哪个项目和哪些中转文件。
+test('the reconciliation queue locates the source task for LAS cases', async () => {
+  const view = await consoleSource()
+  assert.match(view, /label="任务定位"[^>]*><template #default="\{row\}"><template v-if="row\.source_task">/)
+  assert.match(view, /reconciliationTaskLabel\(row\.source_task\)/)
+  assert.match(view, /row\.reference_type \? `\$\{row\.reference_type\} #\$\{row\.reference_id\}` : '—'/)
+  assert.match(view, /v-if="row\.provider_request_id" class="reconciliation-task-subline">请求/)
+})
+
+test('the settlement dialog shows the located task, authorization and archived files', async () => {
+  const view = await consoleSource()
+  assert.match(view, /v-if="settleCase\?\.source_task"/)
+  assert.match(view, /label="关联任务"/)
+  assert.match(view, /\{\{ settleCase\.source_task\.provider_task_id \|\| settleCase\.provider_request_id \|\| '未受理（提交结果不确定）' \}\}/)
+  assert.match(view, /label="预授权"/)
+  assert.match(view, /label="已归档文件"/)
+  assert.match(view, /无（未产出归档文件）/)
+  // 只读信息用纯文本展示：disabled 输入框会裁切长任务定位文字。
+  assert.doesNotMatch(view, /label="关联任务"[^>]*><el-input[^>]*disabled/)
+})

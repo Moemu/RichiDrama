@@ -87,6 +87,15 @@ function taskResponse(payload, expectedTaskId = null) {
   return { task_id: taskId, status, business_code: String(metadata.business_code ?? ''), error_msg: String(metadata.error_msg || '').slice(0, 500), data: payload.data || null };
 }
 
+// HTTP 失败往往就是「提交结果不确定」的来源：把响应头里的请求 ID 带进错误信息，
+// 运营在待对账案件里才能拿它去供应商控制台核对这一笔是否真的被受理。
+function providerRequestId(response) {
+  try {
+    const value = String(response?.headers?.get?.('x-request-id') || response?.headers?.get?.('request-id') || '');
+    return value.replace(/[^\w.-]/g, '').slice(0, 80);
+  } catch (_) { return ''; }
+}
+
 async function request(config, action, payload, fetchImpl = fetch) {
   if (!['submit', 'poll'].includes(action)) throw new Error('LAS API 动作无效');
   const response = await fetchImpl(`${config.baseUrl}/api/v1/${action}`, {
@@ -95,7 +104,10 @@ async function request(config, action, payload, fetchImpl = fetch) {
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw new Error(`LAS ${action} 请求失败：HTTP ${response.status}`);
+  if (!response.ok) {
+    const requestId = providerRequestId(response);
+    throw new Error(`LAS ${action} 请求失败：HTTP ${response.status}${requestId ? `（request_id=${requestId}）` : ''}`);
+  }
   return taskResponse(await response.json(), action === 'poll' ? payload.task_id : null);
 }
 
