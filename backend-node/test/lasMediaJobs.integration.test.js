@@ -109,6 +109,10 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   }
   const completed = jobs.get(db, user.id, jobId);
   assert.equal(completed.status, 'completed', completed.error_msg);
+  assert.equal(completed.billing.state, 'settled');
+  assert.ok(completed.billing.charged_credits > 0, '完成任务要能看到实际扣费');
+  assert.equal(completed.source_asset_name, '原片');
+  assert.equal(completed.output_asset_name, 'LAS 字幕擦除');
   assert.equal(submits, 1);
   assert.equal(polls, 1);
   const output = assets.getByIdForOwner(db, completed.output_asset_id, user.id);
@@ -176,6 +180,8 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   assert.equal(jobs.get(db, user.id, jobId).status, 'completed');
   assert.equal(jobs.get(db, user.id, translationId).status, 'completed');
   assert.equal(jobs.get(db, user.id, uncertainId).status, 'reconciliation');
+  assert.equal(jobs.get(db, user.id, uncertainId).billing.state, 'reconciling');
+  assert.ok(jobs.get(db, user.id, uncertainId).billing.reserved_credits > 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_reconciliation_cases WHERE authorization_id=? AND status='pending'").get(uncertainAuthorization.authorization_id).count, 1);
   assert.equal(submits, 3);
   recovery.stop();

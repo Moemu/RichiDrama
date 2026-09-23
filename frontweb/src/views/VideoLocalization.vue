@@ -40,10 +40,12 @@
         <p v-if="!dramaId" class="empty">先选择项目，查看处理记录。</p>
         <p v-else-if="!jobs.length" class="empty">这个项目还没有视频本地化任务。</p>
         <article v-for="job in jobs" :key="job.id" class="job">
-          <div class="job-top"><div><strong>{{ job.stage === 'inpaint' ? '字幕擦除' : `翻译 · ${languageName(job.input.output_language)}` }}</strong><p>{{ formatChinaDateTime(job.created_at) }} · 源素材 #{{ job.source_asset_id }}</p></div><span :class="['status', job.status]">{{ statusName(job.status) }}</span></div>
+          <div class="job-top"><div><strong>{{ job.stage === 'inpaint' ? '字幕擦除' : `翻译 · ${languageName(job.input.output_language)}` }}</strong><p>{{ formatChinaDateTime(job.created_at) }} · 源视频 {{ job.source_asset_name || `#${job.source_asset_id}` }}<template v-if="job.output_asset_name"> → 成片 {{ job.output_asset_name }}</template></p></div><span :class="['status', job.status]">{{ statusName(job.status) }}</span></div>
+          <p v-if="billingText(job)" class="billing">{{ billingText(job) }}</p>
           <p v-if="job.error_msg" class="error">{{ job.error_msg }}</p>
           <div v-if="job.status === 'completed'" class="job-actions"><button type="button" class="preview-action" @click="openPreview(job)">▶ 预览成片</button><button v-if="job.stage === 'inpaint'" type="button" @click="continueTranslation(job)">用成片继续翻译 →</button><a v-if="job.caption_url" :href="job.caption_url" download>下载字幕 ↧</a></div>
-          <p v-else-if="job.status === 'reconciliation'" class="reconcile">任务已转待对账，不会自动重复调用供应商。</p>
+          <p v-else-if="job.status === 'reconciliation'" class="reconcile">任务已转待对账，不会自动重复调用供应商；运营核验用量后这里会更新为最终结果。</p>
+          <div v-else-if="job.status === 'failed'" class="job-actions"><button type="button" @click="retryJob(job)">按原参数重新提交 →</button><span class="retry-hint">将创建新任务并重新预授权{{ job.billing?.state === 'released' ? '；上次冻结已释放' : '' }}</span></div>
         </article>
       </section>
     </div>
@@ -99,6 +101,22 @@ const model = computed(() => stage.value === 'translate' ? 'las-video-translate'
 const languageName = (code) => ({ 'en-US': '英语', 'ja-JP': '日语', 'ko-KR': '韩语', 'es-MX': '西班牙语', 'pt-BR': '葡萄牙语', 'id-ID': '印尼语', 'th-TH': '泰语', 'vi-VN': '越南语', 'fr-FR': '法语', 'de-DE': '德语' })[code] || code
 const statusName = (status) => ({ queued: '排队中', submitting: '提交中', processing: '处理中', finalizing: '归档中', completed: '已完成', failed: '失败', reconciliation: '待对账' })[status] || status
 const durationText = (seconds) => Number.isFinite(Number(seconds)) ? `${Math.ceil(Number(seconds))} 秒` : '时长未知'
+const creditsText = (value) => Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 10000) / 10000} 积分` : ''
+function billingText(job) {
+  const billing = job.billing
+  if (!billing) return ''
+  if (billing.state === 'settled') return billing.charged_credits != null ? `实际扣费 ${creditsText(billing.charged_credits)}（按供应商实测用量结算）` : '已结算'
+  if (billing.state === 'reconciling') return `对账中：${creditsText(billing.reserved_credits)}冻结中，等待运营核验用量`
+  if (billing.state === 'released') return '预授权已释放，未扣费'
+  return billing.reserved_credits != null ? `预授权 ${creditsText(billing.reserved_credits)}，完成后按实际用量结算` : ''
+}
+function retryJob(job) {
+  stage.value = job.stage
+  if (job.stage === 'inpaint') modelLevel.value = job.input.model_level || 'lite'
+  else outputLanguage.value = job.input.output_language || 'en-US'
+  if (videos.value.some((asset) => String(asset.id) === String(job.source_asset_id))) assetId.value = String(job.source_asset_id)
+  document.querySelector('.setup')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 const uploadHint = computed(() => !dramaId.value
   ? '先选择项目，上传的视频会归档为该项目素材'
   : `上传后自动归档为项目素材并选中；单文件${uploadLimitMb.value ? ` ≤ ${uploadLimitMb.value}MB` : '大小以平台上传限制为准'}`)
@@ -234,6 +252,7 @@ onUnmounted(() => { clearInterval(timer); clearTimeout(quoteTimer); ++quoteVersi
 .estimate{display:grid;gap:9px;margin-top:22px;padding:18px;border:1px solid var(--border-subtle);border-radius:10px;background:var(--bg-raised)}.estimate>div{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.estimate span{color:var(--text-muted);font-size:13px}.estimate strong{font-size:21px;text-align:right}.estimate small{color:var(--text-faint);line-height:1.5}.estimate .quote-error{color:var(--el-color-warning)}.quote-error button{border:0;background:transparent;color:var(--accent);text-decoration:underline;cursor:pointer}
 .actions{display:flex;margin-top:14px}.actions button{flex:1;min-height:46px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:var(--bg-page);font:inherit;font-weight:700;cursor:pointer}.actions button:disabled{cursor:not-allowed;opacity:.5}.hint,.empty{color:var(--text-muted);font-size:13px;line-height:1.6}
 .job{margin-top:12px;padding:17px;border:1px solid var(--border-subtle);border-radius:11px;background:var(--bg-raised)}.job-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.job-top>div{min-width:0}.job-top strong{font-size:16px}.job-top p{margin:6px 0 0;color:var(--text-muted);font-size:12px}.status{flex:0 0 auto;padding:5px 10px;border-radius:999px;background:var(--bg-active);color:var(--text-regular);font-size:12px;white-space:nowrap}.status.completed{color:var(--accent-teal)}.status.failed,.status.reconciliation{color:var(--el-color-warning)}.job>.error,.job>.reconcile{margin:12px 0 0;color:var(--el-color-warning);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.job>.billing{margin:10px 0 0;color:var(--text-muted);font-size:12px;line-height:1.5}.retry-hint{color:var(--text-faint);font-size:12px}
 .job-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-top:15px}.job-actions button,.job-actions a{padding:5px 0;border:0;background:transparent;color:var(--accent);font:inherit;font-size:13px;text-decoration:none;cursor:pointer}.job-actions .preview-action{padding:8px 12px;border:1px solid var(--accent);border-radius:7px;font-weight:700}.result-preview{display:grid;place-items:center;min-height:240px;background:#080d14}.result-preview video{display:block;max-width:100%;max-height:68vh}.result-preview p{padding:20px;color:var(--el-color-danger);text-align:center}.result-preview button{border:0;background:transparent;color:var(--accent);cursor:pointer}
 button:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:900px){.page-body{grid-template-columns:1fr}.panel{padding:20px}}@media(max-width:480px){.localization-page{padding:16px}.heading h1{font-size:36px}.job-top{align-items:flex-start}.estimate>div{align-items:flex-start;flex-direction:column}.estimate strong{text-align:left}}

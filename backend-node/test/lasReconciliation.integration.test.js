@@ -122,6 +122,8 @@ test('LAS reconciliation cases locate the job and settle/waive/expire syncs the 
   assert.equal(settledJob.status, 'failed');
   assert.match(settledJob.error_msg, /提交结果不确定/);
   assert.match(settledJob.error_msg, /已按供应商实测用量人工结算/);
+  assert.equal(settledJob.billing.state, 'settled');
+  assert.ok(settledJob.billing.charged_credits > 0, '结算后用户要能看到实际扣费');
   const usageLog = db.prepare('SELECT charged_micro FROM billing_usage_logs WHERE authorization_id=?').get(authorizationId(settledId));
   assert.ok(usageLog && usageLog.charged_micro > 0, '结算后消耗控制台必须能查到该笔 LAS 用量');
 
@@ -139,6 +141,7 @@ test('LAS reconciliation cases locate the job and settle/waive/expire syncs the 
   assert.equal(waived.body.data.status, 'waived');
   assert.equal(jobs.get(db, user.id, waivedId).status, 'failed');
   assert.match(jobs.get(db, user.id, waivedId).error_msg, /人工豁免/);
+  assert.equal(jobs.get(db, user.id, waivedId).billing.state, 'released');
   assert.equal(db.prepare('SELECT frozen_micro FROM billing_accounts WHERE user_id=?').get(user.id).frozen_micro, frozenBefore - waivedAuthAmount);
 
   // 超时释放同样同步任务状态。

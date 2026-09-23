@@ -24,3 +24,16 @@ test('quote refreshes when project, asset, model, language or stage changes and 
   assert.match(source, /:disabled="!ready \|\| !quote \|\| quoting \|\| submitting"/)
   assert.match(source, /ElMessageBox\.confirm\(/)
 })
+
+// 成片交付体验：任务卡片集中展示源视频→成片、实际扣费与下一步操作，
+// 用户不必跳去素材库或账本就能确认这一单产出了什么、花了多少。
+test('job cards consolidate source, output, actual billing and next actions', async () => {
+  const source = await page()
+  assert.match(source, /源视频 \{\{ job\.source_asset_name/)
+  assert.match(source, /→ 成片 \{\{ job\.output_asset_name \}\}/)
+  assert.match(source, /实际扣费 \$\{creditsText\(billing\.charged_credits\)\}/)
+  assert.match(source, /对账中：[\s\S]*冻结中，等待运营核验用量/)
+  assert.match(source, /预授权已释放，未扣费/)
+  assert.match(source, /@click="retryJob\(job\)">按原参数重新提交/)
+  assert.match(source, /运营核验用量后这里会更新为最终结果/)
+})

@@ -61,23 +61,76 @@ function validateMedia(media, stage) {
   if (media.width * media.height > 1920 * 1080 || media.fps > 30) throw new Error('首版 LAS 工作流只支持不超过 1080p、30fps 的视频');
 }
 
-function publicJob(row) {
+function publicJob(row, extra = {}) {
   return {
     id: row.id, drama_id: row.drama_id, source_asset_id: row.source_asset_id,
     output_asset_id: row.output_asset_id, stage: row.stage, status: row.status,
     caption_url: row.caption_local_path ? `/static/${row.caption_local_path}` : null,
     input: JSON.parse(row.input_json), error_msg: row.error_msg,
     created_at: row.created_at, updated_at: row.updated_at,
+    authorization_id: row.authorization_id || null,
+    provider_task_id: row.provider_task_id || null,
+    ...extra,
   };
+}
+
+const CREDITS_PER_MICRO = 10000;
+
+// 任务详情的计费投影：预授权、实际扣费与账本终态，让用户看到「花了多少」
+// 而不是只有状态标签。批量取，列表页不产生 N+1。
+function decorate(db, rows) {
+  if (!rows.length) return [];
+  const authIds = [...new Set(rows.map((row) => row.authorization_id).filter(Boolean))];
+  const billingByAuth = new Map();
+  if (authIds.length) {
+    const placeholders = authIds.map(() => '?').join(',');
+    const transactions = db.prepare(`SELECT authorization_id, type, amount_micro FROM billing_transactions
+      WHERE authorization_id IN (${placeholders}) AND type IN ('authorization', 'settlement', 'void')`).all(...authIds);
+    const charged = db.prepare(`SELECT authorization_id, SUM(charged_micro) AS charged_micro FROM billing_usage_logs
+      WHERE authorization_id IN (${placeholders}) GROUP BY authorization_id`).all(...authIds);
+    const chargedByAuth = new Map(charged.map((row) => [row.authorization_id, row.charged_micro]));
+    for (const row of transactions) {
+      const entry = billingByAuth.get(row.authorization_id) || {};
+      entry[row.type] = row.amount_micro;
+      billingByAuth.set(row.authorization_id, entry);
+    }
+    for (const [authorizationId, micro] of chargedByAuth) {
+      const entry = billingByAuth.get(authorizationId) || {};
+      entry.charged_micro = micro;
+      billingByAuth.set(authorizationId, entry);
+    }
+  }
+  const assetIds = [...new Set(rows.flatMap((row) => [row.source_asset_id, row.output_asset_id]).filter(Boolean))];
+  const names = new Map(assetIds.length
+    ? db.prepare(`SELECT id, name FROM assets WHERE id IN (${assetIds.map(() => '?').join(',')})`).all(...assetIds).map((asset) => [asset.id, asset.name])
+    : []);
+  return rows.map((row) => {
+    const ledger = billingByAuth.get(row.authorization_id) || {};
+    let state = 'frozen';
+    if (ledger.settlement != null) state = 'settled';
+    else if (ledger.void != null) state = 'released';
+    else if (row.status === 'reconciliation') state = 'reconciling';
+    return {
+      ...publicJob(row, {
+        source_asset_name: names.get(row.source_asset_id) || null,
+        output_asset_name: row.output_asset_id ? names.get(row.output_asset_id) || null : null,
+        billing: {
+          state,
+          reserved_credits: ledger.authorization != null ? ledger.authorization / CREDITS_PER_MICRO : null,
+          charged_credits: state === 'settled' && ledger.charged_micro != null ? ledger.charged_micro / CREDITS_PER_MICRO : null,
+        },
+      }),
+    };
+  });
 }
 
 function get(db, ownerId, id) {
   const row = db.prepare('SELECT * FROM las_media_jobs WHERE id=? AND owner_user_id=?').get(id, ownerId);
-  return row ? publicJob(row) : null;
+  return row ? decorate(db, [row])[0] : null;
 }
 
 function list(db, ownerId, dramaId) {
-  return db.prepare('SELECT * FROM las_media_jobs WHERE owner_user_id=? AND drama_id=? ORDER BY created_at DESC LIMIT 100').all(ownerId, dramaId).map(publicJob);
+  return decorate(db, db.prepare('SELECT * FROM las_media_jobs WHERE owner_user_id=? AND drama_id=? ORDER BY created_at DESC LIMIT 100').all(ownerId, dramaId));
 }
 
 function resultPaths(data, outputPrefix) {
@@ -111,7 +164,7 @@ async function create(db, log, cfg, ownerId, body) {
       || String(body.stage || '') !== existing.stage
       || (existing.stage === 'translate' && String(body.output_language || '') !== previous.output_language)
       || (existing.stage === 'inpaint' && String(body.model_level || '') !== previous.model_level)) throw new Error('幂等键已用于不同任务');
-    return publicJob(existing);
+    return decorate(db, [existing])[0];
   }
   const stage = String(body.stage || '');
   if (!['translate', 'inpaint'].includes(stage)) throw new Error('LAS 任务类型无效');
