@@ -69,6 +69,9 @@ test('application serves SPA routes and preserves cookie sessions and projects a
       assert.equal(result.status, 200, route);
       assert.match(await result.text(), /SPA fixture/);
     }
+    const missingAsset = await fetch(base + '/assets/removed-route-chunk.js');
+    assert.equal(missingAsset.status, 404);
+    assert.equal(missingAsset.headers.get('cache-control'), 'no-store');
     assert.equal((await fetch(base + '/api/v1/nonexistent')).status, 401);
     assert.equal((await fetch(base + '/ready')).status, 200);
     assert.equal((await fetch(base + '/api/v1/dramas')).status, 401);
