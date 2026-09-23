@@ -189,8 +189,8 @@ async function create(db, log, cfg, ownerId, body) {
   billing.quote(db, actor, { service_type: 'video_postprocess', model, provider: 'las', usage: { millisecond: media.durationMs } });
   const at = now();
   db.transaction(() => {
-    db.prepare(`INSERT INTO las_media_jobs(id,owner_user_id,drama_id,source_asset_id,idempotency_key,stage,input_json,status,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,'queued',?,?)`).run(id, ownerId, dramaId, assetId, key, stage, JSON.stringify(input), at, at);
+    db.prepare(`INSERT INTO las_media_jobs(id,owner_user_id,drama_id,source_asset_id,idempotency_key,stage,input_json,tos_policy,status,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,'queued',?,?)`).run(id, ownerId, dramaId, assetId, key, stage, JSON.stringify(input), 'cleanup', at, at);
     const authorization = billing.createAuthorization(db, actor, {
       idempotency_key: `las:${ownerId}:${key}`, service_type: 'video_postprocess', model,
       provider: 'las', usage: { millisecond: media.durationMs }, drama_id: dramaId,
@@ -203,11 +203,43 @@ async function create(db, log, cfg, ownerId, body) {
 }
 
 function record(db, id, patch) {
-  const allowed = ['status', 'input_tos_path', 'provider_task_id', 'result_json', 'output_asset_id', 'caption_local_path', 'error_msg'];
+  const allowed = ['status', 'input_tos_path', 'provider_task_id', 'result_json', 'output_asset_id', 'caption_local_path', 'error_msg', 'submitted_at', 'completed_at', 'tos_objects_json', 'tos_cleanup_at', 'tos_cleanup_attempts'];
   const entries = Object.entries(patch).filter(([key]) => allowed.includes(key));
   if (!entries.length) return;
   const at = now();
   db.prepare(`UPDATE las_media_jobs SET ${entries.map(([key]) => `${key}=?`).join(',')}, updated_at=? WHERE id=?`).run(...entries.map(([, value]) => value), at, id);
+}
+
+function readTosObjects(row) {
+  try { return JSON.parse(row.tos_objects_json || '{}'); } catch (_) { return {}; }
+}
+
+// 只清理本任务精确登记过的中转对象：不列举、不递归、不按时间猜测。
+// 历史任务（tos_policy 为 NULL）默认不动；清理失败绝不把完成任务改判为失败。
+async function cleanupTransit(db, log, cfg, id) {
+  const row = db.prepare('SELECT * FROM las_media_jobs WHERE id=?').get(id);
+  if (!row || row.status !== 'completed' || row.tos_policy !== 'cleanup' || row.tos_cleanup_at) return null;
+  if (Number(row.tos_cleanup_attempts || 0) >= 5) return null;
+  const objects = readTosObjects(row);
+  const localVideo = row.output_asset_id ? require('./assetService').getById(db, row.output_asset_id) : null;
+  const localVideoPath = localVideo && !localVideo.deleted_at ? resolveStorageFile(storageRoot(cfg), localVideo.local_path) : null;
+  // 前置门槛：数据库完成态已落地、本地成片文件可读，才允许删中转对象。
+  if (!localVideoPath || !fs.existsSync(localVideoPath)) return null;
+  if (row.caption_local_path && !fs.existsSync(resolveStorageFile(storageRoot(cfg), row.caption_local_path))) return null;
+  const paths = [row.input_tos_path, objects.output_video || null, objects.output_caption || null].filter(Boolean);
+  let { tosConfig } = serviceConfig(db);
+  let failures = 0;
+  for (const path of paths) {
+    try { await tos.remove(tosConfig, path); }
+    catch (error) { failures += 1; log.warn('LAS 中转对象清理失败，等待重试', { id, path, error: error.message }); }
+  }
+  if (!failures) {
+    record(db, id, { tos_cleanup_at: now() });
+    log.info('LAS 中转对象已清理', { id, objects: paths.length });
+    return { cleaned: paths.length };
+  }
+  db.prepare('UPDATE las_media_jobs SET tos_cleanup_attempts=tos_cleanup_attempts+1, updated_at=? WHERE id=?').run(now(), id);
+  return { failed: failures };
 }
 
 function reconcile(db, row, reason) {
@@ -243,7 +275,7 @@ async function processJob(db, log, cfg, id) {
         const file = resolveStorageFile(storageRoot(cfg), source.local_path);
         const tosPath = await tos.upload(tosConfig, tos.objectKey(id, 'input', 'source.mp4'), file);
         if (!renewLease()) return;
-        record(db, id, { input_tos_path: tosPath, status: 'submitting' });
+        record(db, id, { input_tos_path: tosPath, status: 'submitting', tos_objects_json: JSON.stringify({ input: { path: tosPath, bytes: fs.statSync(file).size } }) });
         row = db.prepare('SELECT * FROM las_media_jobs WHERE id=?').get(id);
       } catch (error) {
         billing.voidAuthorization(db, { id: row.owner_user_id }, row.authorization_id, 'LAS 输入未提交供应商');
@@ -254,7 +286,7 @@ async function processJob(db, log, cfg, id) {
         if (!renewLease()) return;
         const payload = las.submitPayload(clientConfig, row.stage, { ...input, job_id: id, video_url: row.input_tos_path });
         const accepted = await las.request(clientConfig, 'submit', payload);
-        record(db, id, { provider_task_id: accepted.task_id, status: 'processing', error_msg: null });
+        record(db, id, { provider_task_id: accepted.task_id, status: 'processing', error_msg: null, submitted_at: now() });
       } catch (error) {
         reconcile(db, row, `LAS 提交结果不确定：${error.message}`);
         return;
@@ -279,9 +311,11 @@ async function processJob(db, log, cfg, id) {
       const paths = resultPaths(JSON.parse(row.result_json), prefix);
       const relative = `las/${id}/video.mp4`;
       const target = path.join(storageRoot(cfg), relative);
-      await tos.download(tosConfig, paths.video, target);
+      const downloaded = await tos.download(tosConfig, paths.video, target);
       const captionRelative = paths.caption ? `las/${id}/subtitles.srt` : null;
-      if (captionRelative) await tos.download(tosConfig, paths.caption, path.join(storageRoot(cfg), captionRelative));
+      let captionBytes = null;
+      if (captionRelative) captionBytes = (await tos.download(tosConfig, paths.caption, path.join(storageRoot(cfg), captionRelative))).bytes;
+      record(db, id, { tos_objects_json: JSON.stringify({ ...readTosObjects(row), output_video: paths.video, output_caption: paths.caption || null, output_bytes: downloaded.bytes, caption_bytes: captionBytes }) });
       const media = await probe(target);
       validateMedia(media, row.stage);
       const chargedMs = billedMilliseconds(input, media);
@@ -297,8 +331,9 @@ async function processJob(db, log, cfg, id) {
         billing.settleAuthorization(db, { id: row.owner_user_id }, row.authorization_id, {
           usage: { millisecond: chargedMs }, provider_request_id: row.provider_task_id,
         });
-        record(db, id, { output_asset_id: created.id, caption_local_path: captionRelative, status: 'completed', error_msg: null });
+        record(db, id, { output_asset_id: created.id, caption_local_path: captionRelative, status: 'completed', error_msg: null, completed_at: now() });
       })();
+      cleanupTransit(db, log, cfg, id).catch((error) => log.warn('LAS 中转清理异常', { id, error: error.message }));
       if (require('./mediaStorageService').isOss(cfg)) {
         const mediaStorage = require('./mediaStorageService');
         for (const localPath of [relative, captionRelative].filter(Boolean)) {
@@ -340,9 +375,13 @@ function resume(db, log, cfg) {
     for (const row of db.prepare("SELECT id FROM las_media_jobs WHERE status IN ('queued','processing','finalizing') LIMIT 50").all()) {
       processJob(db, log, cfg, row.id).catch((error) => log.error('LAS 任务轮询失败', { id: row.id, error: error.message }));
     }
+    // 完成任务的中转清理重试（有界次数）：清理失败不影响任务终态。
+    for (const row of db.prepare("SELECT id FROM las_media_jobs WHERE status='completed' AND tos_policy='cleanup' AND tos_cleanup_at IS NULL AND tos_cleanup_attempts < 5 LIMIT 20").all()) {
+      cleanupTransit(db, log, cfg, row.id).catch((error) => log.warn('LAS 中转清理重试失败', { id: row.id, error: error.message }));
+    }
   }, 30_000);
   timer.unref?.();
   return { queued: pending.length, uncertain, case_synced: caseSync.synced, stop: () => clearInterval(timer) };
 }
 
-module.exports = { create, get, list, processJob, resume, resultPaths, billedMilliseconds, validateMedia, serviceConfig };
+module.exports = { create, get, list, processJob, resume, cleanupTransit, resultPaths, billedMilliseconds, validateMedia, serviceConfig };

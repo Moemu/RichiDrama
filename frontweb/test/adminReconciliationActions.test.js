@@ -49,3 +49,17 @@ test('the settlement dialog shows the located task, authorization and archived f
   // 只读信息用纯文本展示：disabled 输入框会裁切长任务定位文字。
   assert.doesNotMatch(view, /label="关联任务"[^>]*><el-input[^>]*disabled/)
 })
+
+// 中转治理可见性：运营台「媒体」页必须展示 LAS 耗时、失败阶段与 TOS 占用，
+// 否则清理是否生效只能靠猜。
+test('the media workbench surfaces LAS duration, failure phase and TOS transit usage', async () => {
+  const [view, api] = await Promise.all([consoleSource(), apiSource()])
+  assert.match(api, /lasJobs: \(params\) => request\.get\('\/admin\/las-jobs', \{ params \}\)/)
+  assert.match(view, /视频本地化（LAS）/)
+  assert.match(view, /平均供应商耗时/)
+  assert.match(view, /中转待清理/)
+  assert.match(view, /历史保留/)
+  assert.match(view, /失败阶段/)
+  assert.match(view, /lasCleanupLabel\(row\)/)
+  assert.doesNotMatch(view, /label="任务"[\s\S]{0,200}v-if="false"/)
+})

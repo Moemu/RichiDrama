@@ -18,7 +18,13 @@
 
 该配置行的 `service_type` 为 `video_localization`、`provider` 为 `las`，与超分／插帧使用的 `video_postprocess` 行互不选取。地域与 Bucket 只有一份来源，因此算子与 TOS 不可能被配成两个不同的桶。
 
-当前中转使用 TOS V4 签名的原生 HTTP 请求，不依赖供应商 SDK。输入文件上传到 `tos://<bucket>/richidrama/las/<job-id>/input/source.mp4`。两个算子分别写入 `translate/` 与 `inpaint/`。完成后，后端将 MP4 和可用的 SRT 下载到项目本地存储，并登记为项目素材。没有进行自动 TOS 清理。
+当前中转使用 TOS V4 签名的原生 HTTP 请求，不依赖供应商 SDK。输入文件上传到 `tos://<bucket>/richidrama/las/<job-id>/input/source.mp4`。两个算子分别写入 `translate/` 与 `inpaint/`。完成后，后端将 MP4 和可用的 SRT 下载到项目本地存储，并登记为项目素材。
+
+## 中转治理与清理
+
+发布后新建的任务带 `tos_policy='cleanup'`，任务行同时登记本任务创建过的全部中转对象与字节数（`tos_objects_json`）。本地成片通过规格校验、素材与数据库完成态事务落地后，后端按登记的精确键删除输入与输出对象（404 视为已删，幂等）；不列举、不递归、不按时间猜测。清理失败不会把完成任务改判为失败，由 30 秒恢复轮询有限重试（超过 5 次停止并计入运营告警计数）。历史任务 `tos_policy` 为 NULL，其中转对象一律保留，只在运营台计入「历史保留」占用。
+
+运营台「媒体」页新增视频本地化（LAS）区块：完成／进行中／待对账／失败计数、平均供应商耗时（`submitted_at → completed_at`）、失败阶段分布（中转上传／提交／供应商处理／归档结算／等待对账）、中转待清理与累计占用，以及逐任务表格（耗时、占用字节、清理状态）。数据来自 `GET /api/v1/admin/las-jobs` 与概览接口的 `las` 摘要。
 
 未新增该配置、取消勾选「启用」，或必填项不完整时，任务提交在预授权前失败。有多条启用的配置时，须明确指定唯一默认配置，防止任务使用旧测试 Bucket。`GET /api/v1/las-media-jobs/capabilities` 只返回配置是否齐全与地域，不返回密钥。
 

@@ -24,7 +24,7 @@ function objectKey(jobId, kind, name) {
 }
 
 function signedHeaders(config, method, key, payloadHash, contentType = '', at = new Date()) {
-  if (!['GET', 'PUT', 'HEAD'].includes(method) || !/^richidrama\/las\/[\w./-]+$/.test(key) || key.includes('..')) throw new Error('LAS TOS 请求无效');
+  if (!['GET', 'PUT', 'HEAD', 'DELETE'].includes(method) || !/^richidrama\/las\/[\w./-]+$/.test(key) || key.includes('..')) throw new Error('LAS TOS 请求无效');
   const date = at.toISOString().replace(/[-:]|\.\d{3}/g, '');
   const day = date.slice(0, 8);
   const scope = `${day}/${config.region}/tos/request`;
@@ -98,6 +98,22 @@ async function download(config, tosPath, localFile) {
   return request(config, 'GET', key, hash(''), '', null, localFile);
 }
 
+/** 删除单个中转对象。只接受 tos://<本配置 bucket>/richidrama/las/… 的精确键，
+ *  绝不递归列举；TOS 对不存在的对象返回 404，调用方按已清理处理（幂等重试）。 */
+async function remove(config, tosPath) {
+  const prefix = `tos://${config.bucket}/`;
+  if (!String(tosPath).startsWith(prefix)) throw new Error('LAS 待删对象不在配置的 TOS Bucket 内');
+  const key = tosPath.slice(prefix.length);
+  if (!/^richidrama\/las\/[\w./-]+$/.test(key) || key.includes('..')) throw new Error('LAS 待删对象路径无效');
+  try {
+    await request(config, 'DELETE', key, hash(''), '', null, null);
+    return { deleted: true };
+  } catch (error) {
+    if (/HTTP 404/.test(error.message)) return { deleted: false, already_absent: true };
+    throw error;
+  }
+}
+
 /** 从 TOS 错误响应体（XML）里提取 <Code>/<Message>，供日志与任务错误信息定位。 */
 function tosErrorDetail(body) {
   const text = String(body || '');
@@ -119,4 +135,4 @@ function tosErrorMessage(method, statusCode, body) {
     + (/AccessDenied/i.test(detail) ? '（凭证无该 Bucket 读写权限：请核对受限读写凭证与前缀授权）' : '');
 }
 
-module.exports = { configuration, objectKey, signedHeaders, tosErrorDetail, tosErrorMessage, upload, download };
+module.exports = { configuration, objectKey, signedHeaders, tosErrorDetail, tosErrorMessage, upload, download, remove };

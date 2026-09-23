@@ -243,6 +243,7 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
       } catch (error) { next(error); }
     },
     mediaArchives: (req, res) => response.success(res, operations.listArchives(db, req.query)),
+    lasJobs: (req, res) => response.success(res, operations.listLas(db, req.query)),
     richbestRebindCandidates: guarded((req, res) => response.success(res, richbestRebind.listCandidates(db, req.query))),
     richbestRebindRun: (req, res) => {
       const run = richbestRebind.view(db, req.params.id);

@@ -76,6 +76,11 @@
       <div class="archive-cards"><article v-for="item in storageSummary" :key="item.status"><span>{{ item.status }}</span><strong>{{ item.count }}</strong></article></div>
       <div class="table-scroll"><el-table :data="filteredArchives"><el-table-column prop="id" label="归档 ID" width="90"/><el-table-column prop="local_path" label="本地路径" min-width="260" show-overflow-tooltip/><el-table-column prop="archive_status" label="状态" width="140"/><el-table-column prop="archive_attempts" label="尝试" width="90"/><el-table-column label="更新" width="170"><template #default="{row}">{{ formatChinaDateTime(row.updated_at) }}</template></el-table-column><el-table-column prop="archive_error" label="错误摘要" min-width="200" show-overflow-tooltip/></el-table></div>
       <LogPagination :meta="pages.archives" @change="changePage('archives', $event)" />
+      <div class="historical-usage"><div><b>视频本地化（LAS）</b><small>擦除／翻译任务的耗时、失败阶段与 TOS 中转占用。中转清理仅对发布后新建任务生效，历史对象默认保留。</small></div></div>
+      <div class="project-usage-metrics"><article><small>已完成</small><strong>{{ overview?.las?.completed || 0 }}</strong></article><article><small>进行中</small><strong>{{ overview?.las?.active || 0 }}</strong></article><article><small>待对账</small><strong>{{ overview?.las?.reconciling || 0 }}</strong></article><article><small>失败</small><strong>{{ overview?.las?.failed || 0 }}</strong></article></div>
+      <div class="project-usage-metrics"><article><small>平均供应商耗时</small><strong>{{ formatElapsed(overview?.las?.average_provider_ms) }}</strong></article><article><small>中转待清理</small><strong>{{ formatBytes(overview?.las?.pending_transit_bytes) }}</strong><small class="project-subline">历史保留 {{ formatBytes(overview?.las?.history_transit_bytes) }}</small></article><article><small>中转累计</small><strong>{{ formatBytes(overview?.las?.total_transit_bytes) }}</strong></article><article :class="{ warning: Number(overview?.las?.cleanup_failed || 0) > 0 }"><small>清理超重试上限</small><strong>{{ overview?.las?.cleanup_failed || 0 }}</strong></article></div>
+      <div class="table-scroll"><el-table :data="las"><el-table-column label="任务" min-width="150" show-overflow-tooltip><template #default="{row}"><strong>{{ lasTaskLabel(row) }}</strong><small class="reconciliation-task-subline">{{ row.id.slice(0, 8) }} · {{ row.project_title || `项目 #${row.drama_id}` }}</small></template></el-table-column><el-table-column prop="username" label="用户" width="110" show-overflow-tooltip/><el-table-column label="状态" width="90"><template #default="{row}">{{ lasStatusLabel(row.status) }}</template></el-table-column><el-table-column label="失败阶段" width="110"><template #default="{row}">{{ lasPhaseLabel(row.failure_phase) }}</template></el-table-column><el-table-column label="供应商耗时" width="110"><template #default="{row}">{{ row.provider_elapsed_ms == null ? '—' : formatElapsed(row.provider_elapsed_ms) }}</template></el-table-column><el-table-column label="中转占用" width="100"><template #default="{row}">{{ formatBytes(row.transit_bytes) }}</template></el-table-column><el-table-column label="中转清理" width="110"><template #default="{row}">{{ lasCleanupLabel(row) }}</template></el-table-column><el-table-column label="更新" width="150"><template #default="{row}">{{ formatChinaDateTime(row.updated_at) }}</template></el-table-column><el-table-column prop="error_msg" label="错误摘要" min-width="180" show-overflow-tooltip/></el-table></div>
+      <LogPagination :meta="pages.las" @change="changePage('las', $event)" />
     </section>
 
     <section v-else-if="activeView === 'reconciliations'" class="workbench" aria-labelledby="reconciliation-heading">
@@ -243,7 +248,7 @@ const governanceSettings = ['users', 'organizations', 'tenants', 'assetRebind', 
 const governanceTab = ref(route.query.settings === 'tenants' ? 'tenants' : route.query.settings === 'organizations' ? 'organizations' : 'users')
 if (governanceSettings.includes(route.query.settings)) governanceTab.value = route.query.settings
 const loading = ref(false); const overview = ref(null)
-const production = ref([]); const archives = ref([]); const reconciliations = ref([]); const users = ref([]); const books = ref([]); const tenants = ref([]); const customerOrganizations = ref([]); const availableConfigs = ref([]); const transactions = ref([]); const paymentOrders = ref([]); const usage = ref([]); const usageSummary = ref(null); const audits = ref([]); const projectUsage = ref(null); const projectUsageDetail = ref(null); const historicalUsage = ref({ items: [] }); const showHistoricalUsage = ref(false); const showProjectUsageDetail = ref(false)
+const production = ref([]); const archives = ref([]); const las = ref([]); const reconciliations = ref([]); const users = ref([]); const books = ref([]); const tenants = ref([]); const customerOrganizations = ref([]); const availableConfigs = ref([]); const transactions = ref([]); const paymentOrders = ref([]); const usage = ref([]); const usageSummary = ref(null); const audits = ref([]); const projectUsage = ref(null); const projectUsageDetail = ref(null); const historicalUsage = ref({ items: [] }); const showHistoricalUsage = ref(false); const showProjectUsageDetail = ref(false)
 const productionDetail = ref(null); const showProduction = ref(false)
 const showReconcileSettle = ref(false); const settleCase = ref(null); const settleUsage = reactive({}); const settleReason = ref(''); const settling = ref(false)
 const outputPreviewFailed = ref(false)
@@ -263,7 +268,7 @@ const priceProviderLabels = { volcengine: '火山引擎（方舟）', richbest: 
 function priceProviderLabel(provider) { return provider ? (priceProviderLabels[provider] || provider) : '平台通用' }
 const priceProviderOptions = computed(() => [...new Set(['volcengine', 'richbest', 'las', ...books.value.map((book) => book.provider).filter(Boolean)])].map((value) => ({ value, label: priceProviderLabel(value) })))
 const filters = reactive({ production: { status: route.query.status || '', model: route.query.model || '' }, archives: { status: '' }, reconciliations: { status: '' }, billing: { dates: [], role: '', user_id: null, tenant_id: null, organization_id: null, drama_id: null }, payments: { channel: '', status: '', keyword: '' }, projectUsage: { dates: [], keyword: '', tenant_id: null } })
-const pages = reactive({ production: { page: 1, page_size: 20, total: 0 }, archives: { page: 1, page_size: 20, total: 0 }, reconciliations: { page: 1, page_size: 20, total: 0 }, transactions: { page: 1, page_size: 20, total: 0 }, paymentOrders: { page: 1, page_size: 20, total: 0 }, usage: { page: 1, page_size: 20, total: 0 }, audit: { page: 1, page_size: 20, total: 0 }, projectUsage: { page: 1, page_size: 20, total: 0 } })
+const pages = reactive({ production: { page: 1, page_size: 20, total: 0 }, archives: { page: 1, page_size: 20, total: 0 }, las: { page: 1, page_size: 20, total: 0 }, reconciliations: { page: 1, page_size: 20, total: 0 }, transactions: { page: 1, page_size: 20, total: 0 }, paymentOrders: { page: 1, page_size: 20, total: 0 }, usage: { page: 1, page_size: 20, total: 0 }, audit: { page: 1, page_size: 20, total: 0 }, projectUsage: { page: 1, page_size: 20, total: 0 } })
 // 外部入口（如告警页「去处置」）通过 ?tab=archives&status=failed 直达过滤后的列表。
 if (route.query.tab === 'archives' && route.query.status) filters.archives.status = String(route.query.status)
 if (route.query.tab === 'reconciliations' && route.query.status) filters.reconciliations.status = String(route.query.status)
@@ -307,6 +312,20 @@ function syncRoute() { router.replace({ query: { ...route.query, tab: activeView
 async function refresh() { loading.value = true; try { overview.value = await adminAPI.overview() } finally { loading.value = false } }
 async function loadProduction() { await refresh(); applyPage(production, 'production', await adminAPI.production({ ...pages.production, ...filters.production })) }
 async function loadArchives() { applyPage(archives, 'archives', await adminAPI.mediaArchives(pages.archives)) }
+async function loadLas() { applyPage(las, 'las', await adminAPI.lasJobs(pages.las)) }
+const lasStatusLabel = (status) => ({ queued: '排队中', submitting: '提交中', processing: '处理中', finalizing: '归档中', completed: '已完成', failed: '已失败', reconciliation: '待对账' })[status] || status
+const lasPhaseLabel = (phase) => ({ transit_upload: '中转上传', submit: '提交', provider: '供应商处理', archive: '归档结算', reconcile: '等待对账' })[phase] || '—'
+function lasTaskLabel(row) {
+  return row.stage === 'inpaint' ? `字幕擦除（${row.model_level === 'pro' ? '精细版' : '标准版'}）` : `翻译 · ${row.output_language || '目标语言'}`
+}
+function lasCleanupLabel(row) {
+  if (!row.tos_policy) return '历史·不清理'
+  if (row.tos_cleanup_at) return '已清理'
+  if (row.status !== 'completed') return '保留中'
+  if (row.tos_cleanup_attempts >= 5) return '超过重试上限'
+  return '待清理'
+}
+function formatBytes(value) { const bytes = Number(value || 0); if (!bytes) return '0 B'; const units = ['B', 'KB', 'MB', 'GB']; let index = 0; let size = bytes; while (size >= 1024 && index < units.length - 1) { size /= 1024; index += 1 } return `${index === 0 ? size : size.toFixed(1)} ${units[index]}` }
 async function loadReconciliations() { applyPage(reconciliations, 'reconciliations', await adminAPI.reconciliations(pages.reconciliations)) }
 // Token-like meters are counted in whole units; durations can be fractional.
 const INTEGER_METERS = new Set(['input_token', 'cache_token', 'output_token', 'image', 'input_image', 'request', 'millisecond', 'character'])
@@ -415,10 +434,10 @@ async function syncPaymentOrder(row) { try { await adminAPI.syncPaymentOrder(row
 async function reloadBilling() { pages.transactions.page = 1; pages.usage.page = 1; await loadGovernance() }
 async function onBillingRoleChange() { const selectedUser = users.value.find((user) => Number(user.id) === Number(filters.billing.user_id)); if (selectedUser && filters.billing.role && selectedUser.role !== filters.billing.role) filters.billing.user_id = null; await reloadBilling() }
 async function clearBillingFilters() { filters.billing.dates = []; filters.billing.role = ''; filters.billing.user_id = null; filters.billing.tenant_id = null; filters.billing.organization_id = null; filters.billing.drama_id = null; await reloadBilling() }
-async function loadCurrent() { if (activeView.value === 'overview') return refresh(); if (activeView.value === 'production') return loadProduction(); if (activeView.value === 'archives') return loadArchives(); if (activeView.value === 'reconciliations') return loadReconciliations(); if (activeView.value === 'projectUsage') return loadProjectUsage(); return loadGovernance() }
+async function loadCurrent() { if (activeView.value === 'overview') return refresh(); if (activeView.value === 'production') return loadProduction(); if (activeView.value === 'archives') return Promise.all([refresh(), loadArchives(), loadLas()]); if (activeView.value === 'reconciliations') return loadReconciliations(); if (activeView.value === 'projectUsage') return loadProjectUsage(); return loadGovernance() }
 async function openView(view) { activeView.value = view; syncRoute(); await loadCurrent() }
 async function drill(target = {}) { const view = target.tab || 'production'; if (view === 'production' && target.status) filters.production.status = target.status; if (view === 'production' && target.model) filters.production.model = target.model; if (view === 'archives') filters.archives.status = target.status || ''; if (view === 'reconciliations') filters.reconciliations.status = target.status || ''; await openView(view) }
-async function changePage(name, page) { pages[name].page = page; if (name === activeView.value) await loadCurrent(); else if (name === 'transactions' || name === 'usage' || name === 'audit') await loadGovernance() }
+async function changePage(name, page) { pages[name].page = page; if (name === 'las') return loadLas(); if (name === activeView.value) await loadCurrent(); else if (name === 'transactions' || name === 'usage' || name === 'audit') await loadGovernance() }
 async function openProduction(id) { productionDetail.value = await adminAPI.productionDetail(id); outputPreviewFailed.value = false; showProduction.value = true }
 function openProductionReproduction() {
   const replay = productionDetail.value?.reproduction

@@ -228,3 +228,55 @@ test('historical unassigned usage provides a filter-scoped owner and source over
     for (const suffix of ['', '-wal', '-shm']) try { fs.unlinkSync(dbPath + suffix); } catch (_) {}
   }
 });
+
+test('LAS operations projection exposes duration, failure phase and TOS transit usage', () => {
+  const dbPath = path.join(os.tmpdir(), `lmd-operations-las-${Date.now()}.db`);
+  const db = getDb({ path: dbPath, type: 'sqlite' });
+  try {
+    runMigrationsAndEnsure(db);
+    const auth = require('../src/services/authService');
+    const admin = auth.ensureBootstrapAdmin(db, { info() {}, warn() {}, error() {} });
+    const user = auth.createUser(db, { username: 'las-viewer', password: 'test-password' }, admin.id);
+    db.prepare('INSERT INTO dramas (id, owner_user_id, title, created_at, updated_at) VALUES (7,?,?,?,?)').run(user.id, 'LAS 项目', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');
+    db.prepare(`INSERT INTO assets (id, drama_id, owner_user_id, name, type, local_path, created_at, updated_at) VALUES (1,7,?,?,'video','input/x.mp4',?,?)`)
+      .run(user.id, '原片', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');
+    const insert = db.prepare(`INSERT INTO las_media_jobs(id,owner_user_id,drama_id,source_asset_id,idempotency_key,stage,input_json,status,submitted_at,completed_at,error_msg,tos_objects_json,tos_cleanup_at,tos_cleanup_attempts,tos_policy,created_at,updated_at)
+      VALUES(?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    insert.run('job-done', user.id, 7, 'k1', 'inpaint', JSON.stringify({ stage: 'inpaint', model_level: 'pro' }), 'completed',
+      '2026-09-01T00:01:00.000Z', '2026-09-01T00:11:00.000Z', null, JSON.stringify({ input: { bytes: 1048576 }, output_bytes: 2097152 }), '2026-09-01T00:11:05.000Z', 0, 'cleanup', '2026-09-01T00:00:00.000Z', '2026-09-01T00:11:05.000Z');
+    insert.run('job-provider-fail', user.id, 7, 'k2', 'translate', JSON.stringify({ stage: 'translate', output_language: 'en-US' }), 'failed',
+      '2026-09-01T01:00:00.000Z', null, 'LAS 任务失败：business_code=50001', null, null, 0, 'cleanup', '2026-09-01T01:00:00.000Z', '2026-09-01T01:20:00.000Z');
+    insert.run('job-legacy', user.id, 7, 'k3', 'inpaint', JSON.stringify({ stage: 'inpaint', model_level: 'lite' }), 'completed',
+      null, null, null, JSON.stringify({ input: { bytes: 4096 } }), null, 0, null, '2026-09-01T02:00:00.000Z', '2026-09-01T02:30:00.000Z');
+    insert.run('job-reconcile', user.id, 7, 'k4', 'inpaint', JSON.stringify({ stage: 'inpaint', model_level: 'lite' }), 'reconciliation',
+      '2026-09-01T03:00:00.000Z', null, 'LAS 提交结果不确定', null, null, 0, 'cleanup', '2026-09-01T03:00:00.000Z', '2026-09-01T03:05:00.000Z');
+
+    const page = operations.listLas(db, { page_size: 50 });
+    assert.equal(page.total, 4);
+    const byId = new Map(page.items.map((item) => [item.id, item]));
+    assert.equal(byId.get('job-done').provider_elapsed_ms, 10 * 60 * 1000);
+    assert.equal(byId.get('job-done').transit_bytes, 1048576 + 2097152);
+    assert.equal(byId.get('job-done').tos_policy, 'cleanup');
+    assert.equal(byId.get('job-done').failure_phase, null);
+    assert.equal(byId.get('job-provider-fail').failure_phase, 'provider');
+    assert.equal(byId.get('job-reconcile').failure_phase, 'reconcile');
+    assert.equal(byId.get('job-legacy').tos_policy, null);
+    assert.equal(byId.get('job-provider-fail').username, 'las-viewer');
+    assert.equal(byId.get('job-done').project_title, 'LAS 项目');
+    assert.equal(byId.get('job-done').model_level, 'pro');
+
+    const summary = operations.lasSummary(db);
+    assert.equal(summary.total, 4);
+    assert.equal(summary.completed, 2);
+    assert.equal(summary.failed, 1);
+    assert.equal(summary.reconciling, 1);
+    assert.equal(summary.pending_transit_bytes, 0, '历史对象不计入待清理');
+    assert.equal(summary.history_transit_bytes, 4096, '历史保留占用仍要可见');
+    assert.equal(summary.average_provider_ms, 10 * 60 * 1000);
+    assert.equal(summary.failure_phases.provider, 1);
+    assert.equal(summary.failure_phases.reconcile, 1);
+  } finally {
+    closeDb();
+    for (const suffix of ['', '-wal', '-shm']) try { fs.unlinkSync(dbPath + suffix); } catch (_) {}
+  }
+});
