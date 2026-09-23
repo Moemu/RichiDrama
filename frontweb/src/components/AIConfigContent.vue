@@ -7,7 +7,7 @@
         <div class="tab-content">
           <p v-if="!tenantId && canManageCatalog" class="tab-note">
             供应商凭据与模型请在「供应商连接」中添加，按能力绑定后自动生成配置。
-            本页只新增视频后处理与素材上传服务；已有的旧配置仍可编辑，并可在「供应商连接」中转换。
+            本页只新增视频后处理、视频本地化与素材上传服务；已有的旧配置仍可编辑，并可在「供应商连接」中转换。
             <el-button link type="primary" @click="openConnection()">前往供应商连接</el-button>
           </p>
           <!-- 普通模式操作栏 -->
@@ -98,6 +98,7 @@
                     <Microphone v-else-if="row.service_type === 'tts'" />
                     <Key v-else-if="row.service_type === 'jimeng2_character_auth'" />
                     <Folder v-else-if="row.service_type === 'model_ark_asset'" />
+                    <Film v-else-if="row.service_type === 'video_localization'" />
                   </el-icon>
                   {{ serviceTypeLabel(row.service_type) }}
                 </span>
@@ -292,6 +293,7 @@
             <el-option v-if="!platformCatalogMode || editingId" label="分镜图片生成" value="storyboard_image" />
             <el-option v-if="!platformCatalogMode || editingId" label="视频生成" value="video" />
             <el-option label="视频后处理（超分 / 插帧，AI MediaKit）" value="video_postprocess" />
+            <el-option label="视频本地化（字幕擦除 / 翻译配音）" value="video_localization" />
             <el-option v-if="!platformCatalogMode || editingId" label="语音合成 TTS" value="tts" />
             <el-option label="素材库上传" value="jimeng2_character_auth" />
           </el-select>
@@ -562,7 +564,7 @@ input_reference = (图片文件，可选)</pre>
         </el-form-item>
         <el-form-item v-if="!form.provider_connection_id" prop="api_key">
           <template #label>
-            <span class="form-label-tip">{{ form.service_type === 'jimeng2_character_auth' && form.provider !== 'richbest_asset_v3' ? 'Token' : 'API Key' }}
+            <span class="form-label-tip">{{ form.service_type === 'video_localization' ? 'LAS 算子 API Key' : (form.service_type === 'jimeng2_character_auth' && form.provider !== 'richbest_asset_v3' ? 'Token' : 'API Key') }}
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
                 <template #content>
                   <div class="cfg-tip-content">
@@ -571,6 +573,10 @@ input_reference = (图片文件，可选)</pre>
                     </template>
                     <template v-else-if="form.service_type === 'jimeng2_character_auth'">
                       素材库要求的 <code>Authorization: Bearer …</code> Token，由网关或即梦侧签发。
+                    </template>
+                    <template v-else-if="form.service_type === 'video_localization'">
+                      LAS 在线算子的 API Key，在火山引擎 LAS 控制台签发。<br>
+                      任务提交与查询都使用它；下方的 TOS AK/SK 只用于中转文件的读写。
                     </template>
                     <template v-else>
                       在对应 AI 平台申请的密钥，用于身份验证。<br>
@@ -851,7 +857,7 @@ input_reference = (图片文件，可选)</pre>
         </div>
 
         <template v-if="form.service_type !== 'jimeng2_character_auth'">
-        <el-form-item prop="modelText">
+        <el-form-item v-if="form.service_type !== 'video_localization'" prop="modelText">
           <template #label>
             <span class="form-label-tip">模型列表
               <el-tooltip placement="top" popper-class="cfg-tip-popper">
@@ -897,7 +903,7 @@ input_reference = (图片文件，可选)</pre>
           </el-select>
           <p v-if="form.service_type === 'video_postprocess'" class="field-tip">超分与插帧共用此连接；是否启用由镜头设置决定。</p>
         </el-form-item>
-        <el-form-item v-if="form.service_type !== 'video_postprocess' && !isRichbestProvider">
+        <el-form-item v-if="form.service_type !== 'video_postprocess' && form.service_type !== 'video_localization' && !isRichbestProvider">
           <template #label><span class="form-label-tip">计费键</span></template>
           <el-input v-model="form.billing_key" placeholder="可选；自定义 API 建议填写独立 SKU，如 custom-video-pro" />
           <p class="field-tip">用于匹配价目表；同名模型走不同渠道时须填不同计费键。</p>
@@ -915,6 +921,42 @@ input_reference = (图片文件，可选)</pre>
           <el-input-number v-model="form.interpolation_target_fps" :min="15" :max="120" :step="1" :precision="0" controls-position="right" style="width: 240px" />
           <p class="field-tip">仅镜头显式选择插帧时使用；镜头指定帧率时优先使用镜头值。</p>
         </el-form-item>
+        <template v-if="form.service_type === 'video_localization'">
+          <el-form-item>
+            <template #label>
+              <span class="form-label-tip">LAS 与 TOS 地域
+                <el-tooltip placement="top" popper-class="cfg-tip-popper">
+                  <template #content>
+                    <div class="cfg-tip-content">
+                      LAS 算子只能把结果写入<b>同账号、同地域</b>的 TOS Bucket，这里的一处填写同时约束两边。
+                    </div>
+                  </template>
+                  <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </span>
+            </template>
+            <el-input v-model="form.las_region" placeholder="cn-beijing" style="width: 240px" />
+            <p class="field-tip">算子接入地址由此地域推导：<code>https://operator.las.&lt;地域&gt;.volces.com</code>。</p>
+          </el-form-item>
+          <el-form-item>
+            <template #label><span class="form-label-tip">TOS Bucket</span></template>
+            <el-input v-model="form.tos_bucket" placeholder="仅用于 LAS 中转的私有 Bucket" />
+            <p class="field-tip">只存放 LAS 的输入与输出中转文件，项目成片仍保存在本地与阿里云 OSS。系统只读写 <code>richidrama/las/</code> 前缀。</p>
+          </el-form-item>
+          <el-form-item>
+            <template #label><span class="form-label-tip">TOS AccessKey ID</span></template>
+            <el-input v-model="form.tos_access_key_id" placeholder="受限子账号 AK" />
+          </el-form-item>
+          <el-form-item>
+            <template #label><span class="form-label-tip">TOS Secret AccessKey</span></template>
+            <el-input v-model="form.tos_secret_access_key" type="password" show-password placeholder="受限子账号 SK" />
+            <p class="field-tip">建议授予仅限该 Bucket 及 <code>richidrama/las/</code> 前缀的读写权限。</p>
+          </el-form-item>
+          <el-form-item>
+            <template #label><span class="form-label-tip">价格在哪里配</span></template>
+            <p class="field-tip">这里只保存凭证与中转 Bucket。三个算子的单价在「运营台 → 价目表 → 新建价目草稿」发布：服务类型选<b>视频后处理</b>，模型分别填 <code>las-video-translate</code>、<code>las-video-inpaint-lite</code>、<code>las-video-inpaint-pro</code>，计量选 <code>millisecond</code>，<b>单位数量填 60000</b>（即每个输入分钟）。三项未发布前，提交会一直被拒。</p>
+          </el-form-item>
+        </template>
         <el-form-item v-if="form.service_type === 'video'">
           <template #label><span class="form-label-tip">视频冻结兜底 token（通常留空）</span></template>
           <el-input-number v-model="form.billing_reserve_output_tokens" :min="1" :step="1000" :precision="0" controls-position="right" style="width: 240px" placeholder="留空即可" />
@@ -1328,6 +1370,11 @@ const form = ref({
   billing_key: '',
   interpolation_target_fps: 60,
   upscale_resolution: '1080p',
+  // LAS 视频本地化专属字段，存 settings；LAS 与 TOS 必须同地域、同 Bucket
+  las_region: 'cn-beijing',
+  tos_bucket: '',
+  tos_access_key_id: '',
+  tos_secret_access_key: '',
   deepseek_thinking: 'disabled',
   deepseek_reasoning_effort: 'high',
   priority: 0,
@@ -1390,6 +1437,20 @@ function onServiceTypeChange() {
     form.value.billing_key = ''
     if (platformCatalogMode.value && !editingId.value) {
       form.value.provider = 'volcengine_mediakit'
+      onProviderChange(form.value.provider)
+    }
+  }
+  if (st === 'video_localization') {
+    // 算子地址由地域推导，任务档位由后端固定；这些模型类字段对本服务无意义，避免残留上一个类型的取值。
+    form.value.modelText = ''
+    form.value.default_model = ''
+    form.value.endpoint = ''
+    form.value.query_endpoint = ''
+    form.value.api_protocol = ''
+    form.value.billing_key = ''
+    form.value.las_region = String(form.value.las_region || '').trim() || 'cn-beijing'
+    if (platformCatalogMode.value && !editingId.value) {
+      form.value.provider = 'las'
       onProviderChange(form.value.provider)
     }
   }
@@ -1534,6 +1595,9 @@ const providerConfigs = computed(() => {
   video_postprocess: [
     { id: 'volcengine_mediakit', name: '火山引擎 AI MediaKit' },
   ],
+  video_localization: [
+    { id: 'las', name: '火山引擎 LAS 在线算子' },
+  ],
   tts: [
     { id: 'doubao', name: '火山引擎 豆包语音' },
     { id: 'minimax', name: 'MiniMax T2A' },
@@ -1576,6 +1640,7 @@ const providerProtocolMap = {
   jimeng_material_api: '',
   richbest_asset_v3: '',
   volcengine_mediakit: '',
+  las: '',
 }
 
 /** 厂商 id → 默认 Base URL（与参考前端 AIConfigDialog 757-775 一致） */
@@ -1586,6 +1651,7 @@ function getBaseUrlForProvider(provider) {
   if (p === 'minimax') return 'https://api.minimaxi.com/v1'
   if (p === 'volces' || p === 'volcengine') return 'https://ark.cn-beijing.volces.com/api/v3'
   if (p === 'volcengine_mediakit') return 'https://mediakit.cn-beijing.volces.com'
+  if (p === 'las') return 'https://operator.las.cn-beijing.volces.com'
   if (p === 'openai') return 'https://api.openai.com/v1'
   if (p === 'deepseek') return 'https://api.deepseek.com'
   if (p === 'dashscope') return 'https://dashscope.aliyuncs.com'
@@ -1908,6 +1974,7 @@ function serviceTypeLabel(t) {
     storyboard_image: '分镜图片生成',
     video: '视频',
     video_postprocess: '视频后处理（超分 / 插帧）',
+    video_localization: '视频本地化（LAS）',
     tts: '语音合成 TTS',
     jimeng2_character_auth: '素材库上传',
     model_ark_asset: 'SD2 资产库',
@@ -1929,10 +1996,25 @@ function onRowEdit(row) {
   openEdit(row)
 }
 
+// 与后端 listConfigs 的排序口径保持一致，合并两个来源后再排序才不会打乱「默认优先」。
+const configOrder = (a, b) => (Number(b.is_default || 0) - Number(a.is_default || 0))
+  || (Number(b.priority || 0) - Number(a.priority || 0))
+  || String(b.created_at || '').localeCompare(String(a.created_at || ''))
+
 async function loadList() {
   loading.value = true
   try {
-    list.value = await aiAPI.list(null, { tenantId: tenantId.value })
+    const rows = await aiAPI.list(null, { tenantId: tenantId.value })
+    // 平台模式新增的专用服务是平台级配置（owner_tenant_id 为空），而默认列表按当前分组过滤，
+    // 不补一次平台级读取就会表现为「保存成功，但列表里找不到」。
+    if (platformCatalogMode.value) {
+      const platformRows = await aiAPI.list(null, { platform: true })
+      const extra = platformRows.filter((row) => !row.owner_tenant_id && !row.provider_connection_id
+        && !rows.some((item) => item.id === row.id))
+      list.value = [...rows, ...extra].sort(configOrder)
+    } else {
+      list.value = rows
+    }
     selectedRows.value = []
     if (canManageCatalog) {
       try { catalogRows.value = await request.get('/admin/model-catalog') } catch (_) { catalogRows.value = [] }
@@ -1969,6 +2051,11 @@ function resetForm() {
     billing_key: '',
     interpolation_target_fps: 60,
     upscale_resolution: '1080p',
+    // LAS 视频本地化专属字段，存 settings；LAS 与 TOS 必须同地域、同 Bucket
+    las_region: 'cn-beijing',
+    tos_bucket: '',
+    tos_access_key_id: '',
+    tos_secret_access_key: '',
     deepseek_thinking: 'disabled',
     deepseek_reasoning_effort: 'high',
     priority: 0,
@@ -2014,6 +2101,10 @@ function openEdit(row) {
   let video_capabilities = ''
   let interpolation_target_fps = 60
   let upscale_resolution = '1080p'
+  let las_region = 'cn-beijing'
+  let tos_bucket = ''
+  let tos_access_key_id = ''
+  let tos_secret_access_key = ''
   const deepseekSettings = resolveDeepSeekFormSettings(row)
   if (row.settings) {
     try {
@@ -2034,6 +2125,12 @@ function openEdit(row) {
       if (row.service_type === 'video' && s.video_capabilities) video_capabilities = JSON.stringify(s.video_capabilities, null, 2)
       if (row.service_type === 'video_postprocess' && Number(s.target_fps) >= 15) interpolation_target_fps = Number(s.target_fps)
       if (row.service_type === 'video_postprocess' && ['720p', '1080p'].includes(s.upscale_resolution)) upscale_resolution = s.upscale_resolution
+      if (row.service_type === 'video_localization') {
+        las_region = String(s.region || '')
+        tos_bucket = String(s.tos_bucket || '')
+        tos_access_key_id = String(s.tos_access_key_id || '')
+        tos_secret_access_key = String(s.tos_secret_access_key || '')
+      }
     } catch (_) {}
   }
   form.value = {
@@ -2066,6 +2163,10 @@ function openEdit(row) {
     video_capabilities,
     interpolation_target_fps,
     upscale_resolution,
+    las_region: las_region || 'cn-beijing',
+    tos_bucket,
+    tos_access_key_id,
+    tos_secret_access_key,
   }
   dialogVisible.value = true
 }
@@ -2082,7 +2183,7 @@ async function submit() {
     if (form.value.service_type === 'jimeng2_character_auth' && modelList.length === 0) {
       modelList = ['-']
     }
-    if (form.value.service_type !== 'model_ark_asset' && modelList.length === 0) {
+    if (form.value.service_type !== 'model_ark_asset' && form.value.service_type !== 'video_localization' && modelList.length === 0) {
       ElMessage.warning('至少填写一个模型')
       return
     }
@@ -2137,6 +2238,20 @@ async function submit() {
       if (!['720p', '1080p'].includes(upscaleResolution)) throw new Error('超分目标仅支持 720p 或 1080p')
       const previous = editingId.value ? list.value.find((r) => r.id === editingId.value) : null
       settings = JSON.stringify({ ...parseSettings(previous?.settings), target_fps: targetFps, upscale_resolution: upscaleResolution })
+    }
+    if (form.value.service_type === 'video_localization') {
+      const region = String(form.value.las_region || '').trim().toLowerCase()
+      if (!/^[a-z]+-[a-z]+(?:-\d+)?$/.test(region)) { ElMessage.error('LAS 地域格式无效，例如 cn-beijing'); return }
+      const bucket = String(form.value.tos_bucket || '').trim().toLowerCase()
+      if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) { ElMessage.error('请填写有效的 TOS Bucket 名称'); return }
+      const accessKeyId = String(form.value.tos_access_key_id || '').trim()
+      const secretAccessKey = String(form.value.tos_secret_access_key || '').trim()
+      if (!accessKeyId || !secretAccessKey) { ElMessage.error('请填写 TOS 受限读写凭证的 AK 与 SK'); return }
+      if (!String(form.value.api_key || '').trim() && !editingId.value) { ElMessage.error('请填写 LAS 算子 API Key'); return }
+      form.value.las_region = region
+      form.value.tos_bucket = bucket
+      form.value.base_url = `https://operator.las.${region}.volces.com`
+      settings = JSON.stringify({ region, tos_bucket: bucket, tos_access_key_id: accessKeyId, tos_secret_access_key: secretAccessKey })
     }
     if (form.value.service_type === 'video') {
       const previous = editingId.value ? list.value.find((r) => r.id === editingId.value) : null

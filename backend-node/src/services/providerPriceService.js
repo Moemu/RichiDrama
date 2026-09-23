@@ -753,15 +753,26 @@ function cloneItems(db, fromId, toId, at) {
     SELECT ?,service_type,model,meter,unit_price_micro,is_free,conditions_json,?,? FROM billing_price_book_items WHERE price_book_id=?`).run(toId, at, at, fromId);
 }
 
-/** 每个价目源自己的系统书命名与写入条目时附带的来源信息。 */
+/**
+ * 每个价目源自己的系统书命名与写入条目时附带的来源信息。
+ * 火山/中转是同步来源（有只读权限诊断）；LAS 在线算子与管理员的平台手工价目
+ * 没有上游价目接口，只做文案与命名，绝不参与源校验。
+ */
 function sourceMeta(provider) {
-  return isRelay(provider)
-    ? { label: '瑞池中转', bookName: '瑞池中转同步价目', source: 'relay_pricing',
-        note: '瑞池中转站税前价（含项目价格系数）；实际结算以服务端记录的成功用量与对应账期价格为准',
-        requiresSourceCheck: false }
-    : { label: '火山引擎', bookName: '火山引擎同步价目', source: 'ListModelActivations',
-        note: 'Volcengine account contract unit price; temporary credits and resource packs excluded',
-        requiresSourceCheck: true };
+  if (isRelay(provider)) return { label: '瑞池中转', bookName: '瑞池中转同步价目', source: 'relay_pricing',
+    note: '瑞池中转站税前价（含项目价格系数）；实际结算以服务端记录的成功用量与对应账期价格为准',
+    requiresSourceCheck: false };
+  const name = String(provider || '').trim().toLowerCase();
+  if (name === 'las') return { label: '火山引擎 LAS', bookName: '火山引擎 LAS 本地化价目', source: 'las_contract',
+    note: '火山引擎 LAS 在线算子合同价（元/分钟，按 1 元 = 100 积分折算）；实际结算以任务成功后的计费快照为准',
+    requiresSourceCheck: false };
+  if (!name) return { label: '平台', bookName: '平台手工价目', source: 'manual',
+    note: '管理员手工维护的平台价目，不由供应商价目源同步', requiresSourceCheck: false };
+  if (['volces', 'volcengine', 'volc'].includes(name)) return { label: '火山引擎', bookName: '火山引擎同步价目', source: 'ListModelActivations',
+    note: 'Volcengine account contract unit price; temporary credits and resource packs excluded',
+    requiresSourceCheck: true };
+  return { label: name, bookName: `${name} 价目`, source: 'manual',
+    note: '管理员手工维护的供应商价目，不由供应商价目源同步', requiresSourceCheck: false };
 }
 
 /** 前端来源选择器的文案与门槛都由这里给出，避免界面硬编码供应商名。 */
@@ -844,18 +855,30 @@ function publish(db, actorId, bookId, input = {}) {
   if (reused) return { reused: true, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === reused.id) };
   const draft = db.prepare("SELECT * FROM billing_price_books WHERE id=? AND status='draft'").get(bookId);
   if (!draft) throw new Error('只能发布草稿价目表');
-  const provider = String(draft.provider || PROVIDER);
-  if (draft.source_sync_id && sourceMeta(provider).requiresSourceCheck) {
-    const check = db.prepare('SELECT * FROM provider_price_source_checks WHERE provider=?').get(provider);
+  const provider = String(draft.provider || '').trim();
+  const sourceProvider = provider || PROVIDER;
+  if (draft.source_sync_id && sourceMeta(sourceProvider).requiresSourceCheck) {
+    const check = db.prepare('SELECT * FROM provider_price_source_checks WHERE provider=?').get(sourceProvider);
     if (!check || check.ark_status !== 'success' || check.billing_status !== 'success') throw new Error('方舟价格或账单只读权限诊断未通过');
   }
-  const previous = draft.parent_price_book_id ? db.prepare("SELECT * FROM billing_price_books WHERE id=? AND status='published'").get(draft.parent_price_book_id) : currentSystemBook(db, provider);
+  // 前版本解析：父版本血缘优先，其次才是「该供应商的当前平台系统价目」。
+  // 没有父版本或价目源同步标记（source_sync_id）的手工草稿属于「独立新增价目」，
+  // 即使标注了 provider，也不得归档该供应商的系统价目表：一本只含几行手工价目的书
+  // 若被当成火山平台价目的替代版本，会把已发布系统书归档并把所有分组绑定改指到它，
+  // 全站其它模型当场变成未定价。同步价目、模型目录调价、回滚三条路径都带父版本或
+  // 同步标记，行为保持不变。
+  const replacesPlatformBook = Boolean(draft.source_sync_id);
+  const previous = draft.parent_price_book_id
+    ? db.prepare("SELECT * FROM billing_price_books WHERE id=? AND status='published'").get(draft.parent_price_book_id)
+    : (replacesPlatformBook ? currentSystemBook(db, sourceProvider) : null);
   require('./seedreamProPricing').validateItems(db.prepare('SELECT * FROM billing_price_book_items WHERE price_book_id=?').all(draft.id));
   // 某个价目源的第一版没有可归档的前版本：全部条目按新增计算即可。
   const diff = priceDiff(db, previous?.id ?? null, draft.id);
   if (!diff.length) throw new Error('价目没有变化，无需发布');
   const notifyUsers = input.notify_users !== false;
-  const generated = defaultNotice(diff, provider); const at = now(); const noticeId = notifyUsers ? randomUUID() : null;
+  // 通知文案的供应商：草稿自带标签优先，其次是前版本的归属，两者都没有才是独立手工书。
+  const noticeProvider = provider || String(previous?.provider || '') || (previous ? PROVIDER : '');
+  const generated = defaultNotice(diff, noticeProvider); const at = now(); const noticeId = notifyUsers ? randomUUID() : null;
   const title = String(input.notice_title || generated.title).trim(); const body = String(input.notice_body || generated.body).trim();
   if (notifyUsers && (!title || !body)) throw new Error('通知标题和正文必填');
   db.transaction(() => {
@@ -873,7 +896,7 @@ function publish(db, actorId, bookId, input = {}) {
       }
     }
     if (notifyUsers) db.prepare(`INSERT INTO system_notices(id,type,title,body,status,price_book_id,effective_at,published_by,published_at,created_at,updated_at) VALUES (?,'pricing',?,?,'active',?,?,?,?,?,?)`).run(noticeId, title, body, draft.id, at, actorId, at, at, at);
-    require('./billingService').audit(db, actorId, 'price_book.publish', 'price_book', draft.id, { previous_price_book_id: previous?.id ?? null, source_sync_id: draft.source_sync_id || null, reason: String(input.reason).trim(), notify_users: notifyUsers, notice_id: noticeId, diff });
+    require('./billingService').audit(db, actorId, 'price_book.publish', 'price_book', draft.id, { provider: provider || null, previous_price_book_id: previous?.id ?? null, source_sync_id: draft.source_sync_id || null, reason: String(input.reason).trim(), notify_users: notifyUsers, notice_id: noticeId, diff });
   })();
   return { reused: false, notice_id: noticeId, diff, price_book: require('./billingService').listPriceBooks(db).find((book) => book.id === Number(draft.id)) };
 }

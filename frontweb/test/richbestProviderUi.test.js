@@ -27,7 +27,7 @@ test('专用服务页改名并说明与供应商连接的分工', async () => {
 test('中转站连接隐藏连接级计费键', async () => {
   const source = await readSource('../src/components/AIConfigContent.vue')
   assert.match(source, /const isRichbestProvider = computed\(\(\) => String\(form\.value\.provider \|\| ''\)\.trim\(\)\.toLowerCase\(\) === 'richbest'\)/)
-  assert.match(source, /v-if="form\.service_type !== 'video_postprocess' && !isRichbestProvider"/)
+  assert.match(source, /v-if="form\.service_type !== 'video_postprocess' && form\.service_type !== 'video_localization' && !isRichbestProvider"/)
 })
 
 test('中转厂商的协议与地址映射仍保留，供项目组独立凭据手输使用', async () => {

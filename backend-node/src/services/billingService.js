@@ -1002,6 +1002,10 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
     if (unitPrice < 0) throw new Error('单价必须是非负积分，且最多四位小数');
     if (status === 'published' && !item.is_free && unitPrice <= 0) throw new Error(`${serviceType}/${model}/${meter} 的免费价目必须显式勾选免费`);
     const conditions = item.conditions_json || {};
+    // 取值口径与 rateFor() 一致：缺失时按 1 个计量单位收费，写错会让整个模型无法计价。
+    if (conditions.unit_size != null && (!Number.isSafeInteger(Number(conditions.unit_size)) || Number(conditions.unit_size) <= 0)) {
+      throw new Error(`${serviceType}/${model}/${meter} 的计价单位数量必须是正整数`);
+    }
     seedreamPricing.validate(conditions, meter);
     const rates = Array.isArray(conditions.rates) ? conditions.rates : [];
     const rateWhen = [];
@@ -1060,10 +1064,22 @@ function validatePriceBookWindow(db, bookId, status, effectiveFrom, effectiveTo,
   }
 }
 
+/**
+ * 价目书的供应商归属：留空表示平台通用书（provider 为 NULL，所有按供应商的查询都能命中）。
+ * 只接受安全的标识符，并统一小写，避免 `LAS` 与 `las` 在报价解析里被当成两个供应商。
+ */
+function normalizeBookProvider(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  if (raw.length > 40 || !/^[A-Za-z0-9_.-]+$/.test(raw)) throw new Error('供应商标识只能使用字母、数字、下划线、点和短横线，且不超过 40 个字符');
+  return raw.toLowerCase();
+}
+
 function savePriceBook(db, actorId, input, id) {
   const at = now(); let bookId = id ? Number(id) : null;
   const items = Array.isArray(input.items) ? input.items : [];
   if (!String(input.name || '').trim() && !bookId) throw new Error('价目表名称必填');
+  const provider = normalizeBookProvider(input.provider);
   let status = ['draft','published','archived'].includes(input.status) ? input.status : 'draft';
   if (bookId) {
     const current = db.prepare('SELECT status FROM billing_price_books WHERE id=?').get(bookId);
@@ -1079,10 +1095,18 @@ function savePriceBook(db, actorId, input, id) {
     if (bookId) {
       db.prepare(`UPDATE billing_price_books SET name = ?, status = ?, effective_from = ?, effective_to = ?, updated_at = ? WHERE id = ?`)
         .run(String(input.name || '').trim(), status, effectiveFrom, effectiveTo, at, bookId);
+      // provider 只在请求显式携带时才改写：内部调用（模型目录调价等）不传该字段，
+      // 不能让它们把已建草稿的供应商归属静默清空。
+      if (Object.prototype.hasOwnProperty.call(input, 'provider')) {
+        db.prepare('UPDATE billing_price_books SET provider = ? WHERE id = ?').run(provider, bookId);
+      }
       db.prepare('DELETE FROM billing_price_book_items WHERE price_book_id = ?').run(bookId);
     } else {
-      bookId = Number(db.prepare(`INSERT INTO billing_price_books (name, owner_user_id, status, effective_from, effective_to, created_by, created_at, updated_at)
-        VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`).run(String(input.name).trim(), status, effectiveFrom, effectiveTo, actorId, at, at).lastInsertRowid);
+      // 供应商标签决定这本手工书在报价解析里服务谁；同一供应商的版本号连续递增，
+      // 便于运营在列表里分辨「第几次改价」。
+      const version = provider ? Number(db.prepare('SELECT MAX(version) AS v FROM billing_price_books WHERE provider=?').get(provider).v || 0) + 1 : 1;
+      bookId = Number(db.prepare(`INSERT INTO billing_price_books (name, owner_user_id, status, effective_from, effective_to, created_by, created_at, updated_at, provider, version)
+        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`).run(String(input.name).trim(), status, effectiveFrom, effectiveTo, actorId, at, at, provider, version).lastInsertRowid);
     }
     const stmt = db.prepare(`INSERT INTO billing_price_book_items (price_book_id, service_type, model, meter, unit_price_micro, is_free, conditions_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -1092,8 +1116,30 @@ function savePriceBook(db, actorId, input, id) {
       stmt.run(bookId, serviceType, model, meter, creditsToMicro(item.unit_price ?? microToCredits(item.unit_price_micro || 0)), item.is_free ? 1 : 0, item.conditions_json ? json(item.conditions_json) : null, at, at);
     }
   });
-  write(); audit(db, actorId, id ? 'price_book.update' : 'price_book.create', 'price_book', bookId, { name: input.name, status: input.status, item_count: items.length });
+  write(); audit(db, actorId, id ? 'price_book.update' : 'price_book.create', 'price_book', bookId, id ? { name: input.name, status: input.status, item_count: items.length } : { name: input.name, status: input.status, item_count: items.length, provider: provider || null });
   return listPriceBooks(db).find((b) => b.id === bookId);
+}
+
+/**
+ * 以一本已发布价目为基础新建草稿（运营台的「复制为新版本」）。
+ * 草稿带父版本血缘，发布时会归档前版并把分组绑定改指到新版本，因此不会出现两本
+ * 已发布价目同时持有同一个 (service_type, model, meter)。provider 与 system_managed
+ * 一并继承，跨供应商复制不会把新版本挪到别的供应商名下。
+ */
+function clonePriceBook(db, actorId, bookId) {
+  const source = db.prepare('SELECT * FROM billing_price_books WHERE id=?').get(Number(bookId));
+  if (!source) throw new Error('价目表不存在');
+  if (source.status !== 'published') throw new Error('只能基于已发布价目创建新版本');
+  const at = now(); let draftId;
+  db.transaction(() => {
+    draftId = Number(db.prepare(`INSERT INTO billing_price_books (name, owner_user_id, status, effective_from, effective_to, created_by, created_at, updated_at, version, parent_price_book_id, system_managed, provider)
+      VALUES (?, NULL, 'draft', NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`).run(`${source.name} 新版本`, actorId, at, at, Number(source.version || 1) + 1, source.id, Number(source.system_managed || 0), source.provider || null).lastInsertRowid);
+    db.prepare(`INSERT INTO billing_price_book_items (price_book_id, service_type, model, meter, unit_price_micro, is_free, conditions_json, created_at, updated_at)
+      SELECT ?, service_type, model, meter, unit_price_micro, is_free, conditions_json, ?, ? FROM billing_price_book_items WHERE price_book_id=?`).run(draftId, at, at, source.id);
+  })();
+  const cloned = db.prepare('SELECT COUNT(*) AS n FROM billing_price_book_items WHERE price_book_id=?').get(draftId).n;
+  audit(db, actorId, 'price_book.clone', 'price_book', draftId, { source_price_book_id: source.id, provider: source.provider || null, item_count: Number(cloned) });
+  return listPriceBooks(db).find((book) => book.id === draftId);
 }
 
 function shanghaiDayBoundary(value, endOfDay = false) {
@@ -1415,4 +1461,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { snapshotCalculation, account, payerAccount, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, imageAuthorization, voidImageAuthorization, authorizeImageRequest, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverInterruptedImageReconciliations, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, recoverResolvedVideoReconciliations, recordVideoReconciliationRecovery, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, adjustOrganizationBalance, listUsers, listPriceBooks, savePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };
+module.exports = { snapshotCalculation, account, payerAccount, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, imageAuthorization, voidImageAuthorization, authorizeImageRequest, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverInterruptedImageReconciliations, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, recoverResolvedVideoReconciliations, recordVideoReconciliationRecovery, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, adjustOrganizationBalance, listUsers, listPriceBooks, savePriceBook, clonePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };

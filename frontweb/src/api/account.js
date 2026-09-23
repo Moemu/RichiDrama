@@ -46,6 +46,7 @@ export const adminAPI = {
   priceBooks: () => request.get('/admin/price-books'),
   createPriceBook: (data) => request.post('/admin/price-books', data),
   updatePriceBook: (id, data) => request.patch(`/admin/price-books/${id}`, data),
+  clonePriceBook: (id) => request.post(`/admin/price-books/${id}/clone`),
   providerPriceSources: () => request.get('/admin/provider-price-sources'),
   probeProviderPrices: (provider = 'volcengine', data = {}) => request.post(`/admin/provider-prices/${encodeURIComponent(provider)}/probe`, data),
   providerPriceProbeStatus: (provider = 'volcengine') => request.get(`/admin/provider-prices/${encodeURIComponent(provider)}/probe`),
