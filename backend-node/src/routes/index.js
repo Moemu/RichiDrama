@@ -202,6 +202,7 @@ function setupRouter(cfg, db, log) {
   adminRouter.post('/model-discovery/:id/import', modelDiscovery.import);
   adminRouter.post('/price-books', admin.createPriceBook);
   adminRouter.patch('/price-books/:id', admin.updatePriceBook);
+  adminRouter.post('/price-books/:id/clone', admin.clonePriceBook);
   adminRouter.post('/price-books/:id/publish', admin.publishPriceBook);
   adminRouter.post('/price-books/:id/rollback', admin.rollbackPriceBook);
   adminRouter.post('/provider-prices/:provider/probe', admin.providerPriceProbe);

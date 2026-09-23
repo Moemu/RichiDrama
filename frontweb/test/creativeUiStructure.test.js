@@ -91,6 +91,7 @@ test('共享标签栏自带跳转与创建逻辑，任何页面都能复用', as
   assert.match(header, /@click="router\.push\('\/creative-boards'\)">画布<\/button>/)
   assert.match(header, /@click="startOmniProject\(router\)">全能创作<\/button>/)
   assert.match(header, /to: '\/ai-tools\/reverse-prompt'/)
+  assert.match(header, /title: '视频本地化', group: '视频工作流', to: '\/ai-tools\/video-localization'/)
   assert.match(header, /:command="tool\.to"/)
   assert.match(header, /command="\/media-library"/)
   // 画布有独立列表页，并复用同一个标签栏。

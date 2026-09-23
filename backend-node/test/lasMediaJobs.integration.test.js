@@ -37,7 +37,7 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   las.request = async (_config, action, payload) => {
     if (action === 'submit') {
       submits += 1;
-      const taskId = `task-integration-${submits}`;
+      const taskId = `integration-${submits}`;
       providerOutputs.set(taskId, { video: `${payload.data.output_tos_path}output.mp4`, caption: payload.operator_id === 'las_video_translate' ? `${payload.data.output_tos_path}translated.srt` : null });
       return { task_id: taskId, status: 'PENDING' };
     }
@@ -58,11 +58,21 @@ test('authenticated LAS erase-then-translate workflow archives local results and
     { service_type: 'video_postprocess', model: 'las-video-inpaint-lite', meter: 'millisecond', unit_price: 1, conditions_json: { unit_size: 60000 } },
     { service_type: 'video_postprocess', model: 'las-video-translate', meter: 'millisecond', unit_price: 2, conditions_json: { unit_size: 60000 } },
   ] });
-  require('../src/services/aiConfigService').createConfig(db, log, {
+  const primaryConfig = require('../src/services/aiConfigService').createConfig(db, log, {
     service_type: 'video_localization', provider: 'las', name: 'LAS 视频本地化',
     base_url: 'https://operator.las.cn-beijing.volces.com', api_key: 'test-only',
+    is_default: true,
     settings: JSON.stringify({ region: 'cn-beijing', tos_bucket: 'example-bucket', tos_access_key_id: 'test-access', tos_secret_access_key: 'test-secret' }),
   });
+  require('../src/services/aiConfigService').createConfig(db, log, {
+    service_type: 'video_localization', provider: 'las', name: '旧测试配置',
+    base_url: 'https://operator.las.cn-beijing.volces.com', api_key: 'test-only',
+    settings: JSON.stringify({ region: 'cn-beijing', tos_bucket: 'stale-bucket', tos_access_key_id: 'test-access', tos_secret_access_key: 'test-secret' }),
+  });
+  assert.equal(jobs.serviceConfig(db).tosConfig.bucket, 'example-bucket');
+  db.prepare('UPDATE ai_service_configs SET is_default=0 WHERE id=?').run(primaryConfig.id);
+  assert.throws(() => jobs.serviceConfig(db), /唯一默认配置/);
+  db.prepare('UPDATE ai_service_configs SET is_default=1 WHERE id=?').run(primaryConfig.id);
   const project = drama.createDrama(db, log, { title: 'LAS 测试项目', owner_user_id: user.id });
   const source = assets.create(db, log, { owner_user_id: user.id, drama_id: project.id, name: '原片', type: 'video', local_path: 'input/source.mp4', duration: 10, mime_type: 'video/mp4' });
   const cfg = { storage: { type: 'local', local_path: storage }, server: {}, payments: { enabled: false }, vendor_lock: { enabled: false } };
@@ -125,14 +135,41 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   assert.ok(fs.existsSync(path.join(storage, translation.caption_url.replace('/static/', ''))));
   assert.equal(submits, 2);
   assert.equal(polls, 2);
+  const originalUpload = tos.upload;
+  let releaseUpload;
+  let uploadStarted;
+  const uploadEntered = new Promise((resolve) => { uploadStarted = resolve; });
+  tos.upload = async (...args) => {
+    uploadStarted();
+    await new Promise((resolve) => { releaseUpload = resolve; });
+    return originalUpload(...args);
+  };
+  let leaseJobId;
+  try {
+    const leaseJob = await call('POST', '/las-media-jobs', { drama_id: project.id, asset_id: source.id, stage: 'inpaint', model_level: 'lite', idempotency_key: 'lease-test' }, token);
+    assert.equal(leaseJob.status, 201, JSON.stringify(leaseJob.body));
+    leaseJobId = leaseJob.body.data.id;
+    await uploadEntered;
+    const deadline = Date.parse(db.prepare('SELECT lease_until FROM las_media_jobs WHERE id=?').get(leaseJobId).lease_until) - Date.now();
+    assert.ok(deadline > 0 && deadline <= 120_000, '重启后的旧租约最多应阻塞任务两分钟');
+  } finally {
+    releaseUpload?.();
+    tos.upload = originalUpload;
+  }
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (jobs.get(db, user.id, leaseJobId).status === 'completed') break;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  assert.equal(jobs.get(db, user.id, leaseJobId).status, 'completed');
+  assert.equal(submits, 3);
   const uncertainId = randomUUID();
   const uncertainAuthorization = billing.createAuthorization(db, { id: user.id }, {
     idempotency_key: `las-uncertain:${uncertainId}`, service_type: 'video_postprocess', model: 'las-video-inpaint-lite', provider: 'las',
     usage: { millisecond: 10000 }, drama_id: project.id, reference_type: 'las_media_job', reference_id: uncertainId,
   });
   const at = new Date().toISOString();
-  db.prepare(`INSERT INTO las_media_jobs(id,owner_user_id,drama_id,source_asset_id,idempotency_key,stage,input_json,authorization_id,status,created_at,updated_at)
-    VALUES(?,?,?,?,?,?,?,?,'submitting',?,?)`).run(uncertainId, user.id, project.id, source.id, `uncertain-${uncertainId}`, 'inpaint', JSON.stringify({ stage: 'inpaint', model_level: 'lite' }), uncertainAuthorization.authorization_id, at, at);
+  db.prepare(`INSERT INTO las_media_jobs(id,owner_user_id,drama_id,source_asset_id,idempotency_key,stage,input_json,authorization_id,status,lease_token,lease_until,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,'submitting',?,?,?,?)`).run(uncertainId, user.id, project.id, source.id, `uncertain-${uncertainId}`, 'inpaint', JSON.stringify({ stage: 'inpaint', model_level: 'lite' }), uncertainAuthorization.authorization_id, randomUUID(), new Date(Date.now() - 1000).toISOString(), at, at);
   db.close();
   db = new Database(dbPath);
   const recovery = jobs.resume(db, log, cfg);
@@ -140,7 +177,7 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   assert.equal(jobs.get(db, user.id, translationId).status, 'completed');
   assert.equal(jobs.get(db, user.id, uncertainId).status, 'reconciliation');
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_reconciliation_cases WHERE authorization_id=? AND status='pending'").get(uncertainAuthorization.authorization_id).count, 1);
-  assert.equal(submits, 2);
+  assert.equal(submits, 3);
   recovery.stop();
   assert.equal(assets.getByIdForOwner(db, completed.output_asset_id, user.id).local_path, output.local_path);
 });

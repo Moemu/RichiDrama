@@ -54,8 +54,12 @@ function request(config, method, key, payloadHash, contentType, bodyFile, target
   return new Promise((resolve, reject) => {
     const req = https.request({ hostname: config.host, path: signed.uri, method, headers, timeout: 120_000 }, (res) => {
       if (res.statusCode < 200 || res.statusCode >= 300) {
-        res.resume();
-        reject(new Error(`LAS TOS ${method} 失败：HTTP ${res.statusCode}`));
+        // 错误响应体是 TOS 的 XML（NoSuchBucket / AccessDenied…），把它带出来，
+        // 否则只剩「HTTP 404」，运维没法区分 bucket 拼错、地域不对还是权限不足。
+        const chunks = []; let bytes = 0;
+        res.on('data', (chunk) => { if (bytes < 4096) { chunks.push(chunk); bytes += chunk.length; } });
+        res.on('end', () => reject(new Error(tosErrorMessage(method, res.statusCode, Buffer.concat(chunks).toString('utf8')))));
+        res.on('error', () => reject(new Error(`LAS TOS ${method} 失败：HTTP ${res.statusCode}`)));
         return;
       }
       if (targetFile) {
@@ -94,4 +98,25 @@ async function download(config, tosPath, localFile) {
   return request(config, 'GET', key, hash(''), '', null, localFile);
 }
 
-module.exports = { configuration, objectKey, signedHeaders, upload, download };
+/** 从 TOS 错误响应体（XML）里提取 <Code>/<Message>，供日志与任务错误信息定位。 */
+function tosErrorDetail(body) {
+  const text = String(body || '');
+  const code = /<Code>([^<]+)<\/Code>/i.exec(text)?.[1] || '';
+  const message = /<Message>([^<]+)<\/Message>/i.exec(text)?.[1] || '';
+  return [code, message].filter(Boolean).join(' ');
+}
+
+/**
+ * TOS 失败信息：优先带错误码/消息；没有 XML 详情时把响应体前 200 字符带上——
+ * 地域或域名层面的 404 可能没有错误体，否则诊断里只剩一个光秃秃的 HTTP 状态码。
+ */
+function tosErrorMessage(method, statusCode, body) {
+  const raw = String(body || '');
+  const detail = tosErrorDetail(raw);
+  const fallback = detail ? '' : (raw.trim() ? ` 响应体：${raw.replace(/\s+/g, ' ').trim().slice(0, 200)}` : '（TOS 未返回错误详情）');
+  return `LAS TOS ${method} 失败：HTTP ${statusCode}${detail ? ` ${detail}` : ''}${fallback}`
+    + (/NoSuchBucket/i.test(detail) ? '（Bucket 不存在：请核对专用服务配置里的 TOS Bucket 拼写与地域）' : '')
+    + (/AccessDenied/i.test(detail) ? '（凭证无该 Bucket 读写权限：请核对受限读写凭证与前缀授权）' : '');
+}
+
+module.exports = { configuration, objectKey, signedHeaders, tosErrorDetail, tosErrorMessage, upload, download };

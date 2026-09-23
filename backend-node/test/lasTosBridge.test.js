@@ -26,3 +26,24 @@ test('TOS signature binds method, object, payload, and content type', () => {
   assert.notEqual(first.headers.authorization, changed.headers.authorization);
   assert.equal(first.headers['x-tos-date'], '20260922T030000Z');
 });
+
+test('TOS 错误响应体的 Code/Message 会被带进失败信息，便于区分 bucket 与凭证问题', () => {
+  const xml = '<?xml version="1.0" encoding="UTF-8"?><Error><Code>NoSuchBucket</Code><Message>The specified bucket does not exist</Message><Resource>richibest</Resource></Error>';
+  const detail = bridge.tosErrorDetail(xml);
+  assert.match(detail, /NoSuchBucket/);
+  assert.match(detail, /specified bucket does not exist/);
+  assert.equal(bridge.tosErrorDetail('not xml'), '');
+  // 拼错的 bucket 名会被点名，而不是只留一个 HTTP 404。
+  assert.match(
+    bridge.tosErrorMessage('PUT', 404, xml),
+    /LAS TOS PUT 失败：HTTP 404 NoSuchBucket[\s\S]*Bucket 不存在/,
+  );
+});
+
+test('地域或域名层面的 404 没有 XML 错误体时，失败信息仍须带可诊断内容', () => {
+  assert.match(bridge.tosErrorMessage('PUT', 404, ''), /未返回错误详情/, '空响应体必须显式说明');
+  assert.match(bridge.tosErrorMessage('PUT', 404, '  \n  '), /未返回错误详情/, '纯空白响应体同样显式说明');
+  assert.match(bridge.tosErrorMessage('PUT', 404, '<html><body>404 Not Found</body></html>'), /响应体：<html><body>404 Not Found<\/body><\/html>/, '非 XML 响应体要带上原文片段');
+  assert.ok(bridge.tosErrorMessage('PUT', 404, 'x'.repeat(1000)).length < 500, '超长响应体必须截断');
+  assert.match(bridge.tosErrorMessage('PUT', 403, '<Error><Code>AccessDenied</Code><Message>x</Message></Error>'), /AccessDenied[\s\S]*凭证无该 Bucket 读写权限/);
+});

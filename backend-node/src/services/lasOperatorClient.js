@@ -63,16 +63,26 @@ function submitPayload(config, stage, input) {
 }
 
 function pollPayload(stage, taskId) {
-  if (!OPERATORS[stage] || !/^task-[\w-]{1,100}$/.test(String(taskId || ''))) throw new Error('LAS 任务 ID 无效');
+  if (!OPERATORS[stage] || !validTaskId(taskId)) throw new Error('LAS 任务 ID 无效');
   return { operator_id: OPERATORS[stage], operator_version: 'v1', task_id: taskId };
+}
+
+function validTaskId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 256
+    && !/[\s\u0000-\u001f\u007f]/u.test(value);
 }
 
 function taskResponse(payload, expectedTaskId = null) {
   const metadata = payload?.metadata;
-  const taskId = String(metadata?.task_id || '');
-  if (!/^task-[\w-]{1,100}$/.test(taskId) || (expectedTaskId && taskId !== expectedTaskId)) throw new Error('LAS 返回的任务 ID 无效');
+  const taskId = metadata?.task_id;
+  if (!validTaskId(taskId) || (expectedTaskId && taskId !== expectedTaskId)) {
+    const requestId = String(metadata?.request_id || '').replace(/[^\w.-]/g, '').slice(0, 80);
+    const businessCode = String(metadata?.business_code || '').replace(/[^\w.-]/g, '').slice(0, 80);
+    const details = [requestId && `request_id=${requestId}`, businessCode && `business_code=${businessCode}`].filter(Boolean).join('，');
+    throw new Error(`LAS 返回的任务 ID 无效${details ? `（${details}）` : ''}`);
+  }
   const status = String(metadata.task_status || '').toUpperCase();
-  if (!['PENDING', 'RUNNING', 'PROCESSING', 'COMPLETED', 'FAILED'].includes(status)) throw new Error('LAS 返回的任务状态无效');
+  if (!['ACCEPTED', 'PENDING', 'RUNNING', 'PROCESSING', 'COMPLETED', 'FAILED', 'TIMEOUT'].includes(status)) throw new Error('LAS 返回的任务状态无效');
   if (status === 'COMPLETED' && String(metadata.business_code ?? '0') !== '0') throw new Error('LAS 完成状态与业务码不一致');
   return { task_id: taskId, status, business_code: String(metadata.business_code ?? ''), error_msg: String(metadata.error_msg || '').slice(0, 500), data: payload.data || null };
 }

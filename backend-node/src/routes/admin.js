@@ -149,6 +149,7 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
     priceBooks: (_req, res) => response.success(res, billing.listPriceBooks(db)),
     createPriceBook: guarded((req, res) => response.created(res, billing.savePriceBook(db, req.auth.id, req.body || {}))),
     updatePriceBook: guarded((req, res) => response.success(res, billing.savePriceBook(db, req.auth.id, req.body || {}, req.params.id))),
+    clonePriceBook: guarded((req, res) => response.created(res, billing.clonePriceBook(db, req.auth.id, req.params.id))),
     providerPriceProbe: guardedAsync(async (req, res) => {
       const source = priceSource(req);
       if (!source) return response.badRequest(res, '不支持的价目来源');

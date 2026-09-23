@@ -38,3 +38,17 @@ test('poll response validates task identity, terminal status, and business code'
   assert.throws(() => las.taskResponse({ metadata: { task_id: 'task-other', task_status: 'COMPLETED' } }, 'task-123'), /任务 ID/);
   assert.throws(() => las.taskResponse({ metadata: { task_id: 'task-123', task_status: 'COMPLETED', business_code: 'Failed' } }), /业务码/);
 });
+
+test('LAS task IDs are opaque strings and supplier request IDs survive invalid responses', async () => {
+  const taskId = '06ecbd66031e7006022d';
+  const submitted = await las.request(config, 'submit', {}, async () => ({
+    ok: true,
+    json: async () => ({ metadata: { task_id: taskId, task_status: 'PENDING', business_code: '0' } }),
+  }));
+  assert.equal(submitted.task_id, taskId);
+  assert.equal(las.pollPayload('inpaint', taskId).task_id, taskId);
+  assert.equal(las.taskResponse({ metadata: { task_id: taskId, task_status: 'TIMEOUT', business_code: 'Video.Timeout' } }, taskId).status, 'TIMEOUT');
+  assert.throws(() => las.pollPayload('inpaint', 'bad\nidentifier'), /任务 ID/);
+  assert.throws(() => las.pollPayload('inpaint', 'x'.repeat(257)), /任务 ID/);
+  assert.throws(() => las.taskResponse({ metadata: { task_status: 'PENDING', request_id: 'req-123', business_code: 'TaskId.Missing' } }), /request_id=req-123.*business_code=TaskId.Missing/);
+});

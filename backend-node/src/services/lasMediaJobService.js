@@ -13,14 +13,20 @@ const tos = require('./lasTosBridge');
 const execFileAsync = promisify(execFile);
 const running = new Set();
 const now = () => new Date().toISOString();
-const leaseUntil = () => new Date(Date.now() + 2 * 3600_000).toISOString();
+const LEASE_MS = 120_000;
+const LEASE_HEARTBEAT_MS = 15_000;
+const leaseUntil = () => new Date(Date.now() + LEASE_MS).toISOString();
 const MODEL = { translate: 'las-video-translate', inpaint: { lite: 'las-video-inpaint-lite', pro: 'las-video-inpaint-pro' } };
 const SERVICE_TYPE = 'video_localization';
 
 // 地域与 Bucket 只有一份来源，LAS 与 TOS 不可能再配成两个不同的桶。
 function serviceConfig(db) {
-  const row = require('./aiConfigService').listConfigs(db, SERVICE_TYPE).find((item) => item.is_active);
-  if (!row) throw new Error('尚未启用「视频本地化」专用服务，不能提交付费任务');
+  const active = require('./aiConfigService').listConfigs(db, SERVICE_TYPE)
+    .filter((item) => item.is_active && !item.owner_tenant_id);
+  if (!active.length) throw new Error('尚未启用「视频本地化」专用服务，不能提交付费任务');
+  const defaults = active.filter((item) => item.is_default);
+  const row = defaults.length === 1 ? defaults[0] : active.length === 1 ? active[0] : null;
+  if (!row) throw new Error('请在「视频本地化」专用服务中启用并指定唯一默认配置');
   let settings = {};
   try { settings = JSON.parse(row.settings || '{}'); } catch (_) {}
   const shared = { region: settings.region, bucket: settings.tos_bucket };
@@ -166,6 +172,13 @@ async function processJob(db, log, cfg, id) {
     .run(token, leaseUntil(), id, now()).changes;
   if (!claimed) return;
   running.add(id);
+  const renewLease = () => db.prepare("UPDATE las_media_jobs SET lease_until=? WHERE id=? AND lease_token=? AND status IN ('queued','submitting','processing','finalizing')")
+    .run(leaseUntil(), id, token).changes === 1;
+  const heartbeat = setInterval(() => {
+    try { if (!renewLease()) clearInterval(heartbeat); }
+    catch (error) { clearInterval(heartbeat); log.error('LAS 任务租约续期失败', { id, error: error.message }); }
+  }, LEASE_HEARTBEAT_MS);
+  heartbeat.unref?.();
   try {
     let row = db.prepare('SELECT * FROM las_media_jobs WHERE id=?').get(id);
     if (!row || !['queued', 'processing', 'finalizing'].includes(row.status)) return;
@@ -176,6 +189,7 @@ async function processJob(db, log, cfg, id) {
         const source = assets.getById(db, row.source_asset_id);
         const file = resolveStorageFile(storageRoot(cfg), source.local_path);
         const tosPath = await tos.upload(tosConfig, tos.objectKey(id, 'input', 'source.mp4'), file);
+        if (!renewLease()) return;
         record(db, id, { input_tos_path: tosPath, status: 'submitting' });
         row = db.prepare('SELECT * FROM las_media_jobs WHERE id=?').get(id);
       } catch (error) {
@@ -184,6 +198,7 @@ async function processJob(db, log, cfg, id) {
         return;
       }
       try {
+        if (!renewLease()) return;
         const payload = las.submitPayload(clientConfig, row.stage, { ...input, job_id: id, video_url: row.input_tos_path });
         const accepted = await las.request(clientConfig, 'submit', payload);
         record(db, id, { provider_task_id: accepted.task_id, status: 'processing', error_msg: null });
@@ -196,7 +211,7 @@ async function processJob(db, log, cfg, id) {
     if (row.status === 'processing') {
       try {
         const result = await las.request(clientConfig, 'poll', las.pollPayload(row.stage, row.provider_task_id));
-        if (result.status === 'FAILED') { reconcile(db, row, `LAS 任务失败：${result.business_code} ${result.error_msg}`); return; }
+        if (result.status === 'FAILED' || result.status === 'TIMEOUT') { reconcile(db, row, `LAS 任务${result.status === 'TIMEOUT' ? '超时' : '失败'}：${result.business_code} ${result.error_msg}`); return; }
         if (result.status !== 'COMPLETED') return;
         record(db, id, { status: 'finalizing', result_json: JSON.stringify(result.data), error_msg: null });
       } catch (error) {
@@ -244,6 +259,7 @@ async function processJob(db, log, cfg, id) {
       if (error.code === 'BILLING_ACTUAL_USAGE_EXCEEDS_AVAILABLE_BALANCE' || /已报价规格/.test(error.message)) reconcile(db, row, error.message);
     }
   } finally {
+    clearInterval(heartbeat);
     db.prepare('UPDATE las_media_jobs SET lease_token=NULL,lease_until=NULL WHERE id=? AND lease_token=?').run(id, token);
     running.delete(id);
   }

@@ -101,6 +101,7 @@ const AI_TOOLS = [
   { title: '剧本创作', group: '文本策划', to: '/ai-tools/script-writing' },
   { title: '图片生成', group: '视觉生成', to: '/ai-tools/image-generation' },
   { title: '视频生成', group: '视频工作流', to: '/ai-tools/video-generation' },
+  { title: '视频本地化', group: '视频工作流', to: '/ai-tools/video-localization' },
   { title: '反推提示词', group: '素材分析', to: '/ai-tools/reverse-prompt' },
 ]
 
