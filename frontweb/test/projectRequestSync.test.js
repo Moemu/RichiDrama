@@ -26,6 +26,15 @@ test('field and canvas preconditions use displayed values without a project revi
   assert.deepEqual(relation.data._project_edit.checks[0].fields, { character_ids: [1] })
 })
 
+test('late project reads cannot roll a confirmed edit baseline backward', async () => {
+  rememberProjectResponse('/dramas/900', { id: 900, revision: 120, permissions: {}, episodes: [{ id: 901, drama_id: 900, title: '最新标题' }] })
+  rememberProjectAcknowledgement({ drama_id: 900, revision: 121, entities: [{ kind: 'episodes', entity: { id: 901, title: '已保存标题' } }] })
+  rememberProjectResponse('/dramas/900', { id: 900, revision: 120, permissions: {}, episodes: [{ id: 901, drama_id: 900, title: '旧标题' }] })
+  rememberProjectAcknowledgement({ drama_id: 900, revision: 120, entities: [{ kind: 'episodes', entity: { id: 901, title: '旧确认' } }] })
+  assert.equal(projectSnapshot('dramas', 900).revision, 121)
+  assert.equal(projectSnapshot('episodes', 901).title, '已保存标题')
+})
+
 test('creation and certification commands do not inherit stale entity revisions', async () => {
   rememberProjectEntity('assets', { id: 804, drama_id: 800, requires_sd2_identity: false }, 800, 1)
   for (const [url, body] of [['/storyboards', { episode_id: 801 }], ['/assets/804/sd2-certify', undefined], ['/assets/804/sd2-certify/refresh', undefined], ['/dramas/800/resources/import', { source_id: 7 }]]) {

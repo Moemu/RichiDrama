@@ -184,8 +184,8 @@ export async function openProjectSession(dramaId, onRefresh) {
 
 export function closeProjectSession() {
   sessionVersion++
-  projectSession.id = null
   projectSession.enabled = false
+  projectSession.id = null
   projectSession.connected = false
   projectSession.canEdit = false
   projectSession.pending = 0
@@ -213,13 +213,15 @@ export function hasUnsavedProjectText() {
 }
 
 export async function bindProjectText(target, listener) {
-  if (!projectSession.enabled || !target.id) return null
+  const dramaId = projectSession.id
+  if (!projectSession.enabled || !Number.isSafeInteger(dramaId) || dramaId <= 0 || !target.id) return null
+  if (target.kind === 'dramas' && Number(target.id) !== dramaId) return null
   if (invalidTargets.has(textKey(target))) return null
   const version = sessionVersion
   const key = textKey(target)
   let entry = documents.get(key)
   if (!entry) {
-    const state = await request.get(`/dramas/${projectSession.id}/collaboration/text`, { params: target }).catch(error => {
+    const state = await request.get(`/dramas/${dramaId}/collaboration/text`, { params: target }).catch(error => {
       if (version === sessionVersion) {
         if (error.code === 'ENTITY_DELETED') invalidateText(target)
         throw error
@@ -294,12 +296,12 @@ export function hasPendingProjectText(kind, id, field) {
 export function useProjectTextModel(targetGetter, model) {
   const ready = ref(false)
   let binding; let remote = false; let version = 0; let composing = false
-  const stopTarget = watch(() => [projectSession.enabled, targetGetter()], async ([enabled, target]) => {
+  const stopTarget = watch(() => [projectSession.enabled, projectSession.id, targetGetter()], async ([enabled, dramaId, target]) => {
     const current = ++version
     binding?.dispose(); binding = null
     composing = false
     ready.value = !enabled
-    if (!enabled || !target?.id) return
+    if (!enabled || !dramaId || !target?.id) return
     try {
       // Detach synchronously, then let the caller finish loading the selected shot.
       await Promise.resolve()

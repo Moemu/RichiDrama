@@ -26,6 +26,11 @@ export function rememberProjectEntity(kind, entity, parentProjectId = null, pare
 }
 export function rememberProjectResponse(url, data) {
   const path = String(url || '').split('?')[0]
+  const projectRead = /^\/dramas\/(\d+)\/?$/.exec(path)
+  if (projectRead && Number.isSafeInteger(data?.revision)) {
+    const currentRevision = projectSnapshot('dramas', Number(projectRead[1]))?.revision
+    if (Number.isSafeInteger(currentRevision) && data.revision < currentRevision) return
+  }
   const frames = /^\/storyboards\/(\d+)\/frame-prompts$/.exec(path)
   if (frames && Array.isArray(data?.frame_prompts)) {
     rememberProjectEntity('storyboards', { id: Number(frames[1]), frame_prompts: data.frame_prompts.map(({ frame_type, prompt, description, layout }) => ({ frame_type, prompt, description, layout })).sort((a, b) => a.frame_type.localeCompare(b.frame_type)) })
@@ -65,6 +70,11 @@ export function rememberProjectResponse(url, data) {
 
 export function rememberProjectAcknowledgement(ack) {
   if (!ack?.drama_id) return
+  const project = projectSnapshot('dramas', ack.drama_id)
+  if (Number.isSafeInteger(ack.revision) && Number.isSafeInteger(project?.revision) && ack.revision < project.revision) return
+  if (project && Number.isSafeInteger(ack.revision) && ack.revision > (project.revision ?? -1)) {
+    snapshots.set(`dramas:${ack.drama_id}`, { ...project, revision: ack.revision, __projectRevision: ack.revision })
+  }
   for (const item of ack.entities || []) {
     const entity = { ...item.entity }
     if (Object.hasOwn(entity, 'omni_asset_usage_json')) { entity.omni_asset_usage = entity.omni_asset_usage_json; delete entity.omni_asset_usage_json }
