@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as Y from 'yjs'
+import { watch } from 'vue'
 import { browserModuleUrl, moduleSourceUrl } from './helpers/browserModule.js'
 
 const collaboration = await import(await browserModuleUrl(new URL('../src/composables/useProjectCollaboration.js', import.meta.url), {
@@ -9,6 +10,29 @@ const collaboration = await import(await browserModuleUrl(new URL('../src/compos
   '@/utils/requestId': new URL('../src/utils/requestId.js', import.meta.url).href,
 }))
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
+
+test('text binding never constructs a request with a null project id', async t => {
+  let reads = 0
+  globalThis.sessionGet = async () => { reads++; throw new Error('unexpected request') }
+  t.after(() => { collaboration.closeProjectSession(); delete globalThis.sessionGet })
+  collaboration.closeProjectSession()
+  collaboration.projectSession.enabled = true
+  assert.equal(await collaboration.bindProjectText({ kind: 'dramas', id: 2, field: 'description' }, () => {}), null)
+  assert.equal(reads, 0)
+})
+
+test('closing a project never exposes an enabled session with a null id', () => {
+  collaboration.closeProjectSession()
+  collaboration.projectSession.id = 2
+  collaboration.projectSession.enabled = true
+  let invalid = false
+  const stop = watch(() => [collaboration.projectSession.enabled, collaboration.projectSession.id], ([enabled, id]) => {
+    if (enabled && id == null) invalid = true
+  }, { flush: 'sync' })
+  collaboration.closeProjectSession()
+  stop()
+  assert.equal(invalid, false)
+})
 
 test('explicit save confirms offline text through HTTP and preserves failed drafts for retry', async t => {
   const previous = { socket: globalThis.WebSocket, location: globalThis.location }

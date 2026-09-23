@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { loginRouteForCurrentLocation } from './routeRecovery'
-import { rememberProjectResponse, rememberProjectAcknowledgement } from './projectSnapshots'
+import { projectSnapshot, rememberProjectResponse, rememberProjectAcknowledgement } from './projectSnapshots'
 
 const request = axios.create({
   baseURL: '/api/v1',
@@ -69,6 +69,12 @@ request.interceptors.response.use(
     }
     const res = response.data
     if (res.success !== false) {
+      const projectRead = /^\/dramas\/(\d+)\/?$/.exec(response.config?.url || '')
+      const currentRevision = projectRead && projectSnapshot('dramas', Number(projectRead[1]))?.revision
+      if (Number.isSafeInteger(res.data?.revision) && Number.isSafeInteger(currentRevision) && res.data.revision < currentRevision) {
+        if (!response.config._staleProjectRetry) return request({ ...response.config, _staleProjectRetry: true })
+        return Promise.reject(Object.assign(new Error('项目读取结果已过期，请重试'), { code: 'STALE_PROJECT_READ' }))
+      }
       if (!response.config?.skipProjectSnapshot) rememberProjectResponse(response.config?.url, res.data !== undefined ? res.data : res)
       rememberProjectAcknowledgement(res.project_edit)
       return res.data !== undefined ? res.data : res

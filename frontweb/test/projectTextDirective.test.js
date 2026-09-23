@@ -67,3 +67,28 @@ test('directive discards late bindings after permission toggles, target changes,
   assert.equal(input.value, '镜头三')
   assert.equal(requests[4].disposed, 1)
 })
+
+test('directive waits for a project id before binding text', t => {
+  const session = reactive({ id: null, enabled: true, canEdit: true, invalidTargets: [] })
+  globalThis.directiveSession = session
+  const requested = []
+  globalThis.directiveBind = target => { requested.push(target); return Promise.resolve(null) }
+  const input = new EventTarget()
+  input.value = ''
+  input.readOnly = false
+  input.matches = () => true
+  t.after(() => { delete globalThis.directiveSession; delete globalThis.directiveBind })
+  // Import a fresh directive so this test owns its reactive session.
+  return browserModuleUrl(new URL('../src/directives/projectText.js', import.meta.url), {
+    vue: import.meta.resolve('vue'),
+    '@/composables/useProjectCollaboration': moduleSourceUrl('export const projectSession = globalThis.directiveSession; export const bindProjectText = (...args) => globalThis.directiveBind(...args); export const projectPresence = () => {}; // id readiness'),
+    '@/utils/projectSnapshots': moduleSourceUrl('export const projectSnapshot = () => null'),
+  }).then(async url => {
+    const directive = (await import(url)).default
+    directive.mounted(input, { value: { kind: 'dramas', id: 2, field: 'description' } })
+    assert.equal(requested.length, 0)
+    session.id = 2
+    assert.equal(requested.length, 1)
+    directive.beforeUnmount(input)
+  })
+})

@@ -32,7 +32,7 @@ function mount(el, binding) {
     const version = ++state.version
     state.binding?.dispose()
     state.binding = null
-    if (!enabled || !state.target?.id) return
+    if (!enabled || !projectSession.id || !state.target?.id) return
     if (state.target.kind.endsWith('_libraries') && Number(projectSnapshot(state.target.kind, state.target.id)?.__projectId) !== projectSession.id) return
     try {
       const result = await bindProjectText(state.target, value => { if (version === state.version) update(value) })
