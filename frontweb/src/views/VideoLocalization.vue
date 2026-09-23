@@ -161,7 +161,9 @@ async function loadQuote() {
   } catch (error) { if (version === quoteVersion) quoteError.value = error.message || '报价失败' }
   finally { if (version === quoteVersion) quoting.value = false }
 }
-watch([dramaId, assetId, model], () => {
+// 目标语言虽不改变模型，但 clearQuote 会清空报价；不在依赖里就会出现
+// 「切换语言后报价永不重算、提交按钮永久禁用」。stage 同 reason 一并监听。
+watch([dramaId, assetId, model, outputLanguage, stage], () => {
   clearQuote()
   quoting.value = false
   if (dramaId.value && selectedAsset.value) quoteTimer = setTimeout(loadQuote, 250)
