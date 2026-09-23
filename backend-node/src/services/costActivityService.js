@@ -13,7 +13,7 @@ const OFFICIAL_PRODUCT_SOURCES = new Set(['https://www.volcengine.com/product/yu
 // stays attached to that record; historical imports never become extra usage.
 const SOURCE = `WITH activity AS (
  SELECT 'usage:'||l.id id,l.id usage_id,l.authorization_id,l.user_id,l.organization_id,l.drama_id,
- l.project_title_snapshot project_title,l.source_kind,l.service_type,l.model,l.created_at occurred_at,
+ l.project_title_snapshot project_title,l.source_kind,l.source_id,l.service_type,l.model,l.created_at occurred_at,
  l.snapshot_json, a.snapshot_json authorization_snapshot,l.usage_json,l.charged_micro,
  s.snapshot_json settlement_snapshot,s.amount_micro settlement_amount,s.authorization_id settlement_authorization_id,
  l.provider_request_id,'settled' status,NULL call_id
@@ -21,13 +21,13 @@ const SOURCE = `WITH activity AS (
  LEFT JOIN billing_transactions s ON s.id=l.transaction_id AND s.type='settlement'
  UNION ALL
  SELECT 'authorization:'||a.id,NULL,a.id,a.user_id,a.organization_id,a.drama_id,a.project_title_snapshot,
- a.source_kind,json_extract(a.snapshot_json,'$.service_type'),json_extract(a.snapshot_json,'$.model'),a.created_at,
+ a.source_kind,a.source_id,json_extract(a.snapshot_json,'$.service_type'),json_extract(a.snapshot_json,'$.model'),a.created_at,
  a.snapshot_json,a.snapshot_json,NULL,NULL,NULL,NULL,NULL,NULL,
  CASE WHEN EXISTS(SELECT 1 FROM billing_transactions v WHERE v.authorization_id=a.id AND v.type='void') THEN 'released'
  WHEN EXISTS(SELECT 1 FROM billing_reconciliation_cases b WHERE b.authorization_id=a.id AND b.status='pending') THEN 'reconciliation' ELSE 'processing' END,NULL
  FROM billing_transactions a WHERE a.type='authorization' AND NOT EXISTS(SELECT 1 FROM billing_usage_logs l WHERE l.authorization_id=a.id)
  UNION ALL
- SELECT 'attempt:'||c.id,NULL,c.authorization_id,c.user_id,c.organization_id,c.drama_id,c.project_title,c.source_kind,
+ SELECT 'attempt:'||c.id,NULL,c.authorization_id,c.user_id,c.organization_id,c.drama_id,c.project_title,c.source_kind,c.source_id,
  c.service_type,c.model,c.submitted_at,'{}','{}',r.usage_json,NULL,NULL,NULL,NULL,c.provider_request_id,c.status,c.id
  FROM cost_calls c LEFT JOIN cost_revisions r ON r.id=c.latest_revision_id
  WHERE c.origin='live' AND NOT EXISTS(SELECT 1 FROM billing_transactions a WHERE a.id=c.authorization_id AND a.type='authorization')
@@ -38,11 +38,13 @@ SELECT x.*,(SELECT a.created_at FROM billing_transactions a WHERE a.id=x.authori
  (SELECT b.observed_usage_json FROM billing_reconciliation_cases b WHERE b.authorization_id=x.authorization_id AND b.observed_usage_json IS NOT NULL ORDER BY b.created_at DESC LIMIT 1) reconciliation_usage,
  COALESCE((SELECT SUM(-t.amount_micro) FROM billing_transactions t WHERE t.authorization_id=x.authorization_id AND t.type='adjustment'
  AND t.idempotency_key LIKE 'settlement-supplement:'||x.authorization_id||':%'),0) supplement_micro,
- cfg.name config_name,d.owner_user_id project_owner_id,owner.username project_owner_username,owner.display_name project_owner_display_name
+ cfg.name config_name,d.owner_user_id project_owner_id,owner.username project_owner_username,owner.display_name project_owner_display_name,
+ executor.username executor_username,executor.display_name executor_display_name
  FROM activity x LEFT JOIN cost_calls c ON c.id=COALESCE(x.call_id,
  (SELECT cc.id FROM cost_calls cc WHERE cc.authorization_id=x.authorization_id AND cc.origin='live' ORDER BY cc.submitted_at DESC,cc.id DESC LIMIT 1))
  LEFT JOIN cost_revisions r ON r.id=c.latest_revision_id LEFT JOIN ai_service_configs cfg ON cfg.id=c.config_id
- LEFT JOIN dramas d ON d.id=x.drama_id LEFT JOIN users owner ON owner.id=d.owner_user_id`;
+ LEFT JOIN dramas d ON d.id=x.drama_id LEFT JOIN users owner ON owner.id=d.owner_user_id
+ LEFT JOIN users executor ON executor.id=x.user_id`;
 
 function selection(input) {
   const clauses = [], args = [];
@@ -52,6 +54,7 @@ function selection(input) {
       if (!Number.isSafeInteger(Number(input[key])) || Number(input[key]) < 0) throw new Error('筛选 ID 无效');
       if (Number(input[key]) === 0) { clauses.push(`x.${key} IS NULL`); continue; }
     }
+    if (key === 'source_kind' && (input[key] === 'unknown' || input[key] === '0')) { clauses.push('x.source_kind IS NULL'); continue; }
     clauses.push(key === 'model' ? "COALESCE(json_extract(x.snapshot_json,'$.provider_model'),json_extract(x.authorization_snapshot,'$.provider_model'),x.model)=?" : `x.${key}=?`); args.push(input[key]);
   }
   if (input.date_from) { clauses.push('x.occurred_at>=?'); args.push(boundary(input.date_from)); }
@@ -82,7 +85,8 @@ function present(row) {
     customer_kind: row.organization_id ? 'customer' : (log.account_scope || auth.account_scope) === 'personal' ? 'personal' : 'unknown',
     drama_id: row.drama_id, project_title: row.project_title, project_owner_id: row.project_owner_id,
     project_owner_username: row.project_owner_username, project_owner_display_name: row.project_owner_display_name,
-    source_kind: row.source_kind, service_type: row.service_type,
+    executor_username: row.executor_username, executor_display_name: row.executor_display_name,
+    source_kind: row.source_kind, source_id: row.source_id, service_type: row.service_type,
     model: log.provider_model || auth.provider_model || row.model, billing_model: row.model, occurred_at: row.occurred_at,
     time_basis: row.status === 'settled' ? 'settlement' : row.call_id ? 'supplier_submission' : 'authorization',
     status: row.status, usage, pricing_context: { ...parse(row.context_json), ...snapshot.pricing_context },
@@ -133,12 +137,20 @@ function* records(db, input = {}, cursor = {}) {
   }
 }
 function totals() {
-  return { calls: 0, calculated_calls: 0, supplier_priced_calls: 0, charged_calls: 0, processing_calls: 0, released_calls: 0, missing_usage_calls: 0,
+  return { calls: 0, project_calls: 0, non_project_calls: 0, calculated_calls: 0, supplier_priced_calls: 0, charged_calls: 0, processing_calls: 0, released_calls: 0, missing_usage_calls: 0,
     missing_price_calls: 0, unverified_calls: 0, model_amount_micro: 0, supplier_amount_micro: 0, charged_micro: 0,
+    project_charged_micro: 0, non_project_charged_micro: 0,
     supplier_stale_calls: 0, supplier_fixed_calls: 0, difference_calls: 0, total_tokens: 0, video_output_token: 0, ...Object.fromEntries(METERS.map(k => [k, 0])) };
 }
 function add(total, row) {
   total.calls++;
+  const scope = row.drama_id == null ? 'non_project' : 'project';
+  total[`${scope}_calls`]++;
+  if (row.charged_micro != null) {
+    const key = `${scope}_charged_micro`;
+    if (!Number.isSafeInteger(row.charged_micro) || !Number.isSafeInteger(total[key] + row.charged_micro)) throw new Error('汇总金额超出安全范围，请缩小查询范围');
+    total[key] += row.charged_micro;
+  }
   for (const [amount, count] of [['model_amount_micro', 'calculated_calls'], ['supplier_amount_micro', 'supplier_priced_calls'], ['charged_micro', 'charged_calls']]) {
     if (row[amount] == null) continue;
     if (!Number.isSafeInteger(row[amount]) || !Number.isSafeInteger(total[amount] + row[amount])) throw new Error('汇总金额超出安全范围，请缩小查询范围');
@@ -160,7 +172,9 @@ function group(row, key) {
   const fields = { customer: ['organization_id', 'organization_name'], project: ['drama_id', 'project_title'], user: ['user_id', 'user_name'], model: ['model', 'model'], operation: ['source_kind', 'source_kind'] };
   if (fields[key]) {
     const [id, label] = fields[key];
-    return { key: String(row[id] ?? (key === 'customer' ? row.customer_kind : 'unknown')), label: row[label] || (key === 'customer' ? row.customer_kind === 'personal' ? '个人账户' : row.organization_id ? `客户 #${row.organization_id}` : '未知客户' : null) };
+    const name = key === 'project' && row.drama_id == null ? '未关联项目'
+      : key === 'user' ? row.executor_username || row.user_name : row[label];
+    return { key: String(row[id] ?? (key === 'customer' ? row.customer_kind : 'unknown')), label: name || (key === 'customer' ? row.customer_kind === 'personal' ? '个人账户' : row.organization_id ? `客户 #${row.organization_id}` : '未知客户' : null) };
   }
   const date = new Date(Date.parse(row.occurred_at) + 28800000).toISOString();
   const value = key === 'hour' ? date.slice(0, 13).replace('T', ' ') + ':00' : date.slice(0, key === 'month' ? 7 : 10);
@@ -176,12 +190,16 @@ function activity(db, input = {}) {
     if (summary.calls >= (page - 1) * size && items.length < size) items.push(row);
     add(summary, row);
     const g = group(row, key);
-    if (!groups.has(g.key)) groups.set(g.key, { ...g, ...totals(), owners: [], has_unknown_owner: false });
+    if (!groups.has(g.key)) groups.set(g.key, { ...g, ...totals(), owners: [], has_unknown_owner: false, executors: [], has_unknown_executor: false });
     if (!groups.get(g.key).label && g.label) groups.get(g.key).label = g.label;
     const grouped = groups.get(g.key);
     if (row.project_owner_id == null) grouped.has_unknown_owner = true;
     else if (!grouped.owners.some(owner => owner.id === row.project_owner_id)) {
       grouped.owners.push({ id: row.project_owner_id, username: row.project_owner_username || null, display_name: row.project_owner_display_name || null });
+    }
+    if (row.user_id == null) grouped.has_unknown_executor = true;
+    else if (!grouped.executors.some(executor => executor.id === row.user_id)) {
+      grouped.executors.push({ id: row.user_id, username: row.executor_username || row.user_name || null, display_name: row.executor_display_name || null });
     }
     add(groups.get(g.key), row);
   }

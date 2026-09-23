@@ -36,6 +36,7 @@ test('activity reads original prices and usage without setup, imports or reprici
     let db = f.db;
     seedCostActivity(db, f.admin.id);
     const owner = require('../src/services/authService').createUser(db, { username: 'project-owner', display_name: '项目负责人昵称', password: 'fixture-password' }, f.admin.id);
+    const executor = { id: f.admin.id, username: f.admin.username, display_name: db.prepare('SELECT display_name FROM users WHERE id=?').get(f.admin.id).display_name || null };
     db.prepare('UPDATE dramas SET owner_user_id=? WHERE id=73').run(owner.id);
     db.prepare("UPDATE billing_usage_logs SET project_title_snapshot=NULL,created_at='2026-09-08T04:00:00.000Z' WHERE id='legacy-0'").run();
     const cookie = (await f.request('POST', '/auth/login', { username: f.admin.username, password: 'fixture-password' })).cookie;
@@ -51,10 +52,15 @@ test('activity reads original prices and usage without setup, imports or reprici
     assert.equal(result.summary.millisecond, 1591080);
     assert.equal(result.summary.model_amount_micro, 1651658800);
     assert.equal(result.summary.charged_micro, 1651658800);
+    assert.equal(result.summary.project_calls, 222);
+    assert.equal(result.summary.non_project_calls, 0);
+    assert.equal(result.summary.project_charged_micro, 1651658800);
+    assert.equal(result.summary.non_project_charged_micro, 0);
     assert.equal(result.summary.difference_calls, 0);
     assert.equal(result.breakdown.items[0].label, '历史项目名称', 'an unnamed latest record does not hide the known project snapshot');
     assert.deepEqual(result.breakdown.items[0].owners, [{ id: owner.id, username: 'project-owner', display_name: '项目负责人昵称' }], 'project owner is distinct from the caller');
     assert.equal(result.breakdown.items[0].has_unknown_owner, false);
+    assert.deepEqual(result.breakdown.items[0].executors, [executor]);
     for (const basis of ['billing_activity_v1', 'supplier_daily_v1']) {
       for (const groupBy of ['project', 'customer', 'user', 'model', 'operation', 'hour', 'day', 'month']) {
         const grouped = await get(`?drama_id=73&basis=${basis}&group_by=${groupBy}`);
@@ -64,9 +70,28 @@ test('activity reads original prices and usage without setup, imports or reprici
     db.prepare("INSERT INTO dramas(id,title,owner_user_id,created_at,updated_at) VALUES(74,'Other owner',?,'2026-09-01','2026-09-01')").run(f.admin.id);
     db.prepare("UPDATE billing_usage_logs SET drama_id=74 WHERE id='legacy-1'").run();
     const mixed = await get('?group_by=user');
+    assert.equal(mixed.breakdown.items[0].label, f.admin.username);
     assert.deepEqual(new Set(mixed.breakdown.items[0].owners.map(o => o.username)), new Set(['project-owner', f.admin.username]));
+    assert.deepEqual(mixed.breakdown.items[0].executors, [executor]);
     db.prepare("UPDATE billing_usage_logs SET drama_id=NULL WHERE id='legacy-1'").run();
     assert.equal((await get('?group_by=user')).breakdown.items[0].has_unknown_owner, true);
+    const unassigned = await get('?group_by=project&drama_id=0');
+    assert.equal(unassigned.breakdown.items[0].key, 'unknown');
+    assert.equal(unassigned.breakdown.items[0].label, '未关联项目');
+    assert.equal(unassigned.summary.project_calls, 0);
+    assert.equal(unassigned.summary.non_project_calls, 1);
+    assert.equal(unassigned.summary.project_charged_micro, 0);
+    assert.equal(unassigned.summary.non_project_charged_micro, unassigned.summary.charged_micro);
+    assert.deepEqual(unassigned.breakdown.items[0].executors, [executor]);
+    assert.equal(unassigned.breakdown.items[0].has_unknown_executor, false);
+    const noSource = await get('?group_by=operation&drama_id=0');
+    assert.equal(noSource.breakdown.items[0].key, 'unknown');
+    assert.equal((await get('?drama_id=0&source_kind=unknown')).summary.calls, 1);
+    assert.equal((await get('?drama_id=0&source_kind=0')).summary.calls, 1);
+    db.prepare("UPDATE billing_usage_logs SET source_kind='single_video_tool',source_id='video-task-1' WHERE id='legacy-1'").run();
+    assert.equal((await get('?drama_id=0&source_kind=single_video_tool')).calls.items[0].source_id, 'video-task-1');
+    assert.equal((await get('/usage:legacy-1')).source_id, 'video-task-1');
+    db.prepare("UPDATE billing_usage_logs SET source_kind=NULL,source_id=NULL WHERE id='legacy-1'").run();
     db.prepare("UPDATE billing_usage_logs SET drama_id=73 WHERE id='legacy-1'").run();
     assert.equal(result.calls.items.length, 20);
     assert.equal((await get('?drama_id=73&page=12')).calls.items.length, 2);
@@ -107,6 +132,7 @@ test('activity reads original prices and usage without setup, imports or reprici
     assert.equal((await get('?organization_id=' + org.id)).summary.calls, 0);
     await f.restart(); db = f.db;
     assert.deepEqual((await get('?drama_id=73')).breakdown.items[0].owners, result.breakdown.items[0].owners);
+    assert.deepEqual((await get('?drama_id=73')).breakdown.items[0].executors, [executor]);
     db.prepare('UPDATE users SET display_name=? WHERE id=?').run('新的负责人昵称', owner.id);
     assert.equal((await get('?drama_id=73')).breakdown.items[0].owners[0].display_name, '新的负责人昵称');
     db.prepare("UPDATE users SET display_name='' WHERE id=?").run(owner.id);
