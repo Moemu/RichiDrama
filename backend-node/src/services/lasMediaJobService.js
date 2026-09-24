@@ -384,4 +384,4 @@ function resume(db, log, cfg) {
   return { queued: pending.length, uncertain, case_synced: caseSync.synced, stop: () => clearInterval(timer) };
 }
 
-module.exports = { create, get, list, processJob, resume, cleanupTransit, resultPaths, billedMilliseconds, validateMedia, serviceConfig };
+module.exports = { create, get, list, processJob, resume, cleanupTransit, resultPaths, billedMilliseconds, validateMedia, serviceConfig, probe, storageRoot };

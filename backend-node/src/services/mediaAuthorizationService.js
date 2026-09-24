@@ -167,6 +167,13 @@ const DEFINITIONS = [
   { table: 'las_media_jobs', alias: 'j', pathFields: [
     { name: 'caption_local_path', role: 'asset' },
   ], owner: 'j.owner_user_id', project: 'j.drama_id' },
+  // 投流剪辑的逐条成片与分镜 JSON 只存在于任务表上，同样按所有者/项目授权。
+  { table: 'viral_edit_outputs', alias: 'o', pathFields: [
+    { name: 'local_path', role: 'asset' },
+  ], owner: 'o.owner_user_id', project: 'o.drama_id', where: "o.status IN ('downloaded','saved')" },
+  { table: 'viral_edit_jobs', alias: 'j', pathFields: [
+    { name: 'storyboard_local_path', role: 'asset' },
+  ], owner: 'j.owner_user_id', project: 'j.drama_id', where: "j.status = 'completed'" },
   { table: 'external_asset_bindings', alias: 'b', pathFields: [{ name: 'source_local_path', role: 'binding' }], referenceFields: ['source_image_url'], owner: 'b.owner_user_id' },
 ];
 

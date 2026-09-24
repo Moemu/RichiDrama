@@ -130,6 +130,7 @@ function setupRouter(cfg, db, log) {
   const promptOverrides = promptOverridesRoutes.routes(db, log);
   const tools = require('./tools')(db, log);
   const lasMediaJobs = require('./lasMediaJobs')(db, log, cfg);
+  const viralEditJobs = require('./viralEditJobs')(db, log, cfg);
 
   // ---------- billing (self-service) ----------
   r.get('/billing/me', billing.me);
@@ -485,6 +486,11 @@ function setupRouter(cfg, db, log) {
   r.get('/las-media-jobs/capabilities', lasMediaJobs.capabilities);
   r.get('/las-media-jobs', lasMediaJobs.list);
   r.get('/las-media-jobs/:id', lasMediaJobs.get);
+  r.post('/viral-edit-jobs/quote', viralEditJobs.quote);
+  r.post('/viral-edit-jobs', viralEditJobs.create);
+  r.get('/viral-edit-jobs', viralEditJobs.list);
+  r.get('/viral-edit-jobs/:id', viralEditJobs.get);
+  r.post('/viral-edit-jobs/:id/outputs/:clipIndex/save-asset', viralEditJobs.saveAsset);
   r.get('/tool-runs/:id', tools.get);
   r.delete('/tool-runs/:id', tools.remove);
   r.post('/tool-runs/:id/restore', tools.restore);

@@ -310,10 +310,16 @@ function lasSummary(db) {
   }
   const phaseCounts = db.prepare("SELECT error_msg, submitted_at, completed_at, status FROM las_media_jobs WHERE status IN ('failed','reconciliation')").all()
     .reduce((acc, row) => { const phase = lasFailurePhase(row); acc[phase] = (acc[phase] || 0) + 1; return acc; }, {});
+  const viral = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='viral_edit_jobs'").get()
+    ? db.prepare(`SELECT COUNT(*) total, SUM(status='completed') completed, SUM(status='failed') failed,
+        SUM(status='reconciliation') reconciling, SUM(status IN ('queued','submitting','processing','finalizing')) active,
+        SUM(status='completed' AND tos_policy='cleanup' AND tos_cleanup_at IS NULL) pending_cleanup
+      FROM viral_edit_jobs`).get()
+    : null;
   return {
     ...counts, pending_transit_bytes: pendingBytes, total_transit_bytes: totalBytes, history_transit_bytes: historyBytes,
     cleanup_failed: cleanupFailed, average_provider_ms: durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null,
-    failure_phases: phaseCounts,
+    failure_phases: phaseCounts, viral,
   };
 }
 
