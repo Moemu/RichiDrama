@@ -216,16 +216,20 @@ function readTosObjects(row) {
 
 // 只清理本任务精确登记过的中转对象：不列举、不递归、不按时间猜测。
 // 历史任务（tos_policy 为 NULL）默认不动；清理失败绝不把完成任务改判为失败。
+// completed 必须先有本地成片兜底；failed 没有要保护的结果（预授权已释放或经对账终结），
+// 直接回收登记清单；reconciliation 不删——提交不确定时供应商可能仍在读取输入。
 async function cleanupTransit(db, log, cfg, id) {
   const row = db.prepare('SELECT * FROM las_media_jobs WHERE id=?').get(id);
-  if (!row || row.status !== 'completed' || row.tos_policy !== 'cleanup' || row.tos_cleanup_at) return null;
+  if (!row || !['completed', 'failed'].includes(row.status) || row.tos_policy !== 'cleanup' || row.tos_cleanup_at) return null;
   if (Number(row.tos_cleanup_attempts || 0) >= 5) return null;
   const objects = readTosObjects(row);
-  const localVideo = row.output_asset_id ? require('./assetService').getById(db, row.output_asset_id) : null;
-  const localVideoPath = localVideo && !localVideo.deleted_at ? resolveStorageFile(storageRoot(cfg), localVideo.local_path) : null;
-  // 前置门槛：数据库完成态已落地、本地成片文件可读，才允许删中转对象。
-  if (!localVideoPath || !fs.existsSync(localVideoPath)) return null;
-  if (row.caption_local_path && !fs.existsSync(resolveStorageFile(storageRoot(cfg), row.caption_local_path))) return null;
+  if (row.status === 'completed') {
+    const localVideo = row.output_asset_id ? require('./assetService').getById(db, row.output_asset_id) : null;
+    const localVideoPath = localVideo && !localVideo.deleted_at ? resolveStorageFile(storageRoot(cfg), localVideo.local_path) : null;
+    // 前置门槛：数据库完成态已落地、本地成片文件可读，才允许删中转对象。
+    if (!localVideoPath || !fs.existsSync(localVideoPath)) return null;
+    if (row.caption_local_path && !fs.existsSync(resolveStorageFile(storageRoot(cfg), row.caption_local_path))) return null;
+  }
   const paths = [row.input_tos_path, objects.output_video || null, objects.output_caption || null].filter(Boolean);
   let { tosConfig } = serviceConfig(db);
   let failures = 0;
@@ -375,8 +379,8 @@ function resume(db, log, cfg) {
     for (const row of db.prepare("SELECT id FROM las_media_jobs WHERE status IN ('queued','processing','finalizing') LIMIT 50").all()) {
       processJob(db, log, cfg, row.id).catch((error) => log.error('LAS 任务轮询失败', { id: row.id, error: error.message }));
     }
-    // 完成任务的中转清理重试（有界次数）：清理失败不影响任务终态。
-    for (const row of db.prepare("SELECT id FROM las_media_jobs WHERE status='completed' AND tos_policy='cleanup' AND tos_cleanup_at IS NULL AND tos_cleanup_attempts < 5 LIMIT 20").all()) {
+    // 完成任务与已终结的失败任务的中转清理重试（有界次数）：清理失败不影响任务终态。
+    for (const row of db.prepare("SELECT id FROM las_media_jobs WHERE status IN ('completed','failed') AND tos_policy='cleanup' AND tos_cleanup_at IS NULL AND tos_cleanup_attempts < 5 LIMIT 20").all()) {
       cleanupTransit(db, log, cfg, row.id).catch((error) => log.warn('LAS 中转清理重试失败', { id: row.id, error: error.message }));
     }
   }, 30_000);

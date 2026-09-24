@@ -223,6 +223,58 @@ test('viral clip MVP: quote, submit, multi-clip finalize, settle by measured usa
   assert.equal(submits, beforeWaive);
 });
 
+test('failed viral job reclaims the inputs registered before the failure and exposes governance', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'richidrama-viral-fail-'));
+  const storage = path.join(root, 'storage');
+  fs.mkdirSync(path.join(storage, 'input'), { recursive: true });
+  makeVideo(path.join(storage, 'input', 'f1.mp4'), 10);
+  makeVideo(path.join(storage, 'input', 'f2.mp4'), 10);
+  const original = { upload: tos.upload, request: las.request, remove: tos.remove };
+  const removed = [];
+  tos.upload = async (_config, key) => { if (key.endsWith('ep2.mp4')) throw new Error('TOS PUT 失败：HTTP 500'); return `tos://example-bucket/${key}`; };
+  tos.remove = async (_config, objectPath) => { removed.push(objectPath); return { deleted: true }; };
+  las.request = async () => { throw new Error('不应被调用'); };
+  const db = new Database(':memory:');
+  const out = console.log; const warn = console.warn; console.log = () => {}; console.warn = () => {};
+  try { runMigrationsAndEnsure(db); } finally { console.log = out; console.warn = warn; }
+  const admin = auth.ensureBootstrapAdmin(db, log);
+  const user = auth.createUser(db, { username: `viral-fail-${Date.now()}`, password: 'test-password' }, admin.id);
+  billing.adjustBalance(db, admin.id, user.id, 1000, 'test');
+  billing.savePriceBook(db, admin.id, { name: 'fail fixture', status: 'published', items: [
+    { service_type: 'video_postprocess', model: 'las-viral-clip-gen', meter: 'millisecond', unit_price: 150, conditions_json: { unit_size: 60000, provider: 'las' } },
+    { service_type: 'video_postprocess', model: 'las-viral-clip-gen', meter: 'second', unit_price: 6, conditions_json: { unit_size: 60, provider: 'las' } },
+  ] });
+  require('../src/services/aiConfigService').createConfig(db, log, {
+    service_type: 'video_localization', provider: 'las', name: 'LAS cfg', base_url: 'https://operator.las.cn-beijing.volces.com', api_key: 'test-only', is_default: true,
+    settings: JSON.stringify({ region: 'cn-beijing', tos_bucket: 'example-bucket', tos_access_key_id: 'a', tos_secret_access_key: 'b' }),
+  });
+  const project = drama.createDrama(db, log, { title: '回收测试', owner_user_id: user.id });
+  const assetIds = [];
+  for (const name of ['f1.mp4', 'f2.mp4']) {
+    const created = assets.create(db, log, { owner_user_id: user.id, drama_id: project.id, name, type: 'video', local_path: `input/${name}`, duration: 10, mime_type: 'video/mp4' });
+    assetIds.push(created.id);
+  }
+  const cfg = { storage: { type: 'local', local_path: storage }, server: {}, payments: { enabled: false }, vendor_lock: { enabled: false } };
+  t.after(() => { tos.upload = original.upload; tos.remove = original.remove; las.request = original.request; db.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  const job = await jobs.create(db, log, cfg, user.id, { drama_id: project.id, asset_ids: assetIds, mode: 'sequential', min_clip_duration: 5, max_clip_duration: 10, max_clip_count: 1, idempotency_key: 'fail-reclaim' });
+  for (let attempt = 0; attempt < 100 && !['failed', 'reconciliation'].includes(jobs.get(db, user.id, job.id).status); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  const failed = jobs.get(db, user.id, job.id);
+  assert.equal(failed.status, 'failed', JSON.stringify(failed));
+  assert.equal(failed.billing.state, 'released', '上传失败要释放预授权');
+  const row = db.prepare('SELECT tos_objects_json FROM viral_edit_jobs WHERE id=?').get(job.id);
+  const objects = JSON.parse(row.tos_objects_json);
+  assert.equal(objects.inputs.length, 1, '中途失败时已上传的 ep1 必须已在登记清单里');
+  const cleanup = await jobs.cleanupTransit(db, log, cfg, job.id);
+  assert.deepEqual(cleanup, { cleaned: 1 });
+  assert.deepEqual(removed, [`tos://example-bucket/${objects.inputs[0].path.replace('tos://example-bucket/', '')}`]);
+  const detail = jobs.get(db, user.id, job.id);
+  assert.equal(detail.tos.policy, 'cleanup');
+  assert.ok(detail.tos.cleanup_at, '任务 API 要能看到中转回收状态');
+  assert.equal(detail.tos.cleanup_attempts, 0);
+});
+
 test('viral result parsing tolerates both storyboard locations and rejects foreign paths', () => {
   const prefix = 'tos://example-bucket/richidrama/las/j1/viral/';
   const base = { clips: [{ id: 'clip_001', url: `${prefix}clip_001.mp4`, duration: 8, timeline: [] }] };

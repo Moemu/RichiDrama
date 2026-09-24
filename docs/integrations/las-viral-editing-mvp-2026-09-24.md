@@ -112,3 +112,12 @@
 - 价目书两条新项的**对用户定价**（上游 ¥1.5/¥0.06 每分仅成本参考，两个 mode 的输出单价待定）；
 - MVP 上限数值认可：≤10 集 / 总输入 ≤30 分钟 / ≤10 条 / 单条 ≤300s；
 - 结算口径认可：无供应商 usage → 本地 ffprobe 实测输出时长结算、与响应 duration 交叉校验。
+
+> 2026-09-24 拍板结果：定价 1:1（150/6 积分每分钟，mode 暂同价）、上限照案、结算口径照案。真实冒烟通过（603MB Vlog，实扣 883.84 积分，与逐项重算一致）。
+
+## 10. 边界处置记录（2026-09-24）
+
+- **大文件上传（A 方案）**：`/media/upload` 改 multer diskStorage 流式写 `storage/.tmp-uploads/`，rename 转正（EXDEV 回退复制）；签名读头 12 字节、sha256 流式；`LIMITS.video` 50MB→2048MB 且 multer/校验/`/upload-limits` 共用同一来源；`upload()` finally 清临时文件 + 启动清扫 >6h 残留；nginx 仅对 `/api/v1/media/upload` 精确放宽 2100m（配置文件已改，reload 属部署动作）。实测 87.5MB 上传 9.9s 通过。
+- **失败任务中转回收**：`cleanupTransit` 终态口径从「仅 completed」扩为 `completed|failed`——failed 无结果需保护（预授权已释放或经对账终结），直接按登记清单回收；**reconciliation 仍不删**（提交不确定时供应商可能仍在读取输入）。viral 输入改逐集登记，中途上传失败不留未登记对象。两表 30s 清扫循环同扩 `failed`。
+- **任务 API 治理字段**：`GET /viral-edit-jobs/:id` 详情新增 `tos: { policy, cleanup_at, cleanup_attempts }`。
+- 未处理（观察项）：无字幕素材的评级质量需带真实剧集的运营反馈再评估。

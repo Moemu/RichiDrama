@@ -190,6 +190,7 @@ function publicJob(row) {
     authorization_id: row.authorization_id || null,
     provider_task_id: row.provider_task_id || null,
     submitted_at: row.submitted_at || null, completed_at: row.completed_at || null,
+    tos: { policy: row.tos_policy || null, cleanup_at: row.tos_cleanup_at || null, cleanup_attempts: Number(row.tos_cleanup_attempts || 0) },
   };
 }
 
@@ -392,23 +393,33 @@ function upsertOutput(db, row) {
       row.file_size, row.width, row.height, row.duration_ms, row.status, row.timeline_json, row.rating_summary_json, now(), now());
 }
 
-// 只清理本任务精确登记过的中转对象；历史任务（tos_policy 为 NULL）不动；清理失败不改任务终态。
+// 只清理本任务精确登记过的中转对象；历史任务（tos_policy 为 NULL）不动。
+// completed 要求本地成片与 storyboard 已落地才能删中转；failed 没有要保护的结果，
+// 预授权要么已释放要么经对账处置终结，回收登记清单即可（reconciliation 不删——
+// 提交不确定的任务供应商可能仍在读取输入对象）。清理失败不改任务终态。
 async function cleanupTransit(db, log, cfg, id) {
   const row = db.prepare('SELECT * FROM viral_edit_jobs WHERE id=?').get(id);
-  if (!row || row.status !== 'completed' || row.tos_policy !== 'cleanup' || row.tos_cleanup_at) return null;
+  if (!row || row.tos_policy !== 'cleanup' || row.tos_cleanup_at) return null;
+  if (!['completed', 'failed'].includes(row.status)) return null;
   if (Number(row.tos_cleanup_attempts || 0) >= 5) return null;
   const objects = readTosObjects(row);
   const root = storageRoot(cfg);
   const localReady = (relative) => relative && fs.existsSync(resolveStorageFile(root, relative));
-  const outputs = db.prepare('SELECT * FROM viral_edit_outputs WHERE job_id=? ORDER BY clip_index').all(id);
-  if (!outputs.length && Number(JSON.parse(row.result_json || '{}')?.clips?.length || 0)) return null;
-  if (outputs.some((output) => !localReady(output.local_path))) return null;
-  if (row.storyboard_local_path && !localReady(row.storyboard_local_path)) return null;
+  if (row.status === 'completed') {
+    const outputs = db.prepare('SELECT * FROM viral_edit_outputs WHERE job_id=? ORDER BY clip_index').all(id);
+    if (!outputs.length && Number(JSON.parse(row.result_json || '{}')?.clips?.length || 0)) return null;
+    if (outputs.some((output) => !localReady(output.local_path))) return null;
+    if (row.storyboard_local_path && !localReady(row.storyboard_local_path)) return null;
+  }
   const paths = [
     ...(objects.inputs || []).map((input) => input.path),
     ...(objects.outputs || []).map((output) => output.path),
     objects.storyboard?.path || null,
   ].filter(Boolean);
+  if (!paths.length) {
+    record(db, id, { tos_cleanup_at: now() });
+    return { cleaned: 0 };
+  }
   let { tosConfig } = serviceConfig(db);
   let failures = 0;
   for (const objectPath of paths) {
@@ -462,6 +473,8 @@ async function processJob(db, log, cfg, id) {
           const objectPath = await tos.upload(tosConfig, keys[index], file, CONTENT_TYPES[episode.extension] || 'application/octet-stream');
           if (!renewLease()) return;
           inputs.push({ path: objectPath, bytes: episode.bytes });
+          // 逐集登记：中途失败转 failed 时，已上传的对象必须已在清理清单里，不能等全批完成。
+          record(db, id, { tos_objects_json: JSON.stringify({ ...readTosObjects(row), inputs }) });
         }
         record(db, id, { status: 'submitting', tos_objects_json: JSON.stringify({ inputs }) });
         row = db.prepare('SELECT * FROM viral_edit_jobs WHERE id=?').get(id);
@@ -614,7 +627,7 @@ function resume(db, log, cfg) {
     for (const row of db.prepare("SELECT id FROM viral_edit_jobs WHERE status IN ('queued','processing','finalizing') LIMIT 50").all()) {
       processJob(db, log, cfg, row.id).catch((error) => log.error('投流剪辑任务轮询失败', { id: row.id, error: error.message }));
     }
-    for (const row of db.prepare("SELECT id FROM viral_edit_jobs WHERE status='completed' AND tos_policy='cleanup' AND tos_cleanup_at IS NULL AND tos_cleanup_attempts < 5 LIMIT 20").all()) {
+    for (const row of db.prepare("SELECT id FROM viral_edit_jobs WHERE status IN ('completed','failed') AND tos_policy='cleanup' AND tos_cleanup_at IS NULL AND tos_cleanup_attempts < 5 LIMIT 20").all()) {
       cleanupTransit(db, log, cfg, row.id).catch((error) => log.warn('投流剪辑中转清理重试失败', { id: row.id, error: error.message }));
     }
   }, 30_000);
