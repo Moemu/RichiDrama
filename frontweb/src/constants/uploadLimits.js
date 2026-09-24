@@ -6,11 +6,13 @@
  * - 前端放行、nginx 拒绝 → 用户看到 413 Request Entity Too Large
  *
  * 对应的后端来源：
- *   图片：backend-node/src/routes/upload.js  → multer fileSize (16MB)
+ *   图片：backend-node/src/routes/upload.js  → multer fileSize (30MB)
  *   音频：backend-node/src/routes/upload.js  → multer fileSize (10MB)
- *   nginx：deploy/nginx-drama-richbest.conf  → client_max_body_size 20m（覆盖后端，含 multipart 封装开销）
+ *   媒体上传（视频）：backend-node/src/services/mediaAssetService.js → LIMITS (video 2048MB，流式落盘)
+ *   nginx：deploy/nginx-drama-richbest.conf → server 级 32m；/api/v1/media/upload 精确放宽到 2100m
  *
- * 修改任一处时请同步检查另两处，避免限制不一致。
+ * 修改任一处时请同步检查另两处，避免限制不一致。视频上限以 GET /upload-limits 下发为准，
+ * 页面（素材库/视频本地化/投流提示）动态读取，不在前端硬编码。
  */
 
 /** 单张图片上限（MB）。与后端 upload.js 的 MAX_IMAGE_SIZE_MB 对齐 */

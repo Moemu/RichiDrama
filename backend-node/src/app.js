@@ -100,6 +100,9 @@ function createApp() {
     : path.join(process.cwd(), config.storage?.local_path || './data/storage');
   require('./services/videoUpscaleService').resumePending(db, log, videoStoragePath);
   require('./services/videoInterpolationService').resumePending(db, log, videoStoragePath);
+  // 流式上传的临时文件在进程被杀时不会有任何请求线程回收它，启动时清扫超时残留。
+  try { require('./services/mediaAssetService').sweepUploadTemp(videoStoragePath, log); }
+  catch (error) { log.warn('上传临时目录清扫失败', { error: error.message }); }
   startPendingVideoArchiveRetry(db, log);
   require('./services/operationsReportService').startDailyReporting(db, log);
   require('./services/providerPriceService').startHourlySync(db, log);

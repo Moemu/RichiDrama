@@ -79,6 +79,27 @@ function uploadFile(storagePath, baseUrl, log, fileBuffer, originalName, mimeTyp
   return { url, local_path: relativePath };
 }
 
+// 流式上传落盘：multer diskStorage 已把请求体写进临时文件，这里只做同盘 rename 转正；
+// 跨设备（EXDEV）退回复制+删源，临时文件的最终清理由 mediaAssetService.upload 的 finally 兜底。
+function uploadFileFromPath(storagePath, baseUrl, log, sourceFile, originalName, mimeType, category, projectSubdir = null) {
+  const { dir: categoryPath, relPrefix } = resolveCategoryPaths(storagePath, category, projectSubdir);
+  ensureDir(categoryPath);
+  const ext = path.extname(originalName) || '.png';
+  const timestamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
+  const name = `${timestamp}_${randomUUID()}${ext}`;
+  const filePath = path.join(categoryPath, name);
+  try { fs.renameSync(sourceFile, filePath); }
+  catch (error) {
+    if (error.code !== 'EXDEV') throw error;
+    fs.copyFileSync(sourceFile, filePath);
+    fs.rmSync(sourceFile, { force: true });
+  }
+  const relativePath = `${relPrefix}/${name}`.replace(/\\/g, '/');
+  const url = baseUrl ? `${baseUrl.replace(/\/$/, '')}/${relativePath}` : `/static/${relativePath}`;
+  log.info('File uploaded', { path: filePath, url });
+  return { url, local_path: relativePath };
+}
+
 /**
  * 将远程/Base64 图片保存到本地 storage，避免 AI 链接过期后无法访问
  * @param {string} storagePath - 存储根目录（如 ./data/storage）
@@ -253,6 +274,7 @@ async function uploadLocalImageToProxy(storagePath, localPathOrUrl, log, tag) {
 
 module.exports = {
   uploadFile,
+  uploadFileFromPath,
   downloadImageToLocal,
   uploadToImageProxy,
   uploadLocalImageToProxy,
