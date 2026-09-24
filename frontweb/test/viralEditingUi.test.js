@@ -80,6 +80,21 @@ test('workspace keeps provider signed URLs out of playback and gates paid submit
   assert.match(source, /输入需携带内嵌字幕/, '字幕是官方硬性要求，需要前置提示')
 })
 
+test('管理台按投流剪辑口径收口：second 整数用量、任务标签与治理渲染', async () => {
+  const [admin, costs, nginx] = await Promise.all([
+    readFile(new URL('../src/views/AdminConsole.vue', import.meta.url), 'utf8'),
+    readFile(new URL('../src/utils/costPresentation.js', import.meta.url), 'utf8'),
+    readFile(new URL('../../deploy/nginx-drama-richbest.conf', import.meta.url), 'utf8'),
+  ])
+  // 后端 normalizeUsage 要求全部计量器为非负整数；second 漏进小数输入档会让管理员按预填值提交即报「非法用量」。
+  assert.match(admin, /const INTEGER_METERS = new Set\(\[[^\]]*'second'\]\)/)
+  assert.match(admin, /if \(task\.kind === 'viral_edit_job'\)/, '对账案件的任务定位必须认得投流剪辑，而不是回退英文原串')
+  assert.match(admin, /overview\?\.las\?\.viral/, 'lasSummary.viral 治理统计要有渲染（待对账/中转待回收告警位）')
+  assert.match(costs, /viral_edit_job: '投流剪辑'/, '成本/用量表的来源标签不能露 source_kind 原串')
+  assert.match(nginx, /client_body_timeout 300s;/, '2GB 慢传中途停顿不能被默认 60s 掐断')
+  assert.match(nginx, /proxy_request_buffering off;/, '不关缓冲则每个并发上传先整体落盘 2.1GB，磁盘余量会被吃掉')
+})
+
 test('workspace layout survives the three desktop viewports without truncating clips', async () => {
   const source = await component()
   assert.match(source, /\.viral-layout\{display:grid;grid-template-columns:minmax\(340px,1fr\) minmax\(0,1\.2fr\)/)
