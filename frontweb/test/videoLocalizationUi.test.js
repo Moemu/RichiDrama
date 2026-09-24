@@ -37,3 +37,11 @@ test('job cards consolidate source, output, actual billing and next actions', as
   assert.match(source, /@click="retryJob\(job\)">按原参数重新提交/)
   assert.match(source, /运营核验用量后这里会更新为最终结果/)
 })
+
+test('retry never keeps a different selected video when the original is unavailable', async () => {
+  const source = await page()
+  assert.match(source, /const original = videos\.value\.find\(\(asset\) => String\(asset\.id\) === String\(job\.source_asset_id\)\)/)
+  assert.match(source, /assetId\.value = original \? String\(original\.id\) : ''/)
+  assert.match(source, /原视频素材已不可选，请重新选择视频后再提交/)
+  assert.match(source, /function retryJob\(job\) \{[\s\S]*?clearQuote\(\)/)
+})

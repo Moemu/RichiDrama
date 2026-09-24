@@ -41,7 +41,9 @@ test('LAS reconciliation cases locate the job and settle/waive/expire syncs the 
   las.request = async (_config, action) => {
     if (action !== 'submit') throw new Error('对账测试不应轮询供应商');
     submits += 1;
-    throw new Error('LAS submit 请求失败：HTTP 500（request_id=mock-req-77）');
+    const error = new Error('LAS submit 请求失败：HTTP 500（request_id=mock-req-77）');
+    error.providerRequestId = 'mock-req-77';
+    throw error;
   };
   let db = new Database(dbPath);
   const oldLog = console.log; const oldWarn = console.warn;
@@ -95,6 +97,7 @@ test('LAS reconciliation cases locate the job and settle/waive/expire syncs the 
   const caseOf = (jobId) => db.prepare('SELECT * FROM billing_reconciliation_cases WHERE authorization_id=?').get(authorizationId(jobId));
   assert.match(caseOf(settledId).reason, /提交结果不确定/);
   assert.match(caseOf(settledId).reason, /request_id=mock-req-77/, '案件原因里要能定位供应商请求 ID');
+  assert.equal(caseOf(settledId).provider_request_id, 'mock-req-77', '供应商请求 ID 必须结构化落库');
 
   // 运营台案件定位：任务、供应商请求 ID、预授权、项目与中转/归档文件。
   const queue = await call('GET', '/admin/billing-reconciliations?status=pending&page_size=50', null, adminToken);
@@ -112,7 +115,12 @@ test('LAS reconciliation cases locate the job and settle/waive/expire syncs the 
   assert.equal(located.authorization_id, authorizationId(settledId));
   assert.equal(located.reference_type, 'las_media_job');
   assert.equal(located.reference_id, settledId);
+  assert.equal(located.provider_request_id, 'mock-req-77');
   assert.equal(located.frozen_amount > 0, true);
+
+  db.prepare('UPDATE billing_reconciliation_cases SET provider_request_id=NULL WHERE id=?').run(caseOf(pendingId).id);
+  const legacyQueue = await call('GET', '/admin/billing-reconciliations?status=pending&page_size=50', null, adminToken);
+  assert.equal(legacyQueue.body.data.items.find((item) => item.id === caseOf(pendingId).id).provider_request_id, 'mock-req-77', '旧案件从原因文本只读恢复请求 ID');
 
   // 人工结算 → 用户可见任务状态同步，消耗计入计费流水。
   const settled = await call('POST', `/admin/billing-reconciliations/${caseOf(settledId).id}/settle`, { usage: { millisecond: 10000 }, reason: '按供应商账单补录用量' }, adminToken);

@@ -883,6 +883,9 @@ function pagedReconciliationCases(db, filters = {}) {
     ORDER BY CASE WHEN c.status = 'pending' THEN 0 ELSE 1 END, c.due_at ASC LIMIT ? OFFSET ?`).all(...args, meta.page_size, meta.offset);
   const items = rows.map((row) => {
     const source_task = hasLas ? reconciliationSourceTask(row) : null;
+    if (source_task && !row.provider_request_id) {
+      row.provider_request_id = /\brequest_id=([\w.-]+)/.exec(String(row.reason || ''))?.[1] || null;
+    }
     for (const key of LAS_SOURCE_TASK_COLUMNS) delete row[key];
     return { ...publicReconciliationCase(row), frozen_amount: microToCredits(row.frozen_amount_micro), source_task };
   });

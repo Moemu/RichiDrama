@@ -58,7 +58,13 @@ function request(config, method, key, payloadHash, contentType, bodyFile, target
         // 否则只剩「HTTP 404」，运维没法区分 bucket 拼错、地域不对还是权限不足。
         const chunks = []; let bytes = 0;
         res.on('data', (chunk) => { if (bytes < 4096) { chunks.push(chunk); bytes += chunk.length; } });
-        res.on('end', () => reject(new Error(tosErrorMessage(method, res.statusCode, Buffer.concat(chunks).toString('utf8')))));
+        res.on('end', () => {
+          const body = Buffer.concat(chunks).toString('utf8');
+          const error = new Error(tosErrorMessage(method, res.statusCode, body));
+          error.statusCode = res.statusCode;
+          error.tosCode = /<Code>([^<]+)<\/Code>/i.exec(body)?.[1] || null;
+          reject(error);
+        });
         res.on('error', () => reject(new Error(`LAS TOS ${method} 失败：HTTP ${res.statusCode}`)));
         return;
       }
@@ -99,7 +105,7 @@ async function download(config, tosPath, localFile) {
 }
 
 /** 删除单个中转对象。只接受 tos://<本配置 bucket>/richidrama/las/… 的精确键，
- *  绝不递归列举；TOS 对不存在的对象返回 404，调用方按已清理处理（幂等重试）。 */
+ *  绝不递归列举；只有明确的 NoSuchKey 才按已清理处理，不能吞掉 NoSuchBucket。 */
 async function remove(config, tosPath) {
   const prefix = `tos://${config.bucket}/`;
   if (!String(tosPath).startsWith(prefix)) throw new Error('LAS 待删对象不在配置的 TOS Bucket 内');
@@ -109,9 +115,13 @@ async function remove(config, tosPath) {
     await request(config, 'DELETE', key, hash(''), '', null, null);
     return { deleted: true };
   } catch (error) {
-    if (/HTTP 404/.test(error.message)) return { deleted: false, already_absent: true };
+    if (isMissingObject(error)) return { deleted: false, already_absent: true };
     throw error;
   }
+}
+
+function isMissingObject(error) {
+  return error?.statusCode === 404 && error?.tosCode === 'NoSuchKey';
 }
 
 /** 从 TOS 错误响应体（XML）里提取 <Code>/<Message>，供日志与任务错误信息定位。 */
@@ -135,4 +145,4 @@ function tosErrorMessage(method, statusCode, body) {
     + (/AccessDenied/i.test(detail) ? '（凭证无该 Bucket 读写权限：请核对受限读写凭证与前缀授权）' : '');
 }
 
-module.exports = { configuration, objectKey, signedHeaders, tosErrorDetail, tosErrorMessage, upload, download, remove };
+module.exports = { configuration, objectKey, signedHeaders, tosErrorDetail, tosErrorMessage, isMissingObject, upload, download, remove };

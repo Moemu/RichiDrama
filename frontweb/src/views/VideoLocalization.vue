@@ -111,10 +111,14 @@ function billingText(job) {
   return billing.reserved_credits != null ? `预授权 ${creditsText(billing.reserved_credits)}，完成后按实际用量结算` : ''
 }
 function retryJob(job) {
+  const original = videos.value.find((asset) => String(asset.id) === String(job.source_asset_id))
+  clearQuote()
   stage.value = job.stage
   if (job.stage === 'inpaint') modelLevel.value = job.input.model_level || 'lite'
   else outputLanguage.value = job.input.output_language || 'en-US'
-  if (videos.value.some((asset) => String(asset.id) === String(job.source_asset_id))) assetId.value = String(job.source_asset_id)
+  assetId.value = original ? String(original.id) : ''
+  if (original) quoteTimer = setTimeout(loadQuote, 250)
+  else ElMessage.warning('原视频素材已不可选，请重新选择视频后再提交')
   document.querySelector('.setup')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 const uploadHint = computed(() => !dramaId.value

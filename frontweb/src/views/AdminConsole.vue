@@ -206,7 +206,9 @@
         <el-form-item label="案件"><div class="reconciliation-fact">{{ settleCase ? `${settleCase.username} · ${settleCase.model}` : '' }}</div></el-form-item>
         <template v-if="settleCase?.source_task">
           <el-form-item label="关联任务"><div class="reconciliation-fact">{{ reconciliationTaskLabel(settleCase.source_task) }} · {{ settleCase.source_task.project_title || `项目 #${settleCase.source_task.drama_id}` }} · {{ reconciliationTaskStatusLabel(settleCase.source_task.status) }}</div></el-form-item>
-          <el-form-item label="供应商任务 ID"><div class="reconciliation-fact">{{ settleCase.source_task.provider_task_id || settleCase.provider_request_id || '未受理（提交结果不确定）' }}</div></el-form-item>
+          <el-form-item v-if="settleCase.source_task.provider_task_id" label="供应商任务 ID"><div class="reconciliation-fact">{{ settleCase.source_task.provider_task_id }}</div></el-form-item>
+          <el-form-item v-if="settleCase.provider_request_id && settleCase.provider_request_id !== settleCase.source_task.provider_task_id" label="供应商请求 ID"><div class="reconciliation-fact">{{ settleCase.provider_request_id }}</div></el-form-item>
+          <el-form-item v-if="!settleCase.source_task.provider_task_id" label="供应商受理状态"><div class="reconciliation-fact">未确认；请依据供应商记录核验，不能据此判定未受理</div></el-form-item>
           <el-form-item label="预授权"><div class="reconciliation-fact">{{ settleCase.authorization_id }}（冻结 {{ formatCredits(settleCase.frozen_amount) }} 积分）</div></el-form-item>
           <el-form-item label="已归档文件"><div class="reconciliation-fact"><template v-if="reconciliationTaskFiles(settleCase.source_task).length"><div v-for="file in reconciliationTaskFiles(settleCase.source_task)" :key="file">{{ file }}</div></template><template v-else>无（未产出归档文件）</template></div></el-form-item>
         </template>

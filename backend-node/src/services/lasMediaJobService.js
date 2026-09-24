@@ -242,9 +242,9 @@ async function cleanupTransit(db, log, cfg, id) {
   return { failed: failures };
 }
 
-function reconcile(db, row, reason) {
+function reconcile(db, row, reason, providerRequestId = null) {
   billing.markPendingReconciliation(db, { id: row.owner_user_id }, row.authorization_id, {
-    provider_request_id: row.provider_task_id || null,
+    provider_request_id: row.provider_task_id || providerRequestId,
     reason,
   });
   record(db, row.id, { status: 'reconciliation', error_msg: reason.slice(0, 500) });
@@ -288,7 +288,7 @@ async function processJob(db, log, cfg, id) {
         const accepted = await las.request(clientConfig, 'submit', payload);
         record(db, id, { provider_task_id: accepted.task_id, status: 'processing', error_msg: null, submitted_at: now() });
       } catch (error) {
-        reconcile(db, row, `LAS 提交结果不确定：${error.message}`);
+        reconcile(db, row, `LAS 提交结果不确定：${error.message}`, error.providerRequestId || null);
         return;
       }
       row = db.prepare('SELECT * FROM las_media_jobs WHERE id=?').get(id);
