@@ -188,6 +188,7 @@ function setupRouter(cfg, db, log) {
   adminRouter.put('/customer-organizations/:id/members', admin.replaceCustomerOrganizationMembers);
   adminRouter.post('/customer-organizations/:id/balance-adjustments', admin.adjustCustomerOrganizationBalance);
   adminRouter.get('/price-books', admin.priceBooks);
+  adminRouter.post('/backfill-merged-final-assets', admin.backfillMergedFinalAssets);
   adminRouter.get('/model-catalog', admin.modelCatalog);
   adminRouter.get('/provider-connections', admin.providerConnections);
   adminRouter.post('/provider-connections', admin.saveProviderConnection);

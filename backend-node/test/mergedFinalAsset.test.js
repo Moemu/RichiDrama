@@ -58,6 +58,26 @@ test('merged episode final is registered as a project asset and reused on re-mer
   assert.equal(db.prepare("SELECT COUNT(*) c FROM assets WHERE source_type='merged_final'").get().c, 1)
 })
 
+test('backfill registers legacy merged finals once and stays idempotent', async (t) => {
+  const { db, storage, episode } = setup(t)
+  // 模拟历史数据：登记逻辑上线前完成合并的剧集，只有 episodes.video_url
+  db.prepare("UPDATE episodes SET video_url = '/static/videos/merged/merged_test.mp4', status = 'completed' WHERE id = ?").run(episode)
+  const legacyOther = db.prepare("INSERT INTO episodes(drama_id,episode_number,title,status,video_url,created_at,updated_at) SELECT drama_id,8,'缺文件的第八集','completed','/static/videos/merged/gone.mp4',datetime('now'),datetime('now') FROM episodes WHERE id=?").run(episode).lastInsertRowid
+  const cfg = { storage: { local_path: storage } }
+  const first = await merges.backfillMergedFinalAssets(db, log, cfg)
+  assert.equal(first.candidates, 2)
+  assert.equal(first.registered, 1)
+  assert.equal(first.skipped, 1, '本地文件缺失的成片跳过并计数')
+  const asset = db.prepare("SELECT * FROM assets WHERE source_type='merged_final'").get()
+  assert.equal(JSON.parse(asset.metadata_json).episode_id, episode)
+  assert.equal(asset.local_path, 'videos/merged/merged_test.mp4')
+  const second = await merges.backfillMergedFinalAssets(db, log, cfg)
+  assert.equal(second.candidates, 1, '已登记的不再重复处理')
+  assert.equal(second.registered, 0)
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM assets WHERE source_type='merged_final'").get().c, 1)
+  void legacyOther
+})
+
 test('registration is best-effort: missing episode or file never throws into the merge result', async (t) => {
   const { db, storage, episode } = setup(t)
   assert.equal(await merges.registerMergedFinalAsset(db, log, { episodeId: 99999, mergeId: 1, localPath: 'videos/merged/merged_test.mp4', storageRoot: storage }), null)

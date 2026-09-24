@@ -147,6 +147,15 @@ module.exports = function adminRoutes(db, log = console, cfg = {}) {
       })));
     }),
     priceBooks: (_req, res) => response.success(res, billing.listPriceBooks(db)),
+    // 历史合并成片回填为项目素材：显式 confirm、幂等可重复执行（自动修复历史数据必须管理员触发）。
+    backfillMergedFinalAssets: async (req, res) => {
+      if (req.body?.confirm !== true) return response.badRequest(res, '请显式确认后再执行历史成片回填');
+      try {
+        const result = await require('../services/videoMergeService').backfillMergedFinalAssets(db, log, cfg);
+        billing.audit(db, req.auth.id, 'assets.backfill.merged_final', 'billing', 'merged-final-assets', result);
+        response.success(res, result);
+      } catch (error) { response.badRequest(res, error.message); }
+    },
     createPriceBook: guarded((req, res) => response.created(res, billing.savePriceBook(db, req.auth.id, req.body || {}))),
     updatePriceBook: guarded((req, res) => response.success(res, billing.savePriceBook(db, req.auth.id, req.body || {}, req.params.id))),
     clonePriceBook: guarded((req, res) => response.created(res, billing.clonePriceBook(db, req.auth.id, req.params.id))),

@@ -437,6 +437,31 @@ async function registerMergedFinalAsset(db, log, { episodeId, mergeId, localPath
   }
 }
 
+// 历史成片回填：登记逻辑上线前合并完成的剧集不在素材表里。自动修复历史数据必须
+// 显式触发（管理员端点 + confirm），这里只提供幂等的批量入口，逐条复用登记函数。
+async function backfillMergedFinalAssets(db, log, cfg) {
+  const raw = cfg?.storage?.local_path || './data/storage';
+  const storageRoot = path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw);
+  const { normalizeMediaReference } = require('./mediaAuthorizationService');
+  const episodes = db.prepare(`SELECT e.id, e.video_url FROM episodes e
+    JOIN dramas d ON d.id = e.drama_id AND d.deleted_at IS NULL
+    WHERE e.deleted_at IS NULL AND e.video_url IS NOT NULL AND TRIM(e.video_url) <> ''
+      AND NOT EXISTS (SELECT 1 FROM assets a WHERE a.deleted_at IS NULL AND a.source_type = 'merged_final'
+        AND json_extract(a.metadata_json, '$.episode_id') = e.id)
+    ORDER BY e.id`).all();
+  const result = { candidates: episodes.length, registered: 0, skipped: 0 };
+  for (const episode of episodes) {
+    const localPath = normalizeMediaReference(episode.video_url, storageRoot);
+    const abs = localPath ? path.join(storageRoot, localPath.replace(/\//g, path.sep)) : null;
+    if (!abs || !fs.existsSync(abs)) { result.skipped += 1; continue; }
+    const merge = db.prepare("SELECT id FROM video_merges WHERE episode_id = ? AND status = 'completed' AND deleted_at IS NULL ORDER BY completed_at DESC, id DESC LIMIT 1").get(episode.id);
+    const assetId = await registerMergedFinalAsset(db, log, { episodeId: episode.id, mergeId: merge?.id ?? null, localPath, storageRoot });
+    if (assetId) result.registered += 1; else result.skipped += 1;
+  }
+  log.info('历史成片素材回填完成', result);
+  return result;
+}
+
 module.exports = {
   list,
   getById,
@@ -444,4 +469,5 @@ module.exports = {
   deleteById,
   processVideoMerge,
   registerMergedFinalAsset,
+  backfillMergedFinalAssets,
 };
