@@ -64,6 +64,7 @@ test('static media is owner-scoped, private-cacheable, and keeps local Range sup
       requires_sd2_identity INTEGER NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT,
       archived_at TEXT, deleted_at TEXT
     );
+    CREATE TABLE las_media_jobs (id TEXT PRIMARY KEY, owner_user_id INTEGER, drama_id INTEGER, stage TEXT, caption_local_path TEXT);
   `);
   const owner = auth.createUser(db, { username: 'media-owner', password: 'test-password' }, null);
   const other = auth.createUser(db, { username: 'media-other', password: 'test-password' }, null);
@@ -119,6 +120,12 @@ test('static media is owner-scoped, private-cacheable, and keeps local Range sup
   fs.writeFileSync(path.join(root, ambiguousKey), 'ambiguous');
   db.prepare('INSERT INTO assets (id, owner_user_id, local_path) VALUES (?,?,?)').run(12, owner.id, ambiguousKey);
   db.prepare('INSERT INTO assets (id, owner_user_id, local_path) VALUES (?,?,?)').run(13, other.id, ambiguousKey);
+  // LAS 任务的字幕 srt 只登记在任务行上：所有者必须能下载，他人 404。
+  const lasCaptionKey = 'las/job-1/subtitles.srt';
+  fs.mkdirSync(path.dirname(path.join(root, lasCaptionKey)), { recursive: true });
+  fs.writeFileSync(path.join(root, lasCaptionKey), '1\n00:00:00,000 --> 00:00:01,000\nHi\n');
+  db.prepare('INSERT INTO las_media_jobs (id, owner_user_id, drama_id, stage, caption_local_path) VALUES (?,?,?,?,?)')
+    .run('job-1', owner.id, 7, 'translate', lasCaptionKey);
 
   const app = express();
   app.use(express.json());
@@ -194,6 +201,10 @@ test('static media is owner-scoped, private-cacheable, and keeps local Range sup
     assert.equal(legacyAbsolute.status, 200);
     assert.equal(legacyAbsolute.body.toString(), 'legacy-absolute');
     assert.equal((await request(server, `/static/${legacyUrlKey}`, { headers: { Authorization: `Bearer ${otherSession}` } })).status, 404);
+    const lasCaption = await request(server, `/static/${lasCaptionKey}`, { headers: { Authorization: `Bearer ${ownerSession}` } });
+    assert.equal(lasCaption.status, 200, 'LAS 任务字幕必须可由任务所有者下载');
+    assert.match(lasCaption.body.toString(), /Hello|Hi/);
+    assert.equal((await request(server, `/static/${lasCaptionKey}`, { headers: { Authorization: `Bearer ${otherSession}` } })).status, 404);
 
     // A user-controlled asset row is only a reference. It must not launder a
     // key already owned by another row into the attacker's static namespace.

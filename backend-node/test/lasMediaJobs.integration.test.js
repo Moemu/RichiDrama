@@ -28,11 +28,13 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   const sourceFile = path.join(storage, 'input', 'source.mp4');
   const generated = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=blue:s=640x360:r=24:d=10', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=10', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', sourceFile], { encoding: 'utf8' });
   if (generated.status !== 0) throw new Error(generated.stderr);
-  const original = { upload: tos.upload, download: tos.download, request: las.request };
+  const original = { upload: tos.upload, download: tos.download, request: las.request, remove: tos.remove };
   let submits = 0;
   let polls = 0;
+  const removed = [];
   const providerOutputs = new Map();
   tos.upload = async (_config, key) => `tos://example-bucket/${key}`;
+  tos.remove = async (_config, objectPath) => { removed.push(objectPath); return { deleted: true }; };
   tos.download = async (_config, objectPath, target) => { fs.mkdirSync(path.dirname(target), { recursive: true }); if (objectPath.endsWith('.srt')) fs.writeFileSync(target, '1\n00:00:00,000 --> 00:00:01,000\nHello\n'); else fs.copyFileSync(sourceFile, target); return { bytes: fs.statSync(target).size }; };
   las.request = async (_config, action, payload) => {
     if (action === 'submit') {
@@ -85,7 +87,7 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   let jobId;
   t.after(async () => {
     await new Promise((resolve) => server.close(resolve));
-    tos.upload = original.upload; tos.download = original.download; las.request = original.request;
+    tos.upload = original.upload; tos.download = original.download; las.request = original.request; tos.remove = original.remove;
     db.close();
     fs.rmSync(root, { recursive: true, force: true });
   });
@@ -109,6 +111,10 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   }
   const completed = jobs.get(db, user.id, jobId);
   assert.equal(completed.status, 'completed', completed.error_msg);
+  assert.equal(completed.billing.state, 'settled');
+  assert.ok(completed.billing.charged_credits > 0, '完成任务要能看到实际扣费');
+  assert.equal(completed.source_asset_name, '原片');
+  assert.equal(completed.output_asset_name, 'LAS 字幕擦除');
   assert.equal(submits, 1);
   assert.equal(polls, 1);
   const output = assets.getByIdForOwner(db, completed.output_asset_id, user.id);
@@ -135,6 +141,45 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   assert.ok(fs.existsSync(path.join(storage, translation.caption_url.replace('/static/', ''))));
   assert.equal(submits, 2);
   assert.equal(polls, 2);
+  // 中转治理：完成任务在本地归档与 DB 完成态落地后，精确清理本任务登记过的对象；
+  // 耗时打点写入 submitted_at/completed_at 供运营台展示。
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rows = db.prepare('SELECT tos_cleanup_at FROM las_media_jobs WHERE id IN (?,?)').all(jobId, translationId);
+    if (rows.every((row) => row.tos_cleanup_at)) break;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  const governance = db.prepare('SELECT submitted_at, completed_at, tos_cleanup_at, tos_policy, tos_objects_json FROM las_media_jobs WHERE id=?').get(jobId);
+  assert.ok(governance.submitted_at && governance.completed_at && governance.tos_cleanup_at, '耗时与清理时间必须落库');
+  assert.equal(governance.tos_policy, 'cleanup');
+  assert.ok(JSON.parse(governance.tos_objects_json).input.bytes > 0, '中转对象要带字节数供运营统计');
+  assert.ok(removed.includes(`tos://example-bucket/richidrama/las/${jobId}/input/source.mp4`));
+  assert.ok(removed.includes(`tos://example-bucket/richidrama/las/${jobId}/inpaint/output.mp4`));
+  assert.ok(removed.includes(`tos://example-bucket/richidrama/las/${translationId}/translate/output.mp4`));
+  assert.ok(removed.includes(`tos://example-bucket/richidrama/las/${translationId}/translate/translated.srt`));
+  // 历史任务（tos_policy 为 NULL）默认不清理。
+  const legacyId = randomUUID();
+  const legacyAt = new Date().toISOString();
+  db.prepare(`INSERT INTO las_media_jobs(id,owner_user_id,drama_id,source_asset_id,idempotency_key,stage,input_json,output_asset_id,input_tos_path,status,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,'tos://example-bucket/richidrama/las/legacy/input/source.mp4','completed',?,?)`)
+    .run(legacyId, user.id, project.id, source.id, `legacy-${legacyId}`, 'inpaint', JSON.stringify({ stage: 'inpaint', model_level: 'lite' }), completed.output_asset_id, legacyAt, legacyAt);
+  const removedBefore = removed.length;
+  assert.equal(await jobs.cleanupTransit(db, log, cfg, legacyId), null, '历史任务的中转对象不能被清理');
+  assert.equal(removed.length, removedBefore);
+  // 清理失败不改写任务终态，重试有界且幂等。
+  const failingId = randomUUID();
+  db.prepare(`INSERT INTO las_media_jobs(id,owner_user_id,drama_id,source_asset_id,idempotency_key,stage,input_json,output_asset_id,input_tos_path,tos_policy,tos_objects_json,status,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,'cleanup',?,'completed',?,?)`)
+    .run(failingId, user.id, project.id, source.id, `failing-${failingId}`, 'inpaint', JSON.stringify({ stage: 'inpaint', model_level: 'lite' }), completed.output_asset_id,
+      `tos://example-bucket/richidrama/las/${failingId}/input/source.mp4`, JSON.stringify({ input: { path: `tos://example-bucket/richidrama/las/${failingId}/input/source.mp4`, bytes: 10 } }), legacyAt, legacyAt);
+  const originalRemove = tos.remove;
+  tos.remove = async () => { throw new Error('LAS TOS DELETE 失败：HTTP 500'); };
+  const failedCleanup = await jobs.cleanupTransit(db, log, cfg, failingId);
+  assert.equal(failedCleanup.failed, 1);
+  assert.equal(db.prepare('SELECT status, tos_cleanup_attempts FROM las_media_jobs WHERE id=?').get(failingId).status, 'completed', '清理失败不能让完成任务变失败');
+  assert.equal(db.prepare('SELECT tos_cleanup_attempts FROM las_media_jobs WHERE id=?').get(failingId).tos_cleanup_attempts, 1);
+  tos.remove = originalRemove;
+  await jobs.cleanupTransit(db, log, cfg, failingId);
+  assert.ok(db.prepare('SELECT tos_cleanup_at FROM las_media_jobs WHERE id=?').get(failingId).tos_cleanup_at, '重试后清理成功');
   const originalUpload = tos.upload;
   let releaseUpload;
   let uploadStarted;
@@ -176,6 +221,8 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   assert.equal(jobs.get(db, user.id, jobId).status, 'completed');
   assert.equal(jobs.get(db, user.id, translationId).status, 'completed');
   assert.equal(jobs.get(db, user.id, uncertainId).status, 'reconciliation');
+  assert.equal(jobs.get(db, user.id, uncertainId).billing.state, 'reconciling');
+  assert.ok(jobs.get(db, user.id, uncertainId).billing.reserved_credits > 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_reconciliation_cases WHERE authorization_id=? AND status='pending'").get(uncertainAuthorization.authorization_id).count, 1);
   assert.equal(submits, 3);
   recovery.stop();

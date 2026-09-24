@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const https = require('node:https');
+const { EventEmitter } = require('node:events');
+const { Readable } = require('node:stream');
 const bridge = require('../src/services/lasTosBridge');
 
 const jobId = 'a106ecad-410b-4a0b-a250-838a047a1d8f';
@@ -46,4 +49,45 @@ test('地域或域名层面的 404 没有 XML 错误体时，失败信息仍须�
   assert.match(bridge.tosErrorMessage('PUT', 404, '<html><body>404 Not Found</body></html>'), /响应体：<html><body>404 Not Found<\/body><\/html>/, '非 XML 响应体要带上原文片段');
   assert.ok(bridge.tosErrorMessage('PUT', 404, 'x'.repeat(1000)).length < 500, '超长响应体必须截断');
   assert.match(bridge.tosErrorMessage('PUT', 403, '<Error><Code>AccessDenied</Code><Message>x</Message></Error>'), /AccessDenied[\s\S]*凭证无该 Bucket 读写权限/);
+});
+
+test('中转清理只接受本 bucket 的精确 richidrama/las/ 键', async () => {
+  const date = new Date('2026-09-23T03:00:00Z');
+  const key = bridge.objectKey(jobId, 'inpaint', 'output.mp4');
+  const signed = bridge.signedHeaders(config, 'DELETE', key, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', '', date);
+  assert.match(signed.headers.authorization, /TOS4-HMAC-SHA256/);
+  assert.equal(signed.uri, `/${key}`);
+  await assert.rejects(() => bridge.remove(config, `tos://other-bucket/${key}`), /不在配置的 TOS Bucket 内/);
+  await assert.rejects(() => bridge.remove(config, `tos://example-bucket/other/${key}`), /对象路径无效/);
+  await assert.rejects(() => bridge.remove(config, `https://example.com/${key}`), /不在配置的 TOS Bucket 内/);
+});
+
+test('仅对象不存在的 404 可视为清理完成，Bucket 或地域错误必须保留重试', () => {
+  assert.equal(bridge.isMissingObject({ statusCode: 404, tosCode: 'NoSuchKey' }), true);
+  assert.equal(bridge.isMissingObject({ statusCode: 404, tosCode: 'NoSuchBucket' }), false);
+  assert.equal(bridge.isMissingObject({ statusCode: 404, tosCode: null }), false);
+  assert.equal(bridge.isMissingObject({ statusCode: 403, tosCode: 'NoSuchKey' }), false);
+});
+
+test('TOS 删除请求不吞掉 NoSuchBucket，只有 NoSuchKey 才幂等成功', async () => {
+  const originalRequest = https.request;
+  let code = 'NoSuchBucket';
+  https.request = (_options, respond) => {
+    const req = new EventEmitter();
+    req.end = () => {
+      const res = Readable.from([Buffer.from(`<Error><Code>${code}</Code><Message>missing</Message></Error>`)]);
+      res.statusCode = 404;
+      res.headers = {};
+      respond(res);
+    };
+    return req;
+  };
+  try {
+    const objectPath = `tos://example-bucket/${bridge.objectKey(jobId, 'input', 'source.mp4')}`;
+    await assert.rejects(() => bridge.remove(config, objectPath), /NoSuchBucket/);
+    code = 'NoSuchKey';
+    assert.deepEqual(await bridge.remove(config, objectPath), { deleted: false, already_absent: true });
+  } finally {
+    https.request = originalRequest;
+  }
 });

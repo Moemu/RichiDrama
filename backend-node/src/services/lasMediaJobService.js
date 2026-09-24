@@ -61,23 +61,76 @@ function validateMedia(media, stage) {
   if (media.width * media.height > 1920 * 1080 || media.fps > 30) throw new Error('首版 LAS 工作流只支持不超过 1080p、30fps 的视频');
 }
 
-function publicJob(row) {
+function publicJob(row, extra = {}) {
   return {
     id: row.id, drama_id: row.drama_id, source_asset_id: row.source_asset_id,
     output_asset_id: row.output_asset_id, stage: row.stage, status: row.status,
     caption_url: row.caption_local_path ? `/static/${row.caption_local_path}` : null,
     input: JSON.parse(row.input_json), error_msg: row.error_msg,
     created_at: row.created_at, updated_at: row.updated_at,
+    authorization_id: row.authorization_id || null,
+    provider_task_id: row.provider_task_id || null,
+    ...extra,
   };
+}
+
+const CREDITS_PER_MICRO = 10000;
+
+// 任务详情的计费投影：预授权、实际扣费与账本终态，让用户看到「花了多少」
+// 而不是只有状态标签。批量取，列表页不产生 N+1。
+function decorate(db, rows) {
+  if (!rows.length) return [];
+  const authIds = [...new Set(rows.map((row) => row.authorization_id).filter(Boolean))];
+  const billingByAuth = new Map();
+  if (authIds.length) {
+    const placeholders = authIds.map(() => '?').join(',');
+    const transactions = db.prepare(`SELECT authorization_id, type, amount_micro FROM billing_transactions
+      WHERE authorization_id IN (${placeholders}) AND type IN ('authorization', 'settlement', 'void')`).all(...authIds);
+    const charged = db.prepare(`SELECT authorization_id, SUM(charged_micro) AS charged_micro FROM billing_usage_logs
+      WHERE authorization_id IN (${placeholders}) GROUP BY authorization_id`).all(...authIds);
+    const chargedByAuth = new Map(charged.map((row) => [row.authorization_id, row.charged_micro]));
+    for (const row of transactions) {
+      const entry = billingByAuth.get(row.authorization_id) || {};
+      entry[row.type] = row.amount_micro;
+      billingByAuth.set(row.authorization_id, entry);
+    }
+    for (const [authorizationId, micro] of chargedByAuth) {
+      const entry = billingByAuth.get(authorizationId) || {};
+      entry.charged_micro = micro;
+      billingByAuth.set(authorizationId, entry);
+    }
+  }
+  const assetIds = [...new Set(rows.flatMap((row) => [row.source_asset_id, row.output_asset_id]).filter(Boolean))];
+  const names = new Map(assetIds.length
+    ? db.prepare(`SELECT id, name FROM assets WHERE id IN (${assetIds.map(() => '?').join(',')})`).all(...assetIds).map((asset) => [asset.id, asset.name])
+    : []);
+  return rows.map((row) => {
+    const ledger = billingByAuth.get(row.authorization_id) || {};
+    let state = 'frozen';
+    if (ledger.settlement != null) state = 'settled';
+    else if (ledger.void != null) state = 'released';
+    else if (row.status === 'reconciliation') state = 'reconciling';
+    return {
+      ...publicJob(row, {
+        source_asset_name: names.get(row.source_asset_id) || null,
+        output_asset_name: row.output_asset_id ? names.get(row.output_asset_id) || null : null,
+        billing: {
+          state,
+          reserved_credits: ledger.authorization != null ? ledger.authorization / CREDITS_PER_MICRO : null,
+          charged_credits: state === 'settled' && ledger.charged_micro != null ? ledger.charged_micro / CREDITS_PER_MICRO : null,
+        },
+      }),
+    };
+  });
 }
 
 function get(db, ownerId, id) {
   const row = db.prepare('SELECT * FROM las_media_jobs WHERE id=? AND owner_user_id=?').get(id, ownerId);
-  return row ? publicJob(row) : null;
+  return row ? decorate(db, [row])[0] : null;
 }
 
 function list(db, ownerId, dramaId) {
-  return db.prepare('SELECT * FROM las_media_jobs WHERE owner_user_id=? AND drama_id=? ORDER BY created_at DESC LIMIT 100').all(ownerId, dramaId).map(publicJob);
+  return decorate(db, db.prepare('SELECT * FROM las_media_jobs WHERE owner_user_id=? AND drama_id=? ORDER BY created_at DESC LIMIT 100').all(ownerId, dramaId));
 }
 
 function resultPaths(data, outputPrefix) {
@@ -111,7 +164,7 @@ async function create(db, log, cfg, ownerId, body) {
       || String(body.stage || '') !== existing.stage
       || (existing.stage === 'translate' && String(body.output_language || '') !== previous.output_language)
       || (existing.stage === 'inpaint' && String(body.model_level || '') !== previous.model_level)) throw new Error('幂等键已用于不同任务');
-    return publicJob(existing);
+    return decorate(db, [existing])[0];
   }
   const stage = String(body.stage || '');
   if (!['translate', 'inpaint'].includes(stage)) throw new Error('LAS 任务类型无效');
@@ -136,8 +189,8 @@ async function create(db, log, cfg, ownerId, body) {
   billing.quote(db, actor, { service_type: 'video_postprocess', model, provider: 'las', usage: { millisecond: media.durationMs } });
   const at = now();
   db.transaction(() => {
-    db.prepare(`INSERT INTO las_media_jobs(id,owner_user_id,drama_id,source_asset_id,idempotency_key,stage,input_json,status,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,'queued',?,?)`).run(id, ownerId, dramaId, assetId, key, stage, JSON.stringify(input), at, at);
+    db.prepare(`INSERT INTO las_media_jobs(id,owner_user_id,drama_id,source_asset_id,idempotency_key,stage,input_json,tos_policy,status,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,'queued',?,?)`).run(id, ownerId, dramaId, assetId, key, stage, JSON.stringify(input), 'cleanup', at, at);
     const authorization = billing.createAuthorization(db, actor, {
       idempotency_key: `las:${ownerId}:${key}`, service_type: 'video_postprocess', model,
       provider: 'las', usage: { millisecond: media.durationMs }, drama_id: dramaId,
@@ -150,16 +203,48 @@ async function create(db, log, cfg, ownerId, body) {
 }
 
 function record(db, id, patch) {
-  const allowed = ['status', 'input_tos_path', 'provider_task_id', 'result_json', 'output_asset_id', 'caption_local_path', 'error_msg'];
+  const allowed = ['status', 'input_tos_path', 'provider_task_id', 'result_json', 'output_asset_id', 'caption_local_path', 'error_msg', 'submitted_at', 'completed_at', 'tos_objects_json', 'tos_cleanup_at', 'tos_cleanup_attempts'];
   const entries = Object.entries(patch).filter(([key]) => allowed.includes(key));
   if (!entries.length) return;
   const at = now();
   db.prepare(`UPDATE las_media_jobs SET ${entries.map(([key]) => `${key}=?`).join(',')}, updated_at=? WHERE id=?`).run(...entries.map(([, value]) => value), at, id);
 }
 
-function reconcile(db, row, reason) {
+function readTosObjects(row) {
+  try { return JSON.parse(row.tos_objects_json || '{}'); } catch (_) { return {}; }
+}
+
+// 只清理本任务精确登记过的中转对象：不列举、不递归、不按时间猜测。
+// 历史任务（tos_policy 为 NULL）默认不动；清理失败绝不把完成任务改判为失败。
+async function cleanupTransit(db, log, cfg, id) {
+  const row = db.prepare('SELECT * FROM las_media_jobs WHERE id=?').get(id);
+  if (!row || row.status !== 'completed' || row.tos_policy !== 'cleanup' || row.tos_cleanup_at) return null;
+  if (Number(row.tos_cleanup_attempts || 0) >= 5) return null;
+  const objects = readTosObjects(row);
+  const localVideo = row.output_asset_id ? require('./assetService').getById(db, row.output_asset_id) : null;
+  const localVideoPath = localVideo && !localVideo.deleted_at ? resolveStorageFile(storageRoot(cfg), localVideo.local_path) : null;
+  // 前置门槛：数据库完成态已落地、本地成片文件可读，才允许删中转对象。
+  if (!localVideoPath || !fs.existsSync(localVideoPath)) return null;
+  if (row.caption_local_path && !fs.existsSync(resolveStorageFile(storageRoot(cfg), row.caption_local_path))) return null;
+  const paths = [row.input_tos_path, objects.output_video || null, objects.output_caption || null].filter(Boolean);
+  let { tosConfig } = serviceConfig(db);
+  let failures = 0;
+  for (const path of paths) {
+    try { await tos.remove(tosConfig, path); }
+    catch (error) { failures += 1; log.warn('LAS 中转对象清理失败，等待重试', { id, path, error: error.message }); }
+  }
+  if (!failures) {
+    record(db, id, { tos_cleanup_at: now() });
+    log.info('LAS 中转对象已清理', { id, objects: paths.length });
+    return { cleaned: paths.length };
+  }
+  db.prepare('UPDATE las_media_jobs SET tos_cleanup_attempts=tos_cleanup_attempts+1, updated_at=? WHERE id=?').run(now(), id);
+  return { failed: failures };
+}
+
+function reconcile(db, row, reason, providerRequestId = null) {
   billing.markPendingReconciliation(db, { id: row.owner_user_id }, row.authorization_id, {
-    provider_request_id: row.provider_task_id || null,
+    provider_request_id: row.provider_task_id || providerRequestId,
     reason,
   });
   record(db, row.id, { status: 'reconciliation', error_msg: reason.slice(0, 500) });
@@ -190,7 +275,7 @@ async function processJob(db, log, cfg, id) {
         const file = resolveStorageFile(storageRoot(cfg), source.local_path);
         const tosPath = await tos.upload(tosConfig, tos.objectKey(id, 'input', 'source.mp4'), file);
         if (!renewLease()) return;
-        record(db, id, { input_tos_path: tosPath, status: 'submitting' });
+        record(db, id, { input_tos_path: tosPath, status: 'submitting', tos_objects_json: JSON.stringify({ input: { path: tosPath, bytes: fs.statSync(file).size } }) });
         row = db.prepare('SELECT * FROM las_media_jobs WHERE id=?').get(id);
       } catch (error) {
         billing.voidAuthorization(db, { id: row.owner_user_id }, row.authorization_id, 'LAS 输入未提交供应商');
@@ -201,9 +286,9 @@ async function processJob(db, log, cfg, id) {
         if (!renewLease()) return;
         const payload = las.submitPayload(clientConfig, row.stage, { ...input, job_id: id, video_url: row.input_tos_path });
         const accepted = await las.request(clientConfig, 'submit', payload);
-        record(db, id, { provider_task_id: accepted.task_id, status: 'processing', error_msg: null });
+        record(db, id, { provider_task_id: accepted.task_id, status: 'processing', error_msg: null, submitted_at: now() });
       } catch (error) {
-        reconcile(db, row, `LAS 提交结果不确定：${error.message}`);
+        reconcile(db, row, `LAS 提交结果不确定：${error.message}`, error.providerRequestId || null);
         return;
       }
       row = db.prepare('SELECT * FROM las_media_jobs WHERE id=?').get(id);
@@ -226,9 +311,11 @@ async function processJob(db, log, cfg, id) {
       const paths = resultPaths(JSON.parse(row.result_json), prefix);
       const relative = `las/${id}/video.mp4`;
       const target = path.join(storageRoot(cfg), relative);
-      await tos.download(tosConfig, paths.video, target);
+      const downloaded = await tos.download(tosConfig, paths.video, target);
       const captionRelative = paths.caption ? `las/${id}/subtitles.srt` : null;
-      if (captionRelative) await tos.download(tosConfig, paths.caption, path.join(storageRoot(cfg), captionRelative));
+      let captionBytes = null;
+      if (captionRelative) captionBytes = (await tos.download(tosConfig, paths.caption, path.join(storageRoot(cfg), captionRelative))).bytes;
+      record(db, id, { tos_objects_json: JSON.stringify({ ...readTosObjects(row), output_video: paths.video, output_caption: paths.caption || null, output_bytes: downloaded.bytes, caption_bytes: captionBytes }) });
       const media = await probe(target);
       validateMedia(media, row.stage);
       const chargedMs = billedMilliseconds(input, media);
@@ -244,8 +331,9 @@ async function processJob(db, log, cfg, id) {
         billing.settleAuthorization(db, { id: row.owner_user_id }, row.authorization_id, {
           usage: { millisecond: chargedMs }, provider_request_id: row.provider_task_id,
         });
-        record(db, id, { output_asset_id: created.id, caption_local_path: captionRelative, status: 'completed', error_msg: null });
+        record(db, id, { output_asset_id: created.id, caption_local_path: captionRelative, status: 'completed', error_msg: null, completed_at: now() });
       })();
+      cleanupTransit(db, log, cfg, id).catch((error) => log.warn('LAS 中转清理异常', { id, error: error.message }));
       if (require('./mediaStorageService').isOss(cfg)) {
         const mediaStorage = require('./mediaStorageService');
         for (const localPath of [relative, captionRelative].filter(Boolean)) {
@@ -278,16 +366,22 @@ function resume(db, log, cfg) {
     return count;
   };
   const uncertain = recoverUncertain();
+  // 案件已在处置与任务同步之间中断时落下的窗口，启动/恢复时补偿对齐。
+  const caseSync = billing.recoverResolvedLasReconciliations(db);
   const pending = db.prepare("SELECT id FROM las_media_jobs WHERE status IN ('queued','processing','finalizing')").all();
   for (const row of pending) setImmediate(() => processJob(db, log, cfg, row.id).catch((error) => log.error('LAS 任务恢复失败', { id: row.id, error: error.message })));
   const timer = setInterval(() => {
-    try { recoverUncertain(); } catch (error) { log.error('LAS 提交恢复失败', { error: error.message }); }
+    try { recoverUncertain(); billing.recoverResolvedLasReconciliations(db); } catch (error) { log.error('LAS 提交恢复失败', { error: error.message }); }
     for (const row of db.prepare("SELECT id FROM las_media_jobs WHERE status IN ('queued','processing','finalizing') LIMIT 50").all()) {
       processJob(db, log, cfg, row.id).catch((error) => log.error('LAS 任务轮询失败', { id: row.id, error: error.message }));
     }
+    // 完成任务的中转清理重试（有界次数）：清理失败不影响任务终态。
+    for (const row of db.prepare("SELECT id FROM las_media_jobs WHERE status='completed' AND tos_policy='cleanup' AND tos_cleanup_at IS NULL AND tos_cleanup_attempts < 5 LIMIT 20").all()) {
+      cleanupTransit(db, log, cfg, row.id).catch((error) => log.warn('LAS 中转清理重试失败', { id: row.id, error: error.message }));
+    }
   }, 30_000);
   timer.unref?.();
-  return { queued: pending.length, uncertain, stop: () => clearInterval(timer) };
+  return { queued: pending.length, uncertain, case_synced: caseSync.synced, stop: () => clearInterval(timer) };
 }
 
-module.exports = { create, get, list, processJob, resume, resultPaths, billedMilliseconds, validateMedia, serviceConfig };
+module.exports = { create, get, list, processJob, resume, cleanupTransit, resultPaths, billedMilliseconds, validateMedia, serviceConfig };

@@ -163,6 +163,10 @@ const DEFINITIONS = [
   { table: 'video_interpolation_jobs', alias: 'n', pathFields: [
     { name: 'input_video_url', role: 'postprocess' }, { name: 'source_local_path', role: 'postprocess' }, { name: 'output_local_path', role: 'postprocess' },
   ], owner: 'n.owner_user_id' },
+  // LAS 任务的成片走 assets；字幕 srt 只存在于任务行上，必须单独授权给任务所有者。
+  { table: 'las_media_jobs', alias: 'j', pathFields: [
+    { name: 'caption_local_path', role: 'asset' },
+  ], owner: 'j.owner_user_id', project: 'j.drama_id' },
   { table: 'external_asset_bindings', alias: 'b', pathFields: [{ name: 'source_local_path', role: 'binding' }], referenceFields: ['source_image_url'], owner: 'b.owner_user_id' },
 ];
 

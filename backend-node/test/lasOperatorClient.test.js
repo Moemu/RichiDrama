@@ -51,4 +51,12 @@ test('LAS task IDs are opaque strings and supplier request IDs survive invalid r
   assert.throws(() => las.pollPayload('inpaint', 'bad\nidentifier'), /任务 ID/);
   assert.throws(() => las.pollPayload('inpaint', 'x'.repeat(257)), /任务 ID/);
   assert.throws(() => las.taskResponse({ metadata: { task_status: 'PENDING', request_id: 'req-123', business_code: 'TaskId.Missing' } }), /request_id=req-123.*business_code=TaskId.Missing/);
+  assert.throws(() => las.taskResponse({ metadata: { task_status: 'PENDING', request_id: 'req-123' } }), (error) => error.providerRequestId === 'req-123');
+});
+
+test('HTTP 提交失败保留可核验的供应商请求 ID，而非把它当任务 ID', async () => {
+  await assert.rejects(
+    () => las.request(config, 'submit', {}, async () => ({ ok: false, status: 500, headers: { get: (name) => name === 'x-request-id' ? 'req-http-456' : null } })),
+    (error) => error.providerRequestId === 'req-http-456' && /HTTP 500/.test(error.message),
+  );
 });

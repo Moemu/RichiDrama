@@ -231,6 +231,92 @@ function productionDetail(db, id) {
   return { ...row, stages: stages(row), authorizations, reproduction: productionReproduction(db, row), error_summary: row.error_msg || row.interpolation_error_msg || row.upscale_error_msg || row.archive_record_error || row.archive_error || null };
 }
 
+// —— 视频本地化（LAS）运营视图：耗时、失败阶段与 TOS 中转占用 ——
+function hasLasTable(db) {
+  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='las_media_jobs'").get();
+}
+
+function lasFailurePhase(row) {
+  if (row.status === 'reconciliation') return 'reconcile';
+  if (row.status !== 'failed') return null;
+  const message = String(row.error_msg || '');
+  if (!row.submitted_at) return /TOS|上传/.test(message) ? 'transit_upload' : 'submit';
+  if (!row.completed_at) return /归档|结算|报价|输出/.test(message) ? 'archive' : 'provider';
+  return 'archive';
+}
+
+function lasTransitBytes(row) {
+  const objects = parseJson(row.tos_objects_json, {}) || {};
+  return Number(objects.input?.bytes || 0) + Number(objects.output_bytes || 0) + Number(objects.caption_bytes || 0);
+}
+
+function lasProjection(row) {
+  const input = parseJson(row.input_json, {}) || {};
+  const finished = ['completed', 'failed', 'reconciliation'].includes(row.status);
+  return {
+    id: row.id, owner_user_id: row.owner_user_id, username: row.username || null,
+    drama_id: row.drama_id, project_title: row.project_title || null,
+    stage: row.stage, status: row.status, model_level: input.model_level || null,
+    output_language: input.output_language || null, provider_task_id: row.provider_task_id || null,
+    error_msg: row.error_msg || null, failure_phase: lasFailurePhase(row),
+    created_at: row.created_at, submitted_at: row.submitted_at || null,
+    completed_at: row.completed_at || null, updated_at: row.updated_at,
+    provider_elapsed_ms: row.submitted_at ? elapsedMs(row.submitted_at, row.completed_at || (finished ? row.updated_at : null)) : null,
+    total_elapsed_ms: elapsedMs(row.created_at, finished ? row.updated_at : null),
+    transit_bytes: lasTransitBytes(row),
+    tos_cleanup_at: row.tos_cleanup_at || null,
+    tos_cleanup_attempts: Number(row.tos_cleanup_attempts || 0),
+    tos_policy: row.tos_policy || null,
+  };
+}
+
+function listLas(db, query = {}) {
+  if (!hasLasTable(db)) return { items: [], total: 0, page: 1, page_size: 20 };
+  const meta = page(query); const clauses = ['1=1']; const args = [];
+  if (query.status) { clauses.push('j.status = ?'); args.push(String(query.status)); }
+  if (query.stage) { clauses.push('j.stage = ?'); args.push(String(query.stage)); }
+  if (query.user_id) { clauses.push('j.owner_user_id = ?'); args.push(Number(query.user_id)); }
+  if (query.project_id) { clauses.push('j.drama_id = ?'); args.push(Number(query.project_id)); }
+  if (query.from) { clauses.push('j.created_at >= ?'); args.push(String(query.from)); }
+  if (query.to) { clauses.push('j.created_at <= ?'); args.push(String(query.to)); }
+  const where = clauses.join(' AND ');
+  const total = Number(db.prepare(`SELECT COUNT(*) total FROM las_media_jobs j WHERE ${where}`).get(...args).total || 0);
+  const rows = db.prepare(`SELECT j.*, u.username, d.title AS project_title FROM las_media_jobs j
+    LEFT JOIN users u ON u.id = j.owner_user_id LEFT JOIN dramas d ON d.id = j.drama_id
+    WHERE ${where} ORDER BY j.updated_at DESC, j.created_at DESC LIMIT ? OFFSET ?`).all(...args, meta.page_size, meta.offset);
+  return { items: rows.map(lasProjection), total, page: meta.page, page_size: meta.page_size };
+}
+
+function lasSummary(db) {
+  if (!hasLasTable(db)) return null;
+  const counts = db.prepare(`SELECT COUNT(*) total, SUM(status='completed') completed, SUM(status='failed') failed,
+    SUM(status='reconciliation') reconciling, SUM(status IN ('queued','submitting','processing','finalizing')) active
+    FROM las_media_jobs`).get();
+  const rows = db.prepare('SELECT status, tos_objects_json, tos_cleanup_at, tos_policy, submitted_at, completed_at, created_at, updated_at FROM las_media_jobs').all();
+  let pendingBytes = 0; let totalBytes = 0; let historyBytes = 0; let cleanupFailed = 0;
+  const durations = [];
+  for (const row of rows) {
+    const bytes = lasTransitBytes(row);
+    totalBytes += bytes;
+    if (!row.tos_cleanup_at) {
+      // 清理策略只覆盖新任务；历史对象计入「历史保留」而不是「待清理」。
+      if (row.tos_policy === 'cleanup') pendingBytes += bytes; else historyBytes += bytes;
+    }
+    if (row.status === 'completed' && row.tos_policy === 'cleanup' && !row.tos_cleanup_at && Number(row.tos_cleanup_attempts || 0) >= 5) cleanupFailed += 1;
+    if (row.submitted_at && row.completed_at) {
+      const ms = Date.parse(row.completed_at) - Date.parse(row.submitted_at);
+      if (Number.isFinite(ms) && ms >= 0) durations.push(ms);
+    }
+  }
+  const phaseCounts = db.prepare("SELECT error_msg, submitted_at, completed_at, status FROM las_media_jobs WHERE status IN ('failed','reconciliation')").all()
+    .reduce((acc, row) => { const phase = lasFailurePhase(row); acc[phase] = (acc[phase] || 0) + 1; return acc; }, {});
+  return {
+    ...counts, pending_transit_bytes: pendingBytes, total_transit_bytes: totalBytes, history_transit_bytes: historyBytes,
+    cleanup_failed: cleanupFailed, average_provider_ms: durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null,
+    failure_phases: phaseCounts,
+  };
+}
+
 function listArchives(db, query = {}) {
   const meta = page(query); const clauses = ['1=1']; const args=[];
   if (query.status) { clauses.push('archive_status=?'); args.push(String(query.status)); }
@@ -309,7 +395,7 @@ function overview(db, query = {}) {
       WHERE v.deleted_at IS NULL AND v.status IN ('failed','retryable','invalid') AND ${supersededFailure}
       ORDER BY v.updated_at DESC LIMIT 6`).all().map((row) => ({ ...row, kind: 'failed', target: { tab: 'production', status: 'failed' } })),
   ].sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at))).slice(0, 8);
-  return { generated_at:now.toISOString(), production, postprocess:{ upscale:postprocess, interpolation }, storage, billing:{...billing,...frozen,pending_reconciliations:reconciliation.count}, stage_summary:stageSummary, trend, alerts, action_queue:actionQueue, alert_settings:settings };
+  return { generated_at:now.toISOString(), production, postprocess:{ upscale:postprocess, interpolation }, storage, billing:{...billing,...frozen,pending_reconciliations:reconciliation.count}, las:lasSummary(db), stage_summary:stageSummary, trend, alerts, action_queue:actionQueue, alert_settings:settings };
 }
 
 function csvCell(value) {
@@ -326,4 +412,4 @@ function productionCsv(db, query = {}) {
   return `\uFEFF${[headers, ...rows.map((row) => headers.map((key) => csvCell(row[key])).join(','))].map((row) => Array.isArray(row) ? row.join(',') : row).join('\r\n')}\r\n`;
 }
 
-module.exports = { overview, listProduction, productionDetail, listArchives, alertSettings, saveAlertSettings, productionCsv };
+module.exports = { overview, listProduction, productionDetail, listArchives, listLas, lasSummary, alertSettings, saveAlertSettings, productionCsv };

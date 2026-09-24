@@ -13,11 +13,35 @@ test('completed LAS jobs open the archived asset in a local video player', async
   assert.doesNotMatch(source, /查看成片[^\n]*media-library/)
 })
 
-test('quote refreshes when project, asset, or model changes and ignores stale responses', async () => {
+test('quote refreshes when project, asset, model, language or stage changes and ignores stale responses', async () => {
   const source = await page()
-  assert.match(source, /watch\(\[dramaId, assetId, model\]/)
+  // 回归：上传素材后切换目标语言，翻译模型不变（las-video-translate），
+  // 旧实现只监听 [dramaId, assetId, model]，clearQuote 之后没人重载报价，
+  // 提交按钮因 !quote 永久禁用。语言与阶段必须进入 watcher 依赖。
+  assert.match(source, /watch\(\[dramaId, assetId, model, outputLanguage, stage\]/)
   assert.match(source, /quoteTimer = setTimeout\(loadQuote, 250\)/)
   assert.match(source, /if \(version === quoteVersion\) quote\.value = result/)
   assert.match(source, /:disabled="!ready \|\| !quote \|\| quoting \|\| submitting"/)
   assert.match(source, /ElMessageBox\.confirm\(/)
+})
+
+// 成片交付体验：任务卡片集中展示源视频→成片、实际扣费与下一步操作，
+// 用户不必跳去素材库或账本就能确认这一单产出了什么、花了多少。
+test('job cards consolidate source, output, actual billing and next actions', async () => {
+  const source = await page()
+  assert.match(source, /源视频 \{\{ job\.source_asset_name/)
+  assert.match(source, /→ 成片 \{\{ job\.output_asset_name \}\}/)
+  assert.match(source, /实际扣费 \$\{creditsText\(billing\.charged_credits\)\}/)
+  assert.match(source, /对账中：[\s\S]*冻结中，等待运营核验用量/)
+  assert.match(source, /预授权已释放，未扣费/)
+  assert.match(source, /@click="retryJob\(job\)">按原参数重新提交/)
+  assert.match(source, /运营核验用量后这里会更新为最终结果/)
+})
+
+test('retry never keeps a different selected video when the original is unavailable', async () => {
+  const source = await page()
+  assert.match(source, /const original = videos\.value\.find\(\(asset\) => String\(asset\.id\) === String\(job\.source_asset_id\)\)/)
+  assert.match(source, /assetId\.value = original \? String\(original\.id\) : ''/)
+  assert.match(source, /原视频素材已不可选，请重新选择视频后再提交/)
+  assert.match(source, /function retryJob\(job\) \{[\s\S]*?clearQuote\(\)/)
 })

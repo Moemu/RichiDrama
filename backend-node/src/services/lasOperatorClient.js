@@ -79,12 +79,23 @@ function taskResponse(payload, expectedTaskId = null) {
     const requestId = String(metadata?.request_id || '').replace(/[^\w.-]/g, '').slice(0, 80);
     const businessCode = String(metadata?.business_code || '').replace(/[^\w.-]/g, '').slice(0, 80);
     const details = [requestId && `request_id=${requestId}`, businessCode && `business_code=${businessCode}`].filter(Boolean).join('，');
-    throw new Error(`LAS 返回的任务 ID 无效${details ? `（${details}）` : ''}`);
+    const error = new Error(`LAS 返回的任务 ID 无效${details ? `（${details}）` : ''}`);
+    error.providerRequestId = requestId || null;
+    throw error;
   }
   const status = String(metadata.task_status || '').toUpperCase();
   if (!['ACCEPTED', 'PENDING', 'RUNNING', 'PROCESSING', 'COMPLETED', 'FAILED', 'TIMEOUT'].includes(status)) throw new Error('LAS 返回的任务状态无效');
   if (status === 'COMPLETED' && String(metadata.business_code ?? '0') !== '0') throw new Error('LAS 完成状态与业务码不一致');
   return { task_id: taskId, status, business_code: String(metadata.business_code ?? ''), error_msg: String(metadata.error_msg || '').slice(0, 500), data: payload.data || null };
+}
+
+// HTTP 失败往往就是「提交结果不确定」的来源：把响应头里的请求 ID 带进错误信息，
+// 运营在待对账案件里才能拿它去供应商控制台核对这一笔是否真的被受理。
+function providerRequestId(response) {
+  try {
+    const value = String(response?.headers?.get?.('x-request-id') || response?.headers?.get?.('request-id') || '');
+    return value.replace(/[^\w.-]/g, '').slice(0, 80);
+  } catch (_) { return ''; }
 }
 
 async function request(config, action, payload, fetchImpl = fetch) {
@@ -95,7 +106,12 @@ async function request(config, action, payload, fetchImpl = fetch) {
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw new Error(`LAS ${action} 请求失败：HTTP ${response.status}`);
+  if (!response.ok) {
+    const requestId = providerRequestId(response);
+    const error = new Error(`LAS ${action} 请求失败：HTTP ${response.status}${requestId ? `（request_id=${requestId}）` : ''}`);
+    error.providerRequestId = requestId || null;
+    throw error;
+  }
   return taskResponse(await response.json(), action === 'poll' ? payload.task_id : null);
 }
 

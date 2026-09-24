@@ -81,6 +81,7 @@ export const adminAPI = {
   /** 复用用户端按快照重试端点；服务端对 admin 角色放行归属校验 */
   retryGeneration: (omniJobId, data) => request.post(`/omni-video-jobs/${omniJobId}/retry`, data),
   mediaArchives: (params) => request.get('/admin/media-archives', { params }),
+  lasJobs: (params) => request.get('/admin/las-jobs', { params }),
   richbestRebindCandidates: (params) => request.get('/admin/richbest-asset-rebind-candidates', { params }),
   createRichbestRebind: (data) => request.post('/admin/richbest-asset-rebinds', data),
   richbestRebind: (id) => request.get(`/admin/richbest-asset-rebinds/${id}`),

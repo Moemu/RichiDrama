@@ -674,6 +674,43 @@ function publicReconciliationCase(row) {
   };
 }
 
+const LAS_CASE_OUTCOMES = {
+  resolved: '对账案件已按供应商实测用量人工结算；任务终止，不自动重提',
+  waived: '对账案件已由管理员人工豁免并释放冻结积分；任务终止，不自动重提',
+  expired: '对账案件超时自动释放预授权；任务终止，不自动重提',
+};
+
+function hasLasMediaJobsTable(db) {
+  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='las_media_jobs'").get();
+}
+
+// 人工结算/豁免或超时释放后，同步 LAS 任务的用户可见状态。进入对账的任务没有
+// 已归档成片，统一落为 failed，并把处置结果追加进 error_msg。幂等：只更新
+// status='reconciliation' 的行，重复处置不会二次改写。
+function syncLasReconciliationOutcome(db, authorizationId, outcome) {
+  if (!authorizationId || !hasLasMediaJobsTable(db)) return 0;
+  const rows = db.prepare("SELECT id, error_msg FROM las_media_jobs WHERE authorization_id=? AND status='reconciliation'").all(authorizationId);
+  const at = now();
+  for (const row of rows) {
+    const previous = String(row.error_msg || '').trim();
+    const message = `${previous ? `${previous}；` : ''}${outcome}`.slice(0, 500);
+    db.prepare("UPDATE las_media_jobs SET status='failed', error_msg=?, updated_at=?, lease_token=NULL, lease_until=NULL WHERE id=? AND status='reconciliation'")
+      .run(message, at, row.id);
+  }
+  return rows.length;
+}
+
+// 补偿扫描：案件已处置但任务仍停在 reconciliation（结算事务与任务同步之间进程中断）。
+function recoverResolvedLasReconciliations(db) {
+  if (!hasLasMediaJobsTable(db)) return { synced: 0 };
+  const rows = db.prepare(`SELECT DISTINCT j.authorization_id, c.status FROM las_media_jobs j
+    JOIN billing_reconciliation_cases c ON c.authorization_id = j.authorization_id
+    WHERE j.status = 'reconciliation' AND c.status IN ('resolved','waived','expired')`).all();
+  let synced = 0;
+  for (const row of rows) synced += syncLasReconciliationOutcome(db, row.authorization_id, LAS_CASE_OUTCOMES[row.status] || '对账案件已处置，任务状态已同步');
+  return { synced };
+}
+
 function recordVideoReconciliationRecovery(db, caseId, recovery) {
   const row = db.prepare('SELECT resolution_json, status FROM billing_reconciliation_cases WHERE id=?').get(caseId);
   if (!row || !['resolved', 'waived'].includes(String(row.status || ''))) return false;
@@ -806,6 +843,22 @@ function listReconciliationCases(db, filters = {}) {
     .map((row) => ({ ...publicReconciliationCase(row), frozen_amount: microToCredits(row.frozen_amount_micro) }));
 }
 
+const LAS_SOURCE_TASK_COLUMNS = ['las_job_id', 'las_stage', 'las_status', 'las_drama_id', 'las_project_title', 'las_source_asset_id', 'las_output_asset_id', 'las_provider_task_id', 'las_input_tos_path', 'las_output_local_path', 'las_caption_local_path', 'las_error_msg', 'las_input_json'];
+
+function reconciliationSourceTask(row) {
+  if (row.las_job_id == null) return null;
+  const detail = parse(row.las_input_json, null) || {};
+  return {
+    kind: 'las_media_job', id: String(row.las_job_id), stage: row.las_stage, status: row.las_status,
+    drama_id: row.las_drama_id, project_title: row.las_project_title,
+    source_asset_id: row.las_source_asset_id, output_asset_id: row.las_output_asset_id,
+    output_language: detail.output_language || null, model_level: detail.model_level || null,
+    provider_task_id: row.las_provider_task_id, input_tos_path: row.las_input_tos_path,
+    output_local_path: row.las_output_local_path, caption_local_path: row.las_caption_local_path,
+    error_msg: row.las_error_msg,
+  };
+}
+
 function pagedReconciliationCases(db, filters = {}) {
   let where = 'WHERE 1=1'; const args = [];
   if (filters.status) { where += ' AND c.status = ?'; args.push(String(filters.status)); }
@@ -814,13 +867,29 @@ function pagedReconciliationCases(db, filters = {}) {
   if (filters.from) { where += ' AND c.created_at >= ?'; args.push(String(filters.from)); }
   if (filters.to) { where += ' AND c.created_at <= ?'; args.push(String(filters.to)); }
   const meta = pagination(filters);
+  const hasLas = hasLasMediaJobsTable(db);
+  const lasColumns = hasLas ? `, lj.id AS las_job_id, lj.stage AS las_stage, lj.status AS las_status, lj.drama_id AS las_drama_id,
+      dr.title AS las_project_title, lj.source_asset_id AS las_source_asset_id, lj.output_asset_id AS las_output_asset_id,
+      lj.provider_task_id AS las_provider_task_id, lj.input_tos_path AS las_input_tos_path,
+      oa.local_path AS las_output_local_path, lj.caption_local_path AS las_caption_local_path,
+      lj.error_msg AS las_error_msg, lj.input_json AS las_input_json` : '';
+  const lasJoins = hasLas ? `LEFT JOIN las_media_jobs lj ON lj.authorization_id = c.authorization_id
+    LEFT JOIN dramas dr ON dr.id = lj.drama_id LEFT JOIN assets oa ON oa.id = lj.output_asset_id` : '';
   const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_reconciliation_cases c ${where}`).get(...args)?.total || 0);
   const rows = db.prepare(`SELECT c.*, u.username, a.amount_micro AS frozen_amount_micro,
-      a.snapshot_json AS authorization_snapshot_json
+      a.reference_type, a.reference_id, a.snapshot_json AS authorization_snapshot_json ${lasColumns}
     FROM billing_reconciliation_cases c JOIN users u ON u.id = c.user_id
-    JOIN billing_transactions a ON a.id = c.authorization_id ${where}
+    JOIN billing_transactions a ON a.id = c.authorization_id ${lasJoins} ${where}
     ORDER BY CASE WHEN c.status = 'pending' THEN 0 ELSE 1 END, c.due_at ASC LIMIT ? OFFSET ?`).all(...args, meta.page_size, meta.offset);
-  return { items: rows.map((row) => ({ ...publicReconciliationCase(row), frozen_amount: microToCredits(row.frozen_amount_micro) })), total, page: meta.page, page_size: meta.page_size };
+  const items = rows.map((row) => {
+    const source_task = hasLas ? reconciliationSourceTask(row) : null;
+    if (source_task && !row.provider_request_id) {
+      row.provider_request_id = /\brequest_id=([\w.-]+)/.exec(String(row.reason || ''))?.[1] || null;
+    }
+    for (const key of LAS_SOURCE_TASK_COLUMNS) delete row[key];
+    return { ...publicReconciliationCase(row), frozen_amount: microToCredits(row.frozen_amount_micro), source_task };
+  });
+  return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
 function settleReconciliationCase(db, actor, caseId, input = {}) {
@@ -837,6 +906,7 @@ function settleReconciliationCase(db, actor, caseId, input = {}) {
     .run(json({ usage: input.usage, transaction_id: settled.transaction_id, charged_micro: settled.charged_micro, reason: input.reason || null,
       postprocess_recovery: { version: 1, enabled: true, requested_at: at } }), at, actor.id, caseId);
   audit(db, actor.id, 'billing.reconciliation.settled', 'reconciliation_case', caseId, { authorization_id: row.authorization_id, charged_micro: settled.charged_micro });
+  syncLasReconciliationOutcome(db, row.authorization_id, LAS_CASE_OUTCOMES.resolved);
   recoverResolvedVideoReconciliations(db);
   return publicReconciliationCase(db.prepare('SELECT * FROM billing_reconciliation_cases WHERE id = ?').get(caseId));
 }
@@ -852,6 +922,7 @@ function waiveReconciliationCase(db, actor, caseId, reason) {
     .run(json({ released_micro: released.released_micro, reason: reason || null,
       postprocess_recovery: { version: 1, enabled: true, requested_at: at } }), at, actor.id, caseId);
   audit(db, actor.id, 'billing.reconciliation.waived', 'reconciliation_case', caseId, { authorization_id: row.authorization_id, reason: reason || null });
+  syncLasReconciliationOutcome(db, row.authorization_id, LAS_CASE_OUTCOMES.waived);
   recoverResolvedVideoReconciliations(db);
   return publicReconciliationCase(db.prepare('SELECT * FROM billing_reconciliation_cases WHERE id = ?').get(caseId));
 }
@@ -866,6 +937,7 @@ function expireReconciliationCases(db, actorId = 1, at = now()) {
         .run(json({ released_micro: released.released_micro, reason: 'timeout_release' }), at, actorId, row.id);
       if (changed.changes) {
         audit(db, actorId, 'billing.reconciliation.expired', 'reconciliation_case', row.id, { authorization_id: row.authorization_id, released_micro: released.released_micro });
+        syncLasReconciliationOutcome(db, row.authorization_id, LAS_CASE_OUTCOMES.expired);
         expired += 1;
       }
     } catch (_) {}
@@ -1461,4 +1533,4 @@ function pagedAuditLogs(db, filters = {}) {
   return { items, total, page: meta.page, page_size: meta.page_size };
 }
 
-module.exports = { snapshotCalculation, account, payerAccount, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, imageAuthorization, voidImageAuthorization, authorizeImageRequest, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverInterruptedImageReconciliations, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, recoverResolvedVideoReconciliations, recordVideoReconciliationRecovery, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, adjustOrganizationBalance, listUsers, listPriceBooks, savePriceBook, clonePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };
+module.exports = { snapshotCalculation, account, payerAccount, publicAccount, audit, backfillTenantSnapshots, backfillProjectSnapshots, quote, activeMeters, createAuthorization, getAuthorization, imageAuthorization, voidImageAuthorization, authorizeImageRequest, settleAuthorization, historicalSettlementSupplementCandidates, collectSettlementSupplement, collectHistoricalSettlementSupplements, voidAuthorization, markPendingReconciliation, recoverInterruptedImageReconciliations, recoverCompletedVideoReconciliations, recoverInterruptedTextReconciliations, recoverStuckStageAuthorizations, recoverResolvedVideoReconciliations, recoverResolvedLasReconciliations, syncLasReconciliationOutcome, recordVideoReconciliationRecovery, listReconciliationCases, pagedReconciliationCases, settleReconciliationCase, waiveReconciliationCase, expireReconciliationCases, adjustBalance, setBalance, adjustOrganizationBalance, listUsers, listPriceBooks, savePriceBook, clonePriceBook, listTransactions, listUsage, pagedTransactions, pagedUsage, usageSummary, projectUsage, projectUsageDetail, projectUsageSection, unassignedProjectUsage, pagedAuditLogs };
