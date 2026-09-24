@@ -61,6 +61,7 @@
 - 官方硬约束：单集 1s–600s、≤100 集、总时长 ≤2h、总大小 ≤10GB、**所有输入分辨率一致**且短边∈[360,1080]/长边∈[640,1920]、mp4/mov/avi/mkv。
 - 本项目 MVP 保守上限（后端常量）：输入 ≤10 集、输入总时长 ≤30 分钟、`max_clip_count ≤10`、`min/max_clip_duration ∈ [5,300]` 且 min ≤ max、单条输出 ≤300s。
 - 输入只允许该项目**已本地归档**的视频素材（`assets.local_path` 非空），复用 `assets` 取数（同 VideoLocalization 的 `videos()` 模式），不共用 `validateMedia`（阈值不同）。
+- **应用内制作的剧集**：合并成片此前只写 `episodes.video_url`、不在素材表，投流选择器看不到。现已在 `processVideoMerge` 成功后登记为素材（`source_type='merged_final'`、`category='final'`、按 episode 幂等复用/更新、best-effort OSS 镜像、失败不改合并终态），成片因此对投流剪辑与视频本地化都可直接选用；成果页取数仍走 `episodes.video_url`，不产生重复展示。
 - 字幕无法自动检测 → 创建页明示「输入需携带内嵌字幕，否则高光识别可能失效」。
 - `video_bitrate_kbps` 由后端按短边映射官方分档取中值（360p:650 / 480p:1000 / 720p:2000 / 1080p:4000），不暴露给运营。
 
