@@ -18,7 +18,7 @@ function configuration(source = {}) {
 }
 
 function objectKey(jobId, kind, name) {
-  if (!/^[a-f0-9-]{36}$/i.test(String(jobId)) || !['input', 'translate', 'inpaint'].includes(kind)
+  if (!/^[a-f0-9-]{36}$/i.test(String(jobId)) || !['input', 'translate', 'inpaint', 'viral'].includes(kind)
     || !/^[a-zA-Z0-9_.-]{1,80}$/.test(name) || name.startsWith('.')) throw new Error('LAS TOS 对象路径无效');
   return `richidrama/las/${jobId}/${kind}/${name}`;
 }

@@ -928,7 +928,7 @@ input_reference = (图片文件，可选)</pre>
                 <el-tooltip placement="top" popper-class="cfg-tip-popper">
                   <template #content>
                     <div class="cfg-tip-content">
-                      LAS 算子只能把结果写入<b>同账号、同地域</b>的 TOS Bucket，这里的一处填写同时约束两边。
+                      LAS 算子只能把结果写入<b>同账号、同地域</b>的 TOS Bucket，这里的一处填写同时约束两边。视频本地化与投流剪辑（爆款素材剪辑）共用这份配置。
                     </div>
                   </template>
                   <el-icon class="tip-icon"><QuestionFilled /></el-icon>

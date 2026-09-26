@@ -11,6 +11,7 @@ const config = bridge.configuration({ region: 'cn-beijing', bucket: 'example-buc
 test('TOS bridge uses a separate region-matched bucket and job-scoped keys', () => {
   assert.equal(config.host, 'example-bucket.tos-cn-beijing.volces.com');
   assert.equal(bridge.objectKey(jobId, 'input', 'source.mp4'), `richidrama/las/${jobId}/input/source.mp4`);
+  assert.equal(bridge.objectKey(jobId, 'viral', 'ep1.mp4'), `richidrama/las/${jobId}/viral/ep1.mp4`);
   assert.throws(() => bridge.configuration({ region: 'cn-beijing', bucket: 'example-bucket' }), /凭证/);
   assert.throws(() => bridge.configuration({ region: 'cn beijing', bucket: 'example-bucket', accessKeyId: 'a', secretAccessKey: 'b' }), /地域/);
   assert.throws(() => bridge.configuration({ region: 'cn-beijing', bucket: 'Bad_Bucket', accessKeyId: 'a', secretAccessKey: 'b' }), /Bucket/);

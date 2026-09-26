@@ -684,30 +684,50 @@ function hasLasMediaJobsTable(db) {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='las_media_jobs'").get();
 }
 
-// 人工结算/豁免或超时释放后，同步 LAS 任务的用户可见状态。进入对账的任务没有
-// 已归档成片，统一落为 failed，并把处置结果追加进 error_msg。幂等：只更新
-// status='reconciliation' 的行，重复处置不会二次改写。
-function syncLasReconciliationOutcome(db, authorizationId, outcome) {
-  if (!authorizationId || !hasLasMediaJobsTable(db)) return 0;
-  const rows = db.prepare("SELECT id, error_msg FROM las_media_jobs WHERE authorization_id=? AND status='reconciliation'").all(authorizationId);
+function hasViralEditJobsTable(db) {
+  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='viral_edit_jobs'").get();
+}
+
+const RECONCILIATION_TASK_TABLES = [
+  { table: 'las_media_jobs', has: hasLasMediaJobsTable },
+  { table: 'viral_edit_jobs', has: hasViralEditJobsTable },
+];
+
+function syncTaskReconciliationOutcome(db, table, authorizationId, outcome) {
+  const rows = db.prepare(`SELECT id, error_msg FROM "${table}" WHERE authorization_id=? AND status='reconciliation'`).all(authorizationId);
   const at = now();
   for (const row of rows) {
     const previous = String(row.error_msg || '').trim();
     const message = `${previous ? `${previous}；` : ''}${outcome}`.slice(0, 500);
-    db.prepare("UPDATE las_media_jobs SET status='failed', error_msg=?, updated_at=?, lease_token=NULL, lease_until=NULL WHERE id=? AND status='reconciliation'")
+    db.prepare(`UPDATE "${table}" SET status='failed', error_msg=?, updated_at=?, lease_token=NULL, lease_until=NULL WHERE id=? AND status='reconciliation'`)
       .run(message, at, row.id);
   }
   return rows.length;
 }
 
-// 补偿扫描：案件已处置但任务仍停在 reconciliation（结算事务与任务同步之间进程中断）。
-function recoverResolvedLasReconciliations(db) {
-  if (!hasLasMediaJobsTable(db)) return { synced: 0 };
-  const rows = db.prepare(`SELECT DISTINCT j.authorization_id, c.status FROM las_media_jobs j
-    JOIN billing_reconciliation_cases c ON c.authorization_id = j.authorization_id
-    WHERE j.status = 'reconciliation' AND c.status IN ('resolved','waived','expired')`).all();
+// 人工结算/豁免或超时释放后，同步任务的用户可见状态。本地化任务进入对账时没有
+// 已归档成片；投流剪辑的成片下载先于结算，对账任务可能已有本地成片（保存素材
+// 入口已按已下载状态放开）。状态仍统一落为 failed，处置结果追加进 error_msg。
+// 幂等：只更新 status='reconciliation' 的行，重复处置不会二次改写。
+function syncLasReconciliationOutcome(db, authorizationId, outcome) {
+  if (!authorizationId) return 0;
   let synced = 0;
-  for (const row of rows) synced += syncLasReconciliationOutcome(db, row.authorization_id, LAS_CASE_OUTCOMES[row.status] || '对账案件已处置，任务状态已同步');
+  for (const definition of RECONCILIATION_TASK_TABLES) {
+    if (definition.has(db)) synced += syncTaskReconciliationOutcome(db, definition.table, authorizationId, outcome);
+  }
+  return synced;
+}
+
+// 案件已处置但任务仍停在 reconciliation（结算事务与任务同步之间进程中断）。
+function recoverResolvedLasReconciliations(db) {
+  let synced = 0;
+  for (const definition of RECONCILIATION_TASK_TABLES) {
+    if (!definition.has(db)) continue;
+    const rows = db.prepare(`SELECT DISTINCT j.authorization_id, c.status FROM "${definition.table}" j
+      JOIN billing_reconciliation_cases c ON c.authorization_id = j.authorization_id
+      WHERE j.status = 'reconciliation' AND c.status IN ('resolved','waived','expired')`).all();
+    for (const row of rows) synced += syncTaskReconciliationOutcome(db, definition.table, row.authorization_id, LAS_CASE_OUTCOMES[row.status] || '对账案件已处置，任务状态已同步');
+  }
   return { synced };
 }
 
@@ -844,19 +864,33 @@ function listReconciliationCases(db, filters = {}) {
 }
 
 const LAS_SOURCE_TASK_COLUMNS = ['las_job_id', 'las_stage', 'las_status', 'las_drama_id', 'las_project_title', 'las_source_asset_id', 'las_output_asset_id', 'las_provider_task_id', 'las_input_tos_path', 'las_output_local_path', 'las_caption_local_path', 'las_error_msg', 'las_input_json'];
+const VIRAL_SOURCE_TASK_COLUMNS = ['viral_job_id', 'viral_status', 'viral_drama_id', 'viral_project_title', 'viral_provider_task_id', 'viral_error_msg', 'viral_input_json'];
 
 function reconciliationSourceTask(row) {
-  if (row.las_job_id == null) return null;
-  const detail = parse(row.las_input_json, null) || {};
-  return {
-    kind: 'las_media_job', id: String(row.las_job_id), stage: row.las_stage, status: row.las_status,
-    drama_id: row.las_drama_id, project_title: row.las_project_title,
-    source_asset_id: row.las_source_asset_id, output_asset_id: row.las_output_asset_id,
-    output_language: detail.output_language || null, model_level: detail.model_level || null,
-    provider_task_id: row.las_provider_task_id, input_tos_path: row.las_input_tos_path,
-    output_local_path: row.las_output_local_path, caption_local_path: row.las_caption_local_path,
-    error_msg: row.las_error_msg,
-  };
+  if (row.las_job_id != null) {
+    const detail = parse(row.las_input_json, null) || {};
+    return {
+      kind: 'las_media_job', id: String(row.las_job_id), stage: row.las_stage, status: row.las_status,
+      drama_id: row.las_drama_id, project_title: row.las_project_title,
+      source_asset_id: row.las_source_asset_id, output_asset_id: row.las_output_asset_id,
+      output_language: detail.output_language || null, model_level: detail.model_level || null,
+      provider_task_id: row.las_provider_task_id, input_tos_path: row.las_input_tos_path,
+      output_local_path: row.las_output_local_path, caption_local_path: row.las_caption_local_path,
+      error_msg: row.las_error_msg,
+    };
+  }
+  if (row.viral_job_id != null) {
+    const detail = parse(row.viral_input_json, null) || {};
+    return {
+      kind: 'viral_edit_job', id: String(row.viral_job_id), status: row.viral_status,
+      drama_id: row.viral_drama_id, project_title: row.viral_project_title,
+      provider_task_id: row.viral_provider_task_id, error_msg: row.viral_error_msg,
+      episode_count: Array.isArray(detail.episodes) ? detail.episodes.length : null,
+      input_total_ms: detail.totals?.total_input_ms ?? null,
+      supplier_billing_unit: '视频智能剪辑',
+    };
+  }
+  return null;
 }
 
 function pagedReconciliationCases(db, filters = {}) {
@@ -868,6 +902,7 @@ function pagedReconciliationCases(db, filters = {}) {
   if (filters.to) { where += ' AND c.created_at <= ?'; args.push(String(filters.to)); }
   const meta = pagination(filters);
   const hasLas = hasLasMediaJobsTable(db);
+  const hasViral = hasViralEditJobsTable(db);
   const lasColumns = hasLas ? `, lj.id AS las_job_id, lj.stage AS las_stage, lj.status AS las_status, lj.drama_id AS las_drama_id,
       dr.title AS las_project_title, lj.source_asset_id AS las_source_asset_id, lj.output_asset_id AS las_output_asset_id,
       lj.provider_task_id AS las_provider_task_id, lj.input_tos_path AS las_input_tos_path,
@@ -875,18 +910,24 @@ function pagedReconciliationCases(db, filters = {}) {
       lj.error_msg AS las_error_msg, lj.input_json AS las_input_json` : '';
   const lasJoins = hasLas ? `LEFT JOIN las_media_jobs lj ON lj.authorization_id = c.authorization_id
     LEFT JOIN dramas dr ON dr.id = lj.drama_id LEFT JOIN assets oa ON oa.id = lj.output_asset_id` : '';
+  const viralColumns = hasViral ? `, vj.id AS viral_job_id, vj.status AS viral_status, vj.drama_id AS viral_drama_id,
+      vdr.title AS viral_project_title, vj.provider_task_id AS viral_provider_task_id,
+      vj.error_msg AS viral_error_msg, vj.input_json AS viral_input_json` : '';
+  const viralJoins = hasViral ? ` LEFT JOIN viral_edit_jobs vj ON vj.authorization_id = c.authorization_id
+    LEFT JOIN dramas vdr ON vdr.id = vj.drama_id` : '';
   const total = Number(db.prepare(`SELECT COUNT(*) total FROM billing_reconciliation_cases c ${where}`).get(...args)?.total || 0);
   const rows = db.prepare(`SELECT c.*, u.username, a.amount_micro AS frozen_amount_micro,
-      a.reference_type, a.reference_id, a.snapshot_json AS authorization_snapshot_json ${lasColumns}
+      a.reference_type, a.reference_id, a.snapshot_json AS authorization_snapshot_json ${lasColumns}${viralColumns}
     FROM billing_reconciliation_cases c JOIN users u ON u.id = c.user_id
-    JOIN billing_transactions a ON a.id = c.authorization_id ${lasJoins} ${where}
+    JOIN billing_transactions a ON a.id = c.authorization_id ${lasJoins}${viralJoins} ${where}
     ORDER BY CASE WHEN c.status = 'pending' THEN 0 ELSE 1 END, c.due_at ASC LIMIT ? OFFSET ?`).all(...args, meta.page_size, meta.offset);
   const items = rows.map((row) => {
-    const source_task = hasLas ? reconciliationSourceTask(row) : null;
+    const source_task = (hasLas || hasViral) ? reconciliationSourceTask(row) : null;
     if (source_task && !row.provider_request_id) {
       row.provider_request_id = /\brequest_id=([\w.-]+)/.exec(String(row.reason || ''))?.[1] || null;
     }
     for (const key of LAS_SOURCE_TASK_COLUMNS) delete row[key];
+    for (const key of VIRAL_SOURCE_TASK_COLUMNS) delete row[key];
     return { ...publicReconciliationCase(row), frozen_amount: microToCredits(row.frozen_amount_micro), source_task };
   });
   return { items, total, page: meta.page, page_size: meta.page_size };

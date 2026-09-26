@@ -33,9 +33,10 @@
         </div>
       </section>
       <nav class="project-workspace-tabs" aria-label="项目工作区">
-        <button v-for="tab in [{v:'episodes',label:'分集'},{v:'resources',label:'制作资源'},{v:'results',label:'成果'},{v:'info',label:'成员与设置'}]" :key="tab.v" type="button" :class="{ active: workspaceTab === tab.v }" :aria-pressed="workspaceTab === tab.v" @click="workspaceTab = tab.v">{{ tab.label }}</button>
+        <button v-for="tab in [{v:'episodes',label:'分集'},{v:'resources',label:'制作资源'},{v:'results',label:'成果'},{v:'viral',label:'投流素材'},{v:'info',label:'成员与设置'}]" :key="tab.v" type="button" :class="{ active: workspaceTab === tab.v }" :aria-pressed="workspaceTab === tab.v" @click="workspaceTab = tab.v">{{ tab.label }}</button>
       </nav>
       <ProjectResults v-if="workspaceTab === 'results'" :drama-id="dramaId" :episodes="episodes" />
+      <ViralEditingWorkspace v-if="workspaceTab === 'viral'" :drama-id="dramaId" :can-edit="drama?.permissions?.can_edit !== false" />
       <div v-show="workspaceTab === 'info'" class="project-settings-layout">
       <!-- 基本信息 + 设置 -->
       <section v-show="workspaceTab === 'info'" class="section card info-section">
@@ -412,6 +413,7 @@ import { ArrowLeft, VideoPlay, Plus, Delete, PictureFilled, Grid } from '@elemen
 import AccountBalanceBadge from '@/components/AccountBalanceBadge.vue'
 import EpisodeBatchImportDialog from '@/components/EpisodeBatchImportDialog.vue'
 import ProjectMediaResources from '@/components/ProjectMediaResources.vue'
+import ViralEditingWorkspace from '@/components/ViralEditingWorkspace.vue'
 import { dramaAPI } from '@/api/drama'
 import { characterLibraryAPI } from '@/api/characterLibrary'
 import { sceneLibraryAPI } from '@/api/sceneLibrary'
@@ -789,7 +791,7 @@ async function onAddEpisode() {
 
 // ---------- 资源库 Tab ----------
 const resourceTabs = ['char', 'scene', 'prop', 'media']
-const workspaceTab = ref(route.query.tab === 'resources' ? 'resources' : 'episodes')
+const workspaceTab = ref(['resources', 'viral'].includes(route.query.tab) ? route.query.tab : 'episodes')
 const activeResTab = ref(resourceTabs.includes(route.query.resource) ? route.query.resource : 'char')
 const resourceKeyword = ref('')
 const resourceKinds = { char: 'character', scene: 'scene', prop: 'prop' }

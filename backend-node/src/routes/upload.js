@@ -1,8 +1,10 @@
 const path = require('path');
 const multer = require('multer');
+const { randomUUID } = require('node:crypto');
 const response = require('../response');
 const uploadService = require('../services/uploadService');
 const storageLayout = require('../services/storageLayout');
+const mediaAsset = require('../services/mediaAssetService');
 
 const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
 // 单张图片上限。修改时请同步：
@@ -49,9 +51,23 @@ const audioUpload = multer({
     cb(null, true);
   },
 });
-const mediaUpload = multer({ storage: memoryStorage, limits: { fileSize: 50 * 1024 * 1024 } });
+// 媒体上传（视频/音频/图片混合入口）流式写入 storage/.tmp-uploads，
+// 上限与去重口径共用 mediaAssetService.LIMITS，不再各自硬编码；
+// 内存暂存版本会在 2GB 文件下打爆进程，diskStorage 后内存占用与文件大小无关。
+function createMediaUpload(cfg) {
+  const tempDir = mediaAsset.uploadTempDir(mediaAsset.resolveStoragePath(cfg));
+  const storage = multer.diskStorage({
+    destination(_req, _file, cb) { require('node:fs').mkdirSync(tempDir, { recursive: true }); cb(null, tempDir); },
+    filename(_req, file, cb) {
+      const ext = (path.extname(String(file.originalname || '')).toLowerCase().match(/^\.[a-z0-9]{1,8}$/) || [''])[0];
+      cb(null, `${Date.now()}-${randomUUID()}${ext}`);
+    },
+  });
+  return multer({ storage, limits: { fileSize: mediaAsset.LIMITS.video * 1024 * 1024 } });
+}
 
 function routes(cfg, log, db) {
+  const mediaUpload = createMediaUpload(cfg);
   const singleUpload = upload.single('file');
   return {
     multerSingle: singleUpload,
@@ -102,16 +118,15 @@ function routes(cfg, log, db) {
       }
     },
     uploadMedia: async (req, res) => {
-      if (!req.file || !req.file.buffer) return response.badRequest(res, '请选择文件');
+      if (!req.file || (!req.file.path && !req.file.buffer)) return response.badRequest(res, '请选择文件');
       try {
-        const mediaAssetService = require('../services/mediaAssetService');
         const body = req.body || {};
         const dramaId = Number(body.drama_id) || null;
         // A media upload must be owned immediately. Previously global uploads
         // were inserted with a NULL owner, so they were hidden by the library's
         // ownership filter and their subsequent rename/delete calls returned 404.
         if (dramaId) require('../services/projectAccessService').requireAccess(db, dramaId, req.auth.id, 'edit');
-        const asset = await mediaAssetService.upload(db, cfg, log, req.file, {
+        const asset = await mediaAsset.upload(db, cfg, log, req.file, {
           ...body,
           drama_id: dramaId,
           owner_user_id: req.auth.id,
@@ -131,7 +146,6 @@ module.exports = {
   upload,
   multerSingle: upload.single('file'),
   multerAudioSingle: audioUpload.single('file'),
-  multerMediaSingle: mediaUpload.single('file'),
   MAX_IMAGE_SIZE_MB,
   // 兼容旧导出名
   MAX_SIZE_MB,

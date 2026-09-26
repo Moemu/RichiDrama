@@ -130,6 +130,7 @@ function setupRouter(cfg, db, log) {
   const promptOverrides = promptOverridesRoutes.routes(db, log);
   const tools = require('./tools')(db, log);
   const lasMediaJobs = require('./lasMediaJobs')(db, log, cfg);
+  const viralEditJobs = require('./viralEditJobs')(db, log, cfg);
 
   // ---------- billing (self-service) ----------
   r.get('/billing/me', billing.me);
@@ -187,6 +188,7 @@ function setupRouter(cfg, db, log) {
   adminRouter.put('/customer-organizations/:id/members', admin.replaceCustomerOrganizationMembers);
   adminRouter.post('/customer-organizations/:id/balance-adjustments', admin.adjustCustomerOrganizationBalance);
   adminRouter.get('/price-books', admin.priceBooks);
+  adminRouter.post('/backfill-merged-final-assets', admin.backfillMergedFinalAssets);
   adminRouter.get('/model-catalog', admin.modelCatalog);
   adminRouter.get('/provider-connections', admin.providerConnections);
   adminRouter.post('/provider-connections', admin.saveProviderConnection);
@@ -451,7 +453,7 @@ function setupRouter(cfg, db, log) {
 
   // ---------- upload ----------
   r.post('/upload/image', uploadModule.multerSingle, ownershipGuard(db), require('../middleware/projectOperations')(db), uploadHandlers.uploadImage);
-  r.post('/media/upload', uploadHandlers.multerMediaSingle, ownershipGuard(db), require('../middleware/projectOperations')(db), uploadHandlers.uploadMedia);
+  r.post('/media/upload', uploadHandlers.multerMediaSingle, require('../middleware/uploadTempBackstop'), ownershipGuard(db), require('../middleware/projectOperations')(db), uploadHandlers.uploadMedia);
   r.get('/creative-boards', creativeBoards.list);
   r.post('/creative-boards', creativeBoards.create);
   r.get('/creative-boards/:id', creativeBoards.get);
@@ -485,6 +487,11 @@ function setupRouter(cfg, db, log) {
   r.get('/las-media-jobs/capabilities', lasMediaJobs.capabilities);
   r.get('/las-media-jobs', lasMediaJobs.list);
   r.get('/las-media-jobs/:id', lasMediaJobs.get);
+  r.post('/viral-edit-jobs/quote', viralEditJobs.quote);
+  r.post('/viral-edit-jobs', viralEditJobs.create);
+  r.get('/viral-edit-jobs', viralEditJobs.list);
+  r.get('/viral-edit-jobs/:id', viralEditJobs.get);
+  r.post('/viral-edit-jobs/:id/outputs/:clipIndex/save-asset', viralEditJobs.saveAsset);
   r.get('/tool-runs/:id', tools.get);
   r.delete('/tool-runs/:id', tools.remove);
   r.post('/tool-runs/:id/restore', tools.restore);

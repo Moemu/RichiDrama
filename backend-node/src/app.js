@@ -100,6 +100,9 @@ function createApp() {
     : path.join(process.cwd(), config.storage?.local_path || './data/storage');
   require('./services/videoUpscaleService').resumePending(db, log, videoStoragePath);
   require('./services/videoInterpolationService').resumePending(db, log, videoStoragePath);
+  // 流式上传的临时文件在进程被杀时不会有任何请求线程回收它，启动时清扫超时残留。
+  try { require('./services/mediaAssetService').sweepUploadTemp(videoStoragePath, log); }
+  catch (error) { log.warn('上传临时目录清扫失败', { error: error.message }); }
   startPendingVideoArchiveRetry(db, log);
   require('./services/operationsReportService').startDailyReporting(db, log);
   require('./services/providerPriceService').startHourlySync(db, log);
@@ -112,6 +115,8 @@ function createApp() {
   catch (error) { log.warn('画布交付恢复失败', { error: error.message }); }
   try { require('./services/lasMediaJobService').resume(db, log, config); }
   catch (error) { log.warn('LAS 媒体任务恢复失败', { error: error.message }); }
+  try { require('./services/viralEditJobService').resume(db, log, config); }
+  catch (error) { log.warn('投流剪辑任务恢复失败', { error: error.message }); }
   const paymentRecovery = require('./services/paymentService').createPaymentService(db, config, log);
   const reconcilePayments = () => paymentRecovery.recover(50).catch((error) => log.warn('payment recovery sweep failed', { error: error.message }));
   reconcilePayments();

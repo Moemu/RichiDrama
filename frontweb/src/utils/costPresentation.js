@@ -5,7 +5,7 @@ const sourceNames = {
   single_video_tool: '单视频生成', omni_sequence_shot: '全能创作', omni_video: '全能创作', creative_board: '创作画布',
   video_generation: '视频生成', image_generation: '图片生成', storyboard: '项目分镜', storyboard_video: '分镜视频', storyboard_image: '分镜图片', story_generation: '剧本生成',
   project_text_generation: '项目文本生成', text_generation: '文本生成', tool_run: 'AI 工具箱',
-  video_upscale: '画质增强', video_interpolation: '视频插帧', las_media_job: '视频本地化', storyboard_tts: '分镜配音',
+  video_upscale: '画质增强', video_interpolation: '视频插帧', las_media_job: '视频本地化', viral_edit_job: '投流剪辑', storyboard_tts: '分镜配音',
   other: '来源未记录或其他历史',
 }
 const serviceNames = { text: '文本', image: '图片', storyboard_image: '分镜图片', video: '视频', video_postprocess: '视频后处理', tts: '语音' }

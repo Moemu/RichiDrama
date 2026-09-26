@@ -229,6 +229,47 @@ test('authenticated LAS erase-then-translate workflow archives local results and
   assert.equal(assets.getByIdForOwner(db, completed.output_asset_id, user.id).local_path, output.local_path);
 });
 
+test('failed LAS jobs release registered transit objects while reconciliation rows keep them', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'richidrama-las-release-'));
+  const storage = path.join(root, 'storage');
+  fs.mkdirSync(storage, { recursive: true });
+  const original = { remove: tos.remove };
+  const removed = [];
+  tos.remove = async (_config, objectPath) => { removed.push(objectPath); return { deleted: true }; };
+  const db = new Database(':memory:');
+  const out = console.log; const warn = console.warn; console.log = () => {}; console.warn = () => {};
+  try { runMigrationsAndEnsure(db); } finally { console.log = out; console.warn = warn; }
+  const admin = auth.ensureBootstrapAdmin(db, log);
+  require('../src/services/aiConfigService').createConfig(db, log, {
+    service_type: 'video_localization', provider: 'las', name: '回收测试配置', base_url: 'https://operator.las.cn-beijing.volces.com', api_key: 'test-only', is_default: true,
+    settings: JSON.stringify({ region: 'cn-beijing', tos_bucket: 'example-bucket', tos_access_key_id: 'a', tos_secret_access_key: 'b' }),
+  });
+  const project = drama.createDrama(db, log, { title: '回收测试', owner_user_id: admin.id });
+  const source = assets.create(db, log, { owner_user_id: admin.id, drama_id: project.id, name: '原片', type: 'video', local_path: 'input/source.mp4', duration: 10, mime_type: 'video/mp4' });
+  const at = new Date().toISOString();
+  const insert = db.prepare(`INSERT INTO las_media_jobs(id,owner_user_id,drama_id,source_asset_id,idempotency_key,stage,input_json,input_tos_path,tos_policy,tos_objects_json,status,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?, 'cleanup', ?,?,?,?)`);
+  const failedId = randomUUID();
+  const failedInput = `tos://example-bucket/richidrama/las/${failedId}/input/source.mp4`;
+  insert.run(failedId, admin.id, project.id, source.id, `release-${failedId}`, 'inpaint', JSON.stringify({ stage: 'inpaint', model_level: 'lite' }), failedInput, JSON.stringify({ input: { path: failedInput, bytes: 10 } }), 'failed', at, at);
+  const reconcilingId = randomUUID();
+  const pendingInput = `tos://example-bucket/richidrama/las/${reconcilingId}/input/source.mp4`;
+  insert.run(reconcilingId, admin.id, project.id, source.id, `keep-${reconcilingId}`, 'inpaint', JSON.stringify({ stage: 'inpaint', model_level: 'lite' }), pendingInput, JSON.stringify({ input: { path: pendingInput, bytes: 10 } }), 'reconciliation', at, at);
+  const cfg = { storage: { type: 'local', local_path: storage } };
+  try {
+    const result = await jobs.cleanupTransit(db, log, cfg, failedId);
+    assert.deepEqual(result, { cleaned: 1 });
+    assert.deepEqual(removed, [failedInput]);
+    assert.equal(await jobs.cleanupTransit(db, log, cfg, reconcilingId), null, '待对账任务不能回收——供应商可能仍在读取输入');
+    assert.equal(removed.length, 1);
+    assert.ok(db.prepare('SELECT tos_cleanup_at FROM las_media_jobs WHERE id=?').get(failedId).tos_cleanup_at);
+  } finally {
+    tos.remove = original.remove;
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('result selection rejects missing and ambiguous supplier output paths', () => {
   const prefix = 'tos://example-bucket/richidrama/las/a106ecad-410b-4a0b-a250-838a047a1d8f/translate/';
   assert.equal(jobs.resultPaths({ translated: [{ video_path: `${prefix}video.mp4` }] }, prefix).video, `${prefix}video.mp4`);

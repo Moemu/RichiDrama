@@ -6,5 +6,9 @@
 - [模型中转平台配置示例](model-proxies/README.md)
 - [支付宝与微信 ToC 充值](payments/README.md)
 - [微信支付配置安全说明](wechat-pay/README.md)
+- [LAS 视频本地化接入](las-video-localization.md)
+- [LAS 在线解决方案本地文本整理版](las-online-solution-text-mirror-2026-09-24.md)
+- [LAS 爆款素材剪辑算子接口契约镜像](las-viral-clip-gen-2026-09-24.md)
+- [爆款素材剪辑（投流剪辑）第一批次实施方案](las-viral-editing-mvp-2026-09-24.md)
 
 所有密钥必须通过环境变量或安全配置注入。不要把真实凭据写入仓库。

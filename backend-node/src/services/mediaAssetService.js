@@ -2,13 +2,17 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const { pipeline } = require('stream/promises');
 const uploadService = require('./uploadService');
 const storageLayout = require('./storageLayout');
 const assetService = require('./assetService');
 const mediaStorage = require('./mediaStorageService');
 const { getFfmpegPath, getFfprobePath } = require('../utils/ffmpegPath');
 
-const LIMITS = { image: 30, video: 50, audio: 15 };
+// 视频上限对齐投流/本地化单集场景（官方单文件 ≤5GB、TOS 中转 ≤5GB）；
+// 上传已改流式落盘（multer diskStorage），内存占用与文件大小无关，放开不再有 OOM 风险。
+const LIMITS = { image: 30, video: 2048, audio: 15 };
+const UPLOAD_TEMP_DIRNAME = '.tmp-uploads';
 const INSPECTION_TIMEOUT_MS = 30_000;
 const THUMBNAIL_TIMEOUT_MS = 60_000;
 const EXTENSIONS = {
@@ -45,8 +49,54 @@ function detectType(file) {
 function validate(file, type) {
   if (!type) throw new Error('仅支持图片、视频或音频文件');
   const max = LIMITS[type] * 1024 * 1024;
-  if (file.size > max) throw new Error(`${type === 'image' ? '图片' : type === 'video' ? '视频' : '音频'}不能超过 ${LIMITS[type]} MB`);
-  if (!hasExpectedSignature(file.buffer, type)) throw new Error('文件内容与声明的媒体类型不匹配');
+  if (file.size > max) throw new Error(`${type === 'image' ? '图片' : type === 'video' ? '视频' : '音频'}不能超过 ${LIMITS[type] >= 1024 ? `${LIMITS[type] / 1024} GB` : `${LIMITS[type]} MB`}`);
+  if (!hasExpectedSignature(headBytes(file), type)) throw new Error('文件内容与声明的媒体类型不匹配');
+}
+
+// diskStorage 上传的 file 只有 path；旧调用方仍可能传 memoryStorage 的 buffer 形态，两者都支持。
+function headBytes(file) {
+  if (Buffer.isBuffer(file.buffer)) return file.buffer.subarray(0, 12);
+  if (!file.path) return Buffer.alloc(0);
+  const fd = fs.openSync(file.path, 'r');
+  try {
+    const buffer = Buffer.alloc(12);
+    return buffer.subarray(0, fs.readSync(fd, buffer, 0, 12, 0));
+  } finally { fs.closeSync(fd); }
+}
+
+async function fileChecksum(file) {
+  if (Buffer.isBuffer(file.buffer)) return crypto.createHash('sha256').update(file.buffer).digest('hex');
+  // 2GB 文件的 sha256 不能在事件循环上同步算：流式读取，避免大文件上传期间全服务停摆。
+  const hash = crypto.createHash('sha256');
+  await pipeline(fs.createReadStream(file.path), hash);
+  return hash.digest('hex');
+}
+
+function resolveStoragePath(cfg) {
+  const raw = cfg?.storage?.local_path || './data/storage';
+  return path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(process.cwd(), raw);
+}
+
+function uploadTempDir(storagePath) {
+  return path.join(storagePath, UPLOAD_TEMP_DIRNAME);
+}
+
+// 进程被杀时 multer 的临时文件不会被任何请求线程回收；启动清扫只删超时文件，
+// 6 小时远超 2GB 上传的最长合理耗时，不会碰到进行中的请求。
+function sweepUploadTemp(storagePath, log, maxAgeMs = 6 * 3600_000, at = Date.now()) {
+  const dir = uploadTempDir(storagePath);
+  let removed = 0;
+  let entries = [];
+  try { entries = fs.readdirSync(dir); } catch (_) { return { removed: 0 }; }
+  for (const name of entries) {
+    const file = path.join(dir, name);
+    try {
+      const stats = fs.statSync(file);
+      if (stats.isFile() && at - stats.mtimeMs > maxAgeMs) { fs.rmSync(file, { force: true }); removed += 1; }
+    } catch (_) {}
+  }
+  if (removed) log.info('已清理过期上传临时文件', { removed });
+  return { removed };
 }
 
 // 浏览器 MIME 和扩展名都可伪造；这里先做轻量签名校验。视频/音频的时长、编码等
@@ -62,19 +112,29 @@ function hasExpectedSignature(buffer, type) {
 }
 
 async function upload(db, cfg, log, file, body = {}) {
+  try {
+    return await uploadInner(db, cfg, log, file, body);
+  } finally {
+    // diskStorage 的临时文件必须无论成败都不残留（成功路径已被 rename 走，rmSync 幂等）。
+    if (file && file.path) { try { fs.rmSync(file.path, { force: true }); } catch (_) {} }
+  }
+}
+
+async function uploadInner(db, cfg, log, file, body = {}) {
   const type = detectType(file);
   validate(file, type);
-  const rawStorage = cfg?.storage?.local_path || './data/storage';
-  const storagePath = path.isAbsolute(rawStorage) ? rawStorage : path.join(process.cwd(), rawStorage);
+  const storagePath = resolveStoragePath(cfg);
   const dramaId = Number(body.drama_id) || null;
-  const checksum = crypto.createHash('sha256').update(file.buffer).digest('hex');
+  const checksum = await fileChecksum(file);
   const duplicate = assetService.findByChecksum(db, checksum, dramaId, body.owner_user_id);
   if (duplicate) {
     log.info('媒体上传命中内容去重，复用已有素材', { asset_id: duplicate.id, drama_id: dramaId, type });
     return { ...duplicate, deduplicated: true };
   }
   const projectSubdir = storageLayout.getProjectStorageSubdir(db, dramaId);
-  const result = uploadService.uploadFile(storagePath, cfg?.storage?.base_url || '', log, file.buffer, file.originalname, file.mimetype, `${type}s`, projectSubdir);
+  const result = Buffer.isBuffer(file.buffer)
+    ? uploadService.uploadFile(storagePath, cfg?.storage?.base_url || '', log, file.buffer, file.originalname, file.mimetype, `${type}s`, projectSubdir)
+    : uploadService.uploadFileFromPath(storagePath, cfg?.storage?.base_url || '', log, file.path, file.originalname, file.mimetype, `${type}s`, projectSubdir);
   let inspection;
   try {
     inspection = await inspectMedia(path.join(storagePath, result.local_path.replace(/\//g, path.sep)), type, storagePath, result.local_path, log);
@@ -211,4 +271,4 @@ async function inspectMedia(filePath, type, storageRoot, localPath, log) {
   return result;
 }
 
-module.exports = { upload, detectType, LIMITS, EXTENSIONS, limits, readableUploadName, hasExpectedSignature, inspectMedia, runMediaProcess };
+module.exports = { upload, detectType, LIMITS, EXTENSIONS, limits, readableUploadName, hasExpectedSignature, inspectMedia, runMediaProcess, resolveStoragePath, uploadTempDir, sweepUploadTemp };
