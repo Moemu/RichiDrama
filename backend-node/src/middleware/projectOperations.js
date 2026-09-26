@@ -13,7 +13,9 @@ module.exports = function projectOperations(db) {
     const operationId = req.headers['x-project-operation'];
     const version = req.headers['x-project-revision'];
     if (operationId && (typeof operationId !== 'string' || operationId.length > 100)) return response.badRequest(res, '操作 ID 无效');
-    const hash = operationId ? crypto.createHash('sha256').update(JSON.stringify([req.method, req.originalUrl, req.body])).update(req.file?.buffer || Buffer.alloc(0)).digest('hex') : null;
+    // diskStorage 下 req.file.buffer 不存在（恒为 undefined）：改用文件大小+原始名入哈希，
+    // 保证带 x-project-operation 重试上传不同文件时不会被误判为同一请求回放。
+    const hash = operationId ? crypto.createHash('sha256').update(JSON.stringify([req.method, req.originalUrl, req.body])).update(req.file ? Buffer.from(`${req.file.size}:${req.file.originalname}`) : Buffer.alloc(0)).digest('hex') : null;
     if (operationId) {
       const previous = db.prepare('SELECT * FROM project_operations WHERE drama_id=? AND operation_id=?').get(dramaId, operationId);
       if (previous) {

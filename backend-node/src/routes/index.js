@@ -453,7 +453,7 @@ function setupRouter(cfg, db, log) {
 
   // ---------- upload ----------
   r.post('/upload/image', uploadModule.multerSingle, ownershipGuard(db), require('../middleware/projectOperations')(db), uploadHandlers.uploadImage);
-  r.post('/media/upload', uploadHandlers.multerMediaSingle, ownershipGuard(db), require('../middleware/projectOperations')(db), uploadHandlers.uploadMedia);
+  r.post('/media/upload', uploadHandlers.multerMediaSingle, require('../middleware/uploadTempBackstop'), ownershipGuard(db), require('../middleware/projectOperations')(db), uploadHandlers.uploadMedia);
   r.get('/creative-boards', creativeBoards.list);
   r.post('/creative-boards', creativeBoards.create);
   r.get('/creative-boards/:id', creativeBoards.get);

@@ -11,11 +11,12 @@
         <p class="sub">选择已归档的剧集视频并按顺序排列（第一个即第 1 集）；输入需携带内嵌字幕，否则高光识别可能失效。</p>
         <div class="picker">
           <div class="picker-col">
-            <p class="col-label">项目视频素材</p>
+            <p class="col-label">项目视频素材 <label class="finals-toggle"><input type="checkbox" v-model="finalsOnly" />只看成片</label></p>
             <label v-for="video in availableVideos" :key="video.id" class="video-row">
               <input type="checkbox" :checked="isSelected(video.id)" @change="toggleVideo(video)" />
-              <span class="name">{{ video.name }}</span><span class="meta">{{ viralDurationText(video.duration * 1000) }}</span>
+              <span class="name"><span v-if="video.source_type === 'merged_final'" class="final-badge">成片</span>{{ video.name }}</span><span class="meta">{{ viralDurationText(video.duration * 1000) }}</span>
             </label>
+            <p v-if="truncatedHint" class="col-hint">{{ truncatedHint }}</p>
             <p v-if="!videos.length" class="empty">暂无已归档视频，请先在「制作资源 · 媒体」上传或归档剧集。</p>
           </div>
           <div class="picker-col">
@@ -76,7 +77,7 @@
           <p v-if="viralBillingText(job)" class="billing">{{ viralBillingText(job) }}</p>
           <p v-if="job.error_msg" class="error-text">{{ job.error_msg }}</p>
           <p v-if="job.status === 'reconciliation'" class="billing">已转待对账，不会自动重复调用供应商；运营核验用量后更新。</p>
-          <div v-if="job.status === 'completed' && job.outputs.length" class="clips">
+          <div v-if="job.outputs.length" class="clips">
             <div v-for="output in job.outputs" :key="output.clip_index" class="clip">
               <video v-if="output.url" :src="output.url" controls preload="metadata" />
               <div class="clip-meta">
@@ -110,7 +111,7 @@ import { viralEditJobsAPI } from '@/api/viralEditJobs'
 import { lasMediaJobsAPI } from '@/api/lasMediaJobs'
 import { createClientRequestId } from '@/utils/requestId'
 import { formatChinaDateTime } from '@/utils/time'
-import { moveViralEpisode, viralBillingText, viralDurationText, viralGradeChips, viralModeName, viralStatusName, viralTimelineSegments } from '@/utils/viralEditing'
+import { moveViralEpisode, viralBillingText, viralDurationText, viralGradeChips, viralModeName, viralPickerAssets, viralStatusName, viralTimelineSegments, viralTruncationHint } from '@/utils/viralEditing'
 
 const MAX_EPISODES = 10
 const MAX_CLIP_COUNT = 10
@@ -121,6 +122,8 @@ const props = defineProps({ dramaId: { type: [Number, String], required: true },
 const videos = ref([])
 const jobs = ref([])
 const selected = ref([])
+const finalsOnly = ref(false)
+const truncatedHint = ref('')
 const ready = ref(false)
 const quoting = ref(false)
 const submitting = ref(false)
@@ -132,7 +135,7 @@ let quoteTimer
 let quoteVersion = 0
 const params = ref({ mode: 'sequential', max_clip_count: 5, min_clip_duration: 60, max_clip_duration: 180, preset_intro: false, aspect_ratio: null })
 
-const availableVideos = computed(() => videos.value)
+const availableVideos = computed(() => viralPickerAssets(videos.value, finalsOnly.value))
 const isSelected = (id) => selected.value.some((episode) => String(episode.id) === String(id))
 function toggleVideo(video) {
   const index = selected.value.findIndex((episode) => String(episode.id) === String(video.id))
@@ -149,6 +152,7 @@ async function loadAll() {
     const [assets, history] = await Promise.all([viralEditJobsAPI.videos(props.dramaId), viralEditJobsAPI.list(props.dramaId)])
     videos.value = (assets?.items || []).filter((asset) => asset.local_path)
     jobs.value = history || []
+    truncatedHint.value = viralTruncationHint(assets?.pagination)
     const visible = new Set(videos.value.map((video) => String(video.id)))
     selected.value = selected.value.filter((episode) => visible.has(String(episode.id)))
   } catch (error) { ElMessage.error(error.message) }
@@ -213,12 +217,16 @@ async function saveAsset(job, output) {
   } catch (error) { ElMessage.error(error.message) }
 }
 watch(() => [selected.value.map((episode) => String(episode.id)).join(','), params.value.mode, params.value.max_clip_count, params.value.min_clip_duration, params.value.max_clip_duration, params.value.aspect_ratio, params.value.preset_intro], scheduleQuote)
+// 挂载竞态防护：两个 await 之间组件可能已卸载（onUnmounted 已执行过），
+// 此时不得再建 15s 轮询，否则定时器会一直跑到离开页面。
+let disposed = false
 onMounted(async () => {
   ready.value = !!(await lasMediaJobsAPI.capabilities().then((result) => result?.ready).catch(() => false))
   await loadAll()
+  if (disposed) return
   timer = setInterval(refreshJobs, 15000)
 })
-onUnmounted(() => { clearInterval(timer); clearTimeout(quoteTimer) })
+onUnmounted(() => { disposed = true; clearInterval(timer); clearTimeout(quoteTimer) })
 </script>
 
 <style scoped>
@@ -288,4 +296,7 @@ onUnmounted(() => { clearInterval(timer); clearTimeout(quoteTimer) })
 .empty{color:var(--text-faint);font-size:12px}
 button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:1100px){.viral-layout{grid-template-columns:1fr}}
+.finals-toggle{margin-left:8px;font-weight:400;font-size:12px;color:var(--text-secondary, #909399);display:inline-flex;align-items:center;gap:4px;cursor:pointer}
+.final-badge{display:inline-block;margin-right:4px;padding:0 4px;border-radius:3px;font-size:11px;line-height:16px;background:var(--el-color-success-light-9, #f0f9eb);color:var(--el-color-success, #67c23a)}
+.col-hint{margin:6px 0 0;font-size:12px;color:var(--text-secondary, #909399)}
 </style>

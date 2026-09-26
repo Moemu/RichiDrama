@@ -53,3 +53,38 @@ export function viralBillingText(job) {
   if (billing.state === 'released') return '预授权已释放，未扣费'
   return billing.reserved_credits != null ? `预授权 ${credits(billing.reserved_credits)}，完成后按实际用量结算` : ''
 }
+
+// 「只看成片」：merged_final 是应用内合并的剧集成片；其余为上传/生成/投流回存素材。
+export function viralFinalsOnly(assets, finalsOnly) {
+  if (!finalsOnly) return assets
+  return (assets || []).filter((asset) => asset.source_type === 'merged_final')
+}
+
+// 第 N 集序号取自成片素材名「第N集 成片…」；改名后解析不到则退回 id 排序，保持稳定。
+export function viralEpisodeOrder(asset) {
+  const match = /^第(\d+)集/.exec(String(asset?.name || ''))
+  return match ? Number(match[1]) : null
+}
+
+export function viralSortedAssets(assets) {
+  return [...(assets || [])].sort((a, b) => {
+    const orderA = viralEpisodeOrder(a)
+    const orderB = viralEpisodeOrder(b)
+    if (orderA != null && orderB != null && orderA !== orderB) return orderA - orderB
+    if (orderA != null) return -1
+    if (orderB != null) return 1
+    return Number(a.id) - Number(b.id)
+  })
+}
+
+export function viralPickerAssets(assets, finalsOnly) {
+  return finalsOnly ? viralSortedAssets(viralFinalsOnly(assets, true)) : assets
+}
+
+// 素材超过单页上限（100 条）时给出截断提示，避免运营以为项目里没有更多视频。
+export function viralTruncationHint(pagination) {
+  const total = Number(pagination?.total)
+  if (!Number.isFinite(total) || total <= 0) return ''
+  const pageSize = Number(pagination?.page_size ?? pagination?.pageSize) || 100
+  return total > pageSize ? `素材较多，此处仅显示前 ${pageSize} 条（共 ${total} 条），更多请到「制作资源 · 媒体」筛选` : ''
+}

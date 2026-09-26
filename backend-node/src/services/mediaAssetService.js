@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const { pipeline } = require('stream/promises');
 const uploadService = require('./uploadService');
 const storageLayout = require('./storageLayout');
 const assetService = require('./assetService');
@@ -63,15 +64,11 @@ function headBytes(file) {
   } finally { fs.closeSync(fd); }
 }
 
-function fileChecksum(file) {
+async function fileChecksum(file) {
   if (Buffer.isBuffer(file.buffer)) return crypto.createHash('sha256').update(file.buffer).digest('hex');
+  // 2GB 文件的 sha256 不能在事件循环上同步算：流式读取，避免大文件上传期间全服务停摆。
   const hash = crypto.createHash('sha256');
-  const fd = fs.openSync(file.path, 'r');
-  try {
-    const buffer = Buffer.alloc(1024 * 1024);
-    let read;
-    while ((read = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) hash.update(buffer.subarray(0, read));
-  } finally { fs.closeSync(fd); }
+  await pipeline(fs.createReadStream(file.path), hash);
   return hash.digest('hex');
 }
 
@@ -128,7 +125,7 @@ async function uploadInner(db, cfg, log, file, body = {}) {
   validate(file, type);
   const storagePath = resolveStoragePath(cfg);
   const dramaId = Number(body.drama_id) || null;
-  const checksum = fileChecksum(file);
+  const checksum = await fileChecksum(file);
   const duplicate = assetService.findByChecksum(db, checksum, dramaId, body.owner_user_id);
   if (duplicate) {
     log.info('媒体上传命中内容去重，复用已有素材', { asset_id: duplicate.id, drama_id: dramaId, type });

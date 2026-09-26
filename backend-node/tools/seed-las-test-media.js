@@ -1,5 +1,5 @@
 // 本地验收用：向指定项目导入测试视频，仅创建项目素材；不会提交付费 LAS 任务。
-// 模式一（默认）：ffmpeg 生成一段符合 LAS 门槛的小视频，走 /media/upload（受 50MB 上传限制）。
+// 模式一（默认）：ffmpeg 生成一段符合 LAS 门槛的小视频，走 /media/upload（受 2048MB 上传限制）。
 // 模式二（导入）：node tools/seed-las-test-media.js <文件1> [文件2 ...]
 //   把真实剧集文件直接拷入 storage/imports/ 并用 ffprobe 实测规格，经 POST /assets 登记为项目素材，
 //   绕开 multipart 上传的内存暂存限制，用于投流剪辑等大文件本地冒烟。

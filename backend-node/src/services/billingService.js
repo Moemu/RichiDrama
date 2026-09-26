@@ -705,9 +705,10 @@ function syncTaskReconciliationOutcome(db, table, authorizationId, outcome) {
   return rows.length;
 }
 
-// 人工结算/豁免或超时释放后，同步任务的用户可见状态。进入对账的任务没有
-// 已归档成片，统一落为 failed，并把处置结果追加进 error_msg。幂等：只更新
-// status='reconciliation' 的行，重复处置不会二次改写。
+// 人工结算/豁免或超时释放后，同步任务的用户可见状态。本地化任务进入对账时没有
+// 已归档成片；投流剪辑的成片下载先于结算，对账任务可能已有本地成片（保存素材
+// 入口已按已下载状态放开）。状态仍统一落为 failed，处置结果追加进 error_msg。
+// 幂等：只更新 status='reconciliation' 的行，重复处置不会二次改写。
 function syncLasReconciliationOutcome(db, authorizationId, outcome) {
   if (!authorizationId) return 0;
   let synced = 0;

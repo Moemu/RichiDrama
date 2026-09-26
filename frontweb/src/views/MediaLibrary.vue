@@ -442,7 +442,9 @@ async function toggleFavorite(item) {
 
 async function deleteItem(item) {
   if (projectReadOnly.value) return
-  await ElMessageBox.confirm('确定归档该素材？归档后新镜头不能再选用；已有镜头不受影响。', '归档确认', { type: 'warning' })
+  // 成片素材是剧集合并产物：归档仅从素材库隐藏，剧集成果页与已引用镜头不受影响。
+  const finalsNote = item.source_type === 'merged_final' ? '该素材为剧集成片：归档后剧集成果页播放不受影响，重新合并会自动恢复素材。' : ''
+  await ElMessageBox.confirm(`确定归档该素材？归档后新镜头不能再选用；已有镜头不受影响。${finalsNote}`, '归档确认', { type: 'warning' })
   if (projectReadOnly.value) return
   try {
     await request.delete(`/assets/${item.id}`)
@@ -525,7 +527,10 @@ async function batchDelete() {
   if (projectReadOnly.value) return
   const count = selectedIds.size
   const scopeLabel = projectDramaId.value ? '当前项目' : '全局素材库'
-  await ElMessageBox.confirm(`确定归档选中的 ${count} 个素材？归档后新镜头不能再选用；已有镜头不受影响。范围：${scopeLabel}。`, '批量归档', { type: 'warning', confirmButtonText: '归档选中素材', cancelButtonText: '取消' })
+  // 成片素材是剧集合并产物：归档仅从素材库隐藏，剧集成果页与已引用镜头不受影响。
+  const finalsCount = selectedMedia.value.filter((item) => item.source_type === 'merged_final').length
+  const finalsNote = finalsCount ? `其中 ${finalsCount} 个为剧集成片：归档后剧集成果页播放不受影响，重新合并会自动恢复素材。` : ''
+  await ElMessageBox.confirm(`确定归档选中的 ${count} 个素材？归档后新镜头不能再选用；已有镜头不受影响。范围：${scopeLabel}。${finalsNote}`, '批量归档', { type: 'warning', confirmButtonText: '归档选中素材', cancelButtonText: '取消' })
   if (projectReadOnly.value) return
   try {
     const result = await request.post('/assets/batch-delete', { ids: [...selectedIds], scope: assetScope.value, ...(projectDramaId.value ? { drama_id: projectDramaId.value } : {}) })

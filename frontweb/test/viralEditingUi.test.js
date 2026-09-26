@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { moveViralEpisode, viralGradeChips, viralRatingText, viralTimelineSegments, viralBillingText, viralDurationText, viralModeName, viralStatusName } from '../src/utils/viralEditing.js'
+import { moveViralEpisode, viralGradeChips, viralRatingText, viralTimelineSegments, viralBillingText, viralDurationText, viralModeName, viralStatusName, viralFinalsOnly, viralSortedAssets, viralEpisodeOrder, viralPickerAssets, viralTruncationHint } from '../src/utils/viralEditing.js'
 
 const component = () => readFile(new URL('../src/components/ViralEditingWorkspace.vue', import.meta.url), 'utf8')
 const api = () => readFile(new URL('../src/api/viralEditJobs.js', import.meta.url), 'utf8')
@@ -73,7 +73,8 @@ test('workspace keeps provider signed URLs out of playback and gates paid submit
   // 不拍平就会渲染出空白金额（隐藏页验收时实际踩到）。
   assert.match(source, /quote\.value = result \? \{ \.\.\.result\.quote, totals: result\.totals, episodes: result\.episodes \} : null/)
   assert.match(source, /timer = setInterval\(refreshJobs, 15000\)/)
-  assert.match(source, /onUnmounted\(\(\) => \{ clearInterval\(timer\); clearTimeout\(quoteTimer\) \}\)/)
+  assert.match(source, /if \(disposed\) return/, '挂载竞态：卸载后不得再建 15s 轮询')
+  assert.match(source, /onUnmounted\(\(\) => \{ disposed = true; clearInterval\(timer\); clearTimeout\(quoteTimer\) \}\)/)
   assert.match(source, /idempotency_key: pendingKey/)
   assert.match(source, /:disabled="!canEdit" @click="saveAsset/, '无编辑权限不能保存为素材')
   assert.match(source, /formatChinaDateTime\(job\.created_at\)/, '时间按 Asia/Shanghai 展示')
@@ -101,4 +102,32 @@ test('workspace layout survives the three desktop viewports without truncating c
   assert.match(source, /@media\(max-width:1100px\)\{\.viral-layout\{grid-template-columns:1fr\}\}/, '窄屏必须回退为单列')
   assert.match(source, /\.clips\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(min\(100%,280px\),1fr\)\)/, '成片网格按容器收缩，不在 1280 宽下截断')
   assert.match(source, /\.clip video\{display:block;width:100%;max-height:300px/, '视频限高但不锁死页面滚动')
+})
+
+test('picker「只看成片」filters merged finals, orders them by episode number, and hints at truncation', () => {
+  const assets = [
+    { id: 3, name: '上传素材', source_type: 'upload' },
+    { id: 7, name: '第2集 成片', source_type: 'merged_final' },
+    { id: 5, name: '第10集 成片', source_type: 'merged_final' },
+    { id: 9, name: '第1集 成片', source_type: 'merged_final' },
+  ]
+  assert.equal(viralPickerAssets(assets, false), assets, '关闭开关时保持原有顺序与全量（同一引用）')
+  assert.deepEqual(viralPickerAssets(assets, true).map((asset) => asset.name), ['第1集 成片', '第2集 成片', '第10集 成片'])
+  assert.equal(viralFinalsOnly(assets, true).length, 3)
+  assert.equal(viralEpisodeOrder({ name: '第12集 成片：反转' }), 12)
+  assert.equal(viralEpisodeOrder({ name: '改过名的素材' }), null)
+  assert.deepEqual(viralSortedAssets([{ id: 2, name: '普通素材' }, { id: 1, name: '普通素材B' }]).map((asset) => asset.id), [1, 2], '无集号素材按 id 兜底排序')
+  assert.equal(viralTruncationHint({ total: 260, page_size: 100 }), '素材较多，此处仅显示前 100 条（共 260 条），更多请到「制作资源 · 媒体」筛选')
+  assert.equal(viralTruncationHint({ total: 80, page_size: 100 }), '')
+  assert.equal(viralTruncationHint(undefined), '')
+})
+
+test('workspace exposes finals-only toggle, merged-final badge, truncation hint, and disposal-safe polling', async () => {
+  const source = await component()
+  assert.match(source, /v-model="finalsOnly"/)
+  assert.match(source, /source_type === 'merged_final'/, '成片素材须带「成片」徽标')
+  assert.match(source, /viralTruncationHint\(assets\?\.pagination\)/, '素材超过单页上限时必须给出截断提示')
+  assert.match(source, /if \(disposed\) return/, '挂载竞态：卸载后不得再建 15s 轮询')
+  assert.match(source, /disposed = true; clearInterval\(timer\)/)
+  assert.doesNotMatch(source, /v-if="job\.status === 'completed' && job\.outputs\.length"/, '对账/失败任务的已下载成片也须展示并可保存')
 })

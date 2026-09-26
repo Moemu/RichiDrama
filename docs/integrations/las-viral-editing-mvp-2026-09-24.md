@@ -122,3 +122,13 @@
 - **失败任务中转回收**：`cleanupTransit` 终态口径从「仅 completed」扩为 `completed|failed`——failed 无结果需保护（预授权已释放或经对账终结），直接按登记清单回收；**reconciliation 仍不删**（提交不确定时供应商可能仍在读取输入）。viral 输入改逐集登记，中途上传失败不留未登记对象。两表 30s 清扫循环同扩 `failed`。
 - **任务 API 治理字段**：`GET /viral-edit-jobs/:id` 详情新增 `tos: { policy, cleanup_at, cleanup_attempts }`。
 - 未处理（观察项）：无字幕素材的评级质量需带真实剧集的运营反馈再评估。
+
+## 11. 审查修复记录（2026-09-26，本地分支追加）
+
+- **输入校验补长边 ≥640**：官方要求长边 ∈ [640,1920]，此前只校验短边，480×480 等文件会通过本地预检后被供应商拒绝、资金冻结转对账。
+- **成片 ffprobe 与上传 sha256 改异步**：`registerMergedFinalAsset` 的 ffprobe 与 `fileChecksum` 原为同步调用，2GB 文件会阻塞事件循环数秒（回填循环逐集放大）；分别改 `execFile`（promisified）与 `stream/promises` 流式哈希。
+- **上传临时文件兜底清理**：新增 `middleware/uploadTempBackstop`——multer 落盘后、handler 前被守卫拒绝的请求（403/409）不经过 `upload()` 的 finally，2GB 临时文件会残留到下次重启清扫；现于响应 `finish/close` 时幂等删除（成功路径已被 rename 走，无副作用）。
+- **storyboard 限定任务前缀**：分镜下载路径从「任意 `tos://`」收紧为「本任务 `richidrama/las/<jobId>/` 前缀」，供应商响应指向其他任务对象时跳过分镜（记 warn）而不跨任务读取；成片仍按 outputPrefix 硬校验、违规转对账。
+- **对账/失败任务的已下载成片可保存**：下载先于结算，对账结算收费后任务落 failed 但成片本地可用；`saveOutputAsAsset` 放开为按 output 状态（`downloaded`）判定，前端成片列表同步放开状态门槛；对账回写注释同步修正（viral 任务进入对账时可能已有本地成片）。
+- **projectOperations 幂等哈希**：diskStorage 下 `req.file.buffer` 恒为 undefined（所有上传被判同一请求回放），改用 `size:originalname` 入哈希。
+- **选择器体验**：「只看成片」过滤（`source_type='merged_final'`，默认关）+ 按集数排序；素材超过单页 100 条上限时内联提示截断；成片素材在媒体库归档确认中说明「仅从素材库隐藏，剧集成果页不受影响」；修复 viral tab 卸载后 15s 轮询泄漏（disposed 守卫）。

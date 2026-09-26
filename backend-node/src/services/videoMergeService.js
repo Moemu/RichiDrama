@@ -400,8 +400,10 @@ async function registerMergedFinalAsset(db, log, { episodeId, mergeId, localPath
     let height = null;
     let duration = null;
     try {
-      const { execFileSync } = require('node:child_process');
-      const info = JSON.parse(execFileSync(getFfprobePath(), ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height', '-of', 'json', abs], { encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024 }));
+      // 回填循环里逐集探测；execFileSync 会在事件循环上反复卡顿，改异步 execFile。
+      const { execFile } = require('node:child_process');
+      const { promisify } = require('node:util');
+      const info = JSON.parse((await promisify(execFile)(getFfprobePath(), ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height', '-of', 'json', abs], { windowsHide: true, maxBuffer: 8 * 1024 * 1024, timeout: 30000 })).stdout);
       const video = (info.streams || []).find((stream) => stream.codec_type === 'video');
       width = video?.width ?? null;
       height = video?.height ?? null;

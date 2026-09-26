@@ -85,7 +85,7 @@ function validateInputs(episodes) {
     if (episode.durationMs < 1_000 || episode.durationMs > 600_000) throw new Error(`第 ${episode.seq} 集时长须在第 1 秒至 10 分钟之间`);
     const shortEdge = Math.min(episode.width, episode.height);
     const longEdge = Math.max(episode.width, episode.height);
-    if (shortEdge < 360 || shortEdge > 1080 || longEdge > 1920) throw new Error(`第 ${episode.seq} 集分辨率不在 360x640 至 1080x1920 支持范围内`);
+    if (shortEdge < 360 || shortEdge > 1080 || longEdge < 640 || longEdge > 1920) throw new Error(`第 ${episode.seq} 集分辨率不在 360x640 至 1080x1920 支持范围内`);
     totalMs += episode.durationMs;
     totalBytes += Number(episode.bytes || 0);
   }
@@ -121,10 +121,13 @@ function parseViralResult(data, outputPrefix) {
     };
   });
   const storyboardPath = String(data?.script?.storyboard_json_path || data?.storyboard_json_path || '');
+  // 分镜只允许本任务前缀（richidrama/las/<jobId>/）：供应商响应若指向其他任务的对象，
+  // 宁可放弃分镜也不跨任务下载读取；成片仍按 outputPrefix 硬校验。
+  const jobRoot = outputPrefix.replace(/viral\/$/, '');
   return {
     total_clips: Number(data?.total_clips) || parsed.length,
     clips: parsed,
-    storyboard_path: storyboardPath.startsWith('tos://') ? storyboardPath : null,
+    storyboard_path: storyboardPath.startsWith(jobRoot) ? storyboardPath : null,
     segments: Array.isArray(data?.storyboard) ? data.storyboard : [],
     videos: Array.isArray(data?.videos) ? data.videos : [],
   };
@@ -516,6 +519,9 @@ async function processJob(db, log, cfg, id) {
       const prefix = operator.outputPath(clientConfig, id, 'viral');
       const data = JSON.parse(row.result_json || '{}');
       const parsed = parseViralResult(data, prefix);
+      if ((data?.script?.storyboard_json_path || data?.storyboard_json_path) && !parsed.storyboard_path) {
+        log.warn('投流剪辑分镜不在本任务 TOS 前缀内，已跳过下载', { id });
+      }
       const objects = readTosObjects(row);
       const root = storageRoot(cfg);
       let storyboardPath = objects.storyboard || null;
@@ -581,10 +587,15 @@ async function processJob(db, log, cfg, id) {
 async function saveOutputAsAsset(db, log, cfg, ownerId, jobId, clipIndex) {
   const row = db.prepare('SELECT * FROM viral_edit_jobs WHERE id=? AND owner_user_id=?').get(jobId, ownerId);
   if (!row) throw new Error('投流剪辑任务不存在');
-  if (row.status !== 'completed') throw new Error('任务尚未完成，不能保存素材');
   const output = db.prepare('SELECT * FROM viral_edit_outputs WHERE job_id=? AND clip_index=?').get(jobId, Number(clipIndex));
   if (!output) throw new Error('成片不存在');
   if (output.asset_id) return { output: outputToItem(output, db), reused: true };
+  // 下载先于结算：对账/失败任务的成片可能已落盘。本地文件在即允许保存，
+  // 计费争议走对账处置，不阻塞用户把已产出的素材收进项目。
+  if (output.status !== 'downloaded') {
+    if (row.status === 'completed') throw new Error('本地成片文件缺失，无法保存为素材');
+    throw new Error(row.status === 'reconciliation' ? '任务待对账，成片尚未下载完成' : '任务尚未完成，成片尚未下载，不能保存素材');
+  }
   const access = require('./projectAccessService').access(db, row.drama_id, ownerId);
   if (!access?.can_edit) throw new Error('项目不存在或没有编辑权限');
   const file = resolveStorageFile(storageRoot(cfg), output.local_path);
