@@ -8,15 +8,16 @@
     <div class="viral-layout">
       <div class="panel setup-panel">
         <h4>新建剪辑任务</h4>
-        <p class="sub">选择已归档的剧集视频并按顺序排列（第一个即第 1 集）；输入需携带内嵌字幕，否则高光识别可能失效。</p>
+        <p class="sub">选择已归档的剧集视频并按顺序排列（第一个即第 1 集）；仅支持 mp4 / mov / avi / mkv（webm、m4v 等请先转码），输入需携带内嵌字幕，否则高光识别可能失效。</p>
         <div class="picker">
           <div class="picker-col">
             <p class="col-label">项目视频素材 <label class="finals-toggle"><input type="checkbox" v-model="finalsOnly" />只看成片</label></p>
-            <label v-for="video in availableVideos" :key="video.id" class="video-row">
-              <input type="checkbox" :checked="isSelected(video.id)" @change="toggleVideo(video)" />
-              <span class="name"><span v-if="video.source_type === 'merged_final'" class="final-badge">成片</span>{{ video.name }}</span><span class="meta">{{ viralDurationText(video.duration * 1000) }}</span>
+            <input v-model="videoKeyword" class="video-search" type="search" placeholder="按素材名搜索" aria-label="按素材名搜索" @keyup.enter="reloadVideos" />
+            <label v-for="video in availableVideos" :key="video.id" class="video-row" :title="viralVideoFormatSupported(video) ? null : '投流剪辑仅支持 mp4 / mov / avi / mkv'">
+              <input type="checkbox" :checked="isSelected(video.id)" :disabled="!viralVideoFormatSupported(video)" @change="toggleVideo(video)" />
+              <span class="name"><span v-if="video.source_type === 'merged_final'" class="final-badge">成片</span><span v-if="!viralVideoFormatSupported(video)" class="format-badge">格式不支持</span>{{ video.name }}</span><span class="meta">{{ viralDurationText(video.duration * 1000) }}</span>
             </label>
-            <p v-if="truncatedHint" class="col-hint">{{ truncatedHint }}</p>
+            <button v-if="hasMoreVideos" type="button" class="load-more" :disabled="loadingVideos" @click="loadMoreVideos">{{ loadingVideos ? '加载中…' : `加载更多素材（已载 ${videos.length}/${videoTotal}）` }}</button>
             <p v-if="!videos.length" class="empty">暂无已归档视频，请先在「制作资源 · 媒体」上传或归档剧集。</p>
           </div>
           <div class="picker-col">
@@ -111,7 +112,7 @@ import { viralEditJobsAPI } from '@/api/viralEditJobs'
 import { lasMediaJobsAPI } from '@/api/lasMediaJobs'
 import { createClientRequestId } from '@/utils/requestId'
 import { formatChinaDateTime } from '@/utils/time'
-import { moveViralEpisode, viralBillingText, viralDurationText, viralGradeChips, viralModeName, viralPickerAssets, viralStatusName, viralTimelineSegments, viralTruncationHint } from '@/utils/viralEditing'
+import { moveViralEpisode, viralBillingText, viralDurationText, viralGradeChips, viralModeName, viralPickerAssets, viralStatusName, viralTimelineSegments, viralVideoFormatSupported, viralVideosHasMore } from '@/utils/viralEditing'
 
 const MAX_EPISODES = 10
 const MAX_CLIP_COUNT = 10
@@ -123,7 +124,10 @@ const videos = ref([])
 const jobs = ref([])
 const selected = ref([])
 const finalsOnly = ref(false)
-const truncatedHint = ref('')
+const videoKeyword = ref('')
+const videoPage = ref(1)
+const videoPagination = ref(null)
+const loadingVideos = ref(false)
 const ready = ref(false)
 const quoting = ref(false)
 const submitting = ref(false)
@@ -132,29 +136,44 @@ const quoteError = ref('')
 let pendingKey = ''
 let timer
 let quoteTimer
+let searchTimer
 let quoteVersion = 0
 const params = ref({ mode: 'sequential', max_clip_count: 5, min_clip_duration: 60, max_clip_duration: 180, preset_intro: false, aspect_ratio: null })
 
 const availableVideos = computed(() => viralPickerAssets(videos.value, finalsOnly.value))
+const hasMoreVideos = computed(() => viralVideosHasMore(videoPagination.value, videos.value.length))
 const isSelected = (id) => selected.value.some((episode) => String(episode.id) === String(id))
 function toggleVideo(video) {
   const index = selected.value.findIndex((episode) => String(episode.id) === String(video.id))
   if (index >= 0) selected.value.splice(index, 1)
   else {
+    // 算子只吃 mp4/mov/avi/mkv；webm/m4v 能上传但不能进投流，在选择器阶段就拦下。
+    if (!viralVideoFormatSupported(video)) { ElMessage.warning('投流剪辑仅支持 mp4 / mov / avi / mkv 格式，请先转码后再上传'); return }
     if (selected.value.length >= MAX_EPISODES) { ElMessage.warning(`MVP 阶段单次最多 ${MAX_EPISODES} 集`); return }
     selected.value.push(video)
   }
 }
 function move(index, direction) { selected.value = moveViralEpisode(selected.value, index, direction) }
+async function loadVideos({ append = false } = {}) {
+  if (!props.dramaId || loadingVideos.value) return
+  loadingVideos.value = true
+  try {
+    const assets = await viralEditJobsAPI.videos(props.dramaId, { page: videoPage.value, keyword: videoKeyword.value.trim() || undefined })
+    const fresh = (assets?.items || []).filter((asset) => asset.local_path)
+    videos.value = append
+      ? [...videos.value, ...fresh.filter((item) => !videos.value.some((existing) => String(existing.id) === String(item.id)))]
+      : fresh
+    videoPagination.value = assets?.pagination || null
+  } catch (error) { ElMessage.error(error.message) }
+  finally { loadingVideos.value = false }
+}
+function reloadVideos() { videoPage.value = 1; return loadVideos() }
+function loadMoreVideos() { videoPage.value += 1; return loadVideos({ append: true }) }
 async function loadAll() {
   if (!props.dramaId) return
   try {
-    const [assets, history] = await Promise.all([viralEditJobsAPI.videos(props.dramaId), viralEditJobsAPI.list(props.dramaId)])
-    videos.value = (assets?.items || []).filter((asset) => asset.local_path)
+    const [, history] = await Promise.all([loadVideos(), viralEditJobsAPI.list(props.dramaId)])
     jobs.value = history || []
-    truncatedHint.value = viralTruncationHint(assets?.pagination)
-    const visible = new Set(videos.value.map((video) => String(video.id)))
-    selected.value = selected.value.filter((episode) => visible.has(String(episode.id)))
   } catch (error) { ElMessage.error(error.message) }
 }
 async function refreshJobs() {
@@ -217,6 +236,7 @@ async function saveAsset(job, output) {
   } catch (error) { ElMessage.error(error.message) }
 }
 watch(() => [selected.value.map((episode) => String(episode.id)).join(','), params.value.mode, params.value.max_clip_count, params.value.min_clip_duration, params.value.max_clip_duration, params.value.aspect_ratio, params.value.preset_intro], scheduleQuote)
+watch(videoKeyword, () => { clearTimeout(searchTimer); searchTimer = setTimeout(reloadVideos, 400) })
 // 挂载竞态防护：两个 await 之间组件可能已卸载（onUnmounted 已执行过），
 // 此时不得再建 15s 轮询，否则定时器会一直跑到离开页面。
 let disposed = false
@@ -226,7 +246,7 @@ onMounted(async () => {
   if (disposed) return
   timer = setInterval(refreshJobs, 15000)
 })
-onUnmounted(() => { disposed = true; clearInterval(timer); clearTimeout(quoteTimer) })
+onUnmounted(() => { disposed = true; clearInterval(timer); clearTimeout(quoteTimer); clearTimeout(searchTimer) })
 </script>
 
 <style scoped>
@@ -298,5 +318,9 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 @media(max-width:1100px){.viral-layout{grid-template-columns:1fr}}
 .finals-toggle{margin-left:8px;font-weight:400;font-size:12px;color:var(--text-secondary, #909399);display:inline-flex;align-items:center;gap:4px;cursor:pointer}
 .final-badge{display:inline-block;margin-right:4px;padding:0 4px;border-radius:3px;font-size:11px;line-height:16px;background:var(--el-color-success-light-9, #f0f9eb);color:var(--el-color-success, #67c23a)}
-.col-hint{margin:6px 0 0;font-size:12px;color:var(--text-secondary, #909399)}
+.video-search{width:100%;margin:0 0 6px;padding:5px 8px;border:1px solid var(--el-border-color, #dcdfe6);border-radius:4px;background:transparent;color:inherit;font-size:12px;box-sizing:border-box}
+.video-search:focus{outline:none;border-color:var(--el-color-primary, #409eff)}
+.format-badge{display:inline-block;margin-right:4px;padding:0 4px;border-radius:3px;font-size:11px;line-height:16px;background:var(--el-color-info-light-9, #f4f4f5);color:var(--el-color-info, #909399)}
+.load-more{width:100%;margin-top:6px;padding:4px 0;border:none;background:transparent;color:var(--el-color-primary, #409eff);font-size:12px;cursor:pointer}
+.load-more:disabled{color:var(--el-color-info, #909399);cursor:default}
 </style>

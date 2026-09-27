@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { moveViralEpisode, viralGradeChips, viralRatingText, viralTimelineSegments, viralBillingText, viralDurationText, viralModeName, viralStatusName, viralFinalsOnly, viralSortedAssets, viralEpisodeOrder, viralPickerAssets, viralTruncationHint } from '../src/utils/viralEditing.js'
+import { moveViralEpisode, viralGradeChips, viralRatingText, viralTimelineSegments, viralBillingText, viralDurationText, viralModeName, viralStatusName, viralFinalsOnly, viralSortedAssets, viralEpisodeOrder, viralPickerAssets, VIRAL_SUPPORTED_VIDEO_EXTENSIONS, viralVideoExtension, viralVideoFormatSupported, viralVideosHasMore } from '../src/utils/viralEditing.js'
 
 const component = () => readFile(new URL('../src/components/ViralEditingWorkspace.vue', import.meta.url), 'utf8')
 const api = () => readFile(new URL('../src/api/viralEditJobs.js', import.meta.url), 'utf8')
@@ -74,7 +74,7 @@ test('workspace keeps provider signed URLs out of playback and gates paid submit
   assert.match(source, /quote\.value = result \? \{ \.\.\.result\.quote, totals: result\.totals, episodes: result\.episodes \} : null/)
   assert.match(source, /timer = setInterval\(refreshJobs, 15000\)/)
   assert.match(source, /if \(disposed\) return/, '挂载竞态：卸载后不得再建 15s 轮询')
-  assert.match(source, /onUnmounted\(\(\) => \{ disposed = true; clearInterval\(timer\); clearTimeout\(quoteTimer\) \}\)/)
+  assert.match(source, /onUnmounted\(\(\) => \{ disposed = true; clearInterval\(timer\); clearTimeout\(quoteTimer\); clearTimeout\(searchTimer\) \}\)/)
   assert.match(source, /idempotency_key: pendingKey/)
   assert.match(source, /:disabled="!canEdit" @click="saveAsset/, '无编辑权限不能保存为素材')
   assert.match(source, /formatChinaDateTime\(job\.created_at\)/, '时间按 Asia/Shanghai 展示')
@@ -104,7 +104,7 @@ test('workspace layout survives the three desktop viewports without truncating c
   assert.match(source, /\.clip video\{display:block;width:100%;max-height:300px/, '视频限高但不锁死页面滚动')
 })
 
-test('picker「只看成片」filters merged finals, orders them by episode number, and hints at truncation', () => {
+test('picker「只看成片」filters merged finals and orders them by episode number', () => {
   const assets = [
     { id: 3, name: '上传素材', source_type: 'upload' },
     { id: 7, name: '第2集 成片', source_type: 'merged_final' },
@@ -117,16 +117,43 @@ test('picker「只看成片」filters merged finals, orders them by episode numb
   assert.equal(viralEpisodeOrder({ name: '第12集 成片：反转' }), 12)
   assert.equal(viralEpisodeOrder({ name: '改过名的素材' }), null)
   assert.deepEqual(viralSortedAssets([{ id: 2, name: '普通素材' }, { id: 1, name: '普通素材B' }]).map((asset) => asset.id), [1, 2], '无集号素材按 id 兜底排序')
-  assert.equal(viralTruncationHint({ total: 260, page_size: 100 }), '素材较多，此处仅显示前 100 条（共 260 条），更多请到「制作资源 · 媒体」筛选')
-  assert.equal(viralTruncationHint({ total: 80, page_size: 100 }), '')
-  assert.equal(viralTruncationHint(undefined), '')
 })
 
-test('workspace exposes finals-only toggle, merged-final badge, truncation hint, and disposal-safe polling', async () => {
+test('picker gates unsupported video formats before quote instead of at billing time', () => {
+  const webm = { id: 4, name: '录屏.webm', local_path: 'videos/x.webm' }
+  const mp4 = { id: 5, name: '剧集.mp4', local_path: 'videos/y.mp4' }
+  const mkvNoPath = { id: 6, name: '片源.mkv' }
+  assert.equal(viralVideoExtension(webm), '.webm')
+  assert.equal(viralVideoExtension(mkvNoPath), '.mkv', 'local_path 缺失时可从素材名兜底取扩展名')
+  assert.equal(viralVideoFormatSupported(webm), false, 'webm 能上传但投流不吃，必须在选择器标注')
+  assert.equal(viralVideoFormatSupported(mp4), true)
+  assert.equal(viralVideoFormatSupported(mkvNoPath), true)
+  assert.equal(viralVideoFormatSupported({ name: '大写.MP4' }), true, '扩展名大小写不敏感')
+  assert.equal(viralVideoFormatSupported({ name: '无扩展名' }), false)
+})
+
+test('frontend format allowlist stays in lockstep with the backend operator contract', async () => {
+  const backend = await readFile(new URL('../../backend-node/src/services/viralEditJobService.js', import.meta.url), 'utf8')
+  const match = /const SUPPORTED_EXTENSIONS = new Set\(\[([^\]]+)\]\)/.exec(backend)
+  assert.ok(match, '后端必须显式声明 SUPPORTED_EXTENSIONS')
+  const backendExtensions = match[1].split(',').map((raw) => raw.trim().replace(/['"]/g, ''))
+  assert.deepEqual([...VIRAL_SUPPORTED_VIDEO_EXTENSIONS], backendExtensions, '选择器与后端接受的格式必须一致，避免上传后报价才被拒')
+})
+
+test('picker pages through videos beyond the first 100 via load-more and search', () => {
+  assert.equal(viralVideosHasMore({ total: 260 }, 100), true)
+  assert.equal(viralVideosHasMore({ total: 100 }, 100), false)
+  assert.equal(viralVideosHasMore(undefined, 0), false)
+})
+
+test('workspace exposes finals-only toggle, format badges, search + load-more, and disposal-safe polling', async () => {
   const source = await component()
   assert.match(source, /v-model="finalsOnly"/)
   assert.match(source, /source_type === 'merged_final'/, '成片素材须带「成片」徽标')
-  assert.match(source, /viralTruncationHint\(assets\?\.pagination\)/, '素材超过单页上限时必须给出截断提示')
+  assert.match(source, /viralVideoFormatSupported\(video\)/, '不支持的格式须在选择器标注并禁选')
+  assert.match(source, /format-badge/)
+  assert.match(source, /v-model="videoKeyword"/, '超过单页上限时须可搜索')
+  assert.match(source, /loadMoreVideos/, '超过单页上限时须可分页加载')
   assert.match(source, /if \(disposed\) return/, '挂载竞态：卸载后不得再建 15s 轮询')
   assert.match(source, /disposed = true; clearInterval\(timer\)/)
   assert.doesNotMatch(source, /v-if="job\.status === 'completed' && job\.outputs\.length"/, '对账/失败任务的已下载成片也须展示并可保存')

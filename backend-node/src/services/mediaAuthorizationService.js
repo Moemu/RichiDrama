@@ -171,9 +171,10 @@ const DEFINITIONS = [
   { table: 'viral_edit_outputs', alias: 'o', pathFields: [
     { name: 'local_path', role: 'asset' },
   ], owner: 'o.owner_user_id', project: 'o.drama_id', where: "o.status IN ('downloaded','saved')" },
+  // 分镜下载验证后即登记路径，任务可能仍处于对账/失败态——与成片同口径可交付。
   { table: 'viral_edit_jobs', alias: 'j', pathFields: [
     { name: 'storyboard_local_path', role: 'asset' },
-  ], owner: 'j.owner_user_id', project: 'j.drama_id', where: "j.status = 'completed'" },
+  ], owner: 'j.owner_user_id', project: 'j.drama_id', where: "j.status IN ('completed','reconciliation','failed')" },
   { table: 'external_asset_bindings', alias: 'b', pathFields: [{ name: 'source_local_path', role: 'binding' }], referenceFields: ['source_image_url'], owner: 'b.owner_user_id' },
 ];
 

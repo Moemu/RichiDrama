@@ -7,5 +7,9 @@ export const viralEditJobsAPI = {
   get(id) { return request.get(`/viral-edit-jobs/${id}`) },
   create(body) { return request.post('/viral-edit-jobs', { ...body, idempotency_key: body.idempotency_key || createClientRequestId() }) },
   saveAsset(id, clipIndex) { return request.post(`/viral-edit-jobs/${id}/outputs/${clipIndex}/save-asset`) },
-  videos(dramaId) { return request.get('/assets', { params: { scope: 'project', drama_id: dramaId, type: 'video', page_size: 100 } }) },
+  videos(dramaId, params = {}) {
+    return request.get('/assets', {
+      params: { scope: 'project', drama_id: dramaId, type: 'video', page_size: 100, ...params },
+    })
+  },
 }

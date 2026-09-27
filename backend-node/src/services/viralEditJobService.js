@@ -554,6 +554,9 @@ async function processJob(db, log, cfg, id) {
         storyboardRelative = `viral/${id}/storyboard.json`;
         await tos.download(tosConfig, parsed.storyboard_path, path.join(root, storyboardRelative));
         storyboardPath = { path: parsed.storyboard_path, bytes: fs.statSync(path.join(root, storyboardRelative)).size };
+        // 下载并验证后立即登记本地路径：结算失败转对账时分镜同样可交付，
+        // 不能把交付能力押在与 completed 同一笔写入上（与成片逐条落库同口径）。
+        record(db, id, { storyboard_local_path: storyboardRelative });
       }
       const totalOutputMs = measured.reduce((sum, entry) => sum + entry.media.durationMs, 0);
       record(db, id, { tos_objects_json: JSON.stringify({ ...objects, outputs: parsed.clips.map((clip) => ({ path: clip.tos_path, bytes: clip.local_bytes || null })), storyboard: storyboardPath }) });
