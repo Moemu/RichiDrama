@@ -303,3 +303,29 @@ test('viral input validation enforces operator limits and MVP caps', async () =>
   assert.throws(() => jobs.validateParams({ mode: 'jump_cut', min_clip_duration: 5, max_clip_duration: 300, max_clip_count: 11 }), /目标素材条数/);
   assert.throws(() => jobs.validateParams({ mode: 'jump_cut', min_clip_duration: 5, max_clip_duration: 300, max_clip_count: 1, aspect_ratio: '16:9' }), /9:16/);
 });
+
+test('storyboard stays deliverable when settlement falls back to reconciliation or failure', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'viral-storyboard-auth-'));
+  const storage = path.join(root, 'storage');
+  fs.mkdirSync(storage, { recursive: true });
+  const db = new Database(':memory:');
+  const out = console.log; const warn = console.warn; console.log = () => {}; console.warn = () => {};
+  try { runMigrationsAndEnsure(db) } finally { console.log = out; console.warn = warn }
+  t.after(() => { db.close(); fs.rmSync(root, { recursive: true, force: true }) });
+  const admin = auth.ensureBootstrapAdmin(db, log);
+  const user = auth.createUser(db, { username: `sb-${Date.now()}`, password: 'test-password' }, admin.id);
+  const project = drama.createDrama(db, log, { title: '分镜授权验收', owner_user_id: user.id });
+  const mediaAuthorization = require('../src/services/mediaAuthorizationService');
+  const at = new Date().toISOString();
+  // 每个状态各自独立路径：授权按路径匹配行，共用路径会让 completed 行把 processing 也放行。
+  for (const status of ['completed', 'reconciliation', 'failed', 'processing']) {
+    const relative = `viral/job-${status}/storyboard.json`;
+    fs.mkdirSync(path.dirname(path.join(storage, relative)), { recursive: true });
+    fs.writeFileSync(path.join(storage, relative), '{"ok":true}');
+    db.prepare(`INSERT INTO viral_edit_jobs (id, owner_user_id, drama_id, idempotency_key, input_assets_json, params_json, input_json, status, storyboard_local_path, tos_policy, created_at, updated_at)
+      VALUES (?, ?, ?, ?, '[]', '{}', '{}', ?, ?, 'cleanup', ?, ?)`)
+      .run(`job-${status}`, user.id, project.id, `key-${status}`, status, relative, at, at);
+    const allowed = mediaAuthorization.authorizeMediaPath(db, `/static/${relative}`, { id: user.id }, { storageRoot: storage });
+    assert.equal(allowed.allowed, status !== 'processing', `${status} 态分镜授权判定错误：${JSON.stringify(allowed)}`);
+  }
+});

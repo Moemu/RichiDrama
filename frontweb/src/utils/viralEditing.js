@@ -81,10 +81,23 @@ export function viralPickerAssets(assets, finalsOnly) {
   return finalsOnly ? viralSortedAssets(viralFinalsOnly(assets, true)) : assets
 }
 
-// 素材超过单页上限（100 条）时给出截断提示，避免运营以为项目里没有更多视频。
-export function viralTruncationHint(pagination) {
+// 投流剪辑接受的输入格式（算子契约 mp4/mov/avi/mkv）；通用上传比这更宽（含 webm/m4v），
+// 必须在选择器阶段就拦下，不能等报价报错。与后端 viralEditJobService 的
+// SUPPORTED_EXTENSIONS 保持一致（frontweb 测试锁死两侧一致）。
+export const VIRAL_SUPPORTED_VIDEO_EXTENSIONS = ['.mp4', '.mov', '.avi', '.mkv']
+
+export function viralVideoExtension(asset) {
+  const source = String(asset?.local_path || asset?.name || '').toLowerCase()
+  const match = /\.[a-z0-9]+$/.exec(source)
+  return match ? match[0] : ''
+}
+
+export function viralVideoFormatSupported(asset) {
+  return VIRAL_SUPPORTED_VIDEO_EXTENSIONS.includes(viralVideoExtension(asset))
+}
+
+// 素材按需分页加载：loadedCount 少于总数即还有下一页。
+export function viralVideosHasMore(pagination, loadedCount) {
   const total = Number(pagination?.total)
-  if (!Number.isFinite(total) || total <= 0) return ''
-  const pageSize = Number(pagination?.page_size ?? pagination?.pageSize) || 100
-  return total > pageSize ? `素材较多，此处仅显示前 ${pageSize} 条（共 ${total} 条），更多请到「制作资源 · 媒体」筛选` : ''
+  return Number.isFinite(total) && loadedCount < total
 }
