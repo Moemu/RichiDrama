@@ -52,8 +52,10 @@ lens 重建后无需人工动作：timer 在 ≤5 分钟内自动恢复我们的
 docker exec lens-rhyme-nginx-1 nginx -T | grep -A3 "location = /api/v1/media/upload"
 dd if=/dev/zero of=/tmp/big.bin bs=1M count=40
 curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Host: drama.richbest.cn' \
-  --data-binary @/tmp/big.bin http://127.0.0.1/api/v1/media/upload    # 期望 401（鉴权层），不是 413（nginx 体积闸）
+  -F "file=@/tmp/big.bin;type=video/mp4" http://127.0.0.1/api/v1/media/upload    # 期望 401（应用鉴权层），不是 HTML 413（nginx 体积闸）
 ```
+
+注意：断言必须用 `-F`（multipart）。`--data-binary` 会以 `x-www-form-urlencoded` 穿透 nginx、被应用 `express.urlencoded` 的 100kb 默认限制挡下返回 JSON 413，看起来像 nginx 没放行、实际是两码事。
 
 手工回滚（兜底）：`docker cp /var/backups/minidrama-ingress/<最近一份> lens-rhyme-nginx-1:/etc/nginx/conf.d/minidrama.conf && docker exec lens-rhyme-nginx-1 nginx -t && docker exec lens-rhyme-nginx-1 nginx -s reload`
 

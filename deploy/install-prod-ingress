@@ -15,7 +15,9 @@
 # 可用环境变量覆盖：HTTP_NGINX_CONTAINER、INGRESS_TARGET_CONF、INGRESS_SOURCE_CONF、INGRESS_BACKUP_DIR
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 经 /usr/local/bin 符号链接调用时 BASH_SOURCE 是链接路径本身，必须 readlink -f
+# 解析回真实安装目录（/usr/local/lib/richidrama-deploy），否则找不到同装的配置源。
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 SOURCE_CONF="${INGRESS_SOURCE_CONF:-$SCRIPT_DIR/nginx-drama-richbest.conf}"
 CONTAINER="${HTTP_NGINX_CONTAINER:-lens-rhyme-nginx-1}"
 TARGET_CONF="${INGRESS_TARGET_CONF:-/etc/nginx/conf.d/minidrama.conf}"
