@@ -180,6 +180,37 @@ test('复制为新版本后发布：归档前版并把分组绑定改指到新�
   } finally { teardown(root); }
 });
 
+test('删除价目项可以发布：diff 标记删除、旧版归档、新版不含被删项', () => {
+  const { db, root, admin } = setup();
+  try {
+    const { group, user } = memberOfNewGroup(db, admin, 'las-item-removal');
+    const first = draft(db, admin, { name: '火山引擎 LAS 本地化价目', provider: 'las', items: LAS_ITEMS });
+    providerPrices.publish(db, admin.id, first.id, { confirm: true, reason: '首版', idempotency_key: 'las-remove-v1', notify_users: false });
+    tenants.replaceBindings(db, group.id, { price_book_bindings: [{ provider: 'las', price_book_id: first.id }] });
+
+    const clone = billing.clonePriceBook(db, admin.id, first.id);
+    // savePriceBook 是整表替换语义：提交的条目清单里不带 inpaint-pro 即为删除。
+    billing.savePriceBook(db, admin.id, {
+      name: clone.name,
+      provider: 'las',
+      items: clone.items
+        .filter((row) => row.model !== 'las-video-inpaint-pro')
+        .map((row) => ({ service_type: row.service_type, model: row.model, meter: row.meter, unit_price: row.unit_price, conditions_json: row.conditions_json })),
+    }, clone.id);
+    const result = providerPrices.publish(db, admin.id, clone.id, { confirm: true, reason: '下线 inpaint-pro 合同价', idempotency_key: 'las-remove-v2', notify_users: true });
+
+    const removal = result.diff.find((row) => row.removed);
+    assert.ok(removal, '删除必须进入 diff，否则「仅删除」会被误判为无变化而无法发布');
+    assert.equal(removal.model, 'las-video-inpaint-pro');
+    assert.equal(removal.new_unit_price_micro, null);
+    assert.equal(result.diff.some((row) => !row.removed), false, '未改价的条目不得出现在 diff 里');
+    assert.equal(db.prepare('SELECT status FROM billing_price_books WHERE id=?').get(first.id).status, 'archived');
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM billing_price_book_items WHERE price_book_id=? AND model='las-video-inpaint-pro'").get(clone.id).n, 0, '发布后的新版不得再含被删条目');
+    assert.equal(quoteLas(db, user, 'las-video-translate', 90_000).amount, 225, '未删除的价目继续生效');
+    assert.match(latestNotice(db).body, /删除/, '用户通知文案必须标注删除');
+  } finally { teardown(root); }
+});
+
 test('只有已发布价目能复制新版本，非法供应商标识在保存阶段被拒', () => {
   const { db, root, admin } = setup();
   try {

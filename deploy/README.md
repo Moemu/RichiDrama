@@ -15,7 +15,7 @@
 本应用容器加入 `lens-rhyme_default` 网络（alias `minidrama-app`），
 由 `lens-rhyme-nginx` 按域名 `drama.richbest.cn` 反代。
 - 容器内监听 5679；宿主机 10588 仅作内网调试备用。
-- 生产 Nginx 配置由现有 `default.conf` 管理。发布脚本只验证该配置，不写入重复域名。
+- 生产 Nginx 配置由容器内 `/etc/nginx/conf.d/minidrama.conf` 管理（对应本目录 `nginx-drama-richbest.conf`；`default.conf` 属于 lens 应用，勿动）。该文件由 `install-prod-ingress` 自愈收敛维护，见下方「生产 Ingress 配置：自愈收敛」。
 
 后端（Express）在容器内托管：
 - `/api/v1/*`  后端接口
@@ -24,6 +24,40 @@
 - `/health`    健康检查
 
 **访问地址：`http://drama.richbest.cn/`**
+
+---
+
+## 生产 Ingress 配置：自愈收敛（2026-09-28 实机核对）
+
+关键事实：`lens-rhyme-nginx-1` 的 `Mounts` 为空，`conf.d/*.conf` 全部活在容器可写层——**lens 容器一旦重建（换镜像 / force-recreate），RichiDrama 的 ingress 配置整体丢失**；而 lens 容器的 compose/mount 属跨团队配置，不可要求对方变更。因此收敛不能依赖人工记忆，也不依赖对方配合。
+
+机制：`install-prod-ingress` 以本目录 `nginx-drama-richbest.conf` 为单一事实源，幂等比对容器内 `/etc/nginx/conf.d/minidrama.conf`（行尾归一化后字节一致、且 `nginx -T` 证明已被 include 才 no-op）；漂移或缺失时：备份 → `docker cp` → `nginx -t`（失败自动回滚，绝不把共享 nginx 留在坏配置上）→ 平滑 `nginx -s reload` → media-upload location 生效断言 + `Host: drama.richbest.cn` 的 `/ready` 健康断言（语义错也能秒级自动回滚）。与 `release-deploy` 通过 `/run/lock/minidrama-ingress.lock` 文件锁互斥（两侧都已持锁）。
+
+一次性安装（root）：
+
+```bash
+deploy/install-operations release          # 脚本+配置装到 /usr/local/lib/richidrama-deploy 并链接 /usr/local/bin
+install -m 0644 deploy/minidrama-ingress-ensure.{service,timer} /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now minidrama-ingress-ensure.timer
+```
+
+日常观察：`systemctl list-timers minidrama-ingress-ensure`、`journalctl -u minidrama-ingress-ensure.service -n 50`。
+手动检查漂移：`install-prod-ingress --check`（退出码 1=漂移）；演练：`install-prod-ingress --dry-run`。
+lens 重建后无需人工动作：timer 在 ≤5 分钟内自动恢复我们的配置（lens 自身配置的恢复属他们职责）。
+
+生效断言（首次安装或人工 reload 后）：
+
+```bash
+docker exec lens-rhyme-nginx-1 nginx -T | grep -A3 "location = /api/v1/media/upload"
+dd if=/dev/zero of=/tmp/big.bin bs=1M count=40
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Host: drama.richbest.cn' \
+  --data-binary @/tmp/big.bin http://127.0.0.1/api/v1/media/upload    # 期望 401（鉴权层），不是 413（nginx 体积闸）
+```
+
+手工回滚（兜底）：`docker cp /var/backups/minidrama-ingress/<最近一份> lens-rhyme-nginx-1:/etc/nginx/conf.d/minidrama.conf && docker exec lens-rhyme-nginx-1 nginx -t && docker exec lens-rhyme-nginx-1 nginx -s reload`
+
+已知噪音：`nginx -t` 会报 `conflicting server name "localhost"`——来自 lens 的 `default.conf`，与本应用无关。
 
 ---
 
