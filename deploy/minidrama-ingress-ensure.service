@@ -1,0 +1,8 @@
+[Unit]
+Description=RichiDrama production ingress config self-heal (minidrama.conf in shared nginx)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/install-prod-ingress

@@ -1,0 +1,11 @@
+[Unit]
+Description=Converge RichiDrama production ingress config every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+RandomizedDelaySec=1m
+Unit=minidrama-ingress-ensure.service
+
+[Install]
+WantedBy=timers.target

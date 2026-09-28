@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# 生产 Ingress 配置自愈：以仓库 deploy/nginx-drama-richbest.conf 为单一事实源，
+# 幂等收敛 lens-rhyme-nginx 容器内的 /etc/nginx/conf.d/minidrama.conf。
+#
+# 背景（2026-09-28 实机核对）：该容器 Mounts 为空，conf.d 全部活在可写层——
+# lens 容器一旦重建（换镜像 / force-recreate），RichiDrama 的 ingress 配置会整体丢失，
+# 而 lens 容器的 compose/mount 属于跨团队配置、我们不可要求变更。本脚本让收敛
+# 不依赖任何对方配合：systemd timer 周期执行，漂移或缺失才动作，一致时静默 no-op。
+#
+# 用法：
+#   install-prod-ingress            # 收敛（必要时 docker cp + nginx -t + reload）
+#   install-prod-ingress --check    # 只报告漂移，退出码 1；不写任何东西
+#   install-prod-ingress --dry-run  # 打印将要执行的动作；不写任何东西
+#
+# 可用环境变量覆盖：HTTP_NGINX_CONTAINER、INGRESS_TARGET_CONF、INGRESS_SOURCE_CONF、INGRESS_BACKUP_DIR
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_CONF="${INGRESS_SOURCE_CONF:-$SCRIPT_DIR/nginx-drama-richbest.conf}"
+CONTAINER="${HTTP_NGINX_CONTAINER:-lens-rhyme-nginx-1}"
+TARGET_CONF="${INGRESS_TARGET_CONF:-/etc/nginx/conf.d/minidrama.conf}"
+BACKUP_DIR="${INGRESS_BACKUP_DIR:-/var/backups/minidrama-ingress}"
+MODE="${1:-apply}"
+case "$MODE" in apply|--check|--dry-run) ;; *) echo "Usage: $0 [--check|--dry-run]" >&2; exit 2 ;; esac
+
+[[ -f "$SOURCE_CONF" ]] || { echo "ingress: 配置源不存在：$SOURCE_CONF" >&2; exit 1; }
+docker inspect "$CONTAINER" >/dev/null 2>&1 || { echo "ingress: 找不到容器 $CONTAINER" >&2; exit 1; }
+
+# 与 release-deploy 的 reload、以及上一轮 timer 互斥
+exec 9>/run/lock/minidrama-ingress.lock
+flock 9
+
+source_content="$(cat "$SOURCE_CONF")"
+current="$(docker exec "$CONTAINER" cat "$TARGET_CONF" 2>/dev/null || true)"
+# 文件在磁盘上还不够：nginx -T 列出实际 include 的每一份，才算生效配置
+included="$(docker exec "$CONTAINER" nginx -T 2>/dev/null | grep -cF "# configuration file $TARGET_CONF" || true)"
+
+if [[ -n "$current" && "$current" == "$source_content" && "$included" == "1" ]]; then
+  echo "ingress: 已同步，无需动作"
+  exit 0
+fi
+if [[ "$MODE" == "--check" ]]; then
+  echo "ingress: 检测到漂移或缺失（文件存在=$([[ -n "$current" ]] && echo yes || echo no)，生效=$included）" >&2
+  exit 1
+fi
+
+mkdir -p "$BACKUP_DIR"
+backup=""
+if [[ -n "$current" ]]; then
+  backup="$BACKUP_DIR/minidrama.conf.$(date +%Y%m%d-%H%M%S)"
+  printf '%s\n' "$current" > "$backup"
+  # 只保留最近 10 份，防止 timer 长期堆积
+  ls -1t "$BACKUP_DIR"/minidrama.conf.* 2>/dev/null | tail -n +11 | xargs -r rm -f
+fi
+echo "ingress: 需要收敛（备份=${backup:-无历史文件}）"
+if [[ "$MODE" == "--dry-run" ]]; then
+  echo "ingress: dry-run 结束，未写入"
+  exit 0
+fi
+
+docker cp "$SOURCE_CONF" "$CONTAINER:$TARGET_CONF"
+if ! docker exec "$CONTAINER" nginx -t 2>&1; then
+  echo "ingress: 安装后 nginx -t 失败，回滚（绝不把共享 nginx 留在坏配置上）" >&2
+  if [[ -n "$backup" ]]; then docker cp "$backup" "$CONTAINER:$TARGET_CONF"; else docker exec "$CONTAINER" rm -f "$TARGET_CONF"; fi
+  docker exec "$CONTAINER" nginx -t >/dev/null 2>&1 || echo "ingress: 回滚后配置仍不合法，需要人工介入！" >&2
+  exit 1
+fi
+docker exec "$CONTAINER" nginx -s reload
+if ! docker exec "$CONTAINER" nginx -T 2>/dev/null | grep -qF 'location = /api/v1/media/upload'; then
+  echo "ingress: reload 完成但生效配置里没有 media-upload location，检查 include 结构是否变了" >&2
+  exit 1
+fi
+echo "ingress: 已收敛并平滑 reload"
