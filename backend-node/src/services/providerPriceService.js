@@ -835,15 +835,25 @@ function priceDiff(db, oldId, nextId) {
   const oldRows = db.prepare('SELECT * FROM billing_price_book_items WHERE price_book_id=?').all(oldId);
   const nextRows = db.prepare('SELECT * FROM billing_price_book_items WHERE price_book_id=?').all(nextId);
   const byKey = new Map(oldRows.map((row) => [`${row.service_type}\0${row.model}\0${row.meter}`, row]));
-  return nextRows.map((row) => {
+  const nextKeys = new Set(nextRows.map((row) => `${row.service_type}\0${row.model}\0${row.meter}`));
+  const changed = nextRows.map((row) => {
     const previous = byKey.get(`${row.service_type}\0${row.model}\0${row.meter}`);
     const oldConditions = parse(previous?.conditions_json, {}); const conditions = parse(row.conditions_json, {});
     return { service_type: row.service_type, model: row.model, meter: row.meter, old_unit_price_micro: previous?.unit_price_micro ?? null, new_unit_price_micro: row.unit_price_micro, changed: previous?.unit_price_micro !== row.unit_price_micro || !samePriceCore(oldConditions, conditions), old_conditions: oldConditions, conditions };
   }).filter((row) => row.changed);
+  // 旧版有而草稿没有的条目按「删除」进 diff：发布语义是草稿整本替换前版本，
+  // 若 diff 只看草稿侧，仅删除价目会被误判为「无变化」而永远无法下架。
+  const removed = oldRows
+    .filter((row) => !nextKeys.has(`${row.service_type}\0${row.model}\0${row.meter}`))
+    .map((row) => ({ service_type: row.service_type, model: row.model, meter: row.meter, old_unit_price_micro: row.unit_price_micro, new_unit_price_micro: null, changed: true, removed: true, old_conditions: parse(row.conditions_json, {}), conditions: null }));
+  return [...changed, ...removed];
 }
 
 function defaultNotice(diff, provider = PROVIDER) {
-  const lines = diff.slice(0, 20).map((row) => `${row.model}（${row.meter}）：${row.old_unit_price_micro == null ? '新增' : `${row.old_unit_price_micro / MICRO_PER_POINT} 积分`} → ${row.new_unit_price_micro / MICRO_PER_POINT} 积分`);
+  const lines = diff.slice(0, 20).map((row) => `${row.model}（${row.meter}）：${
+    row.new_unit_price_micro == null ? '删除'
+      : row.old_unit_price_micro == null ? `新增 ${row.new_unit_price_micro / MICRO_PER_POINT} 积分`
+        : `${row.old_unit_price_micro / MICRO_PER_POINT} 积分 → ${row.new_unit_price_micro / MICRO_PER_POINT} 积分`}`);
   if (diff.length > 20) lines.push(`另有 ${diff.length - 20} 项价格变更。`);
   return { title: '模型调用价格已更新', body: `${sourceMeta(provider).label}价格已完成审核并立即生效。\n${lines.join('\n')}` };
 }
