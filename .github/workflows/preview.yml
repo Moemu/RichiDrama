@@ -2,7 +2,11 @@ name: PR Preview
 
 # Previews chain after Validation (validation -> preview): the smoke deploy
 # runs only once the Validation run for the same head commit has succeeded.
-# workflow_run always resolves this file from the default branch.
+# workflow_run always resolves this file from the default branch and
+# attributes the run to main, so the deployment record cannot be a job-level
+# `environment:` (it would anchor to main and PR pages would report the
+# branch as never deployed); the workflow creates it against the PR head
+# branch explicitly.
 on:
   workflow_run:
     workflows: [Validation]
@@ -16,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  deployments: write
   pull-requests: read
   statuses: write
 
@@ -31,7 +36,6 @@ jobs:
     name: Deploy PR preview
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    environment: preview
     steps:
       - name: Resolve and validate internal PR
         id: pr
@@ -67,6 +71,17 @@ jobs:
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${sha}" -f state=pending -f context='preview / smoke' -f description='Preview deployment is running' -f "target_url=$RUN_URL" >/dev/null
+          # Anchor the deployment record to the PR head branch (see file
+          # header); the recorded sha must be the commit Validation approved.
+          branch="$(jq -r .head.ref <<<"$data")"
+          [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]]
+          payload="$(jq -cn --arg ref "$branch" '{ref:$ref,environment:"preview",auto_merge:false,required_contexts:[],production_environment:false}')"
+          response="$(printf '%s\n' "$payload" | gh api -X POST "repos/${GITHUB_REPOSITORY}/deployments" --input -)"
+          deployment_id="$(jq -r .id <<<"$response")"
+          [[ "$deployment_id" =~ ^[0-9]+$ ]]
+          [[ "$(jq -r .sha <<<"$response")" = "$sha" ]]
+          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/deployments/${deployment_id}/statuses" -f state=in_progress -f auto_inactive=false >/dev/null
       - name: Deploy isolated preview
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -116,12 +131,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.pr.outputs.sha }}
+          DEPLOYMENT_ID: ${{ steps.pr.outputs.deployment_id }}
+          # Mirrors the HOST scheme in deploy/preview-deploy.
+          PREVIEW_URL: http://pr-${{ steps.pr.outputs.pr }}.preview.drama.richbest.cn/
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=success -f context='preview / smoke' -f description='Approved preview passed' -f "target_url=$RUN_URL" >/dev/null
+        run: |
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=success -f context='preview / smoke' -f description='Approved preview passed' -f "target_url=$RUN_URL" >/dev/null
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/deployments/${DEPLOYMENT_ID}/statuses" -f state=success -f auto_inactive=false -f "environment_url=$PREVIEW_URL" -f "log_url=$RUN_URL" >/dev/null
       - name: Mark preview failed
-        if: failure() && steps.pr.outputs.sha != ''
+        if: ${{ !success() && steps.pr.outputs.sha != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.pr.outputs.sha }}
+          DEPLOYMENT_ID: ${{ steps.pr.outputs.deployment_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=failure -f context='preview / smoke' -f description='Preview deployment failed' -f "target_url=$RUN_URL" >/dev/null
+        run: |
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" -f state=failure -f context='preview / smoke' -f description='Preview deployment failed' -f "target_url=$RUN_URL" >/dev/null
+          if [[ -n "$DEPLOYMENT_ID" ]]; then
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/deployments/${DEPLOYMENT_ID}/statuses" -f state=failure -f auto_inactive=false -f "log_url=$RUN_URL" >/dev/null
+          fi

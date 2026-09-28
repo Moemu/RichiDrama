@@ -4,9 +4,11 @@
 
 每个 PR 自动运行 `Validation`。此流程运行后端测试、前端测试、前端构建、空数据库迁移和容器构建。
 
-内部 PR 的 `Validation` 成功完成后自动触发 `PR Preview`（`workflow_run` 链式触发，即 validation -> preview；验证失败或运行在 `main` 上时不会部署）。该流程运行在受保护的 `preview` environment 中，需要管理员批准后才会部署；也可以通过 `workflow_dispatch` 手动输入 PR 编号重跑。只有仓库成员的同一仓库分支会被部署，其他来源一律拒绝。
+内部 PR 的 `Validation` 成功完成后自动触发 `PR Preview`（`workflow_run` 链式触发，即 validation -> preview；验证失败或运行在 `main` 上时不会部署）；也可以通过 `workflow_dispatch` 手动输入 PR 编号重跑。只有仓库成员的同一仓库分支会被部署，其他来源一律拒绝。
 
-预览成功后，提交获得 `preview / smoke` 状态。`main` 分支要求此状态。
+`workflow_run` 运行会被 GitHub 归属到默认分支 `main`，所以预览的 deployment 记录由工作流显式创建在 PR head 分支上，而不是使用 job 级 `environment:`（那会把记录锚定到 `main`，导致 PR 页面显示 "This branch has not been deployed"）。记录仍落在 `preview` environment，受其部署分支策略约束；预览环境未配置必需审核者，作者门禁（author_association + 同仓库分支校验）依旧是真正的安全边界。
+
+预览成功后，提交获得 `preview / smoke` 状态，且 PR 页面的 Deployments 区域会显示 `preview` 环境与预览地址；PR 关闭清理时对应记录标记为 inactive。`main` 分支要求 `preview / smoke` 状态。
 
 合并到 `main` 后，`Validation` 必须先成功。然后 `Production Deploy` 等待 `production` environment 批准。
 
