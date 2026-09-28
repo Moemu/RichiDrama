@@ -174,7 +174,17 @@ test('GitHub workflows gate preview and production', () => {
   assert.match(preview, /workflow_run\.conclusion == 'success'/);
   assert.match(preview, /head_branch != 'main'/);
   assert.doesNotMatch(preview, /pull_request_target/);
-  assert.match(preview, /environment: preview/);
+  // The deployment record must be created explicitly against the PR head
+  // branch: a job-level `environment:` anchors it to main (workflow_run runs
+  // are attributed to the default branch) and PR pages would report the
+  // branch as never deployed.
+  assert.doesNotMatch(preview, /environment: preview/);
+  assert.match(preview, /deployments: write/);
+  assert.match(preview, /POST "repos\/\$\{GITHUB_REPOSITORY\}\/deployments" --input -/);
+  assert.match(preview, /environment:"preview",auto_merge:false,required_contexts:\[\]/);
+  assert.match(preview, /deployments\/\$\{deployment_id\}\/statuses" -f state=in_progress/);
+  assert.match(preview, /-f state=success -f auto_inactive=false -f "environment_url=/);
+  assert.match(preview, /-f state=failure -f auto_inactive=false/);
   assert.match(preview, /preview \/ smoke/);
   assert.match(preview, /head\.repo\.full_name/);
   assert.match(preview, /author_association/);
@@ -190,6 +200,11 @@ test('GitHub workflows gate preview and production', () => {
   assert.match(cleanup, /bash \/data\/apps\/LocalMiniDrama\/deploy\/preview-remove/);
   assert.match(cleanup, /bash \/usr\/local\/lib\/richidrama-preview\/preview-remove/);
   assert.match(cleanup, /bash \/usr\/local\/lib\/richidrama-preview\/preview-cleanup/);
+  // Closed PRs must deactivate exactly their own deployment records;
+  // auto_inactive would also deactivate other open PRs' previews.
+  assert.match(cleanup, /deployments: write/);
+  assert.match(cleanup, /deployments\?environment=preview&sha=/);
+  assert.match(cleanup, /-f state=inactive -f auto_inactive=false/);
   assert.match(production, /environment: production/);
   assert.match(production, /workflow_run\.conclusion == 'success'/);
   // Production fetches its own source server-side; the runner ships no bytes.

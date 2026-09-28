@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  deployments: write
 
 concurrency:
   group: preview-cleanup
@@ -33,6 +34,19 @@ jobs:
             else
               bash /usr/local/lib/richidrama-preview/preview-remove '${{ github.event.pull_request.number }}'
             fi
+      - name: Mark closed PR preview deployments inactive
+        if: ${{ always() && github.event_name == 'pull_request_target' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          ids="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/deployments?environment=preview&sha=${SHA}" --jq '.[].id')"
+          # auto_inactive=false: deactivating this PR's records must not also
+          # deactivate other open PRs' preview deployments.
+          for deployment_id in $ids; do
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/deployments/${deployment_id}/statuses" -f state=inactive -f auto_inactive=false >/dev/null
+          done
       - name: Remove expired previews
         if: github.event_name != 'pull_request_target'
         uses: appleboy/ssh-action@v1.2.0
