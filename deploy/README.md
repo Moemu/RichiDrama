@@ -15,7 +15,7 @@
 本应用容器加入 `lens-rhyme_default` 网络（alias `minidrama-app`），
 由 `lens-rhyme-nginx` 按域名 `drama.richbest.cn` 反代。
 - 容器内监听 5679；宿主机 10588 仅作内网调试备用。
-- 生产 Nginx 配置由现有 `default.conf` 管理。发布脚本只验证该配置，不写入重复域名。
+- 生产 Nginx 配置由容器内 `/etc/nginx/conf.d/minidrama.conf` 管理（对应本目录 `nginx-drama-richbest.conf`；`default.conf` 属于 lens 应用，勿动）。发布脚本只 `nginx -t` + `nginx -s reload` 验证并平滑生效，不写入该文件——它的更新是**人工步骤**，见下方「生产 Ingress 配置更新流程」。
 
 后端（Express）在容器内托管：
 - `/api/v1/*`  后端接口
@@ -24,6 +24,34 @@
 - `/health`    健康检查
 
 **访问地址：`http://drama.richbest.cn/`**
+
+---
+
+## 生产 Ingress 配置更新流程（人工，2026-09-28 实机核对）
+
+`lens-rhyme-nginx-1` 的 `Mounts` 为空：`conf.d/*.conf` 全部活在容器可写层，**重建容器（换镜像 / force-recreate）会丢**，必须能随时从仓库重装。更新 `minidrama.conf` 的标准步骤：
+
+```bash
+# 0) 比对现行生效配置与仓库副本（预期只差本次改动的 location）
+docker exec lens-rhyme-nginx-1 cat /etc/nginx/conf.d/minidrama.conf > /tmp/current-minidrama.conf
+diff /tmp/current-minidrama.conf deploy/nginx-drama-richbest.conf
+
+# 1) 备份 → 安装 → 校验 → 平滑 reload（不掐现有连接）
+docker cp lens-rhyme-nginx-1:/etc/nginx/conf.d/minidrama.conf ~/minidrama.conf.bak.$(date +%F-%H%M)
+docker cp deploy/nginx-drama-richbest.conf lens-rhyme-nginx-1:/etc/nginx/conf.d/minidrama.conf
+docker exec lens-rhyme-nginx-1 nginx -t
+docker exec lens-rhyme-nginx-1 nginx -s reload
+
+# 2) 生效断言：nginx -T 能看到新 location；>32MB 无鉴权上传应得 401（鉴权层），不是 413（nginx 体积闸）
+docker exec lens-rhyme-nginx-1 nginx -T | grep -A3 "location = /api/v1/media/upload"
+dd if=/dev/zero of=/tmp/big.bin bs=1M count=40
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Host: drama.richbest.cn' \
+  --data-binary @/tmp/big.bin http://127.0.0.1/api/v1/media/upload
+
+# 回滚：把 ~/minidrama.conf.bak.* docker cp 回同一路径，再 nginx -t && nginx -s reload
+```
+
+已知噪音：`nginx -t` 会报 `conflicting server name "localhost"`——来自 lens 的 `default.conf`，与本应用无关。
 
 ---
 
