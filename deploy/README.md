@@ -31,7 +31,7 @@
 
 关键事实：`lens-rhyme-nginx-1` 的 `Mounts` 为空，`conf.d/*.conf` 全部活在容器可写层——**lens 容器一旦重建（换镜像 / force-recreate），RichiDrama 的 ingress 配置整体丢失**；而 lens 容器的 compose/mount 属跨团队配置，不可要求对方变更。因此收敛不能依赖人工记忆，也不依赖对方配合。
 
-机制：`install-prod-ingress` 以本目录 `nginx-drama-richbest.conf` 为单一事实源，幂等比对容器内 `/etc/nginx/conf.d/minidrama.conf`（内容一致且 `nginx -T` 确认已 include 才 no-op）；漂移或缺失时：备份 → `docker cp` → `nginx -t`（失败自动回滚，绝不把共享 nginx 留在坏配置上）→ 平滑 `nginx -s reload` → 断言 media-upload location 生效。与 `release-deploy` 通过文件锁互斥。
+机制：`install-prod-ingress` 以本目录 `nginx-drama-richbest.conf` 为单一事实源，幂等比对容器内 `/etc/nginx/conf.d/minidrama.conf`（行尾归一化后字节一致、且 `nginx -T` 证明已被 include 才 no-op）；漂移或缺失时：备份 → `docker cp` → `nginx -t`（失败自动回滚，绝不把共享 nginx 留在坏配置上）→ 平滑 `nginx -s reload` → media-upload location 生效断言 + `Host: drama.richbest.cn` 的 `/ready` 健康断言（语义错也能秒级自动回滚）。与 `release-deploy` 通过 `/run/lock/minidrama-ingress.lock` 文件锁互斥（两侧都已持锁）。
 
 一次性安装（root）：
 
@@ -44,7 +44,7 @@ systemctl enable --now minidrama-ingress-ensure.timer
 
 日常观察：`systemctl list-timers minidrama-ingress-ensure`、`journalctl -u minidrama-ingress-ensure.service -n 50`。
 手动检查漂移：`install-prod-ingress --check`（退出码 1=漂移）；演练：`install-prod-ingress --dry-run`。
-lens 重建后无需人工动作：timer 在 ≤10 分钟内自动恢复我们的配置（lens 自身配置的恢复属他们职责）。
+lens 重建后无需人工动作：timer 在 ≤5 分钟内自动恢复我们的配置（lens 自身配置的恢复属他们职责）。
 
 生效断言（首次安装或人工 reload 后）：
 

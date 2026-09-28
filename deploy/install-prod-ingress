@@ -30,12 +30,12 @@ docker inspect "$CONTAINER" >/dev/null 2>&1 || { echo "ingress: 找不到容器 
 exec 9>/run/lock/minidrama-ingress.lock
 flock 9
 
-source_content="$(cat "$SOURCE_CONF")"
-current="$(docker exec "$CONTAINER" cat "$TARGET_CONF" 2>/dev/null || true)"
+source_content="$(tr -d '\r' < "$SOURCE_CONF")"
+current="$(docker exec "$CONTAINER" cat "$TARGET_CONF" 2>/dev/null | tr -d '\r' || true)"
 # 文件在磁盘上还不够：nginx -T 列出实际 include 的每一份，才算生效配置
 included="$(docker exec "$CONTAINER" nginx -T 2>/dev/null | grep -cF "# configuration file $TARGET_CONF" || true)"
 
-if [[ -n "$current" && "$current" == "$source_content" && "$included" == "1" ]]; then
+if [[ -n "$current" && "$current" == "$source_content" && "$included" -ge 1 ]]; then
   echo "ingress: 已同步，无需动作"
   exit 0
 fi
@@ -58,10 +58,14 @@ if [[ "$MODE" == "--dry-run" ]]; then
   exit 0
 fi
 
+restore_backup() {
+  if [[ -n "$backup" ]]; then docker cp "$backup" "$CONTAINER:$TARGET_CONF"; else docker exec "$CONTAINER" rm -f "$TARGET_CONF"; fi
+}
+
 docker cp "$SOURCE_CONF" "$CONTAINER:$TARGET_CONF"
 if ! docker exec "$CONTAINER" nginx -t 2>&1; then
   echo "ingress: 安装后 nginx -t 失败，回滚（绝不把共享 nginx 留在坏配置上）" >&2
-  if [[ -n "$backup" ]]; then docker cp "$backup" "$CONTAINER:$TARGET_CONF"; else docker exec "$CONTAINER" rm -f "$TARGET_CONF"; fi
+  restore_backup
   docker exec "$CONTAINER" nginx -t >/dev/null 2>&1 || echo "ingress: 回滚后配置仍不合法，需要人工介入！" >&2
   exit 1
 fi
@@ -70,4 +74,18 @@ if ! docker exec "$CONTAINER" nginx -T 2>/dev/null | grep -qF 'location = /api/v
   echo "ingress: reload 完成但生效配置里没有 media-upload location，检查 include 结构是否变了" >&2
   exit 1
 fi
-echo "ingress: 已收敛并平滑 reload"
+# nginx -t 只测语法；语义错（如 proxy_pass 目标写错）要靠真实健康断言兜住，
+# 失败立即回滚再 reload，把中断窗口压到秒级。探测方式与 release-deploy 一致。
+if ! curl -fsS --max-time 10 -H "Host: drama.richbest.cn" http://127.0.0.1/ready >/dev/null; then
+  echo "ingress: reload 后 /ready 健康检查失败，自动回滚" >&2
+  restore_backup
+  if docker exec "$CONTAINER" nginx -t >/dev/null 2>&1; then
+    docker exec "$CONTAINER" nginx -s reload
+    curl -fsS --max-time 10 -H "Host: drama.richbest.cn" http://127.0.0.1/ready >/dev/null \
+      || echo "ingress: 回滚后 /ready 仍失败——问题多半不在本配置，查应用容器" >&2
+  else
+    echo "ingress: 回滚后 nginx -t 都不过，需要人工介入！" >&2
+  fi
+  exit 1
+fi
+echo "ingress: 已收敛并平滑 reload（/ready 健康断言通过）"
