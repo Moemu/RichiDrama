@@ -10,8 +10,8 @@ if [[ "$MODE" == preview ]]; then
   COMMANDS=(preview-deploy preview-remove preview-show preview-cleanup)
 else
   TARGET="/usr/local/lib/richidrama-deploy"
-  FILES=(lib.sh preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback install-prod-ingress nginx-preview-vhost.conf nginx-drama-richbest.conf)
-  COMMANDS=(preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback install-prod-ingress)
+  FILES=(lib.sh preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback install-prod-ingress prune-release-backlog nginx-preview-vhost.conf nginx-drama-richbest.conf)
+  COMMANDS=(preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback install-prod-ingress prune-release-backlog)
 fi
 mkdir -p "$TARGET"
 for file in "${FILES[@]}"; do

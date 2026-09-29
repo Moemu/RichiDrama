@@ -132,6 +132,14 @@ test('production release uses an immutable archive and rollback container', () =
   assert.doesNotMatch(library, /mv "\$stale"/);
   assert.match(library, /getent hosts minidrama-app/);
   assert.match(source, /rollback_now/);
+  // Release artifacts must be collected. Every commit that reached CI used to
+  // leave an unpacked source tree and two database copies behind.
+  assert.match(source, /MINIDRAMA_GC_CURRENT_SHA="\$SHA" prune_release_artifacts/);
+  assert.match(read('deploy/preview-deploy'), /MINIDRAMA_GC_CURRENT_SHA="\$SHA" prune_release_artifacts/);
+  assert.match(library, /prune_release_artifacts\(\)/);
+  assert.match(library, /release_is_referenced/);
+  assert.match(library, /-name succeeded -printf '%T@ %h/);
+  assert.match(library, /find "\$\{PROD_DATA_DIR\}\/\.deploy-snapshots".*-delete/);
   assert.match(library, /local image="\$1" sha="\$2" data_dir="\$3"\s+local name="minidrama-preflight-/);
   assert.match(library, /docker build[^\n]*\|\| \\/);
   assert.match(library, /fail "Immutable image build failed/);
@@ -148,6 +156,58 @@ test('production release uses an immutable archive and rollback container', () =
   assert.match(source, /MINIDRAMA_OBSERVATION_SECONDS:-60/);
   assert.match(source, /"\$code" == 401 \|\| "\$code" == 404/);
   assert.doesNotMatch(source + compatibility, /git reset|git remote set-url/);
+});
+
+test('nightly backup snapshots the database instead of tarring a live one', () => {
+  const backup = read('deploy/backup-data.sh');
+  const restore = read('deploy/restore-data.sh');
+  const backlog = read('deploy/prune-release-backlog');
+  const library = read('deploy/lib.sh');
+  // Production starts the container with `docker run`, so the Compose probe must
+  // never be the only way to find the live application.
+  assert.match(backup, /RUNTIME_KIND='docker'/);
+  assert.ok(backup.indexOf('docker info') < backup.indexOf('docker inspect'));
+  assert.match(backup, /db\.backup\(process\.env\.SNAPSHOT_TARGET\)/);
+  assert.match(backup, /integrity_check/);
+  // One consistent database copy, and no deployment scratch from the data mount.
+  assert.match(backup, /--exclude='\*\.db-wal'/);
+  assert.match(backup, /--exclude='\.\/\.deploy-snapshots'/);
+  assert.match(backup, /--exclude='\.\/\.manual-backups'/);
+  assert.match(backup, /-C "\$\{HOST_STAGE\}" drama_generator\.db/);
+  assert.match(backup, /trap cleanup_stage EXIT/);
+  // An inconclusive runtime probe may not silently produce the newest backup.
+  assert.match(backup, /--allow-unverified-database/);
+  assert.match(backup, /Keeping every previous archive/);
+  // Only the documented media races may be reported; any other tar diagnostic,
+  // and anything about the database itself, invalidates the archive.
+  assert.match(backup, /TOLERABLE_TAR_DIAGNOSTICS='/);
+  assert.match(backup, /grep -q 'drama_generator\\\.db' -- "\$\{diagnostics\}"/);
+  // zstandard when available, gzip otherwise, in both directions.
+  assert.match(backup, /zstd -T0 -3/);
+  assert.match(backup, /-name "\$\{prefix\}\*\.tar\.zst"/);
+  assert.match(backup, /RELEASE_BACKUP_RETAIN_COUNT:-30/);
+  assert.match(restore, /\*\.tar\.zst\)/);
+  assert.match(restore, /Archive integrity check failed/);
+  assert.ok(restore.indexOf('Archive integrity check failed') < restore.indexOf('find "${DATA_DIR}" -mindepth 1'),
+    'a restore must validate the archive before it removes the live data');
+  assert.match(restore, /docker stop --time 20 "\$\{APP_CONTAINER\}"/);
+  assert.match(restore, /RUNTIME_KIND='compose'/);
+  // An archive whose database cannot be certified is discarded, so it can never
+  // be counted against retention by the next successful run.
+  assert.match(backup, /Backup discarded/);
+  // A restore must prove the database is readable, not merely SQLite-shaped.
+  assert.match(restore, /PRAGMA integrity_check/);
+  assert.match(restore, /failed its integrity check/);
+  assert.match(restore, /--skip-database-check/);
+  // Retrying an older SHA must not make a history directory collectible.
+  assert.match(library, /if mkdir "\$\{RELEASE_ROOT\}\/\$\{sha\}" 2>\/dev\/null; then/);
+  // Pre-policy release directories are history: collecting them is a separate,
+  // confirmed operation, and the nightly and release paths never do it.
+  assert.match(library, /release_is_collectible/);
+  assert.match(backlog, /require_root/);
+  assert.match(backlog, /--confirm/);
+  assert.match(backlog, /MINIDRAMA_GC_INCLUDE_LEGACY=1/);
+  assert.doesNotMatch(read('deploy/release-deploy') + read('deploy/preview-deploy'), /MINIDRAMA_GC_INCLUDE_LEGACY/);
 });
 
 test('GitHub workflows gate preview and production', () => {

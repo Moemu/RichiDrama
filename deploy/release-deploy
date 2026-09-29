@@ -115,4 +115,5 @@ printf '%s\n' "$SHA" > "$RELEASE_ROOT/active-revision"
 touch "$RELEASE_DIR/succeeded"
 bash "$SOURCE_DIR/deploy/install-operations"
 prune_release_images
+MINIDRAMA_GC_CURRENT_SHA="$SHA" prune_release_artifacts
 log "Production release succeeded: $SHA"

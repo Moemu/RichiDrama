@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# One-off collection of the release directories that were created before release
+# artifact collection shipped. Those directories are production history, so the
+# nightly timer and the release flow never touch them: this command reports them
+# first and removes anything only after an explicit confirmation.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=deploy/lib.sh
+source "$SCRIPT_DIR/lib.sh"
+require_root
+acquire_lock
+
+if [[ "${1:-}" == '--confirm' ]]; then
+  MINIDRAMA_GC_INCLUDE_LEGACY=1 prune_release_artifacts
+  log 'Release backlog collected.'
+  exit 0
+fi
+[[ -z "${1:-}" ]] || fail "Usage: $0 [--confirm]"
+
+root="$(realpath -m "$RELEASE_ROOT")"
+[[ "$root" = /* && "$root" != / ]] || fail "Release root is not usable: ${RELEASE_ROOT}"
+
+legacy=()
+while IFS= read -r dir; do
+  [[ "${dir##*/}" =~ ^[0-9a-f]{40}$ ]] || continue
+  [[ -f "${dir}/.gc-stamp" ]] && continue
+  legacy+=("$dir")
+done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -printf '%p\n' 2>/dev/null)
+
+tree_bytes() {
+  local path="$1"
+  [[ -e "$path" ]] || { printf '0\n'; return; }
+  find "$path" -type f -printf '%s\n' 2>/dev/null | awk '{ sum += $1 } END { printf "%d\n", sum + 0 }'
+}
+
+human_gib() { awk -v bytes="$1" 'BEGIN { printf "%.1f GB", bytes / 1073741824 }'; }
+
+source_bytes=0
+preflight_bytes=0
+snapshot_bytes=0
+for dir in "${legacy[@]}"; do
+  source_bytes=$((source_bytes + $(tree_bytes "${dir}/source")))
+  preflight_bytes=$((preflight_bytes + $(tree_bytes "${dir}/preflight-data")))
+  snapshot_bytes=$((snapshot_bytes + $(tree_bytes "${dir}/production-before.db")))
+done
+
+log "未标记的历史发布目录: ${#legacy[@]} 个"
+log "  source/ 解包源码: $(human_gib "$source_bytes")，可从 Git 重建，将被删除"
+log "  preflight-data/ 迁移演练副本: $(human_gib "$preflight_bytes")，可重建，将被删除"
+log "  production-before.db 发布前库: $(human_gib "$snapshot_bytes")，是恢复点，仅保留最近 ${MINIDRAMA_KEEP_RELEASES:-5} 份与回滚引用的那份"
+log "确认后执行: $0 --confirm"

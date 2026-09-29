@@ -11,9 +11,22 @@ The Compose service mounts the data directory at `/app/backend-node/data`. Do no
 
 ## Deploy safely
 
-`deploy.sh` creates the directories, checkpoints SQLite WAL when the app is running, creates a compact online SQLite release snapshot, and verifies that all tracked media is already in OSS before deployment. This keeps a source-code release independent of the size of the local media hot replica. A mismatched mount or an unsynchronised media record stops the deployment instead of serving incomplete data.
+`release-deploy` verifies that all tracked media is already in OSS, takes an online SQLite snapshot for the release, and runs migrations plus a preflight container against a copy of it. This keeps a source-code release independent of the size of the local media hot replica. A mismatched mount or an unsynchronised media record stops the deployment instead of serving incomplete data.
 
-Full SQLite + local-media archives are created by the persistent `minidrama-full-backup.timer` at 03:30 Asia/Shanghai (with up to a ten-minute jitter). Production retains the newest 2 full archives; the release snapshot retains 30 copies and contains the database plus a manifest. OSS remains the durable media tier.
+Release artifacts are collected after every successful deploy, but only for directories `prepare_source` created itself: each one carries a `.gc-stamp` file, and collection skips anything without it. Among stamped releases, the newest `MINIDRAMA_KEEP_RELEASES` successful ones (5 by default) survive together with any release named by `active-revision` or `rollback.env`; a kept release loses only its reproducible `preflight-data/` copy, and a superseded one is removed with its pre-release database. Release directories that predate the stamp, including every preview checkout, stay untouched until an operator runs the explicit backlog pass:
+
+```bash
+bash deploy/prune-release-backlog          # reports counts and sizes, deletes nothing
+bash deploy/prune-release-backlog --confirm
+```
+
+`prune_release_artifacts` in `lib.sh` implements the policy.
+
+Full SQLite + local-media archives are created by the persistent `minidrama-full-backup.timer` at 03:30 Asia/Shanghai (with up to a ten-minute jitter). Production retains the newest 2 full archives through `FULL_BACKUP_RETAIN_COUNT`. Each archive carries one verified online snapshot of the database instead of the live file plus its write-ahead log, and it skips the deployment scratch directories inside the data mount. `backup-data.sh --release` still creates the compact release snapshot archive (30 retained) for manual use. OSS remains the durable media tier.
+
+Two probe outcomes are handled explicitly. When the Docker daemon answers but no RichiDrama container exists, the database is idle and its files are archived as they are, after which the archive is certified. When the daemon cannot be reached at all, the run refuses to produce an archive, because it cannot tell whether the database is being written; `--allow-unverified-database` creates the archive and then keeps every previous one instead of applying retention.
+
+Archives are zstandard (`.tar.zst`) when the host provides `zstd` and gzip (`.tar.gz`) otherwise; `restore-data.sh` selects the decompressor from the suffix, stops the container whether it runs under `docker run` or Compose, and validates before it destroys anything: the compressed stream is tested, the whole member list is read, and the extracted database must pass `PRAGMA integrity_check` through the first available checker (the `sqlite3` command, the checkout's own better-sqlite3, then the application container). `--skip-database-check` restores anyway when an operator accepts that risk; when no checker exists at all the script falls back to the file header and says so. A full backup that cannot certify its own database is deleted again instead of being left to displace the previous archive during retention.
 
 On its first run after this upgrade, the deployment script detects the former `./volumes/data` directory and copies it into the new data directory before switching the mount. Do not move or delete that legacy directory manually; retain it until the deployment log reports `旧数据迁移完成` and the application has been verified.
 

@@ -95,7 +95,14 @@ prepare_source() {
   if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
     fail 'Source archive contains an unsafe path.'
   fi
-  mkdir -p "${RELEASE_ROOT}/${sha}"
+  mkdir -p "$RELEASE_ROOT"
+  if mkdir "${RELEASE_ROOT}/${sha}" 2>/dev/null; then
+    # Only a directory this function created is stamped. Retrying an older SHA
+    # reuses a pre-policy directory, and that history must not become collectible
+    # just because it was unpacked again.
+    touch "${RELEASE_ROOT}/${sha}/.gc-stamp"
+  fi
+  target="${RELEASE_ROOT}/${sha}/source"
   rm -rf "$target"
   mkdir -p "$target"
   tar -xzf "$archive" -C "$target"
@@ -161,6 +168,9 @@ create_online_snapshot() {
   fi
   name="snapshot-$(date +%s)-$$.db"
   mkdir -p "${PROD_DATA_DIR}/.deploy-snapshots"
+  # A crashed release can leave its staged snapshot inside the data mount, where
+  # every later media backup would copy the same database again.
+  find "${PROD_DATA_DIR}/.deploy-snapshots" -maxdepth 1 -type f -name 'snapshot-*.db' -mmin +60 -delete
   docker exec -e "SNAPSHOT_TARGET=/app/backend-node/data/.deploy-snapshots/${name}" "$PROD_CONTAINER" \
     node -e 'const Database=require("better-sqlite3");(async()=>{const db=new Database("/app/backend-node/data/drama_generator.db",{readonly:true});await db.backup(process.env.SNAPSHOT_TARGET);db.close()})().catch(e=>{console.error(e);process.exit(1)})'
   mv "${PROD_DATA_DIR}/.deploy-snapshots/${name}" "$output"
@@ -352,4 +362,55 @@ prune_release_images() {
     [[ "$image" == "$current_image" || "$image" == "$rollback_image" ]] && continue
     docker image rm "$image" >/dev/null 2>&1 || true
   done
+}
+
+release_is_referenced() {
+  local sha="$1" active
+  local state="${RELEASE_ROOT}/rollback.env"
+  active="$(cat "${RELEASE_ROOT}/active-revision" 2>/dev/null || true)"
+  if [[ -n "$active" && "$sha" == "$active" ]]; then return 0; fi
+  if [[ -f "$state" ]]; then
+    awk -F= '$1=="CANDIDATE_REVISION"||$1=="PREVIOUS_REVISION"{print $2}' "$state" | grep -Fqx "$sha" && return 0
+  fi
+  return 1
+}
+
+# prepare_source stamps every directory it creates. Release collection only ever
+# touches stamped directories, so data that predates this policy stays exactly
+# where it is until an operator opts in to the backlog cleanup.
+release_is_collectible() {
+  [[ -f "${1}/.gc-stamp" ]] || [[ "${MINIDRAMA_GC_INCLUDE_LEGACY:-0}" == 1 ]]
+}
+
+# A release leaves an unpacked source tree, a migrated preflight database copy
+# and a full pre-release database behind, and a CI preview leaves an unpacked
+# source tree. The source tree and the preflight copy are reproducible from Git
+# and from the production snapshot, so they are removed as soon as a release is
+# superseded. A pre-release database is a recovery point: it survives for the
+# newest MINIDRAMA_KEEP_RELEASES successful releases and for every release named
+# by active-revision or rollback.env, and only disappears with its directory
+# after that window.
+prune_release_artifacts() {
+  local keep="${MINIDRAMA_KEEP_RELEASES:-5}"
+  local current="${MINIDRAMA_GC_CURRENT_SHA:-}"
+  local root dir sha
+  local -a kept=()
+  [[ "$keep" =~ ^[1-9][0-9]*$ ]] || keep=5
+  root="$(realpath -m "$RELEASE_ROOT")"
+  [[ "$root" = /* && "$root" != / ]] || return 0
+  mapfile -t kept < <(find "$root" -mindepth 2 -maxdepth 2 -type f -name succeeded -printf '%T@ %h\n' 2>/dev/null |
+    sort -nr | cut -d' ' -f2- | while IFS= read -r dir; do
+      release_is_collectible "$dir" && printf '%s\n' "$dir"
+    done | head -n "$keep")
+  while IFS= read -r dir; do
+    sha="${dir##*/}"
+    [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || continue
+    [[ -z "$current" || "$sha" != "$current" ]] || continue
+    release_is_collectible "$dir" || continue
+    if release_is_referenced "$sha" || printf '%s\n' "${kept[@]}" | grep -Fqx -- "$dir"; then
+      rm -rf -- "${dir}/preflight-data"
+    else
+      rm -rf -- "$dir"
+    fi
+  done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -printf '%p\n' 2>/dev/null)
 }
