@@ -401,9 +401,22 @@ function releaseFixture() {
     fs.mkdirSync(path.join(dir, sha, 'source'), { recursive: true });
     fs.writeFileSync(path.join(dir, sha, 'source', 'Dockerfile'), 'FROM node');
   }
+  // Two aborted releases: they never wrote a success marker, so their only
+  // lasting artefact is the pre-release database. One predates the policy.
+  const aborted = revision(0xa92);
+  const legacyAborted = revision(0xa93);
+  for (const sha of [aborted, legacyAborted]) {
+    const releaseDir = path.join(dir, sha);
+    fs.mkdirSync(path.join(releaseDir, 'source'), { recursive: true });
+    fs.writeFileSync(path.join(releaseDir, 'source', 'Dockerfile'), 'FROM node');
+    fs.mkdirSync(path.join(releaseDir, 'preflight-data'), { recursive: true });
+    fs.writeFileSync(path.join(releaseDir, 'preflight-data', 'drama_generator.db'), 'PREFLIGHT');
+    fs.writeFileSync(path.join(releaseDir, 'production-before.db'), 'ABORTED-SNAPSHOT');
+  }
+  fs.writeFileSync(path.join(dir, aborted, '.gc-stamp'), '');
   fs.writeFileSync(path.join(dir, 'rollback.env'), `PREVIOUS_REVISION=${created[7]}\nCANDIDATE_REVISION=${created[0]}\n`);
   fs.writeFileSync(path.join(dir, 'active-revision'), `${created[0]}\n`);
-  return { dir, created, current };
+  return { dir, created, current, aborted, legacyAborted };
 }
 
 function remainingDirs(dir) {
@@ -424,7 +437,7 @@ find "$MINIDRAMA_RELEASE_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' |
 }
 
 test('release collection only ever touches directories it created itself', () => {
-  const { dir, created, current } = releaseFixture();
+  const { dir, created, current, aborted, legacyAborted } = releaseFixture();
   const remaining = collect(dir, 'MINIDRAMA_KEEP_RELEASES=3 MINIDRAMA_GC_CURRENT_SHA="$CURRENT" prune_release_artifacts', { CURRENT: current });
 
   // created[0..5] carry the collection stamp, so the keep window of 3 ranks
@@ -445,10 +458,18 @@ test('release collection only ever touches directories it created itself', () =>
   assert.ok(fs.existsSync(path.join(dir, created[0], 'source')), 'a kept release keeps its source tree');
   assert.ok(!fs.existsSync(path.join(dir, created[0], 'preflight-data')), 'the preflight copy must be collected');
   assert.ok(fs.existsSync(path.join(dir, created[6], 'preflight-data')), 'untouched history keeps every file it had');
+
+  // An aborted release has no success marker, so it never occupies a keep slot.
+  // Its pre-release database is the only copy of the state before that attempt.
+  assert.ok(remaining.includes(aborted), `aborted release was deleted with its snapshot: ${remaining}`);
+  assert.equal(fs.readFileSync(path.join(dir, aborted, 'production-before.db'), 'utf8'), 'ABORTED-SNAPSHOT');
+  assert.ok(!fs.existsSync(path.join(dir, aborted, 'source')), 'the reproducible source tree of an aborted release must go');
+  assert.ok(!fs.existsSync(path.join(dir, aborted, 'preflight-data')), 'the preflight copy of an aborted release must go');
+  assert.ok(fs.existsSync(path.join(dir, legacyAborted, 'source')), 'pre-policy history is untouched');
 });
 
 test('the backlog opt-in collects pre-policy history but keeps recovery points', () => {
-  const { dir, created, current } = releaseFixture();
+  const { dir, created, current, legacyAborted } = releaseFixture();
   const remaining = collect(dir, 'MINIDRAMA_KEEP_RELEASES=3 MINIDRAMA_GC_CURRENT_SHA="$CURRENT" MINIDRAMA_GC_INCLUDE_LEGACY=1 prune_release_artifacts', { CURRENT: current });
 
   assert.ok(!remaining.includes(revision(0xa91)), `pre-policy history survived the opt-in: ${remaining}`);
@@ -457,6 +478,10 @@ test('the backlog opt-in collects pre-policy history but keeps recovery points',
   for (const sha of remaining) {
     assert.ok(!fs.existsSync(path.join(dir, sha, 'preflight-data')), `${sha} still holds a preflight copy`);
   }
+  // The pre-policy aborted release keeps its unique snapshot as well.
+  assert.ok(remaining.includes(legacyAborted), `pre-policy aborted release was deleted: ${remaining}`);
+  assert.equal(fs.readFileSync(path.join(dir, legacyAborted, 'production-before.db'), 'utf8'), 'ABORTED-SNAPSHOT');
+  assert.ok(!fs.existsSync(path.join(dir, legacyAborted, 'source')), 'its source tree must still be collected');
 });
 
 test('source extraction stamps every new release directory', () => {

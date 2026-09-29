@@ -20,7 +20,7 @@ bash deploy/prune-release-backlog          # reports counts and sizes, deletes n
 bash deploy/prune-release-backlog --confirm
 ```
 
-`prune_release_artifacts` in `lib.sh` implements the policy.
+`prune_release_artifacts` in `lib.sh` implements the policy. A release that never wrote its `succeeded` marker holds no slot in the keep window, and its `production-before.db` is the only surviving copy of the state before that attempt, so collection keeps the database and drops only `source/` and `preflight-data/` for it.
 
 Full SQLite + local-media archives are created by the persistent `minidrama-full-backup.timer` at 03:30 Asia/Shanghai (with up to a ten-minute jitter). Production retains the newest 2 full archives through `FULL_BACKUP_RETAIN_COUNT`. Each archive carries one verified online snapshot of the database instead of the live file plus its write-ahead log, and it skips the deployment scratch directories inside the data mount. `backup-data.sh --release` still creates the compact release snapshot archive (30 retained) for manual use. OSS remains the durable media tier.
 

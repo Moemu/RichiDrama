@@ -38,14 +38,22 @@ human_gib() { awk -v bytes="$1" 'BEGIN { printf "%.1f GB", bytes / 1073741824 }'
 source_bytes=0
 preflight_bytes=0
 snapshot_bytes=0
+orphan_dirs=0
+orphan_bytes=0
 for dir in "${legacy[@]}"; do
   source_bytes=$((source_bytes + $(tree_bytes "${dir}/source")))
   preflight_bytes=$((preflight_bytes + $(tree_bytes "${dir}/preflight-data")))
-  snapshot_bytes=$((snapshot_bytes + $(tree_bytes "${dir}/production-before.db")))
+  if [[ -f "${dir}/production-before.db" && ! -f "${dir}/succeeded" ]]; then
+    orphan_dirs=$((orphan_dirs + 1))
+    orphan_bytes=$((orphan_bytes + $(tree_bytes "${dir}/production-before.db")))
+  else
+    snapshot_bytes=$((snapshot_bytes + $(tree_bytes "${dir}/production-before.db")))
+  fi
 done
 
 log "未标记的历史发布目录: ${#legacy[@]} 个"
 log "  source/ 解包源码: $(human_gib "$source_bytes")，可从 Git 重建，将被删除"
 log "  preflight-data/ 迁移演练副本: $(human_gib "$preflight_bytes")，可重建，将被删除"
-log "  production-before.db 发布前库: $(human_gib "$snapshot_bytes")，是恢复点，仅保留最近 ${MINIDRAMA_KEEP_RELEASES:-5} 份与回滚引用的那份"
+log "  成功发布的 production-before.db: $(human_gib "$snapshot_bytes")，是恢复点，仅保留最近 ${MINIDRAMA_KEEP_RELEASES:-5} 份与回滚引用的那份"
+log "  中止发布的 production-before.db: ${orphan_dirs} 份、$(human_gib "$orphan_bytes")，没有别的副本，一律保留"
 log "确认后执行: $0 --confirm"
