@@ -134,4 +134,5 @@ prune_release_images
 
 PREVIEW_SUCCESS=1
 trap - EXIT
+MINIDRAMA_GC_CURRENT_SHA="$SHA" prune_release_artifacts
 log "Preview for PR $PR_NUMBER is ready at http://$HOST/. Use preview-show to read its access details."

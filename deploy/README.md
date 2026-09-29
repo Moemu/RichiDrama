@@ -223,10 +223,38 @@ ports:
 
 ## 五、数据备份
 
+数据目录与备份目录分开：数据在 `/data/minidrama-data`，备份在 `/data/minidrama-backups`。完整策略见 [PERSISTENCE.md](PERSISTENCE.md)。
+
+systemd timer 每天 03:30（Asia/Shanghai）执行一次全量归档，线上保留最近 2 份：
+
 ```bash
-# 备份 SQLite + 素材
-tar -czf minidrama-backup-$(date +%F).tar.gz volumes/data
+sudo systemctl list-timers minidrama-full-backup.timer   # 查看下次执行时间
 ```
+
+归档包含 SQLite 和本地热副本媒体。库文件是在线一致性快照，不含 `-wal`、`-shm`；发布过程的临时目录不会被收录。宿主机装有 zstd 时生成 `.tar.zst`，否则回退到 `.tar.gz`。
+
+手动备份与恢复：
+
+```bash
+# 立即执行一次全量备份
+bash deploy/backup-data.sh --full
+
+# 从归档恢复，会替换整个数据目录，需要显式确认
+bash deploy/restore-data.sh /data/minidrama-backups/minidrama-data-<时间戳>.tar.zst --confirm
+```
+
+恢复命令会先完整读取并校验归档：验压缩流、读全量文件清单、抽出库文件跑 `PRAGMA integrity_check`，全部通过才停止应用并替换数据目录。校验不通过时现有数据保持原样。确实要用未通过的归档，加 `--skip-database-check`。宿主机没有 sqlite3、没有可用的 better-sqlite3、也没有运行中的容器时，只校验库文件头并打印警告。
+
+探测不到 Docker 守护进程时，全量备份会直接失败，因为无法确认数据库是否仍在写入。确实需要在这种状态下出包，加 `--allow-unverified-database`，此时旧的归档全部保留、不做回收。
+
+发布产物存放在 `/data/minidrama-releases/<sha>`，由发布与预览流程自动回收，且只回收脚本自己创建的目录（内含 `.gc-stamp` 标记）。保留窗口内的发布只删除 `preflight-data/`，窗口外的发布连同 `production-before.db` 一起删除；`active-revision` 与 `rollback.env` 点名的发布始终保留。策略生效前的历史目录不会被自动删除，需要先统计、再显式确认：
+
+```bash
+bash deploy/prune-release-backlog            # 只统计，不删除
+bash deploy/prune-release-backlog --confirm  # 确认后清理
+```
+
+保留数量可调节：`FULL_BACKUP_RETAIN_COUNT` 控制全量归档份数，`MINIDRAMA_KEEP_RELEASES` 控制发布产物份数（默认 5）。已完成的媒体同时镜像到 OSS，OSS 才是媒体的持久层，本地只保留热副本。
 
 ---
 
