@@ -61,8 +61,10 @@ app_node() {
   for pair in "$@"; do
     overrides+=(-e "${pair}")
   done
+  # `-T` only exists on `docker compose exec`; `docker exec` rejects it as an
+  # unknown flag and exits 125, which took the whole nightly run down.
   if [[ "${RUNTIME_KIND}" == docker ]]; then
-    docker exec -T "${overrides[@]}" "${APP_CONTAINER}" node -e "${script}"
+    docker exec "${overrides[@]}" "${APP_CONTAINER}" node -e "${script}"
   else
     docker compose -f "${COMPOSE_FILE}" exec -T "${overrides[@]}" app node -e "${script}"
   fi

@@ -55,14 +55,27 @@ case "\${1:-}" in
   exec)
     shift
     target=''
-    while [[ "\${1:-}" != node ]]; do
-      if [[ "\${1:-}" == -e ]]; then
-        shift
-        [[ "\${1%%=*}" == SNAPSHOT_TARGET ]] && target="\${1#*=}"
-      fi
+    # Only the flags the real CLI accepts may precede the container name. Real
+    # docker exits 125 on anything else, so a compose-only flag such as -T must
+    # fail here too instead of being silently walked past: the 2026-09-29 outage
+    # was the nightly backup invoking "docker exec -T" and dying on every run.
+    while [[ "\${1:-}" == -* ]]; do
+      case "\${1}" in
+        -e|--env)
+          shift
+          [[ "\${1:-}" == SNAPSHOT_TARGET=* ]] && target="\${1#*=}"
+          ;;
+        --env=SNAPSHOT_TARGET=*) target="\${1#--env=SNAPSHOT_TARGET=}" ;;
+        -i|--interactive|-t|--tty|-d|--detach) ;;
+        *)
+          printf "unknown shorthand flag: '%s' in %s\\n" "\${1:1:1}" "\$1" >&2
+          exit 125
+          ;;
+      esac
       shift
     done
-    shift 2
+    shift      # the container name
+    shift 2    # node -e
     host="$(to_host "\$target")"
     case "\${1:-}" in
       *backup*)
