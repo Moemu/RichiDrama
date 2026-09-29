@@ -409,6 +409,12 @@ prune_release_artifacts() {
     release_is_collectible "$dir" || continue
     if release_is_referenced "$sha" || printf '%s\n' "${kept[@]}" | grep -Fqx -- "$dir"; then
       rm -rf -- "${dir}/preflight-data"
+    elif [[ -f "${dir}/production-before.db" && ! -f "${dir}/succeeded" ]]; then
+      # An aborted release never wrote its success marker, so it takes no slot in
+      # the keep window. Its pre-release database is still the only copy of the
+      # state before that attempt, which is exactly what an operator needs after
+      # a rollback. Drop the reproducible parts and keep the snapshot.
+      rm -rf -- "${dir}/source" "${dir}/preflight-data"
     else
       rm -rf -- "$dir"
     fi
