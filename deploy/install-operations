@@ -10,7 +10,10 @@ if [[ "$MODE" == preview ]]; then
   COMMANDS=(preview-deploy preview-remove preview-show preview-cleanup)
 else
   TARGET="/usr/local/lib/richidrama-deploy"
-  FILES=(lib.sh preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback install-prod-ingress prune-release-backlog nginx-preview-vhost.conf nginx-drama-richbest.conf)
+  # backup-data.sh and restore-data.sh are installed too: the nightly systemd
+  # timer runs the managed copy, not the checkout working tree, so a manual
+  # `git checkout` in the checkout can no longer swap the backup logic.
+  FILES=(lib.sh preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback install-prod-ingress prune-release-backlog backup-data.sh restore-data.sh nginx-preview-vhost.conf nginx-drama-richbest.conf)
   COMMANDS=(preview-deploy preview-remove preview-show preview-cleanup release-deploy release-rollback install-prod-ingress prune-release-backlog)
 fi
 mkdir -p "$TARGET"

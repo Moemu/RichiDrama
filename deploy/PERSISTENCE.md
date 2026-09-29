@@ -22,7 +22,22 @@ bash deploy/prune-release-backlog --confirm
 
 `prune_release_artifacts` in `lib.sh` implements the policy. A release that never wrote its `succeeded` marker holds no slot in the keep window, and its `production-before.db` is the only surviving copy of the state before that attempt, so collection keeps the database and drops only `source/` and `preflight-data/` for it.
 
-Full SQLite + local-media archives are created by the persistent `minidrama-full-backup.timer` at 03:30 Asia/Shanghai (with up to a ten-minute jitter). Production retains the newest 2 full archives through `FULL_BACKUP_RETAIN_COUNT`. Each archive carries one verified online snapshot of the database instead of the live file plus its write-ahead log, and it skips the deployment scratch directories inside the data mount. `backup-data.sh --release` still creates the compact release snapshot archive (30 retained) for manual use. OSS remains the durable media tier.
+Full SQLite + local-media archives are created by the persistent `minidrama-full-backup.timer` at 03:30 Asia/Shanghai (with up to a ten-minute jitter). Production retains the newest 2 full archives through `FULL_BACKUP_RETAIN_COUNT`.
+
+The timer runs `/usr/local/lib/richidrama-deploy/backup-data.sh`, the copy `install-operations` writes on every successful release, so the nightly script always matches a released revision. It must never point back at the checkout: a manual `git checkout` there swaps the backup logic with no release and no CI signal (2026-09-29: an unreviewed working tree made every nightly run fail with `unknown shorthand flag: 'T' in -T`). A server that still runs the checkout copy switches over once, **after** the release that installed the managed copy:
+
+```bash
+install -m 0644 /data/apps/LocalMiniDrama/deploy/minidrama-full-backup.service \
+  /etc/systemd/system/minidrama-full-backup.service
+systemctl daemon-reload
+systemctl start minidrama-full-backup.service
+systemctl show -p ExecMainStatus minidrama-full-backup.service   # 0, and a new archive must appear
+systemctl list-timers minidrama-full-backup.timer
+```
+
+Switching the unit before `/usr/local/lib/richidrama-deploy/backup-data.sh` exists fails with `203/EXEC` on the next run. `restore-data.sh` is installed alongside it, so a restore can run the reviewed revision of the same pair.
+
+Each archive carries one verified online snapshot of the database instead of the live file plus its write-ahead log, and it skips the deployment scratch directories inside the data mount. `backup-data.sh --release` still creates the compact release snapshot archive (30 retained) for manual use. OSS remains the durable media tier.
 
 Two probe outcomes are handled explicitly. When the Docker daemon answers but no RichiDrama container exists, the database is idle and its files are archived as they are, after which the archive is certified. When the daemon cannot be reached at all, the run refuses to produce an archive, because it cannot tell whether the database is being written; `--allow-unverified-database` creates the archive and then keeps every previous one instead of applying retention.
 

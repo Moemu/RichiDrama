@@ -167,6 +167,20 @@ test('nightly backup snapshots the database instead of tarring a live one', () =
   // never be the only way to find the live application.
   assert.match(backup, /RUNTIME_KIND='docker'/);
   assert.ok(backup.indexOf('docker info') < backup.indexOf('docker inspect'));
+  // `-T` exists only on `docker compose exec`; passing it to `docker exec` exits
+  // 125 with "unknown shorthand flag", which silently ended every nightly run
+  // once the docker branch became the live path (production outage 2026-09-29).
+  assert.match(backup, /docker exec "\$\{overrides\[@\]\}" "\$\{APP_CONTAINER\}" node/);
+  assert.doesNotMatch(backup, /docker exec -T/);
+  assert.match(backup, /docker compose -f "\$\{COMPOSE_FILE\}" exec -T "\$\{overrides\[@\]\}"/);
+  // The nightly script must execute the revision that was released, not whatever
+  // the checkout working tree happens to hold: an unrelated `git checkout` there
+  // swapped the backup logic with no release involved and no CI signal.
+  const operations = read('deploy/install-operations');
+  const unit = read('deploy/minidrama-full-backup.service');
+  assert.match(operations, /FILES=\(lib\.sh preview-deploy[^)]*backup-data\.sh restore-data\.sh/);
+  assert.match(unit, /ExecStart=\/usr\/bin\/env bash \/usr\/local\/lib\/richidrama-deploy\/backup-data\.sh --full --quiet/);
+  assert.doesNotMatch(unit, /ExecStart=.*\/data\/apps\/LocalMiniDrama/);
   assert.match(backup, /db\.backup\(process\.env\.SNAPSHOT_TARGET\)/);
   assert.match(backup, /integrity_check/);
   // One consistent database copy, and no deployment scratch from the data mount.

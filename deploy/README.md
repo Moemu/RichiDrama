@@ -231,9 +231,21 @@ systemd timer 每天 03:30（Asia/Shanghai）执行一次全量归档，线上�
 sudo systemctl list-timers minidrama-full-backup.timer   # 查看下次执行时间
 ```
 
+timer 执行的是 `/usr/local/lib/richidrama-deploy/backup-data.sh`，即 `install-operations` 在每次成功发布时写入的受管副本，不再执行 checkout 工作树里的脚本——否则一次无关的 `git checkout` 就能在不发布、不过 CI 的情况下换掉每晚的备份逻辑。仍指向工作树的服务器需要一次性切换，**且必须在安装好受管副本的发布之后执行**：
+
+```bash
+sudo install -m 0644 /data/apps/LocalMiniDrama/deploy/minidrama-full-backup.service \
+  /etc/systemd/system/minidrama-full-backup.service
+sudo systemctl daemon-reload
+sudo systemctl start minidrama-full-backup.service
+sudo systemctl show -p ExecMainStatus minidrama-full-backup.service   # 期望 0，且备份目录出现新归档
+```
+
+若受管副本还不存在就切换，下一次执行会以 `203/EXEC` 失败。
+
 归档包含 SQLite 和本地热副本媒体。库文件是在线一致性快照，不含 `-wal`、`-shm`；发布过程的临时目录不会被收录。宿主机装有 zstd 时生成 `.tar.zst`，否则回退到 `.tar.gz`。
 
-手动备份与恢复：
+手动备份与恢复（可用 checkout 路径，也可用受管副本 `/usr/local/lib/richidrama-deploy/` 下的同名脚本，后者与最近一次成功发布一致）：
 
 ```bash
 # 立即执行一次全量备份
