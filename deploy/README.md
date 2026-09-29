@@ -247,7 +247,7 @@ bash deploy/restore-data.sh /data/minidrama-backups/minidrama-data-<时间戳>.t
 
 探测不到 Docker 守护进程时，全量备份会直接失败，因为无法确认数据库是否仍在写入。确实需要在这种状态下出包，加 `--allow-unverified-database`，此时旧的归档全部保留、不做回收。
 
-发布产物存放在 `/data/minidrama-releases/<sha>`，由发布与预览流程自动回收，且只回收脚本自己创建的目录（内含 `.gc-stamp` 标记）。保留窗口内的发布只删除 `preflight-data/`，窗口外的发布连同 `production-before.db` 一起删除；`active-revision` 与 `rollback.env` 点名的发布始终保留。策略生效前的历史目录不会被自动删除，需要先统计、再显式确认：
+发布产物存放在 `/data/minidrama-releases/<sha>`，由发布与预览流程自动回收，且只回收脚本自己创建的目录（内含 `.gc-stamp` 标记）。保留窗口内的发布只删除 `preflight-data/`，窗口外的成功发布连同 `production-before.db` 一起删除；`active-revision` 与 `rollback.env` 点名的发布始终保留。没写过 `succeeded` 标记的中止发布不占窗口名额，它的 `production-before.db` 是那次尝试之前状态的唯一副本，因此只删 `source/` 与 `preflight-data/`、保留快照。策略生效前的历史目录不会被自动删除，需要先统计、再显式确认：
 
 ```bash
 bash deploy/prune-release-backlog            # 只统计，不删除

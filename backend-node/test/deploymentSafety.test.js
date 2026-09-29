@@ -201,6 +201,10 @@ test('nightly backup snapshots the database instead of tarring a live one', () =
   assert.match(restore, /--skip-database-check/);
   // Retrying an older SHA must not make a history directory collectible.
   assert.match(library, /if mkdir "\$\{RELEASE_ROOT\}\/\$\{sha\}" 2>\/dev\/null; then/);
+  // An aborted release never wrote its success marker, so it holds no keep slot;
+  // its pre-release database is the only copy and must survive collection.
+  assert.match(library, /elif \[\[ -f "\$\{dir\}\/production-before\.db" && ! -f "\$\{dir\}\/succeeded" \]\]; then/);
+  assert.match(library, /rm -rf -- "\$\{dir\}\/source" "\$\{dir\}\/preflight-data"/);
   // Pre-policy release directories are history: collecting them is a separate,
   // confirmed operation, and the nightly and release paths never do it.
   assert.match(library, /release_is_collectible/);
